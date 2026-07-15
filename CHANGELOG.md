@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.81.0 - 2026-07-15
+
+- Move native application mTLS fingerprint mapping and per-request
+  reauthorization behind a typed, path-free daemon Unix-socket contract; the
+  Web process no longer reads daemon-owned identity or key registries.
+- Persist redacted daemon-owned mTLS connection/request authorization and
+  rejection audit events without collapsing same-second requests, including
+  immediate post-revocation denial.
+- Bind application identity, key, and audit paths to the daemon's configured
+  state directory while accepting legacy Web registry-path configuration as
+  ignored decode-only compatibility fields.
+
 ## 0.80.1 - 2026-07-15
 
 - Revalidate application certificate mappings on every mTLS request so an

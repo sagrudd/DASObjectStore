@@ -141,9 +141,12 @@ listener now requires a configured CA, maps certificate fingerprints through
 daemon-owned identity/key registries, and removes application routes from the
 primary bearer-capable listener when enabled.
 Missing, unknown, expired, or revoked certificates fail closed, with controlled
-overlap for rotation. Certificate mapping is revalidated on every request so
-HTTP keepalive and HTTP/2 connections cannot retain authority after revocation
-or expiry. Listener-specific connection audit events remain open.
+overlap for rotation. Certificate mapping is resolved by ``dasobjectstored``
+through a path-free Unix-socket fingerprint contract at connection admission
+and on every request, so the Web process does not read daemon registries and
+HTTP keepalive or HTTP/2 connections cannot retain authority after revocation
+or expiry. The daemon persists redacted connection/request authorization and
+rejection audit events.
 The exchange and administrator identity/key/revocation DTO wrappers also reject
 unknown JSON fields before registry lookup or claim consumption, preserving a
 strict versioned boundary for authoritative token decisions.

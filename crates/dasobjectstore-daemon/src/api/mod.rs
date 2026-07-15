@@ -2,6 +2,7 @@
 
 mod appliance_telemetry;
 mod application_identity;
+mod application_mtls;
 mod application_token;
 mod application_upload;
 mod capacity;
@@ -53,6 +54,10 @@ pub use application_identity::{
     ApplicationKeyRegistrationRequest, ApplicationKeyRegistrationResponse,
     ApplicationKeyRegistrationValidationError, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
     APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+};
+pub use application_mtls::{
+    ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,
+    ApplicationMtlsAuthorizationResponse,
 };
 pub use application_token::{
     ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
@@ -280,6 +285,7 @@ pub enum DaemonApiRequest {
     RegisterApplicationIdentity(ApplicationIdentityRegistrationRequest),
     RegisterApplicationKey(ApplicationKeyRegistrationRequest),
     RevokeApplicationCredential(ApplicationCredentialRevocationRequest),
+    AuthorizeApplicationMtls(ApplicationMtlsAuthorizationRequest),
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeRequest),
     IssueApplicationUploadCapability(ApplicationUploadCapabilityIssueRequest),
     CompleteApplicationUpload(ApplicationUploadCompletionRequest),
@@ -347,6 +353,7 @@ impl DaemonApiRequest {
             Self::RegisterApplicationIdentity(_) => "register_application_identity",
             Self::RegisterApplicationKey(_) => "register_application_key",
             Self::RevokeApplicationCredential(_) => "revoke_application_credential",
+            Self::AuthorizeApplicationMtls(_) => "authorize_application_mtls",
             Self::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
             Self::IssueApplicationUploadCapability(_) => "issue_application_upload_capability",
             Self::CompleteApplicationUpload(_) => "complete_application_upload",
@@ -434,6 +441,7 @@ impl DaemonApiRequest {
             Self::RevokeApplicationCredential(request) => request
                 .validate()
                 .map_err(application_credential_revocation_validation_error),
+            Self::AuthorizeApplicationMtls(request) => request.validate(),
             Self::ExchangeApplicationAccessToken(request) => request.validate(),
             Self::IssueApplicationUploadCapability(request) => request
                 .validate()
@@ -552,6 +560,7 @@ pub enum DaemonApiResponse {
     RegisterApplicationIdentity(ApplicationIdentityRegistrationResponse),
     RegisterApplicationKey(ApplicationKeyRegistrationResponse),
     RevokeApplicationCredential(ApplicationCredentialRevocationResponse),
+    AuthorizeApplicationMtls(ApplicationMtlsAuthorizationResponse),
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),

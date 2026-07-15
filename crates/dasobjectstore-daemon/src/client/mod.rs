@@ -13,7 +13,8 @@ use crate::api::{
     ApplicationAccessTokenExchangeResponse, ApplicationCredentialRevocationRequest,
     ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationRequest,
     ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationRequest,
-    ApplicationKeyRegistrationResponse, ApplicationUploadCapabilityIssueRequest,
+    ApplicationKeyRegistrationResponse, ApplicationMtlsAuthorizationRequest,
+    ApplicationMtlsAuthorizationResponse, ApplicationUploadCapabilityIssueRequest,
     ApplicationUploadCapabilityIssueResponse, ApplicationUploadCompletionRequest,
     ApplicationUploadCompletionResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
@@ -486,6 +487,16 @@ where
         }
     }
 
+    pub fn authorize_application_mtls(
+        &self,
+        request: ApplicationMtlsAuthorizationRequest,
+    ) -> Result<ApplicationMtlsAuthorizationResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::AuthorizeApplicationMtls(request))? {
+            DaemonApiResponse::AuthorizeApplicationMtls(response) => Ok(response),
+            response => Err(unexpected("authorize_application_mtls", response)),
+        }
+    }
+
     pub fn issue_application_upload_capability(
         &self,
         request: ApplicationUploadCapabilityIssueRequest,
@@ -815,6 +826,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RegisterApplicationIdentity(_) => "register_application_identity",
         DaemonApiResponse::RegisterApplicationKey(_) => "register_application_key",
         DaemonApiResponse::RevokeApplicationCredential(_) => "revoke_application_credential",
+        DaemonApiResponse::AuthorizeApplicationMtls(_) => "authorize_application_mtls",
         DaemonApiResponse::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
@@ -872,6 +884,8 @@ mod tests {
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryResponse, ApplianceTelemetryWindow,
         ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
+        ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,
+        ApplicationMtlsAuthorizationResponse,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
         CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
@@ -1269,6 +1283,35 @@ mod tests {
         assert!(error
             .to_string()
             .contains("invalid application access-token response"));
+    }
+
+    #[test]
+    fn application_mtls_authorization_uses_typed_client_boundary() {
+        let transport = InProcessDaemonTransport::new(|request| {
+            assert!(matches!(
+                request,
+                DaemonApiRequest::AuthorizeApplicationMtls(ApplicationMtlsAuthorizationRequest {
+                    context: ApplicationMtlsAuthorizationContext::Request,
+                    ..
+                })
+            ));
+            Ok(DaemonApiResponse::AuthorizeApplicationMtls(
+                ApplicationMtlsAuthorizationResponse {
+                    authorized: true,
+                    application_id: Some("synoptikon".to_string()),
+                },
+            ))
+        });
+        let client = DaemonClient::new(transport);
+        let response = client
+            .authorize_application_mtls(ApplicationMtlsAuthorizationRequest {
+                certificate_fingerprint_sha256: format!("sha256:{}", "a".repeat(64)),
+                requested_application_id: Some("synoptikon".to_string()),
+                context: ApplicationMtlsAuthorizationContext::Request,
+            })
+            .expect("authorization response");
+        assert!(response.authorized);
+        assert_eq!(response.application_id.as_deref(), Some("synoptikon"));
     }
 
     #[test]

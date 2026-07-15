@@ -3,7 +3,8 @@ use crate::api::{
     resolve_remote_easyconnect_session_lifetime_seconds, ApplianceTelemetryRequest,
     ApplianceTelemetryResponse, ApplicationAccessTokenExchangeResponse,
     ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationResponse,
-    ApplicationKeyRegistrationResponse, ApplicationUploadCapabilityIssueRequest,
+    ApplicationKeyRegistrationResponse, ApplicationMtlsAuthorizationContext,
+    ApplicationMtlsAuthorizationResponse, ApplicationUploadCapabilityIssueRequest,
     ApplicationUploadCapabilityIssueResponse, ApplicationUploadCompletionOutcome,
     ApplicationUploadCompletionRequest, ApplicationUploadCompletionResponse,
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
@@ -52,24 +53,25 @@ use crate::runtime::{
     read_application_upload_capability, read_object_browser_metadata, read_profile_binding,
     read_profile_binding_record, record_application_audit_event,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
-    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    upsert_application_identity, upsert_application_key, upsert_endpoint_inventory_record,
-    upsert_profile_binding, validate_profile_binding_claim, verify_profile_object,
-    AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    PendingApplicationUploadCapability, ReconciliationManifest,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
-    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
-    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
-    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
-    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
-    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry,
-    RemoteUploadProviderCompletion, ServiceCommandRunner, SystemLocalAdminCommandRunner,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+    resolve_mtls_application_identity_by_fingerprint, resolve_object_download_with_hdd_root,
+    resolve_object_folder_download_with_hdd_root, upsert_application_identity,
+    upsert_application_key, upsert_endpoint_inventory_record, upsert_profile_binding,
+    validate_profile_binding_claim, verify_profile_object, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
+    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ObjectBrowserQueryError, PendingApplicationUploadCapability,
+    ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadCompletionMetadata,
+    RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry, RemoteUploadProviderCompletion,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::application_auth::{
     UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
@@ -1058,6 +1060,7 @@ mod tests {
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
         ApplicationAccessTokenExchangeRequest, ApplicationCredentialRevocationRequest,
         ApplicationIdentityRegistrationRequest, ApplicationKeyRegistrationRequest,
+        ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
@@ -1093,10 +1096,11 @@ mod tests {
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
-        admin_job_registry_path, read_application_audit_events, read_application_identity,
-        read_profile_binding, remote_easyconnect_pairing_store_path,
-        remote_easyconnect_session_store_path, upsert_profile_binding, BackendProfileBinding,
-        DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
+        admin_job_registry_path, deactivate_application_key, read_application_audit_events,
+        read_application_identity, read_profile_binding, remote_easyconnect_pairing_store_path,
+        remote_easyconnect_session_store_path, upsert_application_identity, upsert_application_key,
+        upsert_profile_binding, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+        DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
         FileBackedRemoteEasyconnectPairedSessionStore, FolderBackend, LocalAdminRuntimeError,
         LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
         RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
@@ -1131,6 +1135,7 @@ mod tests {
         StoreServiceDefinition,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use rusqlite::{params, Connection};
     use sha2::{Digest, Sha256};
     use std::cell::RefCell;
@@ -4317,6 +4322,98 @@ mod tests {
             event.operation == "issue_access_token"
                 && event.application_id == application_id
                 && event.key_id.as_deref() == Some("exchange-key")
+        }));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_authorizes_mtls_fingerprint_per_request_and_audits_revocation() {
+        let root = temp_root("application-mtls-authorization");
+        let identity_registry = root.join("application-identities.json");
+        let key_registry = root.join("application-keys.json");
+        let audit_path = root.join("application-audit.json");
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("current time")
+            .as_secs();
+        let application_id = "synoptikon-mtls";
+        let mut identity =
+            application_identity_registration_request_for_auth_test(application_id).identity;
+        identity.credential_kind = ApplicationCredentialKind::MtlsCertificate;
+        identity.issued_at_unix_seconds = now.saturating_sub(60);
+        identity.expires_at_unix_seconds = now + 3_600;
+        upsert_application_identity(&identity_registry, identity).expect("register identity");
+        let fingerprint = format!("sha256:{}", "b".repeat(64));
+        upsert_application_key(
+            &key_registry,
+            ApplicationKeyDescriptor {
+                schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+                application_id: application_id.to_string(),
+                key_id: "certificate-1".to_string(),
+                algorithm: ApplicationKeyAlgorithm::MtlsCertificate,
+                public_key_fingerprint: fingerprint.clone(),
+                public_key_material: None,
+                issued_at_unix_seconds: now.saturating_sub(60),
+                expires_at_unix_seconds: now + 3_600,
+                active: true,
+            },
+        )
+        .expect("register certificate");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-15T09:00:00Z"),
+        )
+        .with_application_identity_registry_path(&identity_registry)
+        .with_application_key_registry_path(&key_registry)
+        .with_application_audit_log_path(&audit_path);
+
+        let authorize = |requested_application_id: Option<&str>, context| {
+            handler
+                .handle(DaemonApiRequest::AuthorizeApplicationMtls(
+                    ApplicationMtlsAuthorizationRequest {
+                        certificate_fingerprint_sha256: fingerprint.clone(),
+                        requested_application_id: requested_application_id.map(str::to_string),
+                        context,
+                    },
+                ))
+                .expect("authorization handled")
+        };
+        let DaemonApiResponse::AuthorizeApplicationMtls(connection) =
+            authorize(None, ApplicationMtlsAuthorizationContext::Connection)
+        else {
+            panic!("expected connection authorization");
+        };
+        assert!(connection.authorized);
+        assert_eq!(connection.application_id.as_deref(), Some(application_id));
+        let DaemonApiResponse::AuthorizeApplicationMtls(mismatch) = authorize(
+            Some("other-application"),
+            ApplicationMtlsAuthorizationContext::Request,
+        ) else {
+            panic!("expected request authorization");
+        };
+        assert!(!mismatch.authorized);
+
+        deactivate_application_key(&key_registry, application_id, "certificate-1")
+            .expect("revoke certificate");
+        let DaemonApiResponse::AuthorizeApplicationMtls(revoked) = authorize(
+            Some(application_id),
+            ApplicationMtlsAuthorizationContext::Request,
+        ) else {
+            panic!("expected revoked authorization");
+        };
+        assert!(
+            !revoked.authorized,
+            "keepalive request must observe revocation"
+        );
+        assert!(revoked.application_id.is_none());
+        let audit = read_application_audit_events(&audit_path).expect("read audit");
+        assert!(audit.iter().any(|event| {
+            event.operation == "authorize_mtls_connection" && event.application_id == application_id
+        }));
+        assert!(audit.iter().any(|event| {
+            event.operation == "reject_mtls_request"
+                && (event.application_id == application_id
+                    || event.application_id == "other-application")
         }));
         cleanup(&root);
     }

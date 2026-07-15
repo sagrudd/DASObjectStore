@@ -1,3 +1,6 @@
+use dasobjectstore_daemon::runtime::{
+    application_audit_log_path, application_identity_registry_path, application_key_registry_path,
+};
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
     ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
@@ -60,7 +63,10 @@ fn run() -> Result<(), String> {
         garage,
         SystemDaemonClock,
         admin_job_registry,
-    );
+    )
+    .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
+    .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
+    .with_application_audit_log_path(application_audit_log_path(&config.state_dir));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(

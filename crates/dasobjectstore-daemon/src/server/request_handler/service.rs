@@ -12,6 +12,62 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::AuthorizeApplicationMtls(request) => {
+            let now = handler.clock.now_utc();
+            let now_unix_seconds = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default();
+            let resolved = resolve_mtls_application_identity_by_fingerprint(
+                &handler.application_identity_registry_path,
+                &handler.application_key_registry_path,
+                &request.certificate_fingerprint_sha256,
+                now_unix_seconds,
+            );
+            let (authorized, application_id) = match resolved {
+                Ok(identity)
+                    if request
+                        .requested_application_id
+                        .as_deref()
+                        .is_none_or(|requested| requested == identity.application_id) =>
+                {
+                    (true, Some(identity.application_id))
+                }
+                Ok(identity) => (false, Some(identity.application_id)),
+                Err(_) => (false, None),
+            };
+            let audit_application_id = application_id
+                .as_deref()
+                .or(request.requested_application_id.as_deref())
+                .unwrap_or("unmapped-mtls-client");
+            let operation = match (request.context, authorized) {
+                (ApplicationMtlsAuthorizationContext::Connection, true) => {
+                    "authorize_mtls_connection"
+                }
+                (ApplicationMtlsAuthorizationContext::Connection, false) => {
+                    "reject_mtls_connection"
+                }
+                (ApplicationMtlsAuthorizationContext::Request, true) => "authorize_mtls_request",
+                (ApplicationMtlsAuthorizationContext::Request, false) => "reject_mtls_request",
+            };
+            record_application_audit_event(
+                &handler.application_audit_log_path,
+                &now,
+                operation,
+                audit_application_id,
+                None,
+                None,
+                "native mTLS certificate authorization",
+                false,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            Ok(DaemonApiResponse::AuthorizeApplicationMtls(
+                ApplicationMtlsAuthorizationResponse {
+                    authorized,
+                    application_id,
+                },
+            ))
+        }
         DaemonApiRequest::ProfileCapabilities(request) => {
             Ok(DaemonApiResponse::ProfileCapabilities(
                 crate::api::discover_profile_capabilities(&request),

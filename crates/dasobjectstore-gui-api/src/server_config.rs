@@ -82,9 +82,11 @@ pub struct StandaloneMutualTlsConfig {
     pub https_port: u16,
     #[serde(default)]
     pub client_ca_path: PathBuf,
-    #[serde(default = "default_application_identity_registry_path")]
+    /// Backward-compatible decode-only field. Registry custody belongs to the daemon.
+    #[serde(default = "default_application_identity_registry_path", skip_serializing)]
     pub application_identity_registry_path: PathBuf,
-    #[serde(default = "default_application_key_registry_path")]
+    /// Backward-compatible decode-only field. Registry custody belongs to the daemon.
+    #[serde(default = "default_application_key_registry_path", skip_serializing)]
     pub application_key_registry_path: PathBuf,
 }
 
@@ -105,14 +107,7 @@ impl StandaloneMutualTlsConfig {
             });
         }
         validate_absolute_path("application_mtls.client_ca_path", &self.client_ca_path)?;
-        validate_absolute_path(
-            "application_mtls.application_identity_registry_path",
-            &self.application_identity_registry_path,
-        )?;
-        validate_absolute_path(
-            "application_mtls.application_key_registry_path",
-            &self.application_key_registry_path,
-        )
+        Ok(())
     }
 
     pub fn socket_addr(&self) -> Result<SocketAddr, StandaloneServerConfigError> {

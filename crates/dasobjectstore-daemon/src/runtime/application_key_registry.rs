@@ -92,13 +92,27 @@ pub fn resolve_mtls_application_identity(
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     );
+    resolve_mtls_application_identity_by_fingerprint(
+        identity_registry_path,
+        key_registry_path,
+        &fingerprint,
+        now_unix_seconds,
+    )
+}
+
+pub fn resolve_mtls_application_identity_by_fingerprint(
+    identity_registry_path: impl AsRef<Path>,
+    key_registry_path: impl AsRef<Path>,
+    certificate_fingerprint_sha256: &str,
+    now_unix_seconds: u64,
+) -> Result<ApplicationIdentity, DaemonServiceRuntimeError> {
     let matching = list_application_keys(key_registry_path)?
         .into_iter()
         .filter(|key| {
             key.algorithm == ApplicationKeyAlgorithm::MtlsCertificate
                 && key
                     .public_key_fingerprint
-                    .eq_ignore_ascii_case(&fingerprint)
+                    .eq_ignore_ascii_case(certificate_fingerprint_sha256)
                 && key.active
                 && key.issued_at_unix_seconds <= now_unix_seconds
                 && now_unix_seconds < key.expires_at_unix_seconds

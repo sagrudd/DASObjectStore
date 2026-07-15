@@ -7,23 +7,23 @@ use axum::routing::post;
 use axum::{Json, Router};
 use dasobjectstore_daemon::api::{
     ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
+    ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,
     ApplicationUploadCapabilityIssueRequest, ApplicationUploadCapabilityIssueResponse,
     ApplicationUploadCompletionRequest, ApplicationUploadCompletionResponse,
     APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
     APPLICATION_UPLOAD_COMPLETION_ROUTE,
 };
-use dasobjectstore_daemon::runtime::resolve_mtls_application_identity;
 use dasobjectstore_daemon::{DaemonClient, DaemonRuntimeConfig, UnixSocketDaemonTransport};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
@@ -32,16 +32,12 @@ use tokio_rustls::TlsAcceptor;
 pub struct MtlsApplicationConnectInfo {
     pub peer_address: SocketAddr,
     pub application_id: String,
-    certificate_der: Arc<Vec<u8>>,
-    identity_registry_path: std::path::PathBuf,
-    key_registry_path: std::path::PathBuf,
+    certificate_fingerprint_sha256: String,
 }
 
 pub struct MtlsApplicationListener {
     listener: TcpListener,
     acceptor: TlsAcceptor,
-    identity_registry_path: std::path::PathBuf,
-    key_registry_path: std::path::PathBuf,
 }
 
 impl axum::serve::Listener for MtlsApplicationListener {
@@ -64,27 +60,26 @@ impl axum::serve::Listener for MtlsApplicationListener {
             else {
                 continue;
             };
-            let certificate_der = certificate.as_ref().to_vec();
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let Ok(identity) = resolve_mtls_application_identity(
-                &self.identity_registry_path,
-                &self.key_registry_path,
-                &certificate_der,
-                now,
-            ) else {
+            let certificate_fingerprint_sha256 = certificate_fingerprint(certificate.as_ref());
+            let Ok(response) = daemon_mtls_authorization(
+                certificate_fingerprint_sha256.clone(),
+                None,
+                ApplicationMtlsAuthorizationContext::Connection,
+            )
+            .await
+            else {
+                continue;
+            };
+            let Some(application_id) = response.application_id.filter(|_| response.authorized)
+            else {
                 continue;
             };
             return (
                 tls,
                 MtlsApplicationConnectInfo {
                     peer_address,
-                    application_id: identity.application_id,
-                    certificate_der: Arc::new(certificate_der),
-                    identity_registry_path: self.identity_registry_path.clone(),
-                    key_registry_path: self.key_registry_path.clone(),
+                    application_id,
+                    certificate_fingerprint_sha256,
                 },
             );
         }
@@ -94,9 +89,7 @@ impl axum::serve::Listener for MtlsApplicationListener {
         Ok(MtlsApplicationConnectInfo {
             peer_address: self.listener.local_addr()?,
             application_id: String::new(),
-            certificate_der: Arc::new(Vec::new()),
-            identity_registry_path: self.identity_registry_path.clone(),
-            key_registry_path: self.key_registry_path.clone(),
+            certificate_fingerprint_sha256: String::new(),
         })
     }
 }
@@ -150,8 +143,6 @@ pub async fn build_application_mtls_listener(
     Ok(MtlsApplicationListener {
         listener,
         acceptor: TlsAcceptor::from(Arc::new(server)),
-        identity_registry_path: mtls.application_identity_registry_path.clone(),
-        key_registry_path: mtls.application_key_registry_path.clone(),
     })
 }
 
@@ -196,32 +187,52 @@ async fn authorize_application(
     peer: &MtlsApplicationConnectInfo,
     requested_application_id: &str,
 ) -> Result<(), MtlsRouteError> {
-    let certificate_der = Arc::clone(&peer.certificate_der);
-    let identity_registry_path = peer.identity_registry_path.clone();
-    let key_registry_path = peer.key_registry_path.clone();
-    let identity = tokio::task::spawn_blocking(move || {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        resolve_mtls_application_identity(
-            identity_registry_path,
-            key_registry_path,
-            certificate_der.as_slice(),
-            now,
-        )
-    })
+    let response = daemon_mtls_authorization(
+        peer.certificate_fingerprint_sha256.clone(),
+        Some(requested_application_id.to_string()),
+        ApplicationMtlsAuthorizationContext::Request,
+    )
     .await
-    .map_err(|_| MtlsRouteError::forbidden("client certificate revalidation failed"))?
-    .map_err(|_| MtlsRouteError::forbidden("client certificate is no longer authorized"))?;
-    if identity.application_id != peer.application_id
-        || identity.application_id != requested_application_id
+    .map_err(|error| MtlsRouteError::unavailable(error.to_string()))?;
+    if !response.authorized
+        || response.application_id.as_deref() != Some(peer.application_id.as_str())
+        || response.application_id.as_deref() != Some(requested_application_id)
     {
         return Err(MtlsRouteError::forbidden(
             "client certificate is not authorized for the requested application identity",
         ));
     }
     Ok(())
+}
+
+async fn daemon_mtls_authorization(
+    certificate_fingerprint_sha256: String,
+    requested_application_id: Option<String>,
+    context: ApplicationMtlsAuthorizationContext,
+) -> Result<
+    dasobjectstore_daemon::api::ApplicationMtlsAuthorizationResponse,
+    dasobjectstore_daemon::DaemonClientError,
+> {
+    tokio::task::spawn_blocking(move || {
+        let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+            DaemonRuntimeConfig::default_packaged().socket_path,
+        ));
+        client.authorize_application_mtls(ApplicationMtlsAuthorizationRequest {
+            certificate_fingerprint_sha256,
+            requested_application_id,
+            context,
+        })
+    })
+    .await
+    .map_err(|_| {
+        dasobjectstore_daemon::DaemonClientError::Transport(
+            "daemon mTLS authorization task failed".to_string(),
+        )
+    })?
+}
+
+fn certificate_fingerprint(certificate_der: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(certificate_der))
 }
 
 async fn daemon_call<T: Send + 'static>(
@@ -321,21 +332,8 @@ impl axum::response::IntoResponse for MtlsRouteError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        authorize_application, build_application_mtls_listener, MtlsApplicationConnectInfo,
-    };
+    use super::build_application_mtls_listener;
     use crate::StandaloneServerConfig;
-    use dasobjectstore_core::application_auth::{
-        ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
-        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
-        APPLICATION_AUTH_SCHEMA_VERSION,
-    };
-    use dasobjectstore_core::ids::StoreId;
-    use dasobjectstore_core::ingress::IngressOrigin;
-    use dasobjectstore_core::object_type::ObjectType;
-    use dasobjectstore_daemon::runtime::{
-        deactivate_application_key, upsert_application_identity, upsert_application_key,
-    };
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
     use rustls::pki_types::{CertificateDer, ServerName};
     use rustls::{ClientConfig, RootCertStore};
@@ -343,42 +341,9 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
     use tokio_rustls::TlsConnector;
-
-    #[tokio::test]
-    async fn every_request_revalidates_identity_and_revocation() {
-        let root = test_root("request-revalidation");
-        let identities = root.join("identities.json");
-        let keys = root.join("keys.json");
-        let certificate_der = b"persistent-connection-client-certificate".to_vec();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("current time")
-            .as_secs();
-        upsert_application_identity(&identities, identity("synoptikon", now))
-            .expect("register identity");
-        upsert_application_key(&keys, key("synoptikon", "cert-1", &certificate_der, now))
-            .expect("register certificate");
-        let peer = MtlsApplicationConnectInfo {
-            peer_address: "127.0.0.1:49152".parse().expect("address"),
-            application_id: "synoptikon".to_string(),
-            certificate_der: Arc::new(certificate_der),
-            identity_registry_path: identities,
-            key_registry_path: keys.clone(),
-        };
-
-        assert!(authorize_application(&peer, "synoptikon").await.is_ok());
-        assert!(authorize_application(&peer, "monas").await.is_err());
-        deactivate_application_key(&keys, "synoptikon", "cert-1").expect("revoke certificate");
-        assert!(
-            authorize_application(&peer, "synoptikon").await.is_err(),
-            "a keepalive connection must not survive certificate revocation"
-        );
-        fs::remove_dir_all(root).expect("cleanup");
-    }
 
     #[tokio::test]
     async fn listener_rejects_tls_clients_without_a_certificate() {
@@ -407,8 +372,6 @@ mod tests {
         server.application_mtls.enabled = true;
         server.application_mtls.https_port = port;
         server.application_mtls.client_ca_path = ca_path;
-        server.application_mtls.application_identity_registry_path = root.join("identities.json");
-        server.application_mtls.application_key_registry_path = root.join("keys.json");
         let listener = build_application_mtls_listener(&server)
             .await
             .expect("listener builds");
@@ -453,53 +416,6 @@ mod tests {
             .local_addr()
             .expect("local address")
             .port()
-    }
-
-    fn identity(application_id: &str, now: u64) -> ApplicationIdentity {
-        ApplicationIdentity {
-            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
-            application_id: application_id.to_string(),
-            owner: "operator".to_string(),
-            purpose: "integration ingress".to_string(),
-            environment: ApplicationEnvironment::Production,
-            credential_kind: ApplicationCredentialKind::MtlsCertificate,
-            scope: ApplicationScope {
-                store_ids: vec![StoreId::new("codex").expect("store")],
-                prefixes: vec!["integration".to_string()],
-                object_types: vec![ObjectType::Fastq],
-                operations: vec![ApplicationOperation::Write],
-                ingress_origin: IngressOrigin::Synoptikon,
-                max_object_bytes: Some(1_000),
-                max_total_bytes: Some(10_000),
-            },
-            issued_at_unix_seconds: now.saturating_sub(60),
-            expires_at_unix_seconds: now + 3_600,
-            active: true,
-        }
-    }
-
-    fn key(
-        application_id: &str,
-        key_id: &str,
-        certificate_der: &[u8],
-        now: u64,
-    ) -> ApplicationKeyDescriptor {
-        use sha2::{Digest, Sha256};
-        let fingerprint = Sha256::digest(certificate_der)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        ApplicationKeyDescriptor {
-            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
-            application_id: application_id.to_string(),
-            key_id: key_id.to_string(),
-            algorithm: ApplicationKeyAlgorithm::MtlsCertificate,
-            public_key_fingerprint: format!("sha256:{fingerprint}"),
-            public_key_material: None,
-            issued_at_unix_seconds: now.saturating_sub(60),
-            expires_at_unix_seconds: now + 3_600,
-            active: true,
-        }
     }
 
     fn test_root(label: &str) -> PathBuf {

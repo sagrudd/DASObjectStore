@@ -40,19 +40,22 @@ certificate fingerprint with the daemon:
        "enabled": true,
        "bind_address": "0.0.0.0",
        "https_port": 8449,
-       "client_ca_path": "/etc/dasobjectstore/application-client-ca.crt",
-       "application_identity_registry_path": "/var/lib/dasobjectstore/application-identities.json",
-       "application_key_registry_path": "/var/lib/dasobjectstore/application-keys.json"
+       "client_ca_path": "/etc/dasobjectstore/application-client-ca.crt"
      }
    }
 
 The listener requires a CA-valid client certificate during the TLS handshake,
-then maps the SHA-256 fingerprint of the complete DER certificate to one
-active ``mtls_certificate`` application key and identity. Unknown, inactive,
+then submits only the SHA-256 fingerprint of the complete DER certificate to
+``dasobjectstored`` over its Unix socket. The daemon maps that fingerprint to
+one active ``mtls_certificate`` application key and identity; the Web process
+does not read identity/key registry files. Unknown, inactive,
 not-yet-valid, expired, or cross-identity ambiguous mappings fail closed.
 The mapping is revalidated for every application request, including requests
 reusing an HTTP/1 keepalive or HTTP/2 connection, so revoking a key or identity
 takes effect without waiting for the TLS connection to close.
+The daemon records redacted connection and request authorization/rejection
+events in its application audit log; certificate material and fingerprints are
+not written to those events.
 Rotation may overlap two active certificate mappings for the same application;
 deactivate the old key after clients have moved. Enabling this listener never
 leaves a bearer-only copy of these application routes on port 8448.

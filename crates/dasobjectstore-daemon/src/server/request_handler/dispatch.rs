@@ -28,6 +28,7 @@ where
         | DaemonApiRequest::RegisterApplicationIdentity(_)
         | DaemonApiRequest::RegisterApplicationKey(_)
         | DaemonApiRequest::RevokeApplicationCredential(_)
+        | DaemonApiRequest::AuthorizeApplicationMtls(_)
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)

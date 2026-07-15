@@ -1143,10 +1143,12 @@ hardware acceptance.
     or revoked client certificates fail closed; controlled rotation may
     overlap active mappings; a listener requiring mTLS never falls back to
     bearer-token-only authentication. Listener implementation now revalidates
-    the certificate mapping on every request so persistent connections cannot
-    outlive revocation or expiry; listener-specific audit events remain local work,
-    while production CA and appliance deployment acceptance are externally
-    blocked.
+    the certificate mapping through the daemon Unix socket on connection and
+    every request so the Web process never reads authority registries and
+    persistent connections cannot outlive revocation or expiry. Redacted
+    daemon-owned listener connection/request authorization and rejection audit
+    events are implemented; production CA and appliance deployment acceptance
+    remain externally blocked.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and

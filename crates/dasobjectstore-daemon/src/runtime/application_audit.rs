@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -19,6 +20,7 @@ pub const APPLICATION_AUDIT_PATH_ENV: &str = "DASOBJECTSTORE_APPLICATION_AUDIT_P
 pub const APPLICATION_AUDIT_MAX_EVENTS: usize = 10_000;
 
 static APPLICATION_AUDIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static APPLICATION_AUDIT_EVENT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub fn application_audit_log_path(state_dir: impl AsRef<Path>) -> PathBuf {
     std::env::var_os(APPLICATION_AUDIT_PATH_ENV)
@@ -88,14 +90,20 @@ pub fn record_application_audit_event(
     }
     let reason_sha256 = sha256_digest(reason);
     let event_id = format!(
-        "{}-{}-{}",
+        "{}-{}-{}-{}-{}-{}",
         operation,
         application_id,
         occurred_at_utc
             .bytes()
             .filter(|byte| byte.is_ascii_alphanumeric())
             .map(char::from)
-            .collect::<String>()
+            .collect::<String>(),
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default(),
+        APPLICATION_AUDIT_EVENT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     );
     let event = ApplicationAuditEvent {
         schema_version: APPLICATION_AUDIT_SCHEMA.to_string(),
@@ -259,6 +267,29 @@ mod tests {
             application_audit_log_path(&root),
             root.join("application-audit.json")
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn same_second_events_are_retained_individually() {
+        let root = temp_root("same-second");
+        let path = root.join("application-audit.json");
+        for _ in 0..2 {
+            record_application_audit_event(
+                &path,
+                "2026-07-15T09:00:00Z",
+                "authorize_mtls_request",
+                "synoptikon",
+                None,
+                None,
+                "native mTLS certificate authorization",
+                false,
+            )
+            .expect("record event");
+        }
+        let events = read_application_audit_events(&path).expect("read events");
+        assert_eq!(events.len(), 2);
+        assert_ne!(events[0].event_id, events[1].event_id);
         cleanup(&root);
     }
 
