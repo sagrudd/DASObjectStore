@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.83.1 - 2026-07-15
+
+- Restore the production Rust module-size release gate without exceptions by
+  extracting daemon API validation adapters, request-handler error
+  projections, and bounded-profile browser/S3/diagnostic dispatch into owned
+  modules while preserving the existing transport and authorization behavior.
+
 ## 0.83.0 - 2026-07-15
 
 - Expose registered folder-to-folder whole-store promotion through a strict,

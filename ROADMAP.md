@@ -257,9 +257,10 @@ warm-up, counter-reset, permission, and device-mapping details, while stable
 device mapping and appliance acceptance remain incomplete; and UI/design work
 remains. Stable telemetry device mapping and the packaged collection loop are
 covered by offline fixtures; physical device mapping and appliance acceptance
-remain deployment-gated. The folder backend and storage request handler have been split below
-the production size budget; the module-size guard now passes with no
-exceptions. Hardware-only acceptance is deferred while travelling without DAS
+remain deployment-gated. The folder backend, daemon API validation adapters,
+request-handler error projections, and bounded-profile storage dispatch have
+been split below the production size budget; the module-size guard passes with
+no exceptions. Hardware-only acceptance is deferred while travelling without DAS
 access. Lima with native ARM64 Ubuntu and AlmaLinux guests is approved as the
 interim surrogate for DEB/RPM package, systemd/cgroup, reboot, and synthetic
 loop-device evidence, but it cannot close

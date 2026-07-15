@@ -285,14 +285,12 @@ completion.
   details; bounded sysfs/device-mapper resolution and the packaged daemon
   collection loop are implemented and regression-tested. Physical device
   mapping and appliance acceptance remain deployment-gated.
-- [~] Remove temporary production module-size exceptions through owned,
-  test-preserving splits; keep dispatcher and public façades narrow. The
-  exception file remains empty, but the recovered v0.82 baseline already
-  exceeds the 1,000-line production limit in ``api/mod.rs``,
-  ``request_handler.rs``, and ``request_handler/storage.rs``; ``make
-  module-size`` therefore fails and the earlier completion claim was stale.
-  Acceptance condition: extract responsibility-specific API/handler modules
-  until all three façades pass the guard without exceptions.
+- [x] Remove temporary production module-size exceptions through owned,
+  test-preserving splits; keep dispatcher and public façades narrow. Request
+  validation adapters, request-handler error projections, and bounded-profile
+  browser/S3/diagnostic dispatch now live in responsibility-specific modules.
+  The three recovered oversized façades pass the 1,000-line production guard,
+  ``make module-size`` passes, and the exception file remains empty.
   - [x] Keep package-asset regression tests aligned with the authoritative
     Debian dependency contract, including `udisks2` and `awscli`, so the local
     workspace test baseline does not mask packaging drift.
