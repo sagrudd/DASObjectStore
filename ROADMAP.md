@@ -305,6 +305,11 @@ provisioning hooks now create the canonical ``/srv/dasobjectstore/ssd`` and
 ``hdd`` roots idempotently, reject file collisions, and repair existing member
 trees only when the daemon-owned ``.dasobjectstore`` marker is present; unmarked
 files remain untouched until explicit adoption/reconciliation.
+Native ARM64 Ubuntu and AlmaLinux package acceptance now exercises that folder
+layout through daemon provision, idempotent reprovision, explicit adoption of
+a generated unmanaged file, rebooted inspection, and uninstall retention. The
+source file remains untouched throughout; physical drive/appliance identity
+acceptance remains separate.
 
 The canonical local Docker profile now derives its private configuration and
 daemon/Garage Compose project names from the selected storage root. Against the

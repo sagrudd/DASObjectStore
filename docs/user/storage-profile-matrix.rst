@@ -16,7 +16,7 @@ or deployment credentials.
      - ``integrated``
    * - ``folder``
      - Preview: bounded macOS backend, XDG path contract, validated launchd plan, local tests
-     - Preview: bounded backend and idempotent package root provisioning; explicit adoption/reconciliation remains pending
+     - ARM64 accepted: DEB/RPM provision, idempotent reuse, explicit adoption, reboot recovery, and uninstall retention
      - Preview: backend contract exists; Mnemosyne/Synoptikon provisioning adapter pending
    * - ``drive``
      - Preview: injected SSD identity validator and guarded backend
@@ -28,7 +28,7 @@ or deployment credentials.
      - Blocked: Garage/provider soak, credentials, physical telemetry, replacement, and performance require DAS access
 
 Lima with native ARM64 Ubuntu and AlmaLinux guests provides the approved
-interim DEB/RPM package, systemd/cgroup, reboot, and synthetic loop-device
+interim DEB/RPM package, systemd/cgroup, reboot, and bounded-folder surrogate
 evidence while the DASServer is unavailable. It is not a substitute for
 physical enclosure identity, SMART/NVMe, real multi-HDD/Garage durability,
 replacement, performance acceptance, or x86_64 parity. Those gates require a

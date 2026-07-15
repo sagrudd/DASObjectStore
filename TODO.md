@@ -37,9 +37,9 @@ evidence and detailed source tasks.
   seams are delivered; appliance placement and shared catalogue wiring remain.
 - `[~]` Gate 2 — logical quota ledger, reservations, capacity APIs, and profile
   admission slices are delivered; complete daemon/S3/multipart wiring remains.
-- `[~]` Gate 3 — bounded folder profile, adoption, inspection, browser, and
-  user-service planning are delivered; package/system-service/container
-  acceptance remains.
+- `[~]` Gate 3 — bounded folder profile, adoption, inspection, browser,
+  package/system-service acceptance, and root-scoped container evidence are
+  delivered; per-user launchd installation remains.
 - `[~]` Gate 4 — guarded SSD drive backend and provider-neutral operations are
   delivered; live mount identity, SMART/NVMe health, and replacement tests
   require hardware.
@@ -646,11 +646,12 @@ transaction wiring; those boundaries stay explicit in the child items below.
 
 ### Gate 3: Bounded folder profile
 
-- [~] Implement system-service and programmatic create/adopt for one explicitly
+- [x] Implement system-service and programmatic create/adopt for one explicitly
   bounded directory, including idempotent DEB/RPM provisioning hooks. Daemon-
   owned programmatic create/adopt, redacted inspection, source-preserving
-  reconciliation, and package hooks are delivered; system-service installation
-  and live drive/appliance identity probing remain deployment-gated.
+  reconciliation, and package hooks are delivered. Native ARM64 DEB/RPM
+  acceptance now covers package layout, daemon provisioning, idempotent reuse,
+  explicit source-preserving adoption, reboot recovery, and uninstall retention.
   - [x] Enforce a finite logical capacity limit when opening a folder backend;
     idempotent directory/namespace creation is covered locally.
   - [x] Make daemon profile binding claims one-to-one: backend and SSD staging
@@ -795,18 +796,21 @@ transaction wiring; those boundaries stay explicit in the child items below.
   - [x] Prove per-user and system host-mode state/runtime namespaces remain
     distinct in a macOS path-coexistence regression; service-manager
     installation and ownership checks remain deployment work.
-- [~] Validate package-created, programmatically created, adopted, container-
+- [x] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic
     bounded-folder creation, explicit source-preserving adoption, checkpoint
     reload/recovery, quota rejection, and symlink drift under the dedicated
-    generated-data root; package-created/container-mounted acceptance remains
-    deployment-gated.
+    generated-data root.
   - [x] Make DEB/RPM provisioning hooks idempotently create the canonical
     bounded profile roots and reject non-directory collisions. Existing member
     trees are repaired only when their daemon-owned ``.dasobjectstore`` marker
     is present; unmarked files remain untouched until explicit adoption or
     reconciliation, preserving package safety without appliance acceptance.
+  - [x] Exercise package-created bounded-folder provision/reprovision, explicit
+    adoption, rebooted inspection, uninstall retention, and generated source
+    preservation in native ARM64 Ubuntu and AlmaLinux guests; root-scoped local
+    Docker rendering and S3 smoke provide the container-mounted boundary.
 
 ### Gate 4: Dedicated SSD drive profile
 
