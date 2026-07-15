@@ -44,6 +44,15 @@ deploying a changed policy.
 The same budget is used when Garage reconciliation hands staged provider data
 back to the local ingest pipeline; it does not bypass daemon admission.
 
+Packaged systemd deployments place the Web control plane in
+``dasobjectstore-control.slice`` and storage work in
+``dasobjectstore-storage.slice``. Both domains enable CPU, memory, and I/O
+accounting. The control slice receives higher CPU/I/O weight and a 256 MiB
+``MemoryLow`` reservation; the storage slice has a 75% ``MemoryHigh`` boundary.
+These are host-level protection defaults around the daemon's transactional
+admission policy, not substitutes for per-device telemetry or capacity rules.
+Inspect the effective values with ``systemctl show`` on a cgroup-v2 Linux host.
+
 The packaged daemon also owns appliance telemetry collection. By default,
 ``/etc/dasobjectstore/daemon.json`` enables telemetry with a 30 second cadence
 and writes the current JSON state under:
@@ -158,6 +167,13 @@ The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the
 ownership through the formal disk lockdown workflow before continuing.
+
+Package upgrade stops the Web and daemon processes before replacing binaries;
+post-install starts them with the retained configuration. Final DEB/RPM removal
+stops and disables the installed units but deliberately retains configuration,
+catalogue, credentials, telemetry, and managed storage roots. Package removal
+is never authorization to delete stored data. Use formal DASObjectStore
+management operations for retirement or deletion.
 
 The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
 daemon implementation is being completed. It is not the normal production

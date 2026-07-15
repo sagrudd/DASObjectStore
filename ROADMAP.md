@@ -262,6 +262,13 @@ performance acceptance. Those gates resume during a quiescent DASServer window
 after the operator confirms access is available; that later run also supplies
 x86_64 parity.
 
+The shared Linux package assets now put the Web control plane and storage daemon
+in distinct systemd slices with CPU, memory, and I/O accounting and explicit
+control-plane protection. DEB and RPM lifecycle hooks stop units safely while
+retaining all persistent metadata and managed storage on removal. Effective
+cgroup properties and install/upgrade/reboot/uninstall behavior remain queued
+for the approved Ubuntu and AlmaLinux Lima guests.
+
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are
 read-only drift until an explicit confirmed reconcile/adopt, and no profile

@@ -90,6 +90,10 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" 
   "$payload_root/usr/lib/systemd/system/dasobjectstore-source-access.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-source-access.path"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-control.slice" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-control.slice"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage.slice" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-storage.slice"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -130,6 +134,8 @@ Requires(post): coreutils
 Requires(post): findutils
 Requires(post): shadow-utils
 Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
 Requires:         awscli
 
 %description
@@ -288,6 +294,23 @@ WARNING
   fi
 fi
 
+%preun
+if [ "\$1" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
+  systemctl disable --now \
+    dasobjectstore-source-access.path \
+    dasobjectstore-server.service \
+    dasobjectstored.service || true
+fi
+
+%postun
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  systemctl reset-failed || true
+fi
+# Persistent configuration, metadata, credentials, telemetry, and managed
+# storage roots are deliberately retained. RPM removal never authorizes data
+# deletion.
+
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
 %config(noreplace) /etc/pam.d/dasobjectstore
@@ -305,6 +328,8 @@ fi
 /usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/systemd/system/dasobjectstore-source-access.service
 /usr/lib/systemd/system/dasobjectstore-source-access.path
+/usr/lib/systemd/system/dasobjectstore-control.slice
+/usr/lib/systemd/system/dasobjectstore-storage.slice
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md

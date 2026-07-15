@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl daemon-reload || true
+  systemctl reset-failed || true
+fi
+
+# Configuration, catalogue, credentials, telemetry, and managed storage roots
+# are intentionally retained on remove and purge. Data deletion requires an
+# explicit DASObjectStore management workflow; package removal is never that
+# authorization boundary.

@@ -1,0 +1,8 @@
+[Unit]
+Description=DASObjectStore control-plane resource domain
+Documentation=https://github.com/sagrudd/DASObjectStore
+
+[Slice]
+CPUWeight=200
+IOWeight=200
+MemoryLow=256M

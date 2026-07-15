@@ -1,0 +1,8 @@
+[Unit]
+Description=DASObjectStore storage-work resource domain
+Documentation=https://github.com/sagrudd/DASObjectStore
+
+[Slice]
+CPUWeight=80
+IOWeight=80
+MemoryHigh=75%

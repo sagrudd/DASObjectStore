@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v systemctl >/dev/null 2>&1; then
+  exit 0
+fi
+
+case "${1:-}" in
+  remove|deconfigure)
+    systemctl disable --now \
+      dasobjectstore-source-access.path \
+      dasobjectstore-server.service \
+      dasobjectstored.service || true
+    ;;
+  upgrade|failed-upgrade)
+    systemctl stop dasobjectstore-server.service dasobjectstored.service || true
+    ;;
+esac

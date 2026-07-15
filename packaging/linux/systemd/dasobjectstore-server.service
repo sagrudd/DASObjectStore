@@ -7,8 +7,13 @@ Requires=dasobjectstored.service
 
 [Service]
 Type=simple
+Slice=dasobjectstore-control.slice
 User=dasobjectstore
 Group=dasobjectstore
+CPUAccounting=true
+MemoryAccounting=true
+IOAccounting=true
+OOMScoreAdjust=-250
 StateDirectory=dasobjectstore
 StateDirectoryMode=0750
 LogsDirectory=dasobjectstore

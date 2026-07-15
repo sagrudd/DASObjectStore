@@ -84,12 +84,18 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" 
   "$build_root/lib/systemd/system/dasobjectstore-source-access.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
   "$build_root/lib/systemd/system/dasobjectstore-source-access.path"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-control.slice" \
+  "$build_root/lib/systemd/system/dasobjectstore-control.slice"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage.slice" \
+  "$build_root/lib/systemd/system/dasobjectstore-storage.slice"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$build_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
 cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
+install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"
+install -m 0755 "$packaging_debian/postrm" "$build_root/DEBIAN/postrm"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
 

@@ -5,8 +5,13 @@ After=local-fs.target
 
 [Service]
 Type=simple
+Slice=dasobjectstore-storage.slice
 User=dasobjectstore
 Group=dasobjectstore
+CPUAccounting=true
+MemoryAccounting=true
+IOAccounting=true
+OOMScoreAdjust=100
 RuntimeDirectory=dasobjectstore
 RuntimeDirectoryMode=0750
 StateDirectory=dasobjectstore

@@ -7,6 +7,10 @@ use dasobjectstore_daemon::{
 const SERVICE: &str = include_str!("../../../packaging/linux/systemd/dasobjectstored.service");
 const WEB_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-server.service");
+const CONTROL_SLICE: &str =
+    include_str!("../../../packaging/linux/systemd/dasobjectstore-control.slice");
+const STORAGE_SLICE: &str =
+    include_str!("../../../packaging/linux/systemd/dasobjectstore-storage.slice");
 const SYSUSERS: &str = include_str!("../../../packaging/linux/sysusers.d/dasobjectstore.conf");
 const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobjectstore.conf");
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
@@ -21,6 +25,8 @@ const PACKAGE_AUTH_GUARD: &str =
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
+const PRERM: &str = include_str!("../../../packaging/debian/prerm");
+const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
     "Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin, awscli";
@@ -199,6 +205,10 @@ fn systemd_service_uses_packaged_identity_and_paths() {
     assert_contains(SERVICE, LINUX_DAEMON_STATE_DIR);
     assert_contains(SERVICE, LINUX_DAEMON_LOG_DIR);
     assert_contains(SERVICE, "ProtectHome=read-only");
+    assert_contains(SERVICE, "Slice=dasobjectstore-storage.slice");
+    assert_contains(SERVICE, "CPUAccounting=true");
+    assert_contains(SERVICE, "MemoryAccounting=true");
+    assert_contains(SERVICE, "IOAccounting=true");
 }
 
 #[test]
@@ -211,7 +221,33 @@ fn web_systemd_service_uses_packaged_config_and_identity() {
         "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls",
     );
     assert_contains(WEB_SERVICE, "Requires=dasobjectstored.service");
+    assert_contains(WEB_SERVICE, "Slice=dasobjectstore-control.slice");
+    assert_contains(WEB_SERVICE, "OOMScoreAdjust=-250");
     assert_contains(WEB_SERVICE, "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /opt/dasobjectstore");
+}
+
+#[test]
+fn systemd_resource_domains_protect_control_plane_from_storage_work() {
+    assert_contains(CONTROL_SLICE, "CPUWeight=200");
+    assert_contains(CONTROL_SLICE, "IOWeight=200");
+    assert_contains(CONTROL_SLICE, "MemoryLow=256M");
+    assert_contains(STORAGE_SLICE, "CPUWeight=80");
+    assert_contains(STORAGE_SLICE, "IOWeight=80");
+    assert_contains(STORAGE_SLICE, "MemoryHigh=75%");
+}
+
+#[test]
+fn package_removal_stops_units_without_deleting_managed_state() {
+    assert_contains(PRERM, "remove|deconfigure");
+    assert_contains(PRERM, "upgrade|failed-upgrade");
+    assert_contains(PRERM, "systemctl disable --now");
+    assert_contains(POSTRM, "systemctl daemon-reload");
+    assert_contains(POSTRM, "package removal is never that");
+    assert!(!PRERM.contains("rm -rf"));
+    assert!(!POSTRM.contains("rm -rf"));
+    assert_contains(BUILD_RPM, "%preun");
+    assert_contains(BUILD_RPM, "%postun");
+    assert_contains(BUILD_RPM, "RPM removal never authorizes data");
 }
 
 #[test]

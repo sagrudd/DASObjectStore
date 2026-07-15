@@ -6,6 +6,8 @@ service="$repo_root/packaging/linux/systemd/dasobjectstored.service"
 web_service="$repo_root/packaging/linux/systemd/dasobjectstore-server.service"
 source_access_service="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.service"
 source_access_path="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.path"
+control_slice="$repo_root/packaging/linux/systemd/dasobjectstore-control.slice"
+storage_slice="$repo_root/packaging/linux/systemd/dasobjectstore-storage.slice"
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
@@ -15,6 +17,8 @@ web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
 pam_service="$repo_root/packaging/linux/pam.d/dasobjectstore"
 reporting_wrapper="$repo_root/packaging/reporting/gnostikon-workflow-control"
 postinst="$repo_root/packaging/debian/postinst"
+prerm="$repo_root/packaging/debian/prerm"
+postrm="$repo_root/packaging/debian/postrm"
 build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
 build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
@@ -52,6 +56,8 @@ require_file "$service"
 require_file "$web_service"
 require_file "$source_access_service"
 require_file "$source_access_path"
+require_file "$control_slice"
+require_file "$storage_slice"
 require_file "$source_access_helper"
 require_file "$mount_policy_helper"
 require_file "$sysusers"
@@ -61,6 +67,8 @@ require_file "$web_config"
 require_file "$pam_service"
 require_file "$reporting_wrapper"
 require_file "$postinst"
+require_file "$prerm"
+require_file "$postrm"
 require_file "$build_deb"
 require_file "$build_rpm"
 require_file "$build_remote_deb"
@@ -71,18 +79,30 @@ require_file "$package_auth_guard"
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
 require_text "$service" "RuntimeDirectory=dasobjectstore"
+require_text "$service" "Slice=dasobjectstore-storage.slice"
+require_text "$service" "CPUAccounting=true"
+require_text "$service" "MemoryAccounting=true"
+require_text "$service" "IOAccounting=true"
 require_text "$service" "ProtectHome=read-only"
 require_text "$service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /srv/dasobjectstore"
 
 require_text "$web_service" "User=dasobjectstore"
 require_text "$web_service" "Group=dasobjectstore"
 require_text "$web_service" "NoNewPrivileges=false"
+require_text "$web_service" "Slice=dasobjectstore-control.slice"
+require_text "$web_service" "OOMScoreAdjust=-250"
 require_text "$web_service" "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls"
 require_text "$web_service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /opt/dasobjectstore"
 require_text "$source_access_service" "ExecStart=/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 require_text "$source_access_path" "PathChanged=/run/media"
 require_text "$source_access_path" "PathChanged=/media"
 require_text "$source_access_helper" 'setfacl -m "u:${service_user}:--x" "$path"'
+require_text "$control_slice" "CPUWeight=200"
+require_text "$control_slice" "IOWeight=200"
+require_text "$control_slice" "MemoryLow=256M"
+require_text "$storage_slice" "CPUWeight=80"
+require_text "$storage_slice" "IOWeight=80"
+require_text "$storage_slice" "MemoryHigh=75%"
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_EXFAT_DEFAULTS'
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS'
 
@@ -136,6 +156,11 @@ require_text "$postinst" 'repair_marked_managed_tree "$root"'
 require_text "$postinst" "systemctl enable --now dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" "systemctl restart dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
+require_text "$prerm" 'remove|deconfigure'
+require_text "$prerm" 'upgrade|failed-upgrade'
+require_text "$prerm" 'systemctl disable --now'
+require_text "$postrm" 'systemctl daemon-reload'
+require_text "$postrm" 'package removal is never that'
 
 require_text "$build_deb" "cargo build --release --no-default-features -p dasobjectstore-daemon"
 require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
@@ -148,6 +173,8 @@ require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.path'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-control.slice'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-storage.slice'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
 require_text "$build_deb" 'opt/dasobjectstore/web'
 require_text "$build_deb" 'etc/pam.d/dasobjectstore'
@@ -157,10 +184,17 @@ require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control
 require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_deb" 'DEBIAN/postinst'
+require_text "$build_deb" 'DEBIAN/prerm'
+require_text "$build_deb" 'DEBIAN/postrm'
 require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
 require_text "$build_rpm" 'Requires:       udisks2'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-source-access.path'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-control.slice'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage.slice'
+require_text "$build_rpm" '%preun'
+require_text "$build_rpm" '%postun'
+require_text "$build_rpm" 'RPM removal never authorizes data'
 require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx'
 require_text "$build_deb" 'X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker'
 require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'

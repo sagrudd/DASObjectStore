@@ -2084,7 +2084,20 @@ list until every temporary size-budget exception has been removed.
     decisions share one lock, lowered budgets fail closed for new work while
     existing jobs drain, and atomic snapshot coverage protects diagnostics;
     host telemetry collection and wiring remain deployment-gated.
-- [~] Package the Web server and storage daemon in distinct systemd resource domains with explicit CPU, memory, and I/O protection. The Web server must retain a protected service budget; ingest may be constrained per SSD/HDD device when PSI, queue latency, or control-plane latency crosses policy thresholds. **Blocker (packaged host):** validating systemd/cgroup resource domains requires the Linux package deployment environment and must not be inferred from macOS fixtures.
+- [~] Package the Web server and storage daemon in distinct systemd resource
+  domains with explicit CPU, memory, and I/O protection. The Web server must
+  retain a protected service budget; ingest may be constrained per SSD/HDD
+  device when PSI, queue latency, or control-plane latency crosses policy
+  thresholds.
+  - [x] Add separate control/storage slice units, CPU/memory/I/O accounting,
+    higher control-plane CPU/I/O weight, a 256 MiB control ``MemoryLow``, and a
+    75% storage ``MemoryHigh`` boundary to both DEB and RPM payloads.
+  - [x] Add DEB/RPM removal hooks that stop and disable services on final
+    removal, distinguish upgrades, reload systemd, and never delete persistent
+    configuration, catalogue, credential, telemetry, or managed storage roots.
+  - [ ] Validate the effective cgroup-v2 properties plus install, upgrade,
+    reboot, and uninstall behavior in the approved Ubuntu and AlmaLinux Lima
+    guests. This is the remaining surrogate acceptance condition.
 - [~] Emit and retain live availability telemetry: HTTP accept queue/active requests and latency, daemon socket queue/active handlers, control-plane deadline/circuit-breaker counts, cgroup memory, per-device queue latency, and CPU/I/O PSI. Surface the current throttle/degraded reason in both the WebUI and TUI. Core admission/degraded projections are implemented; host queue, cgroup, and PSI collection remain deployment-gated.
   - [x] Surface the optional daemon ingest admission action, limiting reason,
     source-read worker count, HDD queue depth, and verification parallelism in
