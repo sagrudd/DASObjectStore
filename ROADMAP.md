@@ -1473,7 +1473,10 @@ Renewable daemon-owned reservation leases are approved with a 60-minute
 default, 10-minute active renewal, durable job/journal correlation, and
 accounting-only expiry when no resumable authority remains. Expiry never
 deletes payloads, and unknown-age legacy reservations remain retained for
-operator review. Scheduler and audit-event implementation remain open.
+operator review. The packaged daemon now runs the scheduler, renews
+current-process and durable multipart authorities, fails closed when journals
+cannot be enumerated, and persists bounded audit events with reservation IDs
+represented only by SHA-256 digests.
 Local file ingest now uses the same provider boundary for each non-skipped
 object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.

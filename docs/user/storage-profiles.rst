@@ -169,8 +169,8 @@ so logical usage cannot drift from the payload size.
 The core ledger also exposes a schema-versioned snapshot/restore boundary for
 restart-safe persistence. Unknown schemas and snapshots that would overbook a
 policy are rejected. Optional SubObject parent/child snapshots are now also
-persisted through an atomic daemon state-file adapter; registry integration and
-the approved renewable-lease scheduler remain separate capacity-gate work.
+persisted through an atomic daemon state-file adapter; registry integration
+remains separate capacity-gate work.
 The daemon persistence wrapper writes this snapshot through a private temporary
 file, file ``fsync``, atomic rename, and directory ``fsync``; corrupt or
 future-schema state is rejected without silently resetting reservations.
@@ -234,6 +234,12 @@ is 60 minutes and active workers renew every 10 minutes. Restart reconciliation
 retains reservations backed by a valid resumable job or multipart journal.
 Expiry releases accounting only when neither remains and never deletes staged
 or finalized payloads. Unknown-age legacy reservations require operator review.
+The packaged daemon runs this maintenance immediately at startup and then at
+the renewal cadence. A missing profile binding or malformed multipart journal
+fails the sweep closed before expiry. Maintenance events are retained under the
+daemon state directory in ``capacity-lease-audit.json``; reservation identities
+appear only as SHA-256 digests, and the bounded audit log never contains object
+keys, backend paths, or payload data.
 The daemon-owned remote S3 transfer worker now uses the remote job ID as that
 reservation ID: it admits before starting the byte-transfer adapter, then
 commits on successful transfer and catalogue completion or releases on any

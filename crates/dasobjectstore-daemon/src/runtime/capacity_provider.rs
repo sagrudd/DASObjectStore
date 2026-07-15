@@ -7,13 +7,18 @@ use crate::api::{
     CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
     CapacityStatusResponse,
 };
+use crate::runtime::capacity_lease::{
+    protections_by_store, reservation_id_digest, CapacityReservationLeaseAction,
+    CapacityReservationLeaseEvent, CapacityReservationLeaseProtection,
+    CapacityReservationLeaseReport,
+};
 use crate::runtime::capacity_persistence::{load_capacity_ledger, save_capacity_ledger};
 use crate::runtime::profile_registry::{profile_binding_registry_path, read_profile_binding};
 use crate::runtime::service::DaemonServiceRuntimeError;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::CapacityReservationLedger;
 use dasobjectstore_object_service::{default_store_registry_path, read_store_registry};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
@@ -145,7 +150,13 @@ pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
     profile_binding_registry_path: Option<PathBuf>,
     require_profile_binding: bool,
     probe: P,
-    ledgers: Mutex<HashMap<String, CapacityReservationLedger>>,
+    state: Mutex<CapacityProviderState>,
+}
+
+#[derive(Default)]
+struct CapacityProviderState {
+    ledgers: HashMap<String, CapacityReservationLedger>,
+    active_reservations: HashMap<String, HashSet<String>>,
 }
 
 impl FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe> {
@@ -177,7 +188,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             profile_binding_registry_path: None,
             require_profile_binding: false,
             probe,
-            ledgers: Mutex::new(HashMap::new()),
+            state: Mutex::new(CapacityProviderState::default()),
         }
     }
 
@@ -309,11 +320,11 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         max_age_seconds: u64,
     ) -> Result<u64, DaemonServiceRuntimeError> {
         let policy = self.policy_for_store(store_id)?;
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
         let before = ledger.clone();
         ledger
             .update_policy(policy)
@@ -333,6 +344,158 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             )));
         }
         Ok(reclaimed_bytes)
+    }
+
+    /// Run one deterministic lease-maintenance pass over every registered
+    /// store. Current-process reservations and caller-supplied durable active
+    /// IDs are renewed before expiry. Legacy reservations whose timestamp is
+    /// zero are retained unless an active authority explicitly renews them.
+    pub fn maintain_reservation_leases(
+        &self,
+        now_unix_seconds: u64,
+        lease_seconds: u64,
+        protections: &[CapacityReservationLeaseProtection],
+    ) -> Result<CapacityReservationLeaseReport, DaemonServiceRuntimeError> {
+        let mut definitions = read_store_registry(&self.store_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        definitions.sort_by(|left, right| left.store_id.as_str().cmp(right.store_id.as_str()));
+        let supplied = protections_by_store(protections);
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let mut report = CapacityReservationLeaseReport::default();
+
+        for definition in definitions {
+            let store_id = definition.store_id;
+            let store_key = store_id.as_str().to_string();
+            let mut protected = supplied.get(&store_key).cloned().unwrap_or_default();
+            protected.extend(
+                state
+                    .active_reservations
+                    .get(&store_key)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+            let ledger = self.ledger_for_store(
+                &mut state.ledgers,
+                &store_id,
+                definition.policy.capacity.clone(),
+            )?;
+            let before = ledger.clone();
+            ledger
+                .update_policy(definition.policy.capacity)
+                .map_err(|error| {
+                    unavailable(format!("capacity policy update failed: {error:?}"))
+                })?;
+            let snapshot = ledger.snapshot_with_expiry();
+
+            let mut protected_ids = protected.iter().collect::<Vec<_>>();
+            protected_ids.sort();
+            for reservation_id in protected_ids {
+                let Some(bytes) = ledger.reservation_bytes(reservation_id) else {
+                    continue;
+                };
+                ledger
+                    .renew_reservation_at_unix_seconds(reservation_id, now_unix_seconds)
+                    .map_err(|error| {
+                        unavailable(format!("capacity reservation renewal failed: {error:?}"))
+                    })?;
+                report.renewed_reservations += 1;
+                report.events.push(CapacityReservationLeaseEvent {
+                    store_id: store_id.clone(),
+                    reservation_id_sha256: reservation_id_digest(reservation_id),
+                    action: CapacityReservationLeaseAction::Renewed,
+                    bytes,
+                });
+            }
+
+            for (reservation_id, bytes) in &snapshot.reservations {
+                if protected.contains(reservation_id) {
+                    continue;
+                }
+                if snapshot
+                    .reservation_created_at_unix_seconds
+                    .get(reservation_id)
+                    .copied()
+                    .unwrap_or_default()
+                    == 0
+                {
+                    report.legacy_reservations_retained += 1;
+                    report.events.push(CapacityReservationLeaseEvent {
+                        store_id: store_id.clone(),
+                        reservation_id_sha256: reservation_id_digest(reservation_id),
+                        action: CapacityReservationLeaseAction::LegacyRetained,
+                        bytes: *bytes,
+                    });
+                }
+            }
+
+            let expired = ledger.expire_reservations(now_unix_seconds, lease_seconds);
+            for (reservation_id, bytes) in expired {
+                report.expired_reservations += 1;
+                report.reclaimed_bytes = report.reclaimed_bytes.saturating_add(bytes);
+                report.events.push(CapacityReservationLeaseEvent {
+                    store_id: store_id.clone(),
+                    reservation_id_sha256: reservation_id_digest(&reservation_id),
+                    action: CapacityReservationLeaseAction::Expired,
+                    bytes,
+                });
+            }
+
+            if ledger != &before {
+                if let Err(error) = save_capacity_ledger(self.ledger_path(&store_key), ledger) {
+                    *ledger = before;
+                    return Err(unavailable(format!(
+                        "capacity ledger persistence failed: {error}"
+                    )));
+                }
+            }
+            report.stores_scanned += 1;
+        }
+        Ok(report)
+    }
+
+    /// Discover durable multipart authorities from registered profile roots,
+    /// then execute one lease pass. Missing profile configuration fails closed:
+    /// expiry must never run when durable active work cannot be enumerated.
+    pub fn maintain_registered_reservation_leases(
+        &self,
+        now_unix_seconds: u64,
+        lease_seconds: u64,
+    ) -> Result<CapacityReservationLeaseReport, DaemonServiceRuntimeError> {
+        let profile_registry_path = self
+            .profile_binding_registry_path
+            .as_ref()
+            .ok_or_else(|| unavailable("profile binding registry is not configured"))?;
+        let definitions = read_store_registry(&self.store_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let mut protections = Vec::with_capacity(definitions.len());
+        for definition in definitions {
+            let store_id = definition.store_id;
+            let binding = read_profile_binding(profile_registry_path, store_id.as_str())?
+                .ok_or_else(|| {
+                    unavailable(format!(
+                        "profile binding is missing for object store {store_id}"
+                    ))
+                })?;
+            let reservation_ids =
+                crate::runtime::profile_s3_multipart::discover_multipart_reservation_ids(
+                    &binding.backend_root,
+                    store_id.as_str(),
+                )
+                .map_err(|error| {
+                    unavailable(format!(
+                    "multipart reservation discovery failed for object store {store_id}: {error}"
+                ))
+                })?;
+            protections.push(CapacityReservationLeaseProtection {
+                store_id,
+                reservation_ids,
+            });
+        }
+        self.maintain_reservation_leases(now_unix_seconds, lease_seconds, &protections)
     }
 }
 
@@ -366,17 +529,18 @@ where
             .into_iter()
             .find(|definition| definition.store_id == store_id)
             .ok_or_else(|| unavailable(format!("unknown object store {store_id}")))?;
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = if let Some(ledger) = ledgers.get_mut(store_id.as_str()) {
+        let ledger = if let Some(ledger) = state.ledgers.get_mut(store_id.as_str()) {
             ledger
         } else {
             let ledger =
                 self.load_or_initialize(store_id.as_str(), definition.policy.capacity.clone())?;
-            ledgers.insert(store_id.as_str().to_string(), ledger);
-            ledgers
+            state.ledgers.insert(store_id.as_str().to_string(), ledger);
+            state
+                .ledgers
                 .get_mut(store_id.as_str())
                 .expect("ledger inserted before lookup")
         };
@@ -413,6 +577,7 @@ where
         &self,
         request: CapacityAdmissionRequest,
     ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        let reservation_id = request.client_request_id.clone();
         let store_id = request.validate().map_err(|error| {
             DaemonServiceRuntimeError::Validation(
                 crate::api::DaemonRequestValidationError::UnsupportedFieldValue {
@@ -434,17 +599,18 @@ where
             )));
         }
 
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = if let Some(ledger) = ledgers.get_mut(store_id.as_str()) {
+        let ledger = if let Some(ledger) = state.ledgers.get_mut(store_id.as_str()) {
             ledger
         } else {
             let ledger =
                 self.load_or_initialize(store_id.as_str(), definition.policy.capacity.clone())?;
-            ledgers.insert(store_id.as_str().to_string(), ledger);
-            ledgers
+            state.ledgers.insert(store_id.as_str().to_string(), ledger);
+            state
+                .ledgers
                 .get_mut(store_id.as_str())
                 .expect("ledger inserted before lookup")
         };
@@ -485,6 +651,13 @@ where
                 "capacity ledger persistence failed: {error}"
             )));
         }
+        if let Some(reservation_id) = reservation_id {
+            state
+                .active_reservations
+                .entry(store_id.as_str().to_string())
+                .or_default()
+                .insert(reservation_id);
+        }
         Ok(response)
     }
 
@@ -512,24 +685,27 @@ where
         reservation_id: &str,
     ) -> Result<(), DaemonServiceRuntimeError> {
         let policy = self.policy_for_store(store_id)?;
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
-        let before = ledger.clone();
-        ledger
-            .update_policy(policy)
-            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        ledger.commit(reservation_id).map_err(|error| {
-            unavailable(format!("capacity reservation commit failed: {error:?}"))
-        })?;
-        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            *ledger = before;
-            return Err(unavailable(format!(
-                "capacity ledger persistence failed: {error}"
-            )));
+        {
+            let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
+            let before = ledger.clone();
+            ledger.update_policy(policy).map_err(|error| {
+                unavailable(format!("capacity policy update failed: {error:?}"))
+            })?;
+            ledger.commit(reservation_id).map_err(|error| {
+                unavailable(format!("capacity reservation commit failed: {error:?}"))
+            })?;
+            if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+                *ledger = before;
+                return Err(unavailable(format!(
+                    "capacity ledger persistence failed: {error}"
+                )));
+            }
         }
+        remove_active_reservation(&mut state, store_id, reservation_id);
         Ok(())
     }
 
@@ -539,24 +715,27 @@ where
         reservation_id: &str,
     ) -> Result<(), DaemonServiceRuntimeError> {
         let policy = self.policy_for_store(store_id)?;
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
-        let before = ledger.clone();
-        ledger
-            .update_policy(policy)
-            .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        ledger.release(reservation_id).map_err(|error| {
-            unavailable(format!("capacity reservation release failed: {error:?}"))
-        })?;
-        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-            *ledger = before;
-            return Err(unavailable(format!(
-                "capacity ledger persistence failed: {error}"
-            )));
+        {
+            let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
+            let before = ledger.clone();
+            ledger.update_policy(policy).map_err(|error| {
+                unavailable(format!("capacity policy update failed: {error:?}"))
+            })?;
+            ledger.release(reservation_id).map_err(|error| {
+                unavailable(format!("capacity reservation release failed: {error:?}"))
+            })?;
+            if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+                *ledger = before;
+                return Err(unavailable(format!(
+                    "capacity ledger persistence failed: {error}"
+                )));
+            }
         }
+        remove_active_reservation(&mut state, store_id, reservation_id);
         Ok(())
     }
 
@@ -566,11 +745,11 @@ where
         used_bytes: u64,
     ) -> Result<(), DaemonServiceRuntimeError> {
         let policy = self.policy_for_store(store_id)?;
-        let mut ledgers = self
-            .ledgers
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
-        let ledger = self.ledger_for_store(&mut ledgers, store_id, policy.clone())?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
         let before = ledger.clone();
         ledger
             .update_policy(policy)
@@ -591,6 +770,20 @@ where
 fn unavailable(message: impl Into<String>) -> DaemonServiceRuntimeError {
     DaemonServiceRuntimeError::UnsupportedOperation {
         operation: message.into(),
+    }
+}
+
+fn remove_active_reservation(
+    state: &mut CapacityProviderState,
+    store_id: &StoreId,
+    reservation_id: &str,
+) {
+    let Some(active) = state.active_reservations.get_mut(store_id.as_str()) else {
+        return;
+    };
+    active.remove(reservation_id);
+    if active.is_empty() {
+        state.active_reservations.remove(store_id.as_str());
     }
 }
 

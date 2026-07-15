@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.85.0 - 2026-07-15
+
+- Activate renewable capacity-reservation leases in the packaged daemon with
+  the approved 60-minute lease and 10-minute maintenance cadence.
+- Renew current-process and durable multipart authorities, retain unknown-age
+  legacy reservations, reclaim only expired accounting without deleting
+  payloads, and fail closed when durable journals cannot be enumerated.
+- Persist a bounded atomic maintenance audit containing SHA-256 reservation
+  digests rather than raw reservation IDs, object keys, or backend paths.
+
 ## 0.84.0 - 2026-07-15
 
 - Generalize the canonical macOS local-Docker authority profile for named

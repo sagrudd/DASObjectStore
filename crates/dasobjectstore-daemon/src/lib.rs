@@ -10,6 +10,7 @@ pub mod runtime;
 pub mod server;
 
 pub use api::DaemonIngestHddTransferPhase;
+pub use api::RemoteEasyconnectUploadCompletion;
 pub use api::{
     decide_remote_easyconnect_upload_admission, discover_profile_capabilities,
     plan_remote_easyconnect_upload_handoff, read_provider_stream_frame,
@@ -116,7 +117,6 @@ pub use api::{
     STORE_DEDUPLICATE_CONFIRMATION, STORE_DELETE_CONFIRMATION, STORE_DRAIN_CONFIRMATION,
     STORE_REPAIR_CONFIRMATION,
 };
-pub use api::RemoteEasyconnectUploadCompletion;
 pub use api::{
     PROFILE_S3_HEALTH_ROUTE, PROFILE_S3_MULTIPART_COMPLETE_ROUTE, PROFILE_S3_OBJECTS_ROUTE,
     PROFILE_S3_OBJECT_ROUTE, PROFILE_S3_ROUTE_PREFIX,
@@ -130,14 +130,15 @@ pub use client::{
 };
 pub use runtime::{
     admin_job_registry_path, appliance_sample_set, appliance_telemetry_state_path,
-    authoritative_performance_recommendation_path, collect_appliance_session_telemetry,
-    collect_linux_cpu_telemetry, collect_linux_disk_capacity_telemetry,
-    collect_linux_disk_io_telemetry, collect_linux_memory_telemetry,
-    default_endpoint_registry_path, default_profile_binding_registry_path, normalize_key,
-    parse_linux_cpu_snapshot, parse_linux_diskstats, plan_reconciliation,
-    plan_remote_upload_cancellation_cleanup, provision_garage_store_registry,
-    query_object_browser_metadata, read_authoritative_ingest_policy, read_object_browser_metadata,
-    read_profile_binding, record_remote_upload_s3_transfer_job,
+    authoritative_performance_recommendation_path, capacity_lease_audit_path,
+    collect_appliance_session_telemetry, collect_linux_cpu_telemetry,
+    collect_linux_disk_capacity_telemetry, collect_linux_disk_io_telemetry,
+    collect_linux_memory_telemetry, default_endpoint_registry_path,
+    default_profile_binding_registry_path, normalize_key, parse_linux_cpu_snapshot,
+    parse_linux_diskstats, plan_reconciliation, plan_remote_upload_cancellation_cleanup,
+    provision_garage_store_registry, query_object_browser_metadata,
+    read_authoritative_ingest_policy, read_object_browser_metadata, read_profile_binding,
+    record_capacity_lease_audit_events, record_remote_upload_s3_transfer_job,
     run_remote_easyconnect_aws_cli_upload_job,
     run_remote_easyconnect_aws_cli_upload_job_with_capacity_provider,
     run_remote_upload_cancellation_cleanup, upsert_endpoint_inventory_record,
@@ -150,13 +151,13 @@ pub use runtime::{
     ApplianceTelemetryMissingReason, ApplianceTelemetrySample, ApplianceTelemetrySampleSet,
     ApplianceTelemetrySink, ApplianceTelemetrySleeper, ApplianceTelemetrySource,
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError, BackendProfileBinding,
-    CapacityAdmissionProvider, CapacitySpaceProbe, DaemonRuntimeConfig, DaemonRuntimeConfigError,
-    DaemonServiceRuntimeError, DaemonTelemetryRuntimeConfig, EndpointRegistryUpsertSummary,
-    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
-    FileBackedCapacityAdmissionProvider, FolderCatalogue, FolderCatalogueBrowserEntry,
-    FolderCatalogueBrowserQuery, GarageProvisioningSummary, GarageServiceController,
-    GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary, LinuxCpuSnapshot,
-    LinuxDiskIoCounters, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
+    CapacityAdmissionProvider, CapacityReservationLeaseReport, CapacitySpaceProbe,
+    DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonServiceRuntimeError,
+    DaemonTelemetryRuntimeConfig, EndpointRegistryUpsertSummary, FileBackedAdminJobRegistry,
+    FileBackedApplianceTelemetrySink, FileBackedCapacityAdmissionProvider, FolderCatalogue,
+    FolderCatalogueBrowserEntry, FolderCatalogueBrowserQuery, GarageProvisioningSummary,
+    GarageServiceController, GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary,
+    LinuxCpuSnapshot, LinuxDiskIoCounters, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
     ObjectBrowserMetadataEntry, ObjectBrowserMetadataReadError, ObjectBrowserQueryError,
     ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
     ReconciliationManifestEntry, ReconciliationManifestError, ReconciliationObject,
@@ -182,12 +183,13 @@ pub use runtime::{
     APPLIANCE_TELEMETRY_FAST_CADENCE_SECONDS, APPLIANCE_TELEMETRY_FILE_NAME,
     APPLIANCE_TELEMETRY_NORMAL_CADENCE_SECONDS, APPLIANCE_TELEMETRY_SCHEMA_VERSION,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
-    DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT, DEFAULT_DAEMON_CONFIG_PATH, DEFAULT_DAEMON_GROUP,
-    DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR, DEFAULT_ENDPOINT_REGISTRY_PATH,
-    ENDPOINT_REGISTRY_ENV, ENDPOINT_REGISTRY_SCHEMA, LINUX_DAEMON_CONFIG_PATH,
-    LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
-    PERFORMANCE_RECOMMENDATION_SCHEMA, PROFILE_BINDING_REGISTRY_SCHEMA,
+    DEFAULT_APPLIANCE_TELEMETRY_HDD_ROOT, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
+    DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
+    DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
+    DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV, ENDPOINT_REGISTRY_SCHEMA,
+    LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
+    LINUX_DAEMON_STATE_DIR, PERFORMANCE_RECOMMENDATION_SCHEMA, PROFILE_BINDING_REGISTRY_SCHEMA,
     RECONCILIATION_MANIFEST_SCHEMA,
 };
 pub use server::{

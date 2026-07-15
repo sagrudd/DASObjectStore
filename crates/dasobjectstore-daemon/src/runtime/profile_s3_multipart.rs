@@ -291,20 +291,68 @@ impl MultipartPartJournal {
     }
 }
 
+/// Discover durable multipart reservations that must retain their capacity
+/// lease across daemon request and restart boundaries. Any malformed or
+/// mismatched journal fails the scan closed so maintenance cannot reclaim
+/// accounting while staged parts may still be recoverable.
+pub fn discover_multipart_reservation_ids(
+    root: impl AsRef<Path>,
+    expected_store_id: &str,
+) -> Result<Vec<String>, MultipartPartJournalError> {
+    let directory = root.as_ref().join(NAMESPACE).join(MULTIPART_DIR);
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(io_error(error)),
+    };
+    let mut reservation_ids = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(io_error)?;
+        let file_type = entry.file_type().map_err(io_error)?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            return Err(MultipartPartJournalError::Manifest(
+                "multipart namespace contains a non-directory entry".to_string(),
+            ));
+        }
+        let directory_reservation_id = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| MultipartPartJournalError::UnsafeReservationId)?;
+        if !safe_reservation_id(&directory_reservation_id) {
+            return Err(MultipartPartJournalError::UnsafeReservationId);
+        }
+        let bytes = fs::read(entry.path().join(MANIFEST_FILE)).map_err(io_error)?;
+        let manifest: JournalManifest = serde_json::from_slice(&bytes)
+            .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
+        validate_manifest(&manifest)?;
+        if manifest.store_id != expected_store_id
+            || manifest.reservation_id != directory_reservation_id
+        {
+            return Err(MultipartPartJournalError::IdentityMismatch);
+        }
+        reservation_ids.push(manifest.reservation_id);
+    }
+    reservation_ids.sort();
+    Ok(reservation_ids)
+}
+
 fn validate_identity(
     request: &ProviderStreamMultipartPartUploadOpenRequest,
 ) -> Result<(), MultipartPartJournalError> {
     request
         .validate()
         .map_err(MultipartPartJournalError::Request)?;
-    if !request
-        .reservation_id
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
+    if !safe_reservation_id(&request.reservation_id) {
         return Err(MultipartPartJournalError::UnsafeReservationId);
     }
     Ok(())
+}
+
+fn safe_reservation_id(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn validate_manifest(manifest: &JournalManifest) -> Result<(), MultipartPartJournalError> {
@@ -447,6 +495,33 @@ mod tests {
         reader.read_to_end(&mut payload).expect("read");
         assert_eq!(payload, b"hello");
         drop(reopened);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn discovers_only_valid_store_bound_multipart_reservations() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-discovery-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("persist journal identity");
+        drop(journal);
+
+        assert_eq!(
+            discover_multipart_reservation_ids(&root, "store-1").expect("discover"),
+            vec!["reservation-1".to_string()]
+        );
+        assert!(matches!(
+            discover_multipart_reservation_ids(&root, "other-store"),
+            Err(MultipartPartJournalError::IdentityMismatch)
+        ));
         let _ = std::fs::remove_dir_all(root);
     }
 }

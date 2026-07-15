@@ -5,11 +5,12 @@ use dasobjectstore_daemon::runtime::{
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
     ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
-    ApplianceTelemetrySource, DaemonRequestHandler, DaemonRuntimeConfig,
-    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
+    ApplianceTelemetrySource, CapacityReservationLeaseReport, DaemonRequestHandler,
+    DaemonRuntimeConfig, FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
     FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
     LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
-    UnixSocketDaemonServer, DEFAULT_DAEMON_CONFIG_PATH,
+    UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
+    DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
 use std::env;
@@ -45,11 +46,12 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    let capacity_provider = Arc::new(FileBackedCapacityAdmissionProvider::for_daemon(
+        &config.state_dir,
+    ));
     let garage =
         GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner)
-            .with_capacity_admission_provider(Arc::new(
-                FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir),
-            ))
+            .with_capacity_admission_provider(capacity_provider.clone())
             .with_ingest_resource_policy(config.ingest_resource_policy);
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
         &config.state_dir,
@@ -71,12 +73,55 @@ fn run() -> Result<(), String> {
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
+    let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(
         "dasobjectstored listening on {}",
         server.socket_path().display()
     );
     server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn spawn_capacity_lease_loop(
+    config: &DaemonRuntimeConfig,
+    provider: Arc<FileBackedCapacityAdmissionProvider>,
+) -> thread::JoinHandle<()> {
+    let audit_path = dasobjectstore_daemon::capacity_lease_audit_path(&config.state_dir);
+    thread::spawn(move || loop {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs();
+        match provider
+            .maintain_registered_reservation_leases(now, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS)
+        {
+            Ok(report) => record_capacity_lease_report(&audit_path, now, &report),
+            Err(error) => eprintln!("capacity reservation lease maintenance failed: {error}"),
+        }
+        thread::sleep(Duration::from_secs(
+            DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS,
+        ));
+    })
+}
+
+fn record_capacity_lease_report(
+    audit_path: &std::path::Path,
+    now_unix_seconds: u64,
+    report: &CapacityReservationLeaseReport,
+) {
+    if let Err(error) = dasobjectstore_daemon::record_capacity_lease_audit_events(
+        audit_path,
+        now_unix_seconds,
+        &report.events,
+    ) {
+        eprintln!("capacity reservation lease audit failed: {error}");
+    }
+    if report.expired_reservations > 0 {
+        eprintln!(
+            "capacity reservation lease maintenance reclaimed {} byte(s) from {} expired reservation(s)",
+            report.reclaimed_bytes, report.expired_reservations
+        );
+    }
 }
 
 fn spawn_appliance_telemetry_loop(

@@ -245,6 +245,28 @@ impl CapacityReservationLedger {
         Ok(())
     }
 
+    /// Renew an outstanding reservation lease at an explicit Unix timestamp.
+    ///
+    /// A zero timestamp is rejected because zero is reserved for legacy
+    /// reservations whose age is unknown. Explicitly renewing such a legacy
+    /// reservation upgrades it to an expirable lease without changing its
+    /// reserved byte charge.
+    pub fn renew_reservation_at_unix_seconds(
+        &mut self,
+        reservation_id: &str,
+        renewed_at_unix_seconds: u64,
+    ) -> Result<(), CapacityLedgerError> {
+        if renewed_at_unix_seconds == 0 {
+            return Err(CapacityLedgerError::InvalidReservationRenewalTime);
+        }
+        if !self.reservations.contains_key(reservation_id) {
+            return Err(CapacityLedgerError::UnknownReservation);
+        }
+        self.reservation_created_at_unix_seconds
+            .insert(reservation_id.to_string(), renewed_at_unix_seconds);
+        Ok(())
+    }
+
     /// Release reservations older than `max_age_seconds` at `now_unix_seconds`.
     /// Legacy schema-v1 reservations have timestamp zero and are intentionally
     /// retained until explicitly released, preventing an upgrade from
@@ -344,6 +366,7 @@ pub enum CapacityLedgerError {
         schema_version: u32,
     },
     InvalidReservationId,
+    InvalidReservationRenewalTime,
     InvalidReservationMetadata,
     UnknownReservation,
     UsedBytesUnderflow {
@@ -432,5 +455,55 @@ mod tests {
         );
         assert_eq!(ledger.reservation_bytes("legacy"), Some(50));
         assert_eq!(ledger.reservation_bytes("new"), Some(200));
+    }
+
+    #[test]
+    fn renewal_delays_expiry_and_upgrades_legacy_reservations() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+            .expect("valid capacity policy");
+        ledger
+            .reserve_at_unix_seconds("active", 100, 100)
+            .expect("active reservation");
+        ledger
+            .reserve_at_unix_seconds("legacy", 50, 0)
+            .expect("legacy reservation");
+
+        ledger
+            .renew_reservation_at_unix_seconds("active", 190)
+            .expect("renew active reservation");
+        ledger
+            .renew_reservation_at_unix_seconds("legacy", 180)
+            .expect("upgrade legacy reservation");
+
+        assert!(ledger.expire_reservations(200, 100).is_empty());
+        assert_eq!(
+            ledger.expire_reservations(280, 100),
+            vec![("legacy".to_string(), 50)]
+        );
+        assert_eq!(
+            ledger.expire_reservations(290, 100),
+            vec![("active".to_string(), 100)]
+        );
+    }
+
+    #[test]
+    fn renewal_rejects_zero_time_and_unknown_reservation_without_mutation() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 0), 0)
+            .expect("valid capacity policy");
+        ledger
+            .reserve_at_unix_seconds("known", 100, 50)
+            .expect("known reservation");
+        let initial = ledger.snapshot_with_expiry();
+
+        assert_eq!(
+            ledger.renew_reservation_at_unix_seconds("known", 0),
+            Err(CapacityLedgerError::InvalidReservationRenewalTime)
+        );
+        assert_eq!(ledger.snapshot_with_expiry(), initial);
+        assert_eq!(
+            ledger.renew_reservation_at_unix_seconds("missing", 100),
+            Err(CapacityLedgerError::UnknownReservation)
+        );
+        assert_eq!(ledger.snapshot_with_expiry(), initial);
     }
 }

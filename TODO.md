@@ -626,15 +626,17 @@ transaction wiring; those boundaries stay explicit in the child items below.
     rollback tests are now in place. **Approved 2026-07-15:** uncommitted
     reservations use daemon-owned renewable leases with a 60-minute default,
     10-minute active renewal, durable job/journal correlation, and atomic
-    persistence. Expiry releases accounting only when no active resumable job
-    or multipart journal remains; it never deletes payloads. Unknown-age legacy
-    reservations remain retained for operator review. Scheduler and audit-event
-    implementation remain.
+    persistence. Expiry releases accounting only when no active in-process
+    reservation or durable multipart journal remains; it never deletes
+    payloads. Unknown-age legacy reservations remain retained for operator
+    review. The packaged daemon now runs the 10-minute scheduler, renews those
+    authorities, and atomically retains bounded SHA-256-redacted audit events.
   - [x] Add durable reservation creation timestamps with schema-v2 emission,
     schema-v1 compatibility, deterministic boundary expiry, and a provider
     maintenance API that atomically persists reclaimed bytes. Unknown-age
-    legacy reservations are retained; automatic expiry and renewal remain
-    disabled until the approved scheduler and audit path are implemented.
+    legacy reservations are retained; automatic expiry, renewal, durable
+    multipart protection, and redacted audit persistence are now enabled by
+    the packaged daemon scheduler.
   - [x] Exercise the file-backed provider against a real macOS filesystem
     fixture, including statvfs backend/SSD observations, admission, and commit;
     appliance-scale full-disk acceptance remains blocked on DASServer access.
@@ -643,8 +645,8 @@ transaction wiring; those boundaries stay explicit in the child items below.
     lease-policy gated.
   - [x] Add core-ledger regressions for mutex-contended reservations, quota
     lowering while usage is over limit, and deterministic timestamp expiry;
-    unknown-age legacy reservations remain retained while the approved lease
-    scheduler is implemented.
+    unknown-age legacy reservations remain retained by the implemented lease
+    scheduler.
 
 ### Gate 3: Bounded folder profile
 

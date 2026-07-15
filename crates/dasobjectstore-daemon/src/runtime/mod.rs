@@ -7,6 +7,8 @@ mod application_capability_replay;
 mod application_identity_registry;
 mod application_key_registry;
 mod application_upload_capabilities;
+mod capacity_lease;
+mod capacity_lease_audit;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
@@ -89,6 +91,17 @@ pub use application_upload_capabilities::{
     application_upload_capability_path, issue_application_upload_capability,
     read_application_upload_capability, PendingApplicationUploadCapability,
     APPLICATION_UPLOAD_CAPABILITY_FILE_NAME, APPLICATION_UPLOAD_CAPABILITY_SCHEMA,
+};
+pub use capacity_lease::{
+    CapacityReservationLeaseAction, CapacityReservationLeaseEvent,
+    CapacityReservationLeaseProtection, CapacityReservationLeaseReport,
+    DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
+    DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS,
+};
+pub use capacity_lease_audit::{
+    capacity_lease_audit_path, read_capacity_lease_audit_events,
+    record_capacity_lease_audit_events, CapacityReservationLeaseAuditRecord,
+    CAPACITY_LEASE_AUDIT_FILE_NAME, CAPACITY_LEASE_AUDIT_SCHEMA,
 };
 pub use capacity_persistence::{
     load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,
@@ -186,7 +199,8 @@ pub use profile_s3::{
     PROFILE_S3_MAX_MULTIPART_PARTS,
 };
 pub use profile_s3_multipart::{
-    MultipartPartJournal, MultipartPartJournalError, MultipartPartRecord,
+    discover_multipart_reservation_ids, MultipartPartJournal, MultipartPartJournalError,
+    MultipartPartRecord,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,
