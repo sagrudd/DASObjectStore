@@ -3,12 +3,15 @@ use crate::api::{
     resolve_remote_easyconnect_session_lifetime_seconds, ApplianceTelemetryRequest,
     ApplianceTelemetryResponse, ApplicationAccessTokenExchangeResponse,
     ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationResponse,
-    ApplicationKeyRegistrationResponse, AssignLocalUserToLocalGroupRequest,
-    AssignLocalUserToLocalGroupResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
-    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest,
-    DaemonApiResponse, DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
-    DaemonJobId, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
-    DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+    ApplicationKeyRegistrationResponse, ApplicationUploadCapabilityIssueRequest,
+    ApplicationUploadCapabilityIssueResponse, ApplicationUploadCompletionOutcome,
+    ApplicationUploadCompletionRequest, ApplicationUploadCompletionResponse,
+    AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
+    CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
+    CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
+    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
+    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
     DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
@@ -40,12 +43,14 @@ use crate::auth::{
 };
 use crate::runtime::{
     appliance_telemetry_state_path, application_audit_log_path, application_identity_registry_path,
-    application_key_registry_path, deactivate_application_identity, deactivate_application_key,
-    default_endpoint_registry_path, default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
-    head_profile_object, list_profile_objects_page, profile_diagnostics, profile_health,
-    profile_s3_list_response, provision_garage_store_registry, query_object_browser_metadata,
-    read_application_identity, read_application_key, read_object_browser_metadata,
-    read_profile_binding, read_profile_binding_record, record_application_audit_event,
+    application_key_registry_path, complete_upload_with_capability,
+    deactivate_application_identity, deactivate_application_key, default_endpoint_registry_path,
+    default_hdd_root, default_ssd_root, discover_managed_hdd_roots, head_profile_object,
+    issue_application_upload_capability, list_profile_objects_page, profile_diagnostics,
+    profile_health, profile_s3_list_response, provision_garage_store_registry,
+    query_object_browser_metadata, read_application_identity, read_application_key,
+    read_application_upload_capability, read_object_browser_metadata, read_profile_binding,
+    read_profile_binding_record, record_application_audit_event,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
     upsert_application_identity, upsert_application_key, upsert_endpoint_inventory_record,
@@ -56,19 +61,25 @@ use crate::runtime::{
     FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadProgressTelemetry,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    PendingApplicationUploadCapability, ReconciliationManifest,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry,
+    RemoteUploadProviderCompletion, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+};
+use dasobjectstore_core::application_auth::{
+    UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
 };
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
-use dasobjectstore_core::utc::{add_seconds_to_utc_timestamp, format_utc_timestamp_seconds};
+use dasobjectstore_core::utc::{
+    add_seconds_to_utc_timestamp, format_utc_timestamp_seconds, parse_utc_timestamp_seconds,
+};
 use dasobjectstore_metadata::{
     put_object_ssd_first, DiskCopyRoot, ObjectPutRequest as MetadataObjectPutRequest,
     LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
@@ -131,6 +142,8 @@ pub struct DaemonRequestHandler<S, C> {
     application_identity_registry_path: PathBuf,
     application_key_registry_path: PathBuf,
     application_audit_log_path: PathBuf,
+    application_upload_capability_path: PathBuf,
+    application_capability_replay_path: PathBuf,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -168,6 +181,12 @@ where
             ),
             application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
             application_audit_log_path: application_audit_log_path(DEFAULT_DAEMON_STATE_DIR),
+            application_upload_capability_path: crate::runtime::application_upload_capability_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_replay_path: crate::runtime::application_capability_replay_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
         }
     }
     pub fn new_with_admin_job_registry(
@@ -204,6 +223,12 @@ where
             ),
             application_key_registry_path: application_key_registry_path(DEFAULT_DAEMON_STATE_DIR),
             application_audit_log_path: application_audit_log_path(DEFAULT_DAEMON_STATE_DIR),
+            application_upload_capability_path: crate::runtime::application_upload_capability_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_replay_path: crate::runtime::application_capability_replay_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
         }
     }
     pub fn with_registry_paths(
@@ -634,6 +659,10 @@ impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
 {
+    fn application_upload_endpoint(&self) -> Option<String> {
+        Some(self.endpoint().to_string())
+    }
+
     fn initialize_profile_capacity(
         &self,
         store_id: &StoreId,
@@ -746,6 +775,48 @@ where
         GarageServiceController::remote_easyconnect_aws_cli_upload_job(
             self, registry, gate, request,
         )
+    }
+
+    fn verify_application_upload_completion(
+        &self,
+        record: &crate::runtime::RemoteUploadCompletionRecord,
+        completion: crate::runtime::RemoteUploadProviderCompletion,
+        environment: Vec<(String, String)>,
+        live_sqlite_path: PathBuf,
+        committed_at_utc: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        crate::runtime::GarageRemoteUploadCompletionAuthority::new(
+            &self.runner,
+            environment,
+            live_sqlite_path,
+            committed_at_utc.to_string(),
+            completion,
+        )
+        .verify_provider(record)
+        .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: error.to_string(),
+        })
+    }
+
+    fn commit_application_upload_catalogue(
+        &self,
+        record: &crate::runtime::RemoteUploadCompletionRecord,
+        completion: crate::runtime::RemoteUploadProviderCompletion,
+        environment: Vec<(String, String)>,
+        live_sqlite_path: PathBuf,
+        committed_at_utc: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        crate::runtime::GarageRemoteUploadCompletionAuthority::new(
+            &self.runner,
+            environment,
+            live_sqlite_path,
+            committed_at_utc.to_string(),
+            completion,
+        )
+        .commit_catalogue(record)
+        .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: error.to_string(),
+        })
     }
 
     fn reconcile_store_s3(

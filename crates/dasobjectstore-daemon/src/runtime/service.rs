@@ -71,7 +71,7 @@ impl GarageServiceRuntimeConfig {
 
 pub struct GarageServiceController<R> {
     config: GarageServiceRuntimeConfig,
-    runner: R,
+    pub(crate) runner: R,
     capacity_admission_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     ingest_resource_gate: Option<Arc<DaemonIngestResourceGate>>,
 }
@@ -80,6 +80,10 @@ impl<R> GarageServiceController<R>
 where
     R: ServiceCommandRunner,
 {
+    pub fn endpoint(&self) -> &str {
+        &self.config.endpoint
+    }
+
     pub fn new(config: GarageServiceRuntimeConfig, runner: R) -> Self {
         Self {
             config,

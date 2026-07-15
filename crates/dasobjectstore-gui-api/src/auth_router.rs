@@ -7,7 +7,8 @@ use axum::{
     Extension, Router,
 };
 use dasobjectstore_daemon::api::{
-    APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, PROFILE_S3_MULTIPART_PART_ROUTE,
+    APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
+    APPLICATION_UPLOAD_COMPLETION_ROUTE, PROFILE_S3_MULTIPART_PART_ROUTE,
 };
 
 pub fn standalone_gui_api_router(auth_store: LocalAuthStore) -> Router {
@@ -44,6 +45,14 @@ pub(crate) fn standalone_auth_router_with_state(state: StandaloneAuthRouteState)
         .route(
             APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
             post(exchange_application_access_token),
+        )
+        .route(
+            APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
+            post(issue_application_upload_capability),
+        )
+        .route(
+            APPLICATION_UPLOAD_COMPLETION_ROUTE,
+            post(complete_application_upload),
         )
         .route("/api/v1/remote/authenticate", post(remote_authenticate))
         .route("/api/logout", post(logout))

@@ -3,6 +3,7 @@
 mod appliance_telemetry;
 mod application_identity;
 mod application_token;
+mod application_upload;
 mod capacity;
 mod disk_lockdown;
 mod disk_mutation;
@@ -56,6 +57,12 @@ pub use application_identity::{
 pub use application_token::{
     ApplicationAccessTokenExchangeRequest, ApplicationAccessTokenExchangeResponse,
     APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
+};
+pub use application_upload::{
+    ApplicationUploadCapabilityIssueRequest, ApplicationUploadCapabilityIssueResponse,
+    ApplicationUploadCompletionOutcome, ApplicationUploadCompletionRequest,
+    ApplicationUploadCompletionResponse, APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
+    APPLICATION_UPLOAD_COMPLETION_ROUTE,
 };
 pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
@@ -274,6 +281,8 @@ pub enum DaemonApiRequest {
     RegisterApplicationKey(ApplicationKeyRegistrationRequest),
     RevokeApplicationCredential(ApplicationCredentialRevocationRequest),
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeRequest),
+    IssueApplicationUploadCapability(ApplicationUploadCapabilityIssueRequest),
+    CompleteApplicationUpload(ApplicationUploadCompletionRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -339,6 +348,8 @@ impl DaemonApiRequest {
             Self::RegisterApplicationKey(_) => "register_application_key",
             Self::RevokeApplicationCredential(_) => "revoke_application_credential",
             Self::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
+            Self::IssueApplicationUploadCapability(_) => "issue_application_upload_capability",
+            Self::CompleteApplicationUpload(_) => "complete_application_upload",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -424,6 +435,12 @@ impl DaemonApiRequest {
                 .validate()
                 .map_err(application_credential_revocation_validation_error),
             Self::ExchangeApplicationAccessToken(request) => request.validate(),
+            Self::IssueApplicationUploadCapability(request) => request
+                .validate()
+                .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
+            Self::CompleteApplicationUpload(request) => request
+                .validate()
+                .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
             Self::PrepareEnclosure(request) => request
                 .validate()
                 .map_err(prepare_enclosure_validation_error),
@@ -569,6 +586,8 @@ pub enum DaemonApiResponse {
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionResponse),
     RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionDecision),
     RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadResponse),
+    ApplicationUploadCapabilityIssued(ApplicationUploadCapabilityIssueResponse),
+    ApplicationUploadCompleted(ApplicationUploadCompletionResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }

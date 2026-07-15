@@ -103,6 +103,50 @@ pub(super) async fn exchange_application_access_token(
         })
 }
 
+pub(super) async fn issue_application_upload_capability(
+    Json(request): Json<DaemonApplicationUploadCapabilityIssueRequest>,
+) -> Result<Json<DaemonApplicationUploadCapabilityIssueResponse>, (StatusCode, Json<AuthRouteError>)>
+{
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .issue_application_upload_capability(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "application_upload_capability_issue_failed")
+        })
+}
+
+pub(super) async fn complete_application_upload(
+    Json(request): Json<DaemonApplicationUploadCompletionRequest>,
+) -> Result<Json<DaemonApplicationUploadCompletionResponse>, (StatusCode, Json<AuthRouteError>)> {
+    request.capability.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_application_upload_completion",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .complete_application_upload(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "application_upload_completion_failed")
+        })
+}
+
 /// Authenticate a remote user and issue one daemon-owned, store-scoped S3
 /// session. The password is used only for this request and never crosses the
 /// daemon boundary or gets persisted in the remote-client configuration.

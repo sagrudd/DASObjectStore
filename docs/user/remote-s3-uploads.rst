@@ -142,6 +142,35 @@ keeps authentication and S3 credentials as two distinct steps:
 Only the credential authority should reveal the generated S3 secret. Do not copy
 Garage or provider-internal secret files to remote computers.
 
+Verified application completion
+--------------------------------
+
+Application integrations finish a single-object provider upload through two
+public HTTPS operations. ``POST
+/api/v1/application-auth/upload-completions/capabilities`` exchanges the
+paired EasyConnect session ID and renewal token for a one-time capability. The
+request identifies the registered application, upload, ObjectStore, object
+key, exact size and SHA-256 digest, bucket, and provider endpoint. Issuance
+fails unless the session has a writable grant and the active application
+identity permits ``complete_upload`` for that ObjectStore namespace and size.
+This supports identities whose recorded ingress origin is ``remote_s3`` or a
+named integration such as Synoptikon. Capabilities expire after at most 15 minutes and never contain provider
+credentials.
+
+After the provider PUT succeeds, ``POST
+/api/v1/application-auth/upload-completions/complete`` submits only that
+capability. The daemon requires an exact match to its durable issuance,
+resolves the store-scoped Garage credential from daemon custody, independently
+checks provider size and SHA-256 metadata, and atomically commits the provider
+placement to the shared catalogue. A retry after a successful commit returns
+``already_committed``. Provider verification or catalogue failure does not
+consume the capability, and replay state is persisted only after the durable,
+idempotent catalogue transaction so interruption remains safe to retry.
+
+Clients must treat the renewal token and one-time capability as bearer
+credentials, keep them out of logs, and never choose a provider endpoint that
+differs from the endpoint advertised by the appliance.
+
 Configure AWS CLI on the remote computer
 ----------------------------------------
 

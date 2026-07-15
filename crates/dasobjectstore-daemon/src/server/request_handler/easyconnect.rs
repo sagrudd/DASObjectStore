@@ -1,5 +1,24 @@
 use super::*;
+use ring::rand::{SecureRandom, SystemRandom};
 use std::sync::Arc;
+
+fn random_capability_slug(prefix: &str) -> Result<String, DaemonServiceRuntimeError> {
+    let mut bytes = [0_u8; 16];
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| upload_error("operating-system randomness is unavailable"))?;
+    let encoded = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!("{prefix}-{encoded}"))
+}
+
+fn upload_error(message: impl Into<String>) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: message.into(),
+    }
+}
 
 /// Handles Remote EasyConnect pairing, sessions, admission, and upload requests.
 pub(super) fn request<S, C>(
@@ -109,6 +128,28 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::IssueApplicationUploadCapability(request) => {
+            let now_utc = handler.clock.now_utc();
+            match handler.issue_application_upload_capability(request, &now_utc) {
+                Ok(response) => Ok(DaemonApiResponse::ApplicationUploadCapabilityIssued(
+                    response,
+                )),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "application_upload_capability_issue_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
+        DaemonApiRequest::CompleteApplicationUpload(request) => {
+            let now_utc = handler.clock.now_utc();
+            match handler.complete_application_upload(request, &now_utc) {
+                Ok(response) => Ok(DaemonApiResponse::ApplicationUploadCompleted(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "application_upload_completion_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
         _ => unreachable!("easyconnect dispatcher received an unrelated request"),
     }
 }
@@ -118,6 +159,213 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    fn issue_application_upload_capability(
+        &self,
+        request: ApplicationUploadCapabilityIssueRequest,
+        now_utc: &str,
+    ) -> Result<ApplicationUploadCapabilityIssueResponse, DaemonServiceRuntimeError> {
+        request.validate().map_err(upload_error)?;
+        let now = parse_utc_timestamp_seconds(now_utc)
+            .ok_or_else(|| upload_error("daemon clock is not a supported UTC timestamp"))?
+            as u64;
+        if request.provider != "garage"
+            || self
+                .service_orchestrator
+                .application_upload_endpoint()
+                .as_deref()
+                != Some(request.endpoint_url.as_str())
+        {
+            return Err(upload_error(
+                "only a configured Garage provider endpoint is supported",
+            ));
+        }
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        );
+        let grant = session_store
+            .authorize_completion(
+                &request.session_id,
+                &request.renewal_token,
+                &request.object_store,
+                now_utc,
+            )
+            .map_err(|error| upload_error(error.to_string()))?;
+        if grant.bucket != request.bucket {
+            return Err(upload_error(
+                "requested bucket is outside the paired session grant",
+            ));
+        }
+        let store_id = StoreId::new(request.object_store.clone())
+            .map_err(|error| upload_error(error.to_string()))?;
+        let identity = read_application_identity(
+            &self.application_identity_registry_path,
+            &request.application_id,
+        )?
+        .ok_or_else(|| upload_error("application identity is not registered"))?;
+        identity
+            .authorize_upload_completion(
+                &store_id,
+                &request.object_key,
+                request.expected_size_bytes,
+                now,
+            )
+            .map_err(|error| upload_error(error.to_string()))?;
+        let ttl = request
+            .requested_ttl_seconds
+            .unwrap_or(MAX_UPLOAD_COMPLETION_TTL_SECONDS);
+        if ttl == 0 || ttl > MAX_UPLOAD_COMPLETION_TTL_SECONDS {
+            return Err(upload_error(
+                "upload capability TTL must be between 1 and 900 seconds",
+            ));
+        }
+        let expires = now
+            .checked_add(ttl)
+            .ok_or_else(|| upload_error("capability expiry overflow"))?;
+        let session = session_store
+            .get(&request.session_id)
+            .map_err(|error| upload_error(error.to_string()))?
+            .ok_or_else(|| upload_error("paired session disappeared during capability issuance"))?;
+        if session.revoked_at_utc.is_some() || session.renewal_token != request.renewal_token {
+            return Err(upload_error(
+                "paired session changed during capability issuance",
+            ));
+        }
+        let session_expires = parse_utc_timestamp_seconds(&session.expires_at_utc)
+            .ok_or_else(|| upload_error("paired session expiry is not a supported UTC timestamp"))?
+            as u64;
+        if expires > session_expires {
+            return Err(upload_error(
+                "upload capability lifetime exceeds paired session",
+            ));
+        }
+        if expires > identity.expires_at_unix_seconds {
+            return Err(upload_error(
+                "upload capability lifetime exceeds application identity",
+            ));
+        }
+        let capability = UploadCompletionCapability {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            capability_id: random_capability_slug("upload-cap")?,
+            application_id: request.application_id,
+            session_id: request.session_id,
+            upload_id: request.upload_id.clone(),
+            store_id,
+            object_key: request.object_key.clone(),
+            expected_size_bytes: request.expected_size_bytes,
+            expected_checksum: request.expected_checksum.clone(),
+            audience: request.audience,
+            issued_at_unix_seconds: now,
+            expires_at_unix_seconds: expires,
+            nonce: random_capability_slug("nonce")?,
+        };
+        capability
+            .validate()
+            .map_err(|error| upload_error(error.to_string()))?;
+        issue_application_upload_capability(
+            &self.application_upload_capability_path,
+            PendingApplicationUploadCapability {
+                capability: capability.clone(),
+                completion: RemoteUploadProviderCompletion {
+                    upload_id: request.upload_id,
+                    provider: request.provider,
+                    bucket: request.bucket,
+                    object_id: request.object_id,
+                    object_version: request.object_version,
+                    object_key: request.object_key,
+                    expected_checksum: request.expected_checksum,
+                    endpoint_url: request.endpoint_url,
+                },
+            },
+            now,
+        )?;
+        Ok(ApplicationUploadCapabilityIssueResponse { capability })
+    }
+
+    fn complete_application_upload(
+        &self,
+        request: ApplicationUploadCompletionRequest,
+        now_utc: &str,
+    ) -> Result<ApplicationUploadCompletionResponse, DaemonServiceRuntimeError> {
+        request.validate().map_err(upload_error)?;
+        let now = parse_utc_timestamp_seconds(now_utc)
+            .ok_or_else(|| upload_error("daemon clock is not a supported UTC timestamp"))?
+            as u64;
+        let pending = read_application_upload_capability(
+            &self.application_upload_capability_path,
+            &request.capability,
+            now,
+        )?;
+        let credentials =
+            read_managed_credential_registry(&self.credential_registry_path, now_utc)?
+                .credentials
+                .into_iter()
+                .find(|credential| {
+                    credential.store_id.as_str() == pending.capability.store_id.as_str()
+                        && credential.bucket_name == pending.completion.bucket
+                })
+                .ok_or_else(|| {
+                    upload_error("no daemon-managed credential exists for upload completion")
+                })?;
+        let environment = vec![
+            ("AWS_ACCESS_KEY_ID".to_string(), credentials.access_key_id),
+            (
+                "AWS_SECRET_ACCESS_KEY".to_string(),
+                credentials.secret_access_key,
+            ),
+        ];
+        let record = RemoteUploadCompletionRecord {
+            job_id: pending.capability.upload_id.clone(),
+            object_store: pending.capability.store_id.to_string(),
+            source_bytes: pending.capability.expected_size_bytes,
+            metadata: Some(RemoteUploadCompletionMetadata {
+                upload_id: pending.capability.upload_id.clone(),
+                object_key: pending.capability.object_key.clone(),
+                expected_size_bytes: pending.capability.expected_size_bytes,
+                expected_checksum: pending.capability.expected_checksum.clone(),
+            }),
+        };
+        let completion = pending.completion.clone();
+        let verification_completion = completion.clone();
+        let verification_environment = environment.clone();
+        let outcome = complete_upload_with_capability(
+            &self.application_capability_replay_path,
+            &pending.capability,
+            now,
+            |_| {
+                self.service_orchestrator
+                    .verify_application_upload_completion(
+                        &record,
+                        verification_completion,
+                        verification_environment,
+                        self.live_sqlite_path.clone(),
+                        now_utc,
+                    )
+                    .map_err(|error| error.to_string())
+            },
+            |_| {
+                self.service_orchestrator
+                    .commit_application_upload_catalogue(
+                        &record,
+                        completion,
+                        environment,
+                        self.live_sqlite_path.clone(),
+                        now_utc,
+                    )
+                    .map_err(|error| error.to_string())
+            },
+        )?;
+        Ok(ApplicationUploadCompletionResponse {
+            capability_id: pending.capability.capability_id,
+            outcome: match outcome {
+                crate::runtime::UploadCompletionCapabilityOutcome::Committed => {
+                    ApplicationUploadCompletionOutcome::Committed
+                }
+                crate::runtime::UploadCompletionCapabilityOutcome::AlreadyConsumed => {
+                    ApplicationUploadCompletionOutcome::AlreadyCommitted
+                }
+            },
+        })
+    }
     fn create_remote_easyconnect_pairing(
         &self,
         request: RemoteEasyconnectCreatePairingRequest,

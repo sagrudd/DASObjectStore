@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.79.0 - 2026-07-15
+
+- Complete the application upload handoff with public capability-issuance and
+  completion routes backed by EasyConnect renewal authentication, registered
+  least-privilege application scope, CSPRNG single-use capabilities, durable
+  exact-issuance validation, daemon-owned provider credentials, Garage HEAD
+  verification, atomic catalogue publication, and idempotent retries.
+
 ## 0.78.0 - 2026-07-15
 
 - Add authoritative Garage remote-upload completion: independent provider

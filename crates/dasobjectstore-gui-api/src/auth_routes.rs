@@ -64,6 +64,12 @@ use axum::{
 pub use contracts::*;
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_daemon::api::{
+    ApplicationUploadCapabilityIssueRequest as DaemonApplicationUploadCapabilityIssueRequest,
+    ApplicationUploadCapabilityIssueResponse as DaemonApplicationUploadCapabilityIssueResponse,
+    ApplicationUploadCompletionRequest as DaemonApplicationUploadCompletionRequest,
+    ApplicationUploadCompletionResponse as DaemonApplicationUploadCompletionResponse,
+};
 use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
 use dasobjectstore_daemon::{
     ApplicationAccessTokenExchangeRequest as DaemonApplicationAccessTokenExchangeRequest,

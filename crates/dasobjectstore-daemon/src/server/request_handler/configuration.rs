@@ -5,6 +5,15 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    pub fn with_application_upload_paths(
+        mut self,
+        capability_path: impl Into<PathBuf>,
+        replay_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.application_upload_capability_path = capability_path.into();
+        self.application_capability_replay_path = replay_path.into();
+        self
+    }
     pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
         self.live_sqlite_path = live_sqlite_path.into();
         self

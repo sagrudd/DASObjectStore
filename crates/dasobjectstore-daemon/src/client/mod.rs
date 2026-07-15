@@ -13,7 +13,9 @@ use crate::api::{
     ApplicationAccessTokenExchangeResponse, ApplicationCredentialRevocationRequest,
     ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationRequest,
     ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationRequest,
-    ApplicationKeyRegistrationResponse, AssignLocalUserToLocalGroupRequest,
+    ApplicationKeyRegistrationResponse, ApplicationUploadCapabilityIssueRequest,
+    ApplicationUploadCapabilityIssueResponse, ApplicationUploadCompletionRequest,
+    ApplicationUploadCompletionResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
     CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
     CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
@@ -484,6 +486,26 @@ where
         }
     }
 
+    pub fn issue_application_upload_capability(
+        &self,
+        request: ApplicationUploadCapabilityIssueRequest,
+    ) -> Result<ApplicationUploadCapabilityIssueResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::IssueApplicationUploadCapability(request))? {
+            DaemonApiResponse::ApplicationUploadCapabilityIssued(response) => Ok(response),
+            response => Err(unexpected("application_upload_capability_issued", response)),
+        }
+    }
+
+    pub fn complete_application_upload(
+        &self,
+        request: ApplicationUploadCompletionRequest,
+    ) -> Result<ApplicationUploadCompletionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CompleteApplicationUpload(request))? {
+            DaemonApiResponse::ApplicationUploadCompleted(response) => Ok(response),
+            response => Err(unexpected("application_upload_completed", response)),
+        }
+    }
+
     pub fn register_application_key(
         &self,
         request: ApplicationKeyRegistrationRequest,
@@ -835,6 +857,10 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(_) => {
             "remote_easyconnect_submit_aws_cli_upload"
         }
+        DaemonApiResponse::ApplicationUploadCapabilityIssued(_) => {
+            "application_upload_capability_issued"
+        }
+        DaemonApiResponse::ApplicationUploadCompleted(_) => "application_upload_completed",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }

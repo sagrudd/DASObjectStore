@@ -76,7 +76,9 @@ where
         | DaemonApiRequest::RemoteEasyconnectRevokeSession(_)
         | DaemonApiRequest::RemoteEasyconnectRenewSession(_)
         | DaemonApiRequest::RemoteEasyconnectUploadAdmission(_)
-        | DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(_)) => {
+        | DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(_)
+        | DaemonApiRequest::IssueApplicationUploadCapability(_)
+        | DaemonApiRequest::CompleteApplicationUpload(_)) => {
             easyconnect::request(handler, easyconnect_request, actor)
         }
         request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

@@ -6,6 +6,7 @@ mod application_audit;
 mod application_capability_replay;
 mod application_identity_registry;
 mod application_key_registry;
+mod application_upload_capabilities;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
@@ -81,6 +82,11 @@ pub use application_key_registry::{
     default_application_key_registry_path, list_application_keys, read_application_key,
     upsert_application_key, APPLICATION_KEY_REGISTRY_ENV, APPLICATION_KEY_REGISTRY_FILE_NAME,
     APPLICATION_KEY_REGISTRY_SCHEMA,
+};
+pub use application_upload_capabilities::{
+    application_upload_capability_path, issue_application_upload_capability,
+    read_application_upload_capability, PendingApplicationUploadCapability,
+    APPLICATION_UPLOAD_CAPABILITY_FILE_NAME, APPLICATION_UPLOAD_CAPABILITY_SCHEMA,
 };
 pub use capacity_persistence::{
     load_capacity_ledger, save_capacity_ledger, CapacityLedgerPersistenceError,
@@ -216,7 +222,7 @@ pub use remote_upload::{
     RemoteUploadS3TransferRunError, RemoteUploadS3TransferWorker,
     RemoteUploadS3TransferWorkerReport, RemoteUploadS3TransferWorkerRequest,
 };
-pub use remote_upload::RemoteUploadProviderCompletion;
+pub use remote_upload::{GarageRemoteUploadCompletionAuthority, RemoteUploadProviderCompletion};
 pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
     GarageServiceController, GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary,

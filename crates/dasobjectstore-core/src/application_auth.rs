@@ -178,6 +178,49 @@ impl ApplicationIdentity {
         }
         self.scope.validate()
     }
+
+    /// Authorize one provider upload-completion capability against the
+    /// daemon-owned application identity.
+    pub fn authorize_upload_completion(
+        &self,
+        store_id: &StoreId,
+        object_key: &str,
+        object_size_bytes: u64,
+        now_unix_seconds: u64,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        self.validate()?;
+        if !self.active {
+            return Err(ApplicationAuthValidationError::InactiveIdentity);
+        }
+        if now_unix_seconds < self.issued_at_unix_seconds
+            || now_unix_seconds >= self.expires_at_unix_seconds
+        {
+            return Err(ApplicationAuthValidationError::LifetimeOutsideIdentity);
+        }
+        if !self
+            .scope
+            .store_ids
+            .iter()
+            .any(|allowed| allowed == store_id)
+            || !self
+                .scope
+                .operations
+                .contains(&ApplicationOperation::CompleteUpload)
+            || self
+                .scope
+                .max_object_bytes
+                .is_some_and(|limit| object_size_bytes > limit)
+            || (!self.scope.prefixes.is_empty()
+                && !self
+                    .scope
+                    .prefixes
+                    .iter()
+                    .any(|prefix| prefix_contains(prefix, object_key)))
+        {
+            return Err(ApplicationAuthValidationError::ScopeNotContained);
+        }
+        validate_logical_path("object_key", object_key)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -666,6 +709,23 @@ mod tests {
         assert!(!encoded.contains("private_key"));
         let decoded: AccessTokenClaims = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded, token);
+    }
+
+    #[test]
+    fn application_identity_authorizes_only_scoped_upload_completion() {
+        let identity = identity();
+        let store = StoreId::new("codex").expect("store");
+        identity
+            .authorize_upload_completion(&store, "analysis/one.fastq", 10_000, 2_000)
+            .expect("scoped completion");
+        assert_eq!(
+            identity.authorize_upload_completion(&store, "other/one.fastq", 1, 2_000),
+            Err(ApplicationAuthValidationError::ScopeNotContained)
+        );
+        assert_eq!(
+            identity.authorize_upload_completion(&store, "analysis/large.fastq", 10_001, 2_000),
+            Err(ApplicationAuthValidationError::ScopeNotContained)
+        );
     }
 
     #[test]

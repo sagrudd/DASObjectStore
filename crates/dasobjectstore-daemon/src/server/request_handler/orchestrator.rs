@@ -5,6 +5,10 @@ use crate::api::{
 };
 
 pub trait DaemonServiceOrchestrator {
+    fn application_upload_endpoint(&self) -> Option<String> {
+        None
+    }
+
     fn capacity_provider(
         &self,
     ) -> Option<std::sync::Arc<dyn crate::runtime::CapacityAdmissionProvider>> {
@@ -68,6 +72,35 @@ pub trait DaemonServiceOrchestrator {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation:
                 "remote easyconnect AWS CLI upload requires an object-service command runner"
+                    .to_string(),
+        })
+    }
+
+    fn verify_application_upload_completion(
+        &self,
+        _record: &crate::runtime::RemoteUploadCompletionRecord,
+        _completion: crate::runtime::RemoteUploadProviderCompletion,
+        _environment: Vec<(String, String)>,
+        _live_sqlite_path: PathBuf,
+        _committed_at_utc: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "application upload completion requires an object-service command runner"
+                .to_string(),
+        })
+    }
+
+    fn commit_application_upload_catalogue(
+        &self,
+        _record: &crate::runtime::RemoteUploadCompletionRecord,
+        _completion: crate::runtime::RemoteUploadProviderCompletion,
+        _environment: Vec<(String, String)>,
+        _live_sqlite_path: PathBuf,
+        _committed_at_utc: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation:
+                "application upload catalogue completion requires an object-service command runner"
                     .to_string(),
         })
     }

@@ -15,7 +15,7 @@ use dasobjectstore_core::protection::ProtectionPolicy;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, serde::Serialize)]
 pub struct RemoteUploadProviderCompletion {
     pub upload_id: String,
     pub provider: String,
@@ -63,7 +63,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
         }
     }
 
-    fn verify_provider(
+    pub fn verify_provider(
         &self,
         record: &RemoteUploadCompletionRecord,
     ) -> Result<(), RemoteUploadCompletionCommitError> {
@@ -114,7 +114,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
         Ok(())
     }
 
-    fn commit_catalogue(
+    pub fn commit_catalogue(
         &self,
         record: &RemoteUploadCompletionRecord,
     ) -> Result<(), RemoteUploadCompletionCommitError> {

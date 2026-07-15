@@ -1109,7 +1109,7 @@ hardware acceptance.
     a concurrent-upsert regression, so rotation and revocation cannot lose
     sibling descriptors.
     Do not issue long-lived broadly scoped bearer access tokens.
-  - [~] Issue one-time upload-completion capabilities bound to the paired
+  - [x] Issue one-time upload-completion capabilities bound to the paired
     session, upload ID, ObjectStore, object key, expected size/checksum,
     audience, expiry, and nonce; verify provider state before atomic catalogue
     commit and make retries idempotent.
@@ -1118,8 +1118,14 @@ hardware acceptance.
     returns an idempotent already-consumed outcome. The live EasyConnect path
     now independently verifies Garage identity, exact size, and SHA-256 object
     metadata with ``head-object`` before an idempotent atomic shared-SQLite
-    provider-placement commit and terminal job completion. Public capability
-    issuance and authenticated completion endpoint exposure remain.
+    provider-placement commit and terminal job completion. The public HTTPS
+    routes now issue CSPRNG-backed, 15-minute-or-less bearer capabilities only
+    after exact EasyConnect renewal-secret, writable store grant, configured
+    Garage endpoint, active application identity, namespace, operation, and
+    size authorization. The daemon persists the exact issuance
+    without credentials, rejects forged or expired capabilities, resolves its
+    managed provider credential only at completion, and exposes idempotent
+    committed/already-committed results through the Unix-socket client bridge.
   - [~] Add explicit expiry, revocation, rotation, replay protection, and
     redacted audit events for every credential class. Upload-completion
     capability consumption now has a daemon-owned, state-scoped atomic replay
