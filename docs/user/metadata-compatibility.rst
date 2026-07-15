@@ -33,7 +33,10 @@ verification result and time, source-retention state, and the administrator and
 time authorizing source retirement. The daemon must publish this record
 atomically and reconcile it after restart. It may not report source retirement
 complete until the durable provenance record says that retirement was
-authorized.
+authorized. Whole-store folder and drive promotion checkpoints ``copying``
+before payload work and ``retirement_pending`` only after every source
+catalogue record has been verified at the destination. Exact retries reuse
+matching records; changed manifest identities fail closed.
 
 Portable object catalogue companion
 ------------------------------------

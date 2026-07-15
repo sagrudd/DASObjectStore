@@ -18,6 +18,7 @@ mod folder_catalogue;
 mod folder_paths;
 mod ingest_files;
 mod local_admin;
+mod migration_provenance;
 mod migration_worker;
 mod object_browser;
 mod object_download;
@@ -123,7 +124,17 @@ pub use local_admin::{
     LocalGroupAdministrationRequest, LocalGroupAdministrationResponse, LocalGroupCommandPlanner,
     SystemLocalAdminCommandRunner, SystemLocalGroupCommandPlanner, LOCAL_ADMIN_CONFIRMATION_MARKER,
 };
-pub use migration_worker::{copy_folder_object, copy_folder_to_drive, FolderMigrationError};
+pub use migration_provenance::{
+    authorize_migration_source_retirement, complete_migration_source_retirement,
+    prepare_migration_provenance, read_migration_provenance, reconcile_migration_provenance,
+    record_migration_destination_verified, MigrationProvenanceError, MigrationProvenanceRecord,
+    MigrationVerificationState, MIGRATION_PROVENANCE_SCHEMA,
+};
+pub use migration_worker::{
+    copy_folder_object, copy_folder_object_with_provenance, copy_folder_to_drive,
+    copy_folder_to_drive_with_provenance, migrate_folder_store_to_drive_with_provenance,
+    migrate_folder_store_with_provenance, FolderMigrationError,
+};
 pub use object_browser::{
     query_object_browser_metadata, read_object_browser_metadata, ObjectBrowserMetadataEntry,
     ObjectBrowserMetadataReadError, ObjectBrowserQueryError,

@@ -1188,6 +1188,14 @@ hardware acceptance.
     logical usage (`used_bytes`) survive restart, while provider/appliance
     adapters remain. Guarded drive migration/reopen tests now prove the same
     authority handoff for the dedicated SSD profile.
+  - [x] Add the daemon-owned ``migration_provenance.v1`` sidecar and whole-store
+    folder-to-folder/folder-to-drive orchestration. It binds exact source and
+    destination manifests by SHA-256, checkpoints copying before payload work,
+    verifies every source catalogue record before retirement-pending state,
+    persists administrator retirement authorization, and reconciles the
+    checkpoint/sidecar crash window. Exact retries are idempotent and manifest
+    drift conflicts fail closed; manifest v1 and appliance metadata are not
+    rewritten.
   - [x] Add daemon-owned Unix-socket portable catalogue export/import contracts
     for bounded folder profiles. Export serializes validated IDs, versions,
     hashes, provenance, protection, and logical placements without paths or
@@ -1197,8 +1205,10 @@ hardware acceptance.
 - [~] Retain source placements until destination verification and explicit
   retirement confirmation; make interrupted promotion resumable.
   - [x] The core migration state machine and atomic checkpoints retain source
-    placement until explicit retirement; daemon copy-worker, catalogue, and
-    profile-adapter execution remain.
+    placement until explicit retirement. Daemon whole-store folder/drive
+    execution now persists copying and retirement-pending checkpoints plus a
+    restart-reconciled provenance sidecar; appliance source retirement and
+    physical placement deletion remain deployment-gated.
 
 ### Gate 6: Integration and market-readiness acceptance
 

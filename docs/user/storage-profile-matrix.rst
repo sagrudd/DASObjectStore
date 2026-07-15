@@ -46,8 +46,12 @@ operator-authorized catalogue registration.
 Promotion uses the resumable migration checkpoint state machine. Source
 placements remain retained through destination verification and are retired only
 after explicit confirmation. A failed or interrupted checkpoint preserves source
-retention. Actual copy workers, archive packaging, package installation, and
-appliance acceptance remain open campaign gates. The daemon now owns a
+retention. Folder-to-folder and folder-to-drive whole-store workers persist
+copying and retirement-pending checkpoints, bind both manifests into the
+versioned migration-provenance sidecar, and require every catalogue record to
+verify before retirement can be authorized. Archive packaging, package
+installation, appliance migration, and appliance acceptance remain open
+campaign gates. The daemon also owns a
 versioned Unix-socket portable catalogue export/import handoff for bounded
 folder profiles: export carries validated IDs, versions, hashes, provenance,
 protection, and logical placements without paths or credentials; import

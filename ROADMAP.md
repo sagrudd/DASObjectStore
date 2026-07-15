@@ -1243,15 +1243,19 @@ making exact retries idempotent while rejecting transaction/object conflicts.
 It intentionally leaves legacy appliance `objects`/`placements` untouched;
 daemon import/migration call-site wiring and physical placement reconciliation
 remain the next integration gate.
-Folder-to-folder and folder-to-drive migrations now commit the verified
-destination record through the shared authority before advancing migration
-state; destination reopen coverage proves catalogue-backed logical usage.
-Migration provenance will persist in a separate daemon-owned, schema-versioned
-sidecar rather than changing strict manifest v1 or legacy appliance metadata.
-The atomic, restart-safe record binds the migration transaction to source and
-destination store identities and manifest digests, destination verification,
-source retention, and the administrator/time authorizing retirement. Source
-retirement cannot be reported complete until that record is durable.
+Folder-to-folder and folder-to-drive migrations now commit verified destination
+records through the shared authority before advancing migration state;
+destination reopen coverage proves catalogue-backed logical usage. Whole-store
+orchestration checkpoints copying before payload work, resumes identical
+already-verified records, and verifies every source catalogue record before
+retirement becomes eligible. Migration provenance persists in a separate
+daemon-owned ``migration_provenance.v1`` sidecar rather than changing strict
+manifest v1 or legacy appliance metadata. The atomic, restart-safe record binds
+the transaction to source and destination store identities and manifest
+digests, destination verification, source retention, and the administrator/time
+authorizing retirement. Checkpoint/sidecar crash windows reconcile safely, and
+source retirement is not reported complete until the final provenance state is
+durable.
 The daemon now also exposes a versioned Unix-socket portable catalogue
 export/import handoff for bounded folder profiles. Export carries validated
 IDs, versions, hashes, provenance, protection, and logical placements without
