@@ -52,6 +52,10 @@ accounting. The control slice receives higher CPU/I/O weight and a 256 MiB
 These are host-level protection defaults around the daemon's transactional
 admission policy, not substitutes for per-device telemetry or capacity rules.
 Inspect the effective values with ``systemctl show`` on a cgroup-v2 Linux host.
+The DEB and RPM defaults, same-version reinstall, reboot recovery, final
+uninstall, and persistent-state retention are covered by native ARM64 Ubuntu
+24.04 and AlmaLinux 9 Lima acceptance. Physical DASServer and x86_64 evidence
+remain separate deployment gates.
 
 The packaged daemon also owns appliance telemetry collection. By default,
 ``/etc/dasobjectstore/daemon.json`` enables telemetry with a 30 second cadence
