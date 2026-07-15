@@ -4,7 +4,11 @@
 
 use super::DaemonServiceRuntimeError;
 use dasobjectstore_core::application_auth::ApplicationKeyDescriptor;
+use dasobjectstore_core::application_auth::{
+    ApplicationCredentialKind, ApplicationIdentity, ApplicationKeyAlgorithm,
+};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -69,6 +73,62 @@ pub fn read_application_key(
         .keys
         .into_iter()
         .find(|key| key.application_id == application_id && key.key_id == key_id))
+}
+
+/// Resolve a CA-verified client certificate to one active daemon-owned
+/// application identity. Multiple active certificate descriptors for the same
+/// identity permit controlled rotation overlap; ambiguous cross-identity
+/// fingerprints fail closed.
+pub fn resolve_mtls_application_identity(
+    identity_registry_path: impl AsRef<Path>,
+    key_registry_path: impl AsRef<Path>,
+    certificate_der: &[u8],
+    now_unix_seconds: u64,
+) -> Result<ApplicationIdentity, DaemonServiceRuntimeError> {
+    let fingerprint = format!(
+        "sha256:{}",
+        Sha256::digest(certificate_der)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    let matching = list_application_keys(key_registry_path)?
+        .into_iter()
+        .filter(|key| {
+            key.algorithm == ApplicationKeyAlgorithm::MtlsCertificate
+                && key
+                    .public_key_fingerprint
+                    .eq_ignore_ascii_case(&fingerprint)
+                && key.active
+                && key.issued_at_unix_seconds <= now_unix_seconds
+                && now_unix_seconds < key.expires_at_unix_seconds
+        })
+        .collect::<Vec<_>>();
+    let Some(first) = matching.first() else {
+        return Err(invalid_key(
+            "client certificate is not mapped to an active application key",
+        ));
+    };
+    if matching
+        .iter()
+        .any(|key| key.application_id != first.application_id)
+    {
+        return Err(invalid_key(
+            "client certificate fingerprint maps to multiple application identities",
+        ));
+    }
+    let identity = super::read_application_identity(identity_registry_path, &first.application_id)?
+        .ok_or_else(|| invalid_key("mapped application identity is not registered"))?;
+    if !identity.active
+        || identity.credential_kind != ApplicationCredentialKind::MtlsCertificate
+        || identity.issued_at_unix_seconds > now_unix_seconds
+        || now_unix_seconds >= identity.expires_at_unix_seconds
+    {
+        return Err(invalid_key(
+            "mapped application identity is inactive, expired, or not mTLS-enabled",
+        ));
+    }
+    Ok(identity)
 }
 
 pub fn upsert_application_key(
@@ -212,11 +272,18 @@ fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
 mod tests {
     use super::{
         deactivate_application_key, default_application_key_registry_path, list_application_keys,
-        read_application_key, upsert_application_key, APPLICATION_KEY_REGISTRY_SCHEMA,
+        read_application_key, resolve_mtls_application_identity, upsert_application_key,
+        APPLICATION_KEY_REGISTRY_SCHEMA,
     };
+    use crate::runtime::upsert_application_identity;
     use dasobjectstore_core::application_auth::{
-        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, APPLICATION_AUTH_SCHEMA_VERSION,
+        ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
+        ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
+        APPLICATION_AUTH_SCHEMA_VERSION,
     };
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::ingress::IngressOrigin;
+    use dasobjectstore_core::object_type::ObjectType;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -250,6 +317,46 @@ mod tests {
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
+        }
+    }
+
+    fn mtls_identity(application_id: &str) -> ApplicationIdentity {
+        ApplicationIdentity {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            owner: "operator".to_string(),
+            purpose: "unattended ingress".to_string(),
+            environment: ApplicationEnvironment::Production,
+            credential_kind: ApplicationCredentialKind::MtlsCertificate,
+            scope: ApplicationScope {
+                store_ids: vec![StoreId::new("codex").expect("store")],
+                prefixes: vec!["ingress".to_string()],
+                object_types: vec![ObjectType::Fastq],
+                operations: vec![ApplicationOperation::Write],
+                ingress_origin: IngressOrigin::Synoptikon,
+                max_object_bytes: Some(10_000),
+                max_total_bytes: Some(100_000),
+            },
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        }
+    }
+
+    fn mtls_key(
+        application_id: &str,
+        key_id: &str,
+        certificate: &[u8],
+    ) -> ApplicationKeyDescriptor {
+        use sha2::{Digest, Sha256};
+        let fingerprint = Sha256::digest(certificate)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        ApplicationKeyDescriptor {
+            algorithm: ApplicationKeyAlgorithm::MtlsCertificate,
+            public_key_fingerprint: format!("sha256:{fingerprint}"),
+            ..key(application_id, key_id)
         }
     }
 
@@ -327,5 +434,31 @@ mod tests {
             .map(|key| key.key_id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["left", "right"]);
+    }
+
+    #[test]
+    fn mtls_resolution_allows_rotation_overlap_and_fails_closed() {
+        let root = root("mtls-resolution");
+        let identities = root.join("identities.json");
+        let keys = root.join("keys.json");
+        let certificate = b"full-client-certificate-der";
+        upsert_application_identity(&identities, mtls_identity("synoptikon")).expect("identity");
+        upsert_application_key(&keys, mtls_key("synoptikon", "old", certificate))
+            .expect("old certificate");
+        upsert_application_key(&keys, mtls_key("synoptikon", "new", certificate))
+            .expect("rotation certificate");
+
+        let resolved = resolve_mtls_application_identity(&identities, &keys, certificate, 2_000)
+            .expect("same-identity overlap resolves");
+        assert_eq!(resolved.application_id, "synoptikon");
+
+        upsert_application_identity(&identities, mtls_identity("monas")).expect("second identity");
+        upsert_application_key(&keys, mtls_key("monas", "duplicate", certificate))
+            .expect("ambiguous certificate");
+        assert!(resolve_mtls_application_identity(&identities, &keys, certificate, 2_000).is_err());
+        assert!(resolve_mtls_application_identity(&identities, &keys, b"unknown", 2_000).is_err());
+        assert!(
+            resolve_mtls_application_identity(&identities, &keys, certificate, 100_000).is_err()
+        );
     }
 }

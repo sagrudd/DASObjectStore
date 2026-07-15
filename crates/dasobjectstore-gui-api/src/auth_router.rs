@@ -19,29 +19,62 @@ pub fn gui_api_router_for_host_mode(
     host_mode: GuiApiHostMode,
     auth_store: LocalAuthStore,
 ) -> Router {
+    gui_api_router_for_host_mode_with_application_auth(host_mode, auth_store, true)
+}
+
+pub fn gui_api_router_for_host_mode_with_application_auth(
+    host_mode: GuiApiHostMode,
+    auth_store: LocalAuthStore,
+    include_application_auth: bool,
+) -> Router {
     match host_mode {
-        GuiApiHostMode::Standalone => crate::routes::gui_api_router_without_redesign_dashboards()
-            .merge(standalone_dashboard_router(auth_store.clone()))
-            .merge(standalone_auth_router(auth_store.clone()))
-            .merge(standalone_easyconnect_router(auth_store.clone()))
-            .merge(standalone_users_groups_router(auth_store.clone()))
-            .merge(standalone_enclosure_admin_router(auth_store.clone()))
-            .merge(
-                crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()),
-            )
-            .merge(standalone_reporting_router(auth_store)),
+        GuiApiHostMode::Standalone => {
+            let router = crate::routes::gui_api_router_without_redesign_dashboards()
+                .merge(standalone_dashboard_router(auth_store.clone()))
+                .merge(standalone_session_auth_router(auth_store.clone()))
+                .merge(standalone_easyconnect_router(auth_store.clone()))
+                .merge(standalone_users_groups_router(auth_store.clone()))
+                .merge(standalone_enclosure_admin_router(auth_store.clone()))
+                .merge(
+                    crate::object_browser_routes::standalone_object_browser_router(
+                        auth_store.clone(),
+                    ),
+                )
+                .merge(standalone_reporting_router(auth_store));
+            if include_application_auth {
+                router.merge(standalone_application_auth_router())
+            } else {
+                router
+            }
+        }
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }
 
 pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {
-    standalone_auth_router_with_state(StandaloneAuthRouteState::system(auth_store))
+    standalone_session_auth_router(auth_store).merge(standalone_application_auth_router())
+}
+
+fn standalone_session_auth_router(auth_store: LocalAuthStore) -> Router {
+    standalone_session_auth_router_with_state(StandaloneAuthRouteState::system(auth_store))
 }
 
 pub(crate) fn standalone_auth_router_with_state(state: StandaloneAuthRouteState) -> Router {
+    standalone_session_auth_router_with_state(state).merge(standalone_application_auth_router())
+}
+
+fn standalone_session_auth_router_with_state(state: StandaloneAuthRouteState) -> Router {
     Router::new()
         .route("/api/register", post(register))
         .route("/api/login", post(login))
+        .route("/api/v1/remote/authenticate", post(remote_authenticate))
+        .route("/api/logout", post(logout))
+        .route("/api/session", post(session))
+        .with_state(state)
+}
+
+fn standalone_application_auth_router() -> Router {
+    Router::new()
         .route(
             APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
             post(exchange_application_access_token),
@@ -54,10 +87,6 @@ pub(crate) fn standalone_auth_router_with_state(state: StandaloneAuthRouteState)
             APPLICATION_UPLOAD_COMPLETION_ROUTE,
             post(complete_application_upload),
         )
-        .route("/api/v1/remote/authenticate", post(remote_authenticate))
-        .route("/api/logout", post(logout))
-        .route("/api/session", post(session))
-        .with_state(state)
 }
 
 pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {

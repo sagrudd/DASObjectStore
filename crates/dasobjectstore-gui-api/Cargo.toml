@@ -19,10 +19,13 @@ flate2.workspace = true
 libc.workspace = true
 prosopikon-core = { workspace = true, features = ["auth", "pam"] }
 rcgen.workspace = true
+rustls.workspace = true
+rustls-pemfile.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tar.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 uuid.workspace = true

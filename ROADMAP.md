@@ -136,9 +136,10 @@ ring-backed Ed25519/P-256 verifier bound to registered public-key material and
 fingerprints, and its daemon socket now performs proof-verified short-lived
 issuance without persisting bearer tokens. The standalone Web API now dispatches
 the canonical proof-bearing exchange route through the daemon and validates
-claim shape at Web and client response boundaries; mTLS transport verification
-remains a listener concern. Native daemon-enforced mTLS with a configured CA
-reference and daemon-owned certificate-fingerprint mapping is approved.
+claim shape at Web and client response boundaries. A dedicated native mTLS
+listener now requires a configured CA, maps certificate fingerprints through
+daemon-owned identity/key registries, and removes application routes from the
+primary bearer-capable listener when enabled.
 Missing, unknown, expired, or revoked certificates fail closed, with controlled
 overlap for rotation.
 The exchange and administrator identity/key/revocation DTO wrappers also reject
@@ -165,8 +166,8 @@ concurrent rotation or revocation requests cannot lose sibling descriptors.
 Restored identity and key registries normalize deterministic ordering before
 reads, preserving stable administrator and audit projections.
 Credential registration and revocation now append atomically persisted,
-reason-digest audit events without secrets or paths; mTLS transport verification
-remains listener work.
+reason-digest audit events without secrets or paths. Production CA provisioning
+and appliance listener acceptance remain deployment work.
 
 ### Current delivered baseline
 

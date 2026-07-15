@@ -6,9 +6,11 @@ use axum::routing::get;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
-    ensure_standalone_tls_assets, gui_api_router_for_host_mode, LocalAuthStore,
-    LocalAuthStoreError, StandaloneAuthenticationConfig, StandaloneServerConfig,
-    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
+    gui_api_router_for_host_mode_with_application_auth, LocalAuthStore, LocalAuthStoreError,
+    MtlsApplicationConnectInfo, MtlsListenerError, StandaloneAuthenticationConfig,
+    StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsAssetError,
+    StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -69,24 +71,67 @@ async fn start_server(
     }
     let web_root = config.product_root.join("web");
     let auth_root = auth_store.root().to_path_buf();
-    axum_server::bind_rustls(socket_addr, tls)
-        .serve(standalone_router(web_root, config.authentication, auth_root).into_make_service())
-        .await?;
+    let mtls_enabled = config.application_mtls.enabled;
+    let primary_router = standalone_router_with_application_auth(
+        web_root,
+        config.authentication.clone(),
+        auth_root,
+        !mtls_enabled,
+    );
+    if mtls_enabled {
+        let mtls_addr = config.application_mtls.socket_addr()?;
+        let listener = build_application_mtls_listener(&config).await?;
+        writeln!(
+            writer,
+            "dasobjectstore-server application mTLS listener on https://{}",
+            mtls_addr
+        )?;
+        let primary =
+            axum_server::bind_rustls(socket_addr, tls).serve(primary_router.into_make_service());
+        let applications = axum::serve(
+            listener,
+            application_mtls_router()
+                .into_make_service_with_connect_info::<MtlsApplicationConnectInfo>(),
+        );
+        tokio::try_join!(primary, applications)?;
+    } else {
+        axum_server::bind_rustls(socket_addr, tls)
+            .serve(primary_router.into_make_service())
+            .await?;
+    }
     Ok(())
 }
 
+#[cfg(test)]
 fn standalone_router(
     web_root: PathBuf,
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
+) -> Router {
+    standalone_router_with_application_auth(web_root, authentication, auth_root, true)
+}
+
+fn standalone_router_with_application_auth(
+    web_root: PathBuf,
+    authentication: StandaloneAuthenticationConfig,
+    auth_root: PathBuf,
+    include_application_auth: bool,
 ) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
     let asset_root = web_root;
     let host_mode = authentication.gui_api_host_mode();
     let auth_store = LocalAuthStore::new(auth_root);
-    let root_api = gui_api_router_for_host_mode(host_mode, auth_store.clone());
-    let product_api = gui_api_router_for_host_mode(host_mode, auth_store);
+    let root_api = gui_api_router_for_host_mode_with_application_auth(
+        host_mode,
+        auth_store.clone(),
+        include_application_auth,
+    );
+    let product_api = gui_api_router_for_host_mode_with_application_auth(
+        host_mode,
+        auth_store,
+        include_application_auth,
+    );
     Router::new()
         .route("/", get(root_redirect))
         .route(
@@ -214,6 +259,7 @@ pub(crate) enum ServerRunError {
     Config(StandaloneServerConfigError),
     Tls(StandaloneTlsAssetError),
     Auth(LocalAuthStoreError),
+    Mtls(MtlsListenerError),
     Io(io::Error),
     Json(serde_json::Error),
 }
@@ -224,6 +270,7 @@ impl Display for ServerRunError {
             Self::Config(err) => write!(formatter, "{err}"),
             Self::Tls(err) => write!(formatter, "{err}"),
             Self::Auth(err) => write!(formatter, "{err}"),
+            Self::Mtls(err) => write!(formatter, "application mTLS listener failed: {err}"),
             Self::Io(err) => write!(formatter, "server output failed: {err}"),
             Self::Json(err) => write!(formatter, "server JSON output failed: {err}"),
         }
@@ -247,6 +294,12 @@ impl From<StandaloneTlsAssetError> for ServerRunError {
 impl From<LocalAuthStoreError> for ServerRunError {
     fn from(err: LocalAuthStoreError) -> Self {
         Self::Auth(err)
+    }
+}
+
+impl From<MtlsListenerError> for ServerRunError {
+    fn from(err: MtlsListenerError) -> Self {
+        Self::Mtls(err)
     }
 }
 
@@ -281,6 +334,23 @@ fn write_pretty_config(
         "tls_private_key_path: {}",
         config.tls.private_key_path.display()
     )?;
+    writeln!(
+        writer,
+        "application_mtls_enabled: {}",
+        config.application_mtls.enabled
+    )?;
+    if config.application_mtls.enabled {
+        writeln!(
+            writer,
+            "application_mtls_bind: {}",
+            config.application_mtls.socket_addr()?
+        )?;
+        writeln!(
+            writer,
+            "application_mtls_client_ca_path: {}",
+            config.application_mtls.client_ca_path.display()
+        )?;
+    }
     if let Some(tls_report) = tls_report {
         writeln!(writer, "tls_generated: {}", tls_report.generated)?;
     }
@@ -305,7 +375,10 @@ fn write_json_config(
 
 #[cfg(test)]
 mod tests {
-    use super::{run, standalone_router, static_asset_read_permits, STATIC_ASSET_READ_PERMITS};
+    use super::{
+        run, standalone_router, standalone_router_with_application_auth, static_asset_read_permits,
+        STATIC_ASSET_READ_PERMITS,
+    };
     use crate::server_cli::ServerCli;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -421,6 +494,44 @@ mod tests {
             .expect("api response");
 
         assert_eq!(response.status(), StatusCode::OK);
+        cleanup(&auth_root);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn primary_listener_removes_application_auth_when_mtls_is_enabled() {
+        let root = temp_root("server-run-mtls-isolation");
+        let auth_root = temp_root("server-run-mtls-isolation-auth");
+        let request = || {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/application-auth/access-token")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request builds")
+        };
+
+        let isolated = standalone_router_with_application_auth(
+            root.clone(),
+            Default::default(),
+            auth_root.clone(),
+            false,
+        )
+        .oneshot(request())
+        .await
+        .expect("isolated response");
+        assert_eq!(isolated.status(), StatusCode::NOT_FOUND);
+
+        let compatible = standalone_router_with_application_auth(
+            root.clone(),
+            Default::default(),
+            auth_root.clone(),
+            true,
+        )
+        .oneshot(request())
+        .await
+        .expect("compatible response");
+        assert_ne!(compatible.status(), StatusCode::NOT_FOUND);
         cleanup(&auth_root);
         cleanup(&root);
     }

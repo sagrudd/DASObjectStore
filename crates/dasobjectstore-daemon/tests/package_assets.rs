@@ -47,6 +47,27 @@ fn package_daemon_config_matches_runtime_defaults() {
 }
 
 #[test]
+fn packaged_web_config_declares_disabled_production_mtls_listener() {
+    let config: serde_json::Value = serde_json::from_str(WEB_CONFIG).expect("Web config parses");
+    let mtls = &config["application_mtls"];
+    assert_eq!(mtls["enabled"], false);
+    assert_eq!(mtls["bind_address"], "0.0.0.0");
+    assert_eq!(mtls["https_port"], 8449);
+    assert_eq!(
+        mtls["client_ca_path"],
+        "/etc/dasobjectstore/application-client-ca.crt"
+    );
+    assert_eq!(
+        mtls["application_identity_registry_path"],
+        "/var/lib/dasobjectstore/application-identities.json"
+    );
+    assert_eq!(
+        mtls["application_key_registry_path"],
+        "/var/lib/dasobjectstore/application-keys.json"
+    );
+}
+
+#[test]
 fn local_docker_private_state_and_projects_are_storage_root_scoped() {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../deploy/local-docker/local.sh");

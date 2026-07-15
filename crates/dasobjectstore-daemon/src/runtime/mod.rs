@@ -80,8 +80,8 @@ pub use application_identity_registry::{
 pub use application_key_registry::{
     application_key_registry_path, deactivate_application_key,
     default_application_key_registry_path, list_application_keys, read_application_key,
-    upsert_application_key, APPLICATION_KEY_REGISTRY_ENV, APPLICATION_KEY_REGISTRY_FILE_NAME,
-    APPLICATION_KEY_REGISTRY_SCHEMA,
+    resolve_mtls_application_identity, upsert_application_key, APPLICATION_KEY_REGISTRY_ENV,
+    APPLICATION_KEY_REGISTRY_FILE_NAME, APPLICATION_KEY_REGISTRY_SCHEMA,
 };
 pub use application_upload_capabilities::{
     application_upload_capability_path, issue_application_upload_capability,

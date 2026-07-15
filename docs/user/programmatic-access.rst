@@ -18,12 +18,47 @@ by the daemon and are never accepted as a substitute for the signed exchange
 proof. Long-lived identity metadata is therefore distinct from short-lived
 storage authority.
 
-The standalone Web API also exposes the canonical proof-bearing route
+The standalone Web API exposes the canonical proof-bearing route
 ``/api/v1/application-auth/access-token`` and forwards it to the same daemon
-authority. The deployment listener must still provide the configured TLS/mTLS
-boundary before exposing this route beyond a trusted local integration. Do not
+authority. When application mTLS is enabled, this route and the upload
+capability/completion routes are removed from the ordinary HTTPS listener and
+served only by the dedicated client-certificate listener. Do not
 place private keys, proofs, or access-token claims in manifests, logs, shell
 history, or support tickets.
+
+Production application mTLS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable the dedicated listener in ``/etc/dasobjectstore/config.json`` only
+after installing a production client CA and registering each application's
+certificate fingerprint with the daemon:
+
+.. code-block:: json
+
+   {
+     "application_mtls": {
+       "enabled": true,
+       "bind_address": "0.0.0.0",
+       "https_port": 8449,
+       "client_ca_path": "/etc/dasobjectstore/application-client-ca.crt",
+       "application_identity_registry_path": "/var/lib/dasobjectstore/application-identities.json",
+       "application_key_registry_path": "/var/lib/dasobjectstore/application-keys.json"
+     }
+   }
+
+The listener requires a CA-valid client certificate during the TLS handshake,
+then maps the SHA-256 fingerprint of the complete DER certificate to one
+active ``mtls_certificate`` application key and identity. Unknown, inactive,
+not-yet-valid, expired, or cross-identity ambiguous mappings fail closed.
+Rotation may overlap two active certificate mappings for the same application;
+deactivate the old key after clients have moved. Enabling this listener never
+leaves a bearer-only copy of these application routes on port 8448.
+
+The packaged configuration keeps this listener disabled. Supply CA and client
+certificates through the deployment's secret/certificate authority; development
+self-signing is not a production or package facility. Restart
+``dasobjectstore-server`` after changing listener configuration and confirm
+both the ordinary port 8448 and application mTLS port 8449 are listening.
 
 For local integrations, the CLI can submit a path-free request document to the
 same daemon boundary. The request document contains public identity metadata or
@@ -52,7 +87,7 @@ is configured for the deployment's TLS/mTLS policy:
 
    curl --cert ./client.crt --key ./client.key \
      --data @./access-token-exchange.json \
-     https://localhost:8443/api/v1/application-auth/access-token
+     https://localhost:8449/api/v1/application-auth/access-token
 
 The daemon verifies identity/key membership, proof, scope, and lifetime before
 returning the typed access-token claims. The CLI does not sign requests, store

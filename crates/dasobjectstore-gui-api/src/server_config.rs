@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_STANDALONE_PUBLIC_BASE_URL: &str = "https://127.0.0.1:8448";
 pub const DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH: &str = "tls/server.crt";
 pub const DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH: &str = "tls/server.key";
+pub const DEFAULT_MTLS_HTTPS_PORT: u16 = 8449;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneServerConfig {
@@ -20,6 +21,8 @@ pub struct StandaloneServerConfig {
     #[serde(default)]
     pub authentication: StandaloneAuthenticationConfig,
     pub tls: StandaloneTlsConfig,
+    #[serde(default)]
+    pub application_mtls: StandaloneMutualTlsConfig,
 }
 
 impl StandaloneServerConfig {
@@ -38,6 +41,7 @@ impl StandaloneServerConfig {
             product_root,
             authentication: StandaloneAuthenticationConfig::default(),
             tls,
+            application_mtls: StandaloneMutualTlsConfig::default(),
         }
     }
 
@@ -59,11 +63,78 @@ impl StandaloneServerConfig {
         validate_absolute_path("product_root", &self.product_root)?;
         self.tls.validate()?;
         self.authentication.validate()?;
+        self.application_mtls.validate(self.https_port)?;
         Ok(())
     }
 
     pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
         self.authentication.gui_api_host_mode()
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneMutualTlsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_mtls_bind_address")]
+    pub bind_address: String,
+    #[serde(default = "default_mtls_https_port")]
+    pub https_port: u16,
+    #[serde(default)]
+    pub client_ca_path: PathBuf,
+    #[serde(default = "default_application_identity_registry_path")]
+    pub application_identity_registry_path: PathBuf,
+    #[serde(default = "default_application_key_registry_path")]
+    pub application_key_registry_path: PathBuf,
+}
+
+impl StandaloneMutualTlsConfig {
+    pub fn validate(&self, primary_https_port: u16) -> Result<(), StandaloneServerConfigError> {
+        if !self.enabled {
+            return Ok(());
+        }
+        self.bind_address.parse::<IpAddr>().map_err(|_| {
+            StandaloneServerConfigError::InvalidMutualTlsBindAddress {
+                bind_address: self.bind_address.clone(),
+            }
+        })?;
+        validate_https_port(self.https_port)?;
+        if self.https_port == primary_https_port {
+            return Err(StandaloneServerConfigError::DuplicateListenerPort {
+                https_port: self.https_port,
+            });
+        }
+        validate_absolute_path("application_mtls.client_ca_path", &self.client_ca_path)?;
+        validate_absolute_path(
+            "application_mtls.application_identity_registry_path",
+            &self.application_identity_registry_path,
+        )?;
+        validate_absolute_path(
+            "application_mtls.application_key_registry_path",
+            &self.application_key_registry_path,
+        )
+    }
+
+    pub fn socket_addr(&self) -> Result<SocketAddr, StandaloneServerConfigError> {
+        let address = self.bind_address.parse::<IpAddr>().map_err(|_| {
+            StandaloneServerConfigError::InvalidMutualTlsBindAddress {
+                bind_address: self.bind_address.clone(),
+            }
+        })?;
+        Ok(SocketAddr::new(address, self.https_port))
+    }
+}
+
+impl Default for StandaloneMutualTlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind_address: default_mtls_bind_address(),
+            https_port: default_mtls_https_port(),
+            client_ca_path: PathBuf::new(),
+            application_identity_registry_path: default_application_identity_registry_path(),
+            application_key_registry_path: default_application_key_registry_path(),
+        }
     }
 }
 
@@ -155,6 +226,8 @@ pub enum StandaloneServerConfigError {
     RelativePath { field: &'static str, path: PathBuf },
     DuplicateTlsAssetPath,
     InvalidSessionTtlSeconds { session_ttl_seconds: i64 },
+    InvalidMutualTlsBindAddress { bind_address: String },
+    DuplicateListenerPort { https_port: u16 },
 }
 
 impl Display for StandaloneServerConfigError {
@@ -195,12 +268,38 @@ impl Display for StandaloneServerConfigError {
                     "authentication session_ttl_seconds must be positive: {session_ttl_seconds}"
                 )
             }
+            Self::InvalidMutualTlsBindAddress { bind_address } => write!(
+                formatter,
+                "invalid application mTLS bind address: {bind_address}"
+            ),
+            Self::DuplicateListenerPort { https_port } => write!(
+                formatter,
+                "application mTLS port must differ from primary HTTPS port: {https_port}"
+            ),
         }
     }
 }
 
 fn default_session_ttl_seconds() -> i64 {
     60 * 60
+}
+
+fn default_mtls_bind_address() -> String {
+    DEFAULT_STANDALONE_BIND_ADDRESS.to_string()
+}
+
+fn default_mtls_https_port() -> u16 {
+    DEFAULT_MTLS_HTTPS_PORT
+}
+
+fn default_application_identity_registry_path() -> PathBuf {
+    PathBuf::from(dasobjectstore_daemon::runtime::DEFAULT_DAEMON_STATE_DIR)
+        .join(dasobjectstore_daemon::runtime::APPLICATION_IDENTITY_REGISTRY_FILE_NAME)
+}
+
+fn default_application_key_registry_path() -> PathBuf {
+    PathBuf::from(dasobjectstore_daemon::runtime::DEFAULT_DAEMON_STATE_DIR)
+        .join(dasobjectstore_daemon::runtime::APPLICATION_KEY_REGISTRY_FILE_NAME)
 }
 
 impl std::error::Error for StandaloneServerConfigError {}
@@ -332,6 +431,8 @@ mod tests {
         );
         assert_eq!(encoded["authentication"]["authority"], "local_user");
         assert_eq!(encoded["authentication"]["session_ttl_seconds"], 3600);
+        assert_eq!(encoded["application_mtls"]["enabled"], false);
+        assert_eq!(encoded["application_mtls"]["https_port"], 8449);
     }
 
     #[test]
@@ -380,6 +481,40 @@ mod tests {
             config.validate().expect_err("ttl rejected"),
             StandaloneServerConfigError::InvalidSessionTtlSeconds {
                 session_ttl_seconds: 0
+            }
+        );
+    }
+
+    #[test]
+    fn validates_enabled_application_mtls_listener() {
+        let mut config = StandaloneServerConfig::default();
+        config.application_mtls.enabled = true;
+        config.application_mtls.client_ca_path = PathBuf::from("/etc/dasobjectstore/client-ca.crt");
+        config.validate().expect("mTLS config is valid");
+        assert_eq!(
+            config.application_mtls.socket_addr().expect("mTLS address"),
+            "127.0.0.1:8449".parse().expect("address")
+        );
+    }
+
+    #[test]
+    fn enabled_application_mtls_fails_closed_on_unsafe_listener_config() {
+        let mut config = StandaloneServerConfig::default();
+        config.application_mtls.enabled = true;
+        config.application_mtls.https_port = config.https_port;
+        config.application_mtls.client_ca_path = PathBuf::from("/etc/dasobjectstore/client-ca.crt");
+        assert_eq!(
+            config.validate().expect_err("duplicate port rejected"),
+            StandaloneServerConfigError::DuplicateListenerPort { https_port: 8448 }
+        );
+
+        config.application_mtls.https_port = 8449;
+        config.application_mtls.client_ca_path = PathBuf::from("client-ca.crt");
+        assert_eq!(
+            config.validate().expect_err("relative CA rejected"),
+            StandaloneServerConfigError::RelativePath {
+                field: "application_mtls.client_ca_path",
+                path: PathBuf::from("client-ca.crt")
             }
         );
     }

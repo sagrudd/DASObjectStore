@@ -62,11 +62,11 @@ evidence and detailed source tasks.
   appliance performance acceptance; those remain scheduled for a quiescent
   DASServer window using a bounded synthetic ``CODEX`` store; that later run
   also supplies x86_64 parity.
-- The public paired-session HTTPS completion authentication contract is now
-  approved as a scoped-capability design. Implementation remains gated on the
-  daemon-owned service-principal, short-lived access-token, and one-time
-  completion-capability work below; renewal tokens are never storage-operation
-  bearer credentials.
+- The public paired-session HTTPS completion authentication contract is
+  delivered as daemon-owned application identities, short-lived access-token
+  exchange, and one-time completion capabilities. Production mTLS deployment
+  acceptance remains blocked on the unavailable appliance and CA material;
+  renewal tokens are never storage-operation bearer credentials.
 - Development self-signing is permitted only for local workspace/local-Docker
   generated-data tests. It is explicitly rejected by appliance/production
   listeners and must not appear in RPM/DEB contents, including keys, issuers,
@@ -223,9 +223,9 @@ completion.
   renewal-only sessions, short-lived scoped access, and one-time upload
   capabilities. Internal admission, transfer, cancellation, and progress
   modules are delivered; service-principal/token-exchange implementation,
-  concrete Garage provider verification and shared-SQLite catalogue completion
-  are now wired into the EasyConnect AWS CLI submission path; public one-time
-  capability issuance/endpoint exposure remain open.
+  concrete Garage provider verification and shared-SQLite catalogue completion,
+  public one-time capability issuance, completion dispatch, and the dedicated
+  fail-closed application mTLS listener are wired. Appliance soak remains open.
   **Approved 2026-07-15:** implement a provider-neutral completion-verification
   contract with Garage backed by the existing cancellable AWS CLI command
   runner. The daemon must independently verify provider identity, size, and
@@ -1101,10 +1101,10 @@ hardware acceptance.
     to registered public-key material and fingerprints, with positive proof
     regressions for both algorithms. The daemon socket now
     performs proof-verified issuance without persisting bearer tokens; private
-    key custody and mTLS transport verification remain; the standalone Web API
-    now dispatches the canonical proof-bearing exchange route through the
-    daemon, validates claim shape at both Web and client response boundaries,
-    and rejects malformed claims before consumers can use them. Key-registry
+    keys remain in consumer custody. The standalone Web API dispatches the
+    canonical proof-bearing exchange route through the daemon, validates claim
+    shape at both Web and client response boundaries, and now provides the
+    dedicated CA-verified mTLS listener. Key-registry
     read-modify-write operations are serialized in the daemon and covered by
     a concurrent-upsert regression, so rotation and revocation cannot lose
     sibling descriptors.
@@ -1136,13 +1136,14 @@ hardware acceptance.
     now published and wired through authenticated administrator dispatch to
     atomic identity/key deactivation; redacted, reason-digest audit events are
     now persisted atomically for registration, rotation, revocation, and
-    access-token issuance, and completion paths, while mTLS listener binding
-    remains. **Approved 2026-07-15:** native daemon-enforced mTLS uses an
+    access-token issuance, completion paths, and the native application mTLS
+    listener. **Approved 2026-07-15:** native daemon-enforced mTLS uses an
     explicitly configured CA trust reference plus daemon-owned certificate
     fingerprint-to-application mapping. Missing, unknown, expired, or revoked
     client certificates fail closed; controlled rotation may overlap active
     mappings; a listener requiring mTLS never falls back to bearer-token-only
-    authentication. Listener implementation and deployment acceptance remain.
+    authentication. Listener implementation is complete; production CA and
+    appliance deployment acceptance remain externally blocked.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
@@ -1157,8 +1158,9 @@ hardware acceptance.
     private-key PEM material while allowing the public auth contract.
     The daemon socket exchange now verifies registered key proofs; the
     canonical versioned HTTPS exchange route is published and dispatched by
-    the standalone Web API. Listener authentication and mTLS verification
-    remain open.
+    the standalone Web API. A dedicated CA-verified application listener now
+    binds certificate fingerprints to daemon identities and removes these
+    routes from the bearer-capable primary listener when enabled.
   - [x] Publish versioned, non-secret JSON contract fixtures for identity,
     public-key descriptor, exchange request, scoped access token, renewal-only
     token, and upload-completion capability adapters. The exchange fixture

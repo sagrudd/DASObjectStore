@@ -10,5 +10,13 @@
   "tls": {
     "certificate_path": "/opt/dasobjectstore/tls/server.crt",
     "private_key_path": "/opt/dasobjectstore/tls/server.key"
+  },
+  "application_mtls": {
+    "enabled": false,
+    "bind_address": "0.0.0.0",
+    "https_port": 8449,
+    "client_ca_path": "/etc/dasobjectstore/application-client-ca.crt",
+    "application_identity_registry_path": "/var/lib/dasobjectstore/application-identities.json",
+    "application_key_registry_path": "/var/lib/dasobjectstore/application-keys.json"
   }
 }

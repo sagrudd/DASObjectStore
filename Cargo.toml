@@ -15,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.79.0"
+version = "0.80.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -51,6 +51,9 @@ ratatui = "0.30.2"
 regex = "1.12.2"
 libc = "0.2"
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rustls = "0.23.42"
+rustls-pemfile = "2.2.0"
+tokio-rustls = "0.26.4"
 rpassword = "7.4.0"
 ring = "0.17.14"
 rusqlite = { version = "0.37", features = ["bundled"] }

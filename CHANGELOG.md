@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.80.0 - 2026-07-15
+
+- Add a dedicated production application mTLS listener with configured client
+  CA verification and daemon-owned certificate-fingerprint mapping.
+- Fail closed for missing, unknown, inactive, expired, or ambiguous client
+  identities while allowing controlled same-identity certificate rotation.
+- Remove application token and upload handoff routes from the ordinary HTTPS
+  listener whenever mTLS is enabled, preventing bearer-only fallback.
+
 ## 0.79.0 - 2026-07-15
 
 - Complete the application upload handoff with public capability-issuance and

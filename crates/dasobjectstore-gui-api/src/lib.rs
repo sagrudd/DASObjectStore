@@ -13,6 +13,7 @@ mod endpoints_aggregator;
 mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
+mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
 mod remote_upload_aggregator;
@@ -44,11 +45,12 @@ pub use auth_guard::{
     STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
-    gui_api_router_for_host_mode, standalone_auth_router, standalone_gui_api_router,
-    AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest, GuiApiHostMode,
-    LoginRequest, LogoutRequest, RegisterRequest, SessionCheckRequest,
-    StandaloneEasyconnectAuthContextResponse, StandaloneLocalGroupAdminAcceptedResponse,
-    StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
+    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    standalone_auth_router, standalone_gui_api_router, AssignLocalUserToGroupRequest,
+    AuthRouteError, CreateLocalGroupRequest, GuiApiHostMode, LoginRequest, LogoutRequest,
+    RegisterRequest, SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,
+    StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
+    StandaloneLocalGroupOperation,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
@@ -63,13 +65,18 @@ pub use endpoints::{
     EndpointInventoryView, EndpointKindView, EndpointValidationStateView, EndpointValidationView,
     EndpointWarningSeverityView, EndpointWarningView, ENDPOINT_INVENTORY_SCHEMA_VERSION,
 };
+pub use mtls_listener::{
+    application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,
+    MtlsApplicationListener, MtlsListenerError,
+};
 pub use remote_upload_aggregator::{
     RemoteUploadActorView, RemoteUploadObjectStoreView, RemoteUploadWorkspaceView,
 };
 pub use routes::gui_api_router;
 pub use server_config::{
-    StandaloneAuthenticationAuthority, StandaloneAuthenticationConfig, StandaloneServerConfig,
-    StandaloneServerConfigError, StandaloneTlsConfig, DEFAULT_STANDALONE_PUBLIC_BASE_URL,
+    StandaloneAuthenticationAuthority, StandaloneAuthenticationConfig, StandaloneMutualTlsConfig,
+    StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsConfig,
+    DEFAULT_MTLS_HTTPS_PORT, DEFAULT_STANDALONE_PUBLIC_BASE_URL,
     DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH, DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH,
 };
 pub use tls_assets::{
