@@ -254,11 +254,13 @@ covered by offline fixtures; physical device mapping and appliance acceptance
 remain deployment-gated. The folder backend and storage request handler have been split below
 the production size budget; the module-size guard now passes with no
 exceptions. Hardware-only acceptance is deferred while travelling without DAS
-access. A disposable Linux VM is approved as an interim surrogate for package,
-systemd/cgroup, reboot, and synthetic loop-device evidence, but it cannot close
+access. Lima with native ARM64 Ubuntu and AlmaLinux guests is approved as the
+interim surrogate for DEB/RPM package, systemd/cgroup, reboot, and synthetic
+loop-device evidence, but it cannot close
 physical enclosure, SMART/NVMe, multi-HDD/Garage durability, replacement, or
 performance acceptance. Those gates resume during a quiescent DASServer window
-after the operator confirms access is available.
+after the operator confirms access is available; that later run also supplies
+x86_64 parity.
 
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are

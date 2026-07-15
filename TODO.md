@@ -53,12 +53,14 @@ evidence and detailed source tasks.
 
 - DASServer/Garage hardware, appliance credentials, and deployment access are
   unavailable while travelling. Do not retry DASServer connectivity until the
-  operator confirms they are home. In the interim, a disposable Linux VM is
-  approved for package install/upgrade/uninstall, systemd/cgroup, reboot, and
-  synthetic loop-device coverage. VM evidence must not close physical
+  operator confirms they are home. In the interim, Lima with native ARM64
+  Ubuntu and AlmaLinux guests is approved for DEB/RPM
+  install/upgrade/uninstall, systemd/cgroup, reboot, and synthetic loop-device
+  coverage. VM evidence must not close physical
   enclosure, SMART/NVMe, device replacement, multi-HDD/Garage durability, or
   appliance performance acceptance; those remain scheduled for a quiescent
-  DASServer window using a bounded synthetic ``CODEX`` store.
+  DASServer window using a bounded synthetic ``CODEX`` store; that later run
+  also supplies x86_64 parity.
 - The public paired-session HTTPS completion authentication contract is now
   approved as a scoped-capability design. Implementation remains gated on the
   daemon-owned service-principal, short-lived access-token, and one-time
