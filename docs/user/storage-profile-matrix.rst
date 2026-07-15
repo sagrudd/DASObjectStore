@@ -15,7 +15,7 @@ or deployment credentials.
      - ``system``
      - ``integrated``
    * - ``folder``
-     - Preview: bounded macOS backend, XDG path contract, validated launchd plan, local tests
+     - macOS accepted: bounded backend plus transactional per-user launchd install/status/uninstall and rollback acceptance
      - ARM64 accepted: DEB/RPM provision, idempotent reuse, explicit adoption, reboot recovery, and uninstall retention
      - Preview: backend contract exists; Mnemosyne/Synoptikon provisioning adapter pending
    * - ``drive``
@@ -33,6 +33,12 @@ evidence while the DASServer is unavailable. It is not a substitute for
 physical enclosure identity, SMART/NVMe, real multi-HDD/Garage durability,
 replacement, performance acceptance, or x86_64 parity. Those gates require a
 quiescent DASServer validation window.
+
+The macOS per-user service acceptance is isolated from the live service
+manager. ``deploy/macos/test-user-service.sh`` substitutes launchctl beneath
+``$HOME/.dasobjectstore-codex-validation`` and proves transactional replacement
+and state-preserving uninstall. The production adapter consumes the same
+validated render-only plan with ``deploy/macos/user-service.sh``.
 
 Run the surrogate matrix from the repository root with
 ``deploy/lima/package-acceptance.sh all``. It creates only the named

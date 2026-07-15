@@ -115,7 +115,9 @@ Per-user host mode derives state beneath ``XDG_STATE_HOME`` or
 run without a runtime directory, but socket resolution fails explicitly rather
 than falling back to shared ``/tmp``. System and integrated modes retain the
 packaged daemon state/runtime roots. Directory ownership, permissions, and user
-service installation remain deployment-layer responsibilities. The daemon
+service installation remain deployment-layer responsibilities. The supplied
+macOS adapter enforces those responsibilities in the invoking user's launchd
+domain. The daemon
 runtime exposes a render-only ``launchd`` user-service plan for macOS that
 validates absolute executable/config/state paths, restricts the service label,
 and XML-escapes plist values. A deployment adapter may write that plist beneath
@@ -391,8 +393,14 @@ XDG inputs; otherwise ``HOME``, ``XDG_STATE_HOME``, and ``XDG_RUNTIME_DIR`` are
 read from the environment. Add ``--json`` for an adapter-friendly envelope.
 The command only prints the plist and derived state directory: it does not
 write a LaunchAgents file, invoke ``launchctl``, create directories, or start
-``dasobjectstored``. Deployment code remains responsible for creating the
-directory, installation, and lifecycle operations. If the derived state directory already
+``dasobjectstored``. Install that plan with
+``deploy/macos/user-service.sh install --executable /absolute/path/to/dasobjectstored
+--config /absolute/path/to/daemon.json``. The adapter refuses root/sudo,
+relative paths, symlinked deployment targets, and paths not owned by the
+invoking user. It atomically restores a prior loaded definition if launchd
+rejects an update. ``status`` inspects only ``gui/<uid>`` and ``uninstall``
+removes only the plist while retaining configuration, logs, and persistent
+state. If the derived state directory already
 exists, it must be owned by the invoking user; otherwise the render-only plan
 fails closed without changing the directory.
 

@@ -24,6 +24,7 @@ const PACKAGE_AUTH_GUARD: &str =
     include_str!("../../../packaging/validate-package-auth-content.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
+const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
@@ -76,6 +77,16 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
         assert_ne!(first_value, second_value, "{field} must be root-scoped");
     }
     assert_contains(LOCAL_DOCKER, "private config is bound to a different storage root");
+}
+
+#[test]
+fn macos_user_service_adapter_preserves_the_per_user_safety_boundary() {
+    assert_contains(MACOS_USER_SERVICE, "must not run as root or through sudo");
+    assert_contains(MACOS_USER_SERVICE, "refusing symlinked service plist");
+    assert_contains(MACOS_USER_SERVICE, "rollback_install");
+    assert_contains(MACOS_USER_SERVICE, "store user-service-plan");
+    assert_contains(MACOS_USER_SERVICE, "retained state at");
+    assert_contains(MACOS_USER_SERVICE, "gui/$UID_NUMBER");
 }
 
 #[test]

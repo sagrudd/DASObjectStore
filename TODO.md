@@ -37,9 +37,9 @@ evidence and detailed source tasks.
   seams are delivered; appliance placement and shared catalogue wiring remain.
 - `[~]` Gate 2 — logical quota ledger, reservations, capacity APIs, and profile
   admission slices are delivered; complete daemon/S3/multipart wiring remains.
-- `[~]` Gate 3 — bounded folder profile, adoption, inspection, browser,
-  package/system-service acceptance, and root-scoped container evidence are
-  delivered; per-user launchd installation remains.
+- `[x]` Gate 3 — bounded folder profile, adoption, inspection, browser,
+  package/system-service acceptance, root-scoped container evidence, and
+  transactional per-user launchd installation are delivered.
 - `[~]` Gate 4 — guarded SSD drive backend and provider-neutral operations are
   delivered; live mount identity, SMART/NVMe health, and replacement tests
   require hardware.
@@ -776,7 +776,7 @@ transaction wiring; those boundaries stay explicit in the child items below.
     daemon, authenticated Web route, and read-only CLI as ``store
     profile-verify``; success requires payload size/checksum agreement and
     returns no backend location.
-- [~] Add per-user host mode with XDG state/runtime paths and a user service;
+- [x] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
   - [x] Add pure per-user/system state and runtime path derivation. Per-user
@@ -794,8 +794,13 @@ transaction wiring; those boundaries stay explicit in the child items below.
     the current user; missing state remains allowed for first-run render-only
     planning, and no service-manager side effects are introduced.
   - [x] Prove per-user and system host-mode state/runtime namespaces remain
-    distinct in a macOS path-coexistence regression; service-manager
-    installation and ownership checks remain deployment work.
+    distinct in a macOS path-coexistence regression.
+  - [x] Add a deployment-layer macOS launchd adapter with invoking-user-only
+    install/status/uninstall, owned non-symlink path checks, atomic plist
+    replacement and rollback, and state-preserving removal. An isolated fake
+    launchctl acceptance covers install, status, rejected-update rollback,
+    reinstall, and uninstall under the dedicated generated-data root without
+    registering a real service.
 - [x] Validate package-created, programmatically created, adopted, container-
   mounted, restart/recovery, quota, and hostile-filesystem fixtures.
   - [x] Add a local fixture-matrix integration test covering programmatic

@@ -272,6 +272,14 @@ sequential harness packages committed source with a strictly validated prebuilt
 Web bundle, reboots each guest, checks resource properties and retained state,
 and copies evidence outside the repository before deleting successful VMs.
 
+The macOS per-user deployment now consumes the daemon's render-only launchd
+contract through a transactional adapter. It refuses root/sudo and foreign or
+symlinked deployment paths, scopes lifecycle calls to ``gui/<uid>``, restores
+the prior loaded service when an update is rejected, and retains configuration,
+logs, and persistent state on uninstall. Isolated macOS acceptance substitutes
+launchctl under the dedicated generated-data root, so the deployment lifecycle
+is exercised without mutating the operator's live service domain.
+
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are
 read-only drift until an explicit confirmed reconcile/adopt, and no profile
