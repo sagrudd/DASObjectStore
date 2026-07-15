@@ -6,6 +6,24 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.77.0 - 2026-07-15
+
+- Complete the bounded provider-stream daemon data plane for authenticated
+  PUT, GET/range, DELETE, and multipart operations with transactional quota,
+  durable finalization, catalogue authority, backpressure, and cancellation.
+- Add schema-versioned portable catalogue handoff, shared-SQLite transaction
+  bridging, restart reconciliation, and whole-store migration provenance with
+  explicit source-retirement authorization.
+- Add native ARM64 Ubuntu and AlmaLinux package acceptance for install,
+  reinstall, reboot, uninstall, systemd resource isolation, and bounded-folder
+  provision/adopt/recovery using disposable Lima guests.
+- Add a transactional macOS per-user launchd deployment adapter with
+  ownership/symlink defenses, rejected-update rollback, and state-preserving
+  uninstall.
+- Add root-scoped Docker/Garage S3 acceptance with running-image revision
+  verification and same-commit local deployment evidence reporting, while
+  retaining explicit blockers for physical DAS and x86_64 acceptance.
+
 ## 0.76.27 - 2026-07-13
 
 - Add the canonical runtime-to-transport projection for bounded profile-S3

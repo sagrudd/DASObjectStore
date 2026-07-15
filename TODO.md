@@ -1251,6 +1251,14 @@ appliance and representative product workflows before release readiness.
   workflows; never use customer/project data in automated acceptance.
 - [~] Require real-world validation readiness, operator runbooks, release notes,
   and no unexplained critical TODO blockers before declaring a profile ready.
+  - [x] Add a same-commit deployment evidence verifier and operator runbook for
+    macOS per-user launchd, ARM64 Ubuntu/AlmaLinux packages, and root-scoped
+    Docker/Garage S3. The generated report keeps physical DAS and x86_64 gates
+    explicitly blocked rather than promoting surrogate results.
+  - [~] Complete the physical DAS acceptance report and final release notes.
+    **Blocker:** the DASServer and x86_64 host are unavailable. Acceptance
+    condition: same-release hardware evidence passes during the confirmed
+    quiescent home-host window, after which release readiness can be declared.
 
 ## Architecture Remediation Backlog
 

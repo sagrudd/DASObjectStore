@@ -26,6 +26,8 @@ const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const LOCAL_DOCKERFILE: &str = include_str!("../../../deploy/local-docker/Dockerfile");
 const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
+const RELEASE_READINESS: &str =
+    include_str!("../../../deploy/acceptance/verify-release-readiness.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
@@ -97,6 +99,19 @@ fn macos_user_service_adapter_preserves_the_per_user_safety_boundary() {
     assert_contains(MACOS_USER_SERVICE, "store user-service-plan");
     assert_contains(MACOS_USER_SERVICE, "retained state at");
     assert_contains(MACOS_USER_SERVICE, "gui/$UID_NUMBER");
+}
+
+#[test]
+fn release_readiness_requires_same_commit_surrogate_evidence() {
+    assert_contains(RELEASE_READINESS, "macos-launchd-$COMMIT.txt");
+    assert_contains(RELEASE_READINESS, "local-docker-s3-$COMMIT.txt");
+    assert_contains(RELEASE_READINESS, "ubuntu-arm64.txt");
+    assert_contains(RELEASE_READINESS, "alma-arm64.txt");
+    assert_contains(RELEASE_READINESS, "source_commit \"$COMMIT\"");
+    assert_contains(
+        RELEASE_READINESS,
+        "physical_das_acceptance=blocked_unavailable_host",
+    );
 }
 
 #[test]

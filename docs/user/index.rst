@@ -17,6 +17,7 @@ stabilized in the current MVP.
    storage-profiles
    metadata-compatibility
    storage-profile-matrix
+   deployment-acceptance
    nas-endpoints
    disk-preparation
    object-stores

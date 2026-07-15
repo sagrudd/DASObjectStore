@@ -8,6 +8,7 @@ keep_guest="${DASOBJECTSTORE_LIMA_KEEP:-0}"
 cpus="${DASOBJECTSTORE_LIMA_CPUS:-4}"
 memory="${DASOBJECTSTORE_LIMA_MEMORY_GIB:-6}"
 disk="${DASOBJECTSTORE_LIMA_DISK_GIB:-20}"
+source_commit="$(git -C "$repo_root" rev-parse HEAD)"
 
 usage() {
   cat <<'USAGE'
@@ -94,6 +95,9 @@ run_one() {
   limactl shell "$instance" sudo bash \
     /var/tmp/dasobjectstore-acceptance/guest-package-acceptance.sh post-reboot "$distro"
   limactl copy "$instance:/var/tmp/dasobjectstore-acceptance/evidence.txt" "$evidence"
+  printf 'source_commit=%s\n' "$source_commit" >> "$evidence"
+  printf 'harness_sha256=%s\n' "$(shasum -a 256 "$repo_root/deploy/lima/guest-package-acceptance.sh" | awk '{print $1}')" >> "$evidence"
+  chmod 600 "$evidence"
   printf 'Lima acceptance passed: %s\nEvidence: %s\n' "$instance" "$evidence"
   if [[ "$keep_guest" != "1" ]]; then
     delete_guest "$instance"

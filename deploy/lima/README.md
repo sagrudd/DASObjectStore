@@ -26,6 +26,10 @@ Successful guests are deleted after their evidence is copied to
 are retained automatically. `package-acceptance.sh delete` removes only the two
 harness-owned guest names.
 
+Each evidence record includes the exact archived source commit and guest
+harness SHA-256. Release-readiness verification rejects evidence from a stale
+commit rather than treating a prior surrogate run as current acceptance.
+
 Guest-side harness state is staged below `/var/tmp` so the same script,
 package path, and evidence survive the required reboot lifecycle check.
 

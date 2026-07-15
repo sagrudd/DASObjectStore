@@ -287,6 +287,13 @@ payload, cleans up on every exit path, and writes no-secret evidence tied to
 the tested Git commit. This closes the local provider compatibility run while
 leaving physical appliance durability and performance claims explicitly open.
 
+Deployment evidence is now commit-bound across macOS launchd, the two native
+ARM64 Lima package guests, and the running Docker daemon image. A single
+readiness verifier rejects missing or stale evidence and emits a local report
+that continues to label physical DAS and x86_64 parity as unavailable-host
+blockers. The operator runbook preserves that distinction through the later
+home-host acceptance window.
+
 The profile creation/adoption semantics are now approved and documented: one
 bounded folder root maps to one logical ObjectStore, unmanaged edits are
 read-only drift until an explicit confirmed reconcile/adopt, and no profile

@@ -116,4 +116,17 @@ fi
 
 /usr/bin/grep -q "bootstrap gui/$(/usr/bin/id -u) $PLIST" "$LAUNCH_LOG"
 /usr/bin/grep -q "kickstart -k gui/$(/usr/bin/id -u)/$LABEL" "$LAUNCH_LOG"
+EVIDENCE_DIR="$VALIDATION_ROOT/deployment-evidence"
+COMMIT="$(git -C "$SCRIPT_DIR/../.." rev-parse HEAD 2>/dev/null || printf 'unavailable')"
+/bin/mkdir -p "$EVIDENCE_DIR"
+/bin/chmod 700 "$EVIDENCE_DIR"
+{
+    printf 'source_commit=%s\n' "$COMMIT"
+    printf 'platform=macos\n'
+    printf 'architecture=%s\n' "$(/usr/bin/uname -m)"
+    printf 'render=passed\ninstall=passed\nstatus=passed\n'
+    printf 'rollback=passed\nreinstall=passed\nuninstall=passed\n'
+    printf 'persistent_state_retained=yes\n'
+} > "$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
+/bin/chmod 600 "$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
 printf 'macOS per-user launchd deployment acceptance passed\n'
