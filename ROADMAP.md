@@ -296,10 +296,14 @@ provisioning hooks now create the canonical ``/srv/dasobjectstore/ssd`` and
 trees only when the daemon-owned ``.dasobjectstore`` marker is present; unmarked
 files remain untouched until explicit adoption/reconciliation.
 
-The canonical local Docker profile now renders successfully against the
-dedicated macOS validation root and both generated Compose documents pass
-configuration parsing. Starting the daemon, nested Garage, and the AlleleAnchor
-S3 smoke remains Docker-daemon/file-sharing gated.
+The canonical local Docker profile now derives its private configuration and
+daemon/Garage Compose project names from the selected storage root. Against the
+dedicated macOS validation root, Docker Desktop starts the daemon and its
+daemon-owned nested Garage instance, provisions and exports one scoped
+AlleleAnchor credential, and passes a generated 4096-byte
+put/head/list/get/SHA-256/delete smoke. This closes the local single-node
+compatibility gate without claiming appliance durability or performance
+acceptance.
 
 ## Historical Appliance MVP Definition
 

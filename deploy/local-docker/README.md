@@ -13,7 +13,10 @@ the storage authority boundary intact:
 
 Secret-bearing daemon configuration and Garage credential state are kept under
 the Mac's private APFS home volume (by default
-``$HOME/.config/dasobjectstore/<profile>``). This is intentional: the attached
+``$HOME/.config/dasobjectstore/<profile>-<root-key>``). The root key binds
+private configuration and Compose project names to one storage root, preventing
+two identically named profiles on different volumes from overwriting or
+controlling each other's Garage service. This is intentional: the attached
 Seagate volume is ExFAT in the supported macOS setup and cannot enforce POSIX
 ``0600`` permissions. The profile mounts only that private object-service
 directory into the daemon; object data and non-secret store metadata remain on
@@ -45,7 +48,7 @@ private configuration and credentials use the APFS path shown next:
   garage-meta/  Garage metadata
   garage-data/  Garage object data
 
-$HOME/.config/dasobjectstore/alleleanchor-mvp/
+$HOME/.config/dasobjectstore/alleleanchor-mvp-<root-key>/
   config/       daemon.json, Garage config, nested Compose file
   credentials/  mode-0600 Garage and AlleleAnchor credential files
   object-service/ private daemon credential registry
@@ -112,8 +115,14 @@ DASOBJECTSTORE_BUILD_CONTEXT=/Users/stephen/Projects \
 Set `DASOBJECTSTORE_BIN` when using a release binary from another checkout.
 Set `DASOBJECTSTORE_LOCAL_API_PORT` if port 3900 is already occupied.
 Set `DASOBJECTSTORE_LOCAL_PRIVATE_ROOT` to place the private APFS config and
-credential root somewhere other than ``$HOME/.config/dasobjectstore``. Do not
-set it to the ExFAT Seagate volume.
+credential root somewhere other than ``$HOME/.config/dasobjectstore``; the
+profile/root namespace is still appended. Do not set it to the ExFAT Seagate
+volume. ``local.sh paths`` prints the resolved non-secret roots and Compose
+project names without creating them.
+
+The rendered daemon configuration carries that same root-scoped Garage Compose
+project name. Daemon-owned lifecycle and credential provisioning therefore
+address the exact service instance rendered for the selected storage root.
 
 ## Platform boundary
 

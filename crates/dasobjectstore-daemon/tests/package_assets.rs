@@ -19,6 +19,7 @@ const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const PACKAGE_AUTH_GUARD: &str =
     include_str!("../../../packaging/validate-package-auth-content.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
+const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const POSTINST: &str = include_str!("../../../packaging/debian/postinst");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
@@ -33,6 +34,42 @@ fn package_daemon_config_matches_runtime_defaults() {
     assert!(config.telemetry.enabled);
     assert_eq!(config.telemetry.cadence_seconds, 30);
     config.validate().expect("packaged config is valid");
+}
+
+#[test]
+fn local_docker_private_state_and_projects_are_storage_root_scoped() {
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../deploy/local-docker/local.sh");
+    let paths = |root: &str| {
+        let output = std::process::Command::new("bash")
+            .arg(&script)
+            .arg("paths")
+            .env("DASOBJECTSTORE_LOCAL_ROOT", root)
+            .env("DASOBJECTSTORE_LOCAL_PROFILE", "same-profile")
+            .output()
+            .expect("run local Docker path projection");
+        assert!(
+            output.status.success(),
+            "path projection failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("path projection is UTF-8")
+    };
+    let first = paths("/Volumes/CODEX-A/DASObjectStore");
+    let second = paths("/Volumes/CODEX-B/DASObjectStore");
+    assert_ne!(first, second);
+    for field in ["private_root=", "stack_project=", "garage_project="] {
+        let first_value = first
+            .lines()
+            .find(|line| line.starts_with(field))
+            .expect("first projection field");
+        let second_value = second
+            .lines()
+            .find(|line| line.starts_with(field))
+            .expect("second projection field");
+        assert_ne!(first_value, second_value, "{field} must be root-scoped");
+    }
+    assert_contains(LOCAL_DOCKER, "private config is bound to a different storage root");
 }
 
 #[test]

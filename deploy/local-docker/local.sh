@@ -12,14 +12,16 @@ BUILD_CONTEXT="${DASOBJECTSTORE_BUILD_CONTEXT:-$(cd "$REPO_DIR/.." && pwd)}"
 ROOT="${DASOBJECTSTORE_LOCAL_ROOT:-/Volumes/Seagate/DASObjectStore}"
 VALIDATION_ROOT="${HOME:-/Users/stephen}/.dasobjectstore-codex-validation"
 PROFILE="${DASOBJECTSTORE_LOCAL_PROFILE:-alleleanchor-mvp}"
-PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local}"
-GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore}"
+ROOT_KEY="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
+PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local-${ROOT_KEY}}"
+GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore-${ROOT_KEY}}"
 API_PORT="${DASOBJECTSTORE_LOCAL_API_PORT:-3900}"
 GARAGE_IMAGE="${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}"
 DAEMON_IMAGE="${DASOBJECTSTORE_LOCAL_IMAGE:-dasobjectstore-local:dev}"
 
 PROFILE_ROOT="$ROOT/$PROFILE"
-PRIVATE_ROOT="${DASOBJECTSTORE_LOCAL_PRIVATE_ROOT:-${HOME:-/Users/stephen}/.config/dasobjectstore}/$PROFILE"
+PRIVATE_ROOT="${DASOBJECTSTORE_LOCAL_PRIVATE_ROOT:-${HOME:-/Users/stephen}/.config/dasobjectstore}/${PROFILE}-${ROOT_KEY}"
+ROOT_BINDING="$PRIVATE_ROOT/storage-root"
 CONFIG_DIR="$PRIVATE_ROOT/config"
 STATE_DIR="$PROFILE_ROOT/state"
 RUNTIME_DIR="$PROFILE_ROOT/runtime"
@@ -56,6 +58,7 @@ Commands:
   status       Show daemon and nested Garage Compose status without secrets.
   down         Stop Garage through the daemon, then stop the daemon container.
   config       Print the generated AlleleAnchor adapter config path.
+  paths        Print non-secret root/project paths without creating them.
 
 Configuration is supplied through environment variables. The defaults target
 /Volumes/Seagate/DASObjectStore and the local alleleanchor-mvp profile.
@@ -141,6 +144,21 @@ ensure_profile_dirs() {
     chmod 700 "$PROFILE_ROOT" "$PRIVATE_ROOT" "$CONFIG_DIR" "$STATE_DIR" \
         "$RUNTIME_DIR" "$LOG_DIR" "$META_DIR" "$DATA_DIR" "$CREDENTIALS_DIR" \
         "$OBJECT_SERVICE_DIR"
+    if [ -f "$ROOT_BINDING" ]; then
+        [ "$(cat "$ROOT_BINDING")" = "$ROOT" ] || \
+            die "private config is bound to a different storage root: $PRIVATE_ROOT"
+    else
+        printf '%s\n' "$ROOT" > "$ROOT_BINDING"
+        chmod 600 "$ROOT_BINDING"
+    fi
+}
+
+print_paths() {
+    printf 'storage_root=%s\n' "$ROOT"
+    printf 'profile_root=%s\n' "$PROFILE_ROOT"
+    printf 'private_root=%s\n' "$PRIVATE_ROOT"
+    printf 'stack_project=%s\n' "$PROJECT"
+    printf 'garage_project=%s\n' "$GARAGE_PROJECT"
 }
 
 ensure_local_ssd_marker() {
@@ -206,7 +224,7 @@ EOF
 }
 
 render_daemon_config() {
-    cat > "$DAEMON_CONFIG" <<'EOF'
+    cat > "$DAEMON_CONFIG" <<EOF
 {
   "service_user": "dasobjectstore",
   "service_group": "dasobjectstore",
@@ -216,6 +234,9 @@ render_daemon_config() {
   "state_dir": "/var/lib/dasobjectstore",
   "log_dir": "/var/log/dasobjectstore",
   "product_root": "/opt/dasobjectstore",
+  "object_service": {
+    "compose_project": "$GARAGE_PROJECT"
+  },
   "telemetry": {
     "enabled": true,
     "cadence_seconds": 30
@@ -432,6 +453,9 @@ case "$command" in
         ;;
     config)
         printf '%s\n' "$ALLELEANCHOR_CONFIG"
+        ;;
+    paths)
+        print_paths
         ;;
     help|--help|-h)
         usage

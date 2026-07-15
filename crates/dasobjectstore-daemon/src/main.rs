@@ -149,7 +149,7 @@ fn garage_runtime_config(
     Ok(GarageServiceRuntimeConfig {
         compose_file: config_dir.join("garage.compose.yml"),
         project_directory: Some(config.state_dir.join("garage")),
-        compose_project: "dasobjectstore".to_string(),
+        compose_project: config.object_service.compose_project.clone(),
         service_name: "garage".to_string(),
         config_path: PathBuf::from(DEFAULT_GARAGE_CONFIG_PATH),
         metadata_path: PathBuf::from("/srv/dasobjectstore/ssd/garage"),
@@ -253,6 +253,17 @@ mod tests {
             PathBuf::from("/srv/dasobjectstore/ssd/garage")
         );
         assert_eq!(garage.endpoint, "http://0.0.0.0:3900");
+        assert_eq!(garage.compose_project, "dasobjectstore");
+    }
+
+    #[test]
+    fn derives_garage_compose_project_from_daemon_config() {
+        let mut config = DaemonRuntimeConfig::linux_packaged();
+        config.object_service.compose_project = "dasobjectstore-validation-42".to_string();
+
+        let garage = garage_runtime_config(&config).expect("garage config");
+
+        assert_eq!(garage.compose_project, "dasobjectstore-validation-42");
     }
 
     #[test]

@@ -27,11 +27,12 @@ evidence and detailed source tasks.
   closed that item. A partial gate remains open until every required child task
   is implemented, validated, documented, committed, and pushed.
 
-### Current campaign gate status (2026-07-13)
+### Current campaign gate status (2026-07-15)
 
-- `[~]` Gate 0 — local Docker rendering, daemon bootstrap, and offline
-  validation are delivered; Docker Desktop file sharing and appliance soak
-  remain unavailable from this workstation.
+- `[x]` Gate 0 — root-isolated local Docker rendering, daemon bootstrap,
+  daemon-owned Garage provisioning, scoped credential export, and an S3
+  put/head/list/get/checksum/delete smoke are delivered. This remains local
+  compatibility evidence; appliance soak is tracked separately.
 - `[~]` Gate 1 — profile/backend/manifest contracts and bounded folder/drive
   seams are delivered; appliance placement and shared catalogue wiring remain.
 - `[~]` Gate 2 — logical quota ledger, reservations, capacity APIs, and profile
@@ -77,8 +78,9 @@ evidence and detailed source tasks.
 - A canonical macOS Docker profile now keeps ``/etc/dasobjectstore`` inside
   the daemon container and persists the generated single-node Garage profile
   under ``$HOME/.dasobjectstore-codex-validation``. Docker Desktop 29.6.1 is
-  reachable on 2026-07-15; local Garage/provider verification and the
-  AlleleAnchor adapter smoke are scheduled against that generated-data root.
+  reachable on 2026-07-15. The root-isolated daemon and Garage projects now
+  provision one scoped bucket/key, export mode-0600 AlleleAnchor configuration,
+  and pass the generated-data S3 lifecycle smoke against that root.
 
 ## Market and Mnemosyne Integration Campaign
 
@@ -158,7 +160,7 @@ completion.
 
 ### Gate 0: Re-baseline and close release-critical appliance debt
 
-- [~] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
+- [x] Validate ``deploy/local-docker`` on macOS with Docker Desktop and an
   attached volume or the dedicated generated-data root
   ``$HOME/.dasobjectstore-codex-validation``: build the daemon image, start
   Garage through ``dasobjectstored``, provision one scoped bucket/key, export
@@ -167,10 +169,11 @@ completion.
   soak acceptance. AlleleAnchor's local ``FileStore`` and container workflow
   remain consumer-side substitutes and must consume exported scoped config,
   not private DAS host paths.
-  Docker Desktop 29.6.1 and the dedicated validation root are available as of
-  2026-07-15. Container startup, Garage provisioning, provider verification,
-  and S3 smoke remain execution work rather than an environment blocker;
-  renderer/configuration and secret-boundary checks are already complete.
+  **COMPLETED (2026-07-15):** Docker Desktop 29.6.1 ran the root-isolated
+  daemon and daemon-owned Garage projects against the dedicated validation
+  root. Provisioning exported one mode-0600 scoped credential pair. AWS CLI
+  put/head/list/get verified a 4096-byte generated payload and SHA-256, then
+  delete/list confirmed cleanup. No user or project data was used.
   - [x] Render the daemon/Garage profile against the dedicated validation root
     and validate both generated Compose files with ``docker compose config``;
     container start, Garage provisioning, and S3 smoke remain Docker-daemon
@@ -195,17 +198,17 @@ completion.
     installs the small runtime set (PAM, OpenSSL, zlib, libstdc++, and CA
     certificates) before startup.
   - [x] Keep the generated Garage Compose project aligned with daemon
-    provisioning. **COMPLETED (2026-07-13):** the CLI lifecycle path used the
-    generated project name while daemon credential provisioning uses the
-    canonical ``dasobjectstore`` project; the local profile now defaults Garage
-    to that project and permits an explicit
-    ``DASOBJECTSTORE_LOCAL_GARAGE_PROJECT`` override.
+    provisioning. **COMPLETED (2026-07-15):** daemon runtime configuration now
+    owns the Garage Compose project name. The local profile derives private
+    state plus daemon and Garage project names from the canonical storage root,
+    preventing an identically named profile on another volume from controlling
+    or provisioning the wrong service. The explicit project override remains.
   - [x] Keep local secrets off the attached ExFAT volume. **COMPLETED
     (2026-07-13):** `/Volumes/Seagate` is ExFAT and cannot enforce POSIX mode
     `0600`; the local profile now stores daemon/Garage config, exported client
     credentials, and the daemon credential registry under the Mac APFS private
-    root (default `$HOME/.config/dasobjectstore/<profile>`), while object data
-    and non-secret store state remain on Seagate.
+    root (default `$HOME/.config/dasobjectstore/<profile>-<root-key>`), while
+    object data and non-secret store state remain on Seagate.
 
 - [x] Reconcile every unchecked item in historical Milestones 12 and 19-24
   into this campaign as implemented, locally actionable, externally blocked, or

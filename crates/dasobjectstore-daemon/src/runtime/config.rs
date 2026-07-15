@@ -49,6 +49,8 @@ pub struct DaemonRuntimeConfig {
     pub telemetry: DaemonTelemetryRuntimeConfig,
     #[serde(default)]
     pub ingest_resource_policy: DaemonIngestResourcePolicy,
+    #[serde(default)]
+    pub object_service: DaemonObjectServiceRuntimeConfig,
 }
 
 impl DaemonRuntimeConfig {
@@ -65,6 +67,7 @@ impl DaemonRuntimeConfig {
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
             telemetry: DaemonTelemetryRuntimeConfig::default(),
             ingest_resource_policy: DaemonIngestResourcePolicy::default(),
+            object_service: DaemonObjectServiceRuntimeConfig::default(),
         }
     }
 
@@ -81,6 +84,7 @@ impl DaemonRuntimeConfig {
             product_root: PathBuf::from(DEFAULT_PRODUCT_ROOT),
             telemetry: DaemonTelemetryRuntimeConfig::default(),
             ingest_resource_policy: DaemonIngestResourcePolicy::default(),
+            object_service: DaemonObjectServiceRuntimeConfig::default(),
         }
     }
 
@@ -94,6 +98,7 @@ impl DaemonRuntimeConfig {
         validate_absolute_path("log_dir", &self.log_dir)?;
         validate_absolute_path("product_root", &self.product_root)?;
         self.telemetry.validate()?;
+        self.object_service.validate()?;
 
         if self.socket_path.parent() != Some(self.runtime_dir.as_path()) {
             return Err(DaemonRuntimeConfigError::SocketOutsideRuntimeDir {
@@ -103,6 +108,25 @@ impl DaemonRuntimeConfig {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonObjectServiceRuntimeConfig {
+    pub compose_project: String,
+}
+
+impl DaemonObjectServiceRuntimeConfig {
+    fn validate(&self) -> Result<(), DaemonRuntimeConfigError> {
+        reject_blank("object_service.compose_project", &self.compose_project)
+    }
+}
+
+impl Default for DaemonObjectServiceRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            compose_project: "dasobjectstore".to_string(),
+        }
     }
 }
 
@@ -234,6 +258,7 @@ mod tests {
             config.ingest_resource_policy,
             crate::api::DaemonIngestResourcePolicy::default()
         );
+        assert_eq!(config.object_service.compose_project, "dasobjectstore");
         config.validate().expect("default config is valid");
     }
 
@@ -255,6 +280,7 @@ mod tests {
             config.ingest_resource_policy,
             crate::api::DaemonIngestResourcePolicy::default()
         );
+        assert_eq!(config.object_service.compose_project, "dasobjectstore");
     }
 
     #[test]
