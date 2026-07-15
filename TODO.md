@@ -364,18 +364,15 @@ completion.
     rejection. The adapter deliberately leaves legacy appliance
     `objects`/`placements` untouched; daemon call-site wiring and physical
     appliance reconciliation remain the next integration gate.
-    **Blocker (catalogue authority boundary):** the profile-private catalogue
-    records currently carry versioned logical keys plus profile-local locations,
-    while the existing ``live.sqlite`` objects/placements schema has no
-    compatible version field and derives locations through disk rows. Before
-    wiring shared SQLite, the daemon must choose a versioned adapter/schema and
-    transaction owner that can atomically reconcile both representations
-    without leaking paths or silently changing authoritative records.
-    The adapter now provides the recommended schema-versioned boundary with
+    **Approved 2026-07-15:** keep separate authoritative representations joined
+    only by a daemon-owned, schema-versioned transaction bridge. Profile
+    catalogues remain authoritative for folder/drive logical records; legacy
+    appliance tables remain authoritative for existing physical placements.
+    The adapter provides the approved boundary with
     explicit profile namespace and transaction IDs; keep backend paths private
-    and migrate only through its atomic, conflict-checked handoff. Remaining
-    work is wiring this adapter into daemon import/migration call sites and
-    reconciling with appliance placement only when that host is available.
+    and migrate only through its atomic, conflict-checked handoff. Daemon import
+    and restart replay are wired; remaining work is migration call-site and
+    appliance placement reconciliation when that host is available.
   - [x] Prove authority batches are all-or-none across conflicts and restart;
     a conflicting existing version cannot partially add a new record.
     Catalogue mutations now serialize daemon-local read/modify/write

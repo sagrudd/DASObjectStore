@@ -1525,13 +1525,13 @@ staging remain daemon transport concerns. A local Unix-socket fixture also
 round-trips a reservation-bound part through terminal framing and its typed
 acknowledgement.
 
-Shared SQLite catalogue integration is currently blocked by a schema/authority
-boundary: profile-private records carry versioned logical keys and local
-locations, while the live SQLite objects/placements tables have no compatible
-version field and derive locations through disk rows. The recommended next
-step is a daemon-owned, schema-versioned adapter with an explicit profile
-namespace and transaction IDs, keeping paths private and requiring an atomic,
-conflict-checked handoff before either representation is treated as complete.
+Shared SQLite catalogue integration uses separate authoritative
+representations joined only by an approved daemon-owned, schema-versioned
+transaction bridge. Profile catalogues own versioned folder/drive logical
+records; legacy appliance tables own existing physical placements. Explicit
+profile namespaces and transaction IDs keep paths private and require an
+atomic, conflict-checked handoff before either representation is treated as
+complete. Appliance placement reconciliation remains hardware-gated.
 
 Exit criteria: system and per-user deployments can create/adopt, ingest, verify,
 reconcile, browse, expose through S3, restart, and recover a folder store without
