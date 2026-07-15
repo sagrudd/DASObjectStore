@@ -81,19 +81,19 @@ run_one() {
   limactl start --yes --name="$instance" --arch=aarch64 --vm-type=vz \
     --cpus="$cpus" --memory="$memory" --disk="$disk" --containerd=none \
     --mount-none "template:$template"
-  limactl shell "$instance" mkdir -p /tmp/dasobjectstore-acceptance
+  limactl shell "$instance" mkdir -p /var/tmp/dasobjectstore-acceptance
   limactl copy "$validation_root/artifacts/DASObjectStore.tar.gz" \
     "$validation_root/artifacts/prosopikon.tar.gz" \
     "$validation_root/artifacts/web-dist.tar.gz" \
     "$validation_root/artifacts/guest-package-acceptance.sh" \
-    "$instance:/tmp/dasobjectstore-acceptance/"
+    "$instance:/var/tmp/dasobjectstore-acceptance/"
   limactl shell "$instance" sudo bash \
-    /tmp/dasobjectstore-acceptance/guest-package-acceptance.sh initial "$distro"
+    /var/tmp/dasobjectstore-acceptance/guest-package-acceptance.sh initial "$distro"
   limactl shell "$instance" sudo systemctl reboot >/dev/null 2>&1 || true
   wait_after_reboot "$instance"
   limactl shell "$instance" sudo bash \
-    /tmp/dasobjectstore-acceptance/guest-package-acceptance.sh post-reboot "$distro"
-  limactl copy "$instance:/tmp/dasobjectstore-acceptance/evidence.txt" "$evidence"
+    /var/tmp/dasobjectstore-acceptance/guest-package-acceptance.sh post-reboot "$distro"
+  limactl copy "$instance:/var/tmp/dasobjectstore-acceptance/evidence.txt" "$evidence"
   printf 'Lima acceptance passed: %s\nEvidence: %s\n' "$instance" "$evidence"
   if [[ "$keep_guest" != "1" ]]; then
     delete_guest "$instance"

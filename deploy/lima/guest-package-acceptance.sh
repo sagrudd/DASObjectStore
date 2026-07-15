@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root=/tmp/dasobjectstore-acceptance
+root=/var/tmp/dasobjectstore-acceptance
 workspace=/opt/dasobjectstore-acceptance/workspace
 web_dist=/opt/dasobjectstore-acceptance/web-dist
 state_file=/var/tmp/dasobjectstore-package-acceptance.env

@@ -23,6 +23,9 @@ Successful guests are deleted after their evidence is copied to
 are retained automatically. `package-acceptance.sh delete` removes only the two
 harness-owned guest names.
 
+Guest-side harness state is staged below `/var/tmp` so the same script,
+package path, and evidence survive the required reboot lifecycle check.
+
 The source packages are built from committed `HEAD`; unrelated uncommitted
 worktree edits never enter the guest. A previously verified WebAssembly bundle
 is supplied explicitly through `DASOBJECTSTORE_PREBUILT_WEB_DIST`, avoiding a
