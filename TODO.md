@@ -607,19 +607,24 @@ transaction wiring; those boundaries stay explicit in the child items below.
     contract that preserves used bytes and outstanding reservations across a
     restart boundary; daemon file persistence is complete and legacy snapshots
     remain loadable. Explicit stale-reservation expiry is now covered below;
-    lease policy and scheduling remain open.
+    the renewable lease policy is approved and scheduling remains open.
   - [x] Add daemon atomic JSON persistence around that snapshot contract with
     uniquely-scoped temporary files, file and directory ``fsync``/rename
     ordering, cleanup on failed publication, and corrupt-state rejection;
     live-store registry wiring remains open. Durable reservation timestamps,
     deterministic expiry, legacy-snapshot retention, and provider persistence
-    rollback tests are now in place; no background scheduler is enabled until
-    a lease/renewal policy is approved.
+    rollback tests are now in place. **Approved 2026-07-15:** uncommitted
+    reservations use daemon-owned renewable leases with a 60-minute default,
+    10-minute active renewal, durable job/journal correlation, and atomic
+    persistence. Expiry releases accounting only when no active resumable job
+    or multipart journal remains; it never deletes payloads. Unknown-age legacy
+    reservations remain retained for operator review. Scheduler and audit-event
+    implementation remain.
   - [x] Add durable reservation creation timestamps with schema-v2 emission,
     schema-v1 compatibility, deterministic boundary expiry, and a provider
     maintenance API that atomically persists reclaimed bytes. Unknown-age
     legacy reservations are retained; automatic expiry and renewal remain
-    intentionally disabled pending an approved lease policy.
+    disabled until the approved scheduler and audit path are implemented.
   - [x] Exercise the file-backed provider against a real macOS filesystem
     fixture, including statvfs backend/SSD observations, admission, and commit;
     appliance-scale full-disk acceptance remains blocked on DASServer access.
@@ -628,8 +633,8 @@ transaction wiring; those boundaries stay explicit in the child items below.
     lease-policy gated.
   - [x] Add core-ledger regressions for mutex-contended reservations, quota
     lowering while usage is over limit, and deterministic timestamp expiry;
-    unknown-age legacy reservations remain retained and no lease scheduler is
-    enabled without an approved policy.
+    unknown-age legacy reservations remain retained while the approved lease
+    scheduler is implemented.
 
 ### Gate 3: Bounded folder profile
 

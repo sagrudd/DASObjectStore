@@ -168,7 +168,7 @@ The core ledger also exposes a schema-versioned snapshot/restore boundary for
 restart-safe persistence. Unknown schemas and snapshots that would overbook a
 policy are rejected. Optional SubObject parent/child snapshots are now also
 persisted through an atomic daemon state-file adapter; registry integration and
-stale-reservation expiry remain separate capacity-gate work.
+the approved renewable-lease scheduler remain separate capacity-gate work.
 The daemon persistence wrapper writes this snapshot through a private temporary
 file, file ``fsync``, atomic rename, and directory ``fsync``; corrupt or
 future-schema state is rejected without silently resetting reservations.
@@ -227,6 +227,11 @@ store policy; callers cannot reduce redundancy through the admission request.
 Reservations have explicit daemon-owned ``commit`` and ``release`` lifecycle
 operations. A failed durable update restores the prior ledger snapshot; upload
 workers must retain the reservation ID until their catalogue outcome is known.
+Uncommitted reservations use renewable daemon-owned leases: the default lease
+is 60 minutes and active workers renew every 10 minutes. Restart reconciliation
+retains reservations backed by a valid resumable job or multipart journal.
+Expiry releases accounting only when neither remains and never deletes staged
+or finalized payloads. Unknown-age legacy reservations require operator review.
 The daemon-owned remote S3 transfer worker now uses the remote job ID as that
 reservation ID: it admits before starting the byte-transfer adapter, then
 commits on successful transfer and catalogue completion or releases on any

@@ -1393,8 +1393,11 @@ Typed multipart-style byte-transfer adapters are covered by the same admission
 regression contract: rejection happens before adapter invocation, while
 success/failure paths commit or release the daemon reservation. A concrete
 multipart API and catalogue accounting path is still pending.
-Unknown-age legacy reservations are retained; automatic scheduling and renewal
-remain open until a lease policy is approved.
+Renewable daemon-owned reservation leases are approved with a 60-minute
+default, 10-minute active renewal, durable job/journal correlation, and
+accounting-only expiry when no resumable authority remains. Expiry never
+deletes payloads, and unknown-age legacy reservations remain retained for
+operator review. Scheduler and audit-event implementation remain open.
 Local file ingest now uses the same provider boundary for each non-skipped
 object: admission occurs before source/staging or direct-HDD work, durable
 settlement commits the reservation, and failed jobs release outstanding IDs.
