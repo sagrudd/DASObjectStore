@@ -1310,6 +1310,14 @@ SQLite handoff before returning success. They reuse the stable migration ID as
 the transaction ID, so a crash or unavailable metadata database leaves the
 source retained and the verified destination replayable rather than creating a
 second transaction.
+Registered folder-to-folder promotion is now an authenticated daemon operation
+rather than an internal-only worker. Its path-free request carries stable
+migration/source/destination identities and explicit confirmation; the daemon
+resolves bindings and capacity policy, owns all checkpoint/provenance/handoff
+paths, records the outcome in the common job model, and exposes the supported
+``store profile-migrate`` CLI. Packaged guarded-drive dispatch still requires
+Linux device-identity acceptance, and appliance placement remains gated on the
+physical host.
 The daemon now also exposes a versioned Unix-socket portable catalogue
 export/import handoff for bounded folder profiles. Export carries validated
 IDs, versions, hashes, provenance, protection, and logical placements without
@@ -1422,8 +1430,10 @@ execution behind the Unix-socket boundary while the CLI remains a client.
 Post-acceptance local writer-group registry updates are serialized and
 fsync-published, preserving sibling groups when concurrent Web responses
 reconcile the same registry.
-CLI migration fallbacks and any remaining managed mutation require their own
-daemon runtime operation before they can be marked complete.
+Registered folder migration now has its own daemon runtime operation and CLI
+client. Any remaining managed mutation, including packaged guarded-drive and
+appliance placement transitions, requires the same daemon-owned boundary
+before it can be marked complete.
 
 The profile-by-host-mode support matrix and fail-closed upgrade/migration
 policy are published in `docs/user/storage-profile-matrix.rst`; preview rows

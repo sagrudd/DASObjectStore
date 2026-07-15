@@ -32,6 +32,11 @@ where
         self
     }
 
+    pub fn with_profile_migration_state_root(mut self, path: impl Into<PathBuf>) -> Self {
+        self.profile_migration_state_root = path.into();
+        self
+    }
+
     pub fn with_application_identity_registry_path(
         mut self,
         application_identity_registry_path: impl Into<PathBuf>,

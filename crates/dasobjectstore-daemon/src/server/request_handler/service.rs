@@ -526,6 +526,84 @@ where
             handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
         }
+        DaemonApiRequest::ProfileMigration(mut request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authentication_required",
+                    "profile migration requires an authenticated local administrator",
+                )));
+            };
+            if !actor.is_administrator() {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authorization_required",
+                    "profile migration requires root, sudo, or dasobjectstore-admin membership",
+                )));
+            }
+            request.administrator_actor = Some(actor.display_name());
+            request.validate().map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: error.to_string(),
+                    },
+                )
+            })?;
+            let source_store_id =
+                StoreId::new(request.source_store_id.clone()).map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        },
+                    )
+                })?;
+            let destination_store_id =
+                StoreId::new(request.destination_store_id.clone()).map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        },
+                    )
+                })?;
+            let now = handler.clock.now_utc();
+            let report = migrate_registered_folder_store(
+                &request.migration_id,
+                &source_store_id,
+                &destination_store_id,
+                &handler.profile_binding_registry_path,
+                &handler.store_registry_path,
+                &handler.live_sqlite_path,
+                &handler.profile_migration_state_root,
+                &now,
+            )
+            .map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: error.to_string(),
+                    },
+                )
+            })?;
+            handler
+                .service_orchestrator
+                .reconcile_profile_capacity(&destination_store_id, report.destination_used_bytes)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            let job_id_value = format!("profile-migration-{}", request.migration_id);
+            let job_id = DaemonJobId::new(job_id_value.clone()).map_err(|_| {
+                DaemonRequestHandlerError::ServiceRuntime(DaemonServiceRuntimeError::InvalidJobId(
+                    job_id_value,
+                ))
+            })?;
+            let response = ProfileMigrationResponse::completed(
+                job_id,
+                &now,
+                request,
+                report.verified_object_count,
+                report.destination_used_bytes,
+                report.state,
+                report.source_retained,
+                actor.display_name(),
+            );
+            handler.record_admin_job(daemon_job_summary_from_profile_migration(&response))?;
+            Ok(DaemonApiResponse::ProfileMigration(response))
+        }
         DaemonApiRequest::ProfileInspection(request) => {
             let Some(actor) = actor else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

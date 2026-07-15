@@ -218,6 +218,7 @@ fn admin_job_kind_label(kind: DaemonJobKind) -> &'static str {
             "object_store_creation"
         }
         DaemonJobKind::Repair => "repair",
+        DaemonJobKind::ProfileMigration => "profile_migration",
         DaemonJobKind::RemoteUpload => "remote_upload",
         DaemonJobKind::ServiceOperation => "service_operation",
         DaemonJobKind::SystemAdministration => "system_administration",

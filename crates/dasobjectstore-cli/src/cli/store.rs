@@ -23,6 +23,9 @@ pub(crate) enum StoreCommand {
     /// Register a daemon-owned folder or drive profile binding from a manifest.
     #[command(name = "profile-binding")]
     ProfileBinding(StoreProfileBindingArgs),
+    /// Promote all catalogued objects between daemon-owned folder profiles.
+    #[command(name = "profile-migrate")]
+    ProfileMigrate(StoreProfileMigrationArgs),
     /// Inspect a daemon-owned profile without exposing host paths.
     #[command(name = "profile-inspection")]
     ProfileInspection(StoreProfileInspectionArgs),
@@ -134,6 +137,43 @@ impl StoreProfileBindingArgs {
     }
     pub(crate) fn dry_run(&self) -> bool {
         self.dry_run
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreProfileMigrationArgs {
+    /// Stable replay-safe migration transaction identifier.
+    #[arg(long)]
+    migration_id: String,
+    /// Source ObjectStore identifier. Source data is always retained.
+    #[arg(long)]
+    source_store_id: String,
+    /// Destination ObjectStore identifier.
+    #[arg(long)]
+    destination_store_id: String,
+    /// Required confirmation marker for the daemon mutation.
+    #[arg(long, default_value = "confirm profile migration")]
+    confirm: String,
+    /// Emit the daemon response as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreProfileMigrationArgs {
+    pub(crate) fn migration_id(&self) -> &str {
+        &self.migration_id
+    }
+    pub(crate) fn source_store_id(&self) -> &str {
+        &self.source_store_id
+    }
+    pub(crate) fn destination_store_id(&self) -> &str {
+        &self.destination_store_id
     }
     pub(crate) fn confirm(&self) -> &str {
         &self.confirm
@@ -981,6 +1021,33 @@ mod tests {
         assert_eq!(binding.operation(), StoreProfileBindingOperation::Adopt);
         assert!(binding.dry_run());
         assert!(binding.json());
+    }
+
+    #[test]
+    fn parses_path_free_profile_migration_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-migrate",
+            "--migration-id",
+            "promotion-1",
+            "--source-store-id",
+            "source-store",
+            "--destination-store-id",
+            "destination-store",
+            "--json",
+        ])
+        .expect("profile migration parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileMigrate(migration)) = args.command() else {
+            panic!("expected profile migration command")
+        };
+        assert_eq!(migration.migration_id(), "promotion-1");
+        assert_eq!(migration.source_store_id(), "source-store");
+        assert_eq!(migration.destination_store_id(), "destination-store");
+        assert!(migration.json());
     }
 
     #[test]

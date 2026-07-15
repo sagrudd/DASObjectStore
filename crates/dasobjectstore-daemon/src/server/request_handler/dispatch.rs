@@ -32,6 +32,7 @@ where
         | DaemonApiRequest::PrepareEnclosure(_)
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)
+        | DaemonApiRequest::ProfileMigration(_)
         | DaemonApiRequest::ProfileInspection(_)
         | DaemonApiRequest::ProfileReadiness(_)
         | DaemonApiRequest::UpsertEndpointInventory(_)

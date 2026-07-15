@@ -26,6 +26,7 @@ mod profile_capabilities;
 mod profile_catalogue;
 mod profile_diagnostics;
 mod profile_inspection;
+mod profile_migration;
 mod profile_readiness;
 mod profile_s3;
 mod provider_stream;
@@ -177,6 +178,10 @@ pub use profile_inspection::{
     ProfileInspectionRequest, ProfileInspectionResponse, ProfileInspectionRootState,
     PROFILE_INSPECTION_SCHEMA_VERSION,
 };
+pub use profile_migration::{
+    ProfileMigrationRequest, ProfileMigrationResponse, ProfileMigrationValidationError,
+    PROFILE_MIGRATION_CONFIRMATION,
+};
 pub use profile_readiness::{
     ProfileReadinessRequest, ProfileReadinessResponse, PROFILE_READINESS_ROUTE,
     PROFILE_READINESS_SCHEMA_VERSION,
@@ -292,6 +297,7 @@ pub enum DaemonApiRequest {
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
+    ProfileMigration(ProfileMigrationRequest),
     ProfileBrowser(ProfileBrowserRequest),
     ProfileCatalogueExport(ProfileCatalogueExportRequest),
     ProfileCatalogueImport(ProfileCatalogueImportRequest),
@@ -360,6 +366,7 @@ impl DaemonApiRequest {
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
+            Self::ProfileMigration(_) => "profile_migration",
             Self::ProfileBrowser(_) => "profile_browser",
             Self::ProfileCatalogueExport(_) => "profile_catalogue_export",
             Self::ProfileCatalogueImport(_) => "profile_catalogue_import",
@@ -457,6 +464,13 @@ impl DaemonApiRequest {
                 .map_err(create_object_store_validation_error),
             Self::RegisterProfileBinding(request) => {
                 request.validate().map_err(profile_binding_validation_error)
+            }
+            Self::ProfileMigration(request) => {
+                request
+                    .validate()
+                    .map_err(|error| DaemonRequestValidationError::InvalidPolicy {
+                        message: error.to_string(),
+                    })
             }
             Self::ProfileBrowser(request) => request.validate(),
             Self::ProfileCatalogueExport(request) => request.validate(),
@@ -565,6 +579,7 @@ pub enum DaemonApiResponse {
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),
+    ProfileMigration(ProfileMigrationResponse),
     ProfileBrowser(ProfileBrowserResponse),
     ProfileCatalogueExport(ProfileCatalogueExportResponse),
     ProfileCatalogueImport(ProfileCatalogueImportResponse),

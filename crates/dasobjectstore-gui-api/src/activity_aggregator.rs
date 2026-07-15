@@ -391,6 +391,7 @@ fn activity_kind_from_daemon_job(kind: &DaemonJobKind) -> ActivityTaskKindView {
         DaemonJobKind::DiskDrain
         | DaemonJobKind::DiskRetire
         | DaemonJobKind::DiskReplace
+        | DaemonJobKind::ProfileMigration
         | DaemonJobKind::Repair => ActivityTaskKindView::Repair,
         DaemonJobKind::EnclosurePreparation => ActivityTaskKindView::EnclosurePreparation,
         DaemonJobKind::EndpointValidation => ActivityTaskKindView::EndpointValidation,

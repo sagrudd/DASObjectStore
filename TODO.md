@@ -285,13 +285,14 @@ completion.
   details; bounded sysfs/device-mapper resolution and the packaged daemon
   collection loop are implemented and regression-tested. Physical device
   mapping and appliance acceptance remain deployment-gated.
-- [x] Remove temporary production module-size exceptions through owned,
+- [~] Remove temporary production module-size exceptions through owned,
   test-preserving splits; keep dispatcher and public façades narrow. The
-  folder backend's `ObjectStoreBackend` implementation and the storage request
-  handler's store/disk/repair/inventory operations are isolated in
-  responsibility-specific child modules. Both public façades remain below the
-  1,000-line budget, the exception file remains empty, and `make module-size`
-  passes.
+  exception file remains empty, but the recovered v0.82 baseline already
+  exceeds the 1,000-line production limit in ``api/mod.rs``,
+  ``request_handler.rs``, and ``request_handler/storage.rs``; ``make
+  module-size`` therefore fails and the earlier completion claim was stale.
+  Acceptance condition: extract responsibility-specific API/handler modules
+  until all three façades pass the guard without exceptions.
   - [x] Keep package-asset regression tests aligned with the authoritative
     Debian dependency contract, including `udisks2` and `awscli`, so the local
     workspace test baseline does not mask packaging drift.
@@ -1233,6 +1234,14 @@ hardware acceptance.
     a failed shared-metadata commit retains both the verified destination and
     source so restart can finish safely. Physical appliance placement remains
     deployment-gated.
+  - [x] Expose registered folder-to-folder promotion as a path-free,
+    administrator-authorized daemon operation and supported
+    ``store profile-migrate`` CLI workflow. The daemon resolves bindings and
+    capacity policy, owns checkpoint/provenance/handoff paths, records the
+    completed verification in the shared job model, reconciles the durable
+    destination capacity ledger, and replays the stable migration ID
+    idempotently. Guarded drive transport dispatch and appliance physical
+    placement remain host-gated.
   - [x] Add daemon-owned Unix-socket portable catalogue export/import contracts
     for bounded folder profiles. Export serializes validated IDs, versions,
     hashes, provenance, protection, and logical placements without paths or

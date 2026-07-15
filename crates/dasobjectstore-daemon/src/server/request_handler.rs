@@ -21,13 +21,14 @@ use crate::api::{
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
     ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileReadinessResponse, ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
-    ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    ProfileMigrationResponse, ProfileReadinessResponse, ProfileS3HeadResponse,
+    ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -47,11 +48,11 @@ use crate::runtime::{
     application_key_registry_path, complete_upload_with_capability,
     deactivate_application_identity, deactivate_application_key, default_endpoint_registry_path,
     default_hdd_root, default_ssd_root, discover_managed_hdd_roots, head_profile_object,
-    issue_application_upload_capability, list_profile_objects_page, profile_diagnostics,
-    profile_health, profile_s3_list_response, provision_garage_store_registry,
-    query_object_browser_metadata, read_application_identity, read_application_key,
-    read_application_upload_capability, read_object_browser_metadata, read_profile_binding,
-    read_profile_binding_record, record_application_audit_event,
+    issue_application_upload_capability, list_profile_objects_page,
+    migrate_registered_folder_store, profile_diagnostics, profile_health, profile_s3_list_response,
+    provision_garage_store_registry, query_object_browser_metadata, read_application_identity,
+    read_application_key, read_application_upload_capability, read_object_browser_metadata,
+    read_profile_binding, read_profile_binding_record, record_application_audit_event,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     resolve_mtls_application_identity_by_fingerprint, resolve_object_download_with_hdd_root,
     resolve_object_folder_download_with_hdd_root, upsert_application_identity,
@@ -115,8 +116,8 @@ use self::job_projection::{
     daemon_job_summary_from_application_key_registration,
     daemon_job_summary_from_create_object_store, daemon_job_summary_from_endpoint_inventory,
     daemon_job_summary_from_local_admin, daemon_job_summary_from_prepare_enclosure,
-    daemon_job_summary_from_profile_binding, daemon_job_summary_from_service_lifecycle,
-    daemon_job_summary_from_service_provision,
+    daemon_job_summary_from_profile_binding, daemon_job_summary_from_profile_migration,
+    daemon_job_summary_from_service_lifecycle, daemon_job_summary_from_service_provision,
     daemon_job_summary_from_update_object_store_ingest_policy,
     remote_easyconnect_aws_cli_upload_job_request,
 };
@@ -141,6 +142,7 @@ pub struct DaemonRequestHandler<S, C> {
     remote_upload_admission_gate: Arc<RemoteUploadAdmissionGate>,
     cancelled_job_ids: Arc<Mutex<BTreeSet<String>>>,
     profile_binding_registry_path: PathBuf,
+    profile_migration_state_root: PathBuf,
     application_identity_registry_path: PathBuf,
     application_key_registry_path: PathBuf,
     application_audit_log_path: PathBuf,
@@ -178,6 +180,8 @@ where
             profile_binding_registry_path: crate::runtime::profile_binding_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            profile_migration_state_root: PathBuf::from(DEFAULT_DAEMON_STATE_DIR)
+                .join("profile-migrations"),
             application_identity_registry_path: application_identity_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -220,6 +224,8 @@ where
             profile_binding_registry_path: crate::runtime::profile_binding_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            profile_migration_state_root: PathBuf::from(DEFAULT_DAEMON_STATE_DIR)
+                .join("profile-migrations"),
             application_identity_registry_path: application_identity_registry_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -1078,16 +1084,17 @@ mod tests {
         ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
-        ProfileInspectionRequest, ProfileInspectionRootState, ProfileReadinessRequest,
-        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
-        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ProfileInspectionRequest, ProfileInspectionRootState, ProfileMigrationRequest,
+        ProfileReadinessRequest, ProviderStreamChunkHeader, ProviderStreamOpenRequest,
+        ProviderStreamUploadOpenRequest, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
+        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -4031,6 +4038,31 @@ mod tests {
                 if error.code == "administrator_authentication_required"
         ));
         cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_profile_migration_without_authenticated_administrator() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-15T18:00:00Z"),
+        );
+        let response = handler
+            .handle(DaemonApiRequest::ProfileMigration(
+                ProfileMigrationRequest {
+                    migration_id: "promotion-1".to_string(),
+                    source_store_id: "source-store".to_string(),
+                    destination_store_id: "destination-store".to_string(),
+                    client_request_id: None,
+                    administrator_actor: Some("spoofed".to_string()),
+                    confirmation_marker: crate::api::PROFILE_MIGRATION_CONFIRMATION.to_string(),
+                },
+            ))
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
     }
 
     #[test]

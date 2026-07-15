@@ -161,6 +161,27 @@ pub(super) fn daemon_job_summary_from_profile_binding(
     )
 }
 
+pub(super) fn daemon_job_summary_from_profile_migration(
+    response: &ProfileMigrationResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        false,
+        Some(response.administrator_actor.clone()),
+        format!(
+            "profile migration {} verified {} object(s)/{} logical bytes from {} to {}; source retained={}",
+            response.migration_id,
+            response.verified_object_count,
+            response.destination_used_bytes,
+            response.source_store_id,
+            response.destination_store_id,
+            response.source_retained
+        ),
+    )
+}
+
 pub(super) fn daemon_job_summary_from_update_object_store_ingest_policy(
     response: &UpdateObjectStoreIngestPolicyResponse,
 ) -> DaemonJobSummary {

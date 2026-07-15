@@ -36,25 +36,25 @@ use crate::api::{
     ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
     ProfileCatalogueExportRequest, ProfileCatalogueExportResponse, ProfileCatalogueImportRequest,
     ProfileCatalogueImportResponse, ProfileDiagnosticsRequest, ProfileDiagnosticsResponse,
-    ProfileInspectionRequest, ProfileInspectionResponse, ProfileReadinessRequest,
-    ProfileReadinessResponse, ProfileS3DeleteRequest, ProfileS3DeleteResponse,
-    ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
-    ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartCompletionRequest,
-    ProfileS3MultipartCompletionResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
-    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
-    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    ProfileInspectionRequest, ProfileInspectionResponse, ProfileMigrationRequest,
+    ProfileMigrationResponse, ProfileReadinessRequest, ProfileReadinessResponse,
+    ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,
+    ProfileS3HealthRequest, ProfileS3HealthResponse, ProfileS3ListRequest, ProfileS3ListResponse,
+    ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
+    ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
+    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
+    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -577,6 +577,16 @@ where
         }
     }
 
+    pub fn profile_migration(
+        &self,
+        request: ProfileMigrationRequest,
+    ) -> Result<ProfileMigrationResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileMigration(request))? {
+            DaemonApiResponse::ProfileMigration(response) => Ok(response),
+            response => Err(unexpected("profile_migration", response)),
+        }
+    }
+
     pub fn profile_inspection(
         &self,
         request: ProfileInspectionRequest,
@@ -831,6 +841,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
+        DaemonApiResponse::ProfileMigration(_) => "profile_migration",
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",
         DaemonApiResponse::ProfileCatalogueExport(_) => "profile_catalogue_export",
         DaemonApiResponse::ProfileCatalogueImport(_) => "profile_catalogue_import",

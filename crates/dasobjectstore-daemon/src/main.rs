@@ -1,5 +1,6 @@
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
+    profile_binding_registry_path,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
@@ -64,6 +65,8 @@ fn run() -> Result<(), String> {
         SystemDaemonClock,
         admin_job_registry,
     )
+    .with_profile_binding_registry_path(profile_binding_registry_path(&config.state_dir))
+    .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir));

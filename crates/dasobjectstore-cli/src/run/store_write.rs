@@ -68,6 +68,48 @@ pub(super) fn run_store_profile_binding(
     Ok(())
 }
 
+pub(super) fn run_store_profile_migration(
+    args: &StoreProfileMigrationArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_migration(dasobjectstore_daemon::api::ProfileMigrationRequest {
+            migration_id: args.migration_id().to_string(),
+            source_store_id: args.source_store_id().to_string(),
+            destination_store_id: args.destination_store_id().to_string(),
+            client_request_id: None,
+            administrator_actor: std::env::var("USER").ok(),
+            confirmation_marker: args.confirm().to_string(),
+        })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Migration: {}", response.migration_id)?;
+        writeln!(writer, "Source store: {}", response.source_store_id)?;
+        writeln!(
+            writer,
+            "Destination store: {}",
+            response.destination_store_id
+        )?;
+        writeln!(
+            writer,
+            "Verified objects: {}",
+            response.verified_object_count
+        )?;
+        writeln!(
+            writer,
+            "Destination logical bytes: {}",
+            response.destination_used_bytes
+        )?;
+        writeln!(writer, "State: {:?}", response.state)?;
+        writeln!(writer, "Source retained: {}", response.source_retained)?;
+        writeln!(writer, "Job: {}", response.accepted.job_id)?;
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_drain(
     args: &StoreDrainArgs,
     writer: &mut impl Write,

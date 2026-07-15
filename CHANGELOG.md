@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.83.0 - 2026-07-15
+
+- Expose registered folder-to-folder whole-store promotion through a strict,
+  path-free, administrator-authorized daemon contract and supported
+  ``store profile-migrate`` CLI workflow.
+- Resolve backend bindings and capacity policy only inside the daemon, retain
+  source placement, persist replay-safe checkpoints/provenance, commit the
+  destination through shared catalogue authority, reconcile durable logical
+  capacity, and publish the result in the common daemon job model.
+
 ## 0.82.0 - 2026-07-15
 
 - Bridge verified whole-store folder-to-folder and folder-to-drive migration

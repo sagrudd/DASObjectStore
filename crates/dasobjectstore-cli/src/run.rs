@@ -13,9 +13,9 @@ use crate::cli::{
     StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
     StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
-    StoreProfileInspectionArgs, StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs,
-    StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
-    SubobjectCreateArgs,
+    StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
+    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod application_auth;
 mod command_handlers;
@@ -154,7 +154,8 @@ use self::store_read::{
 };
 use self::store_write::{
     run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
-    run_store_ingest_policy, run_store_profile_binding, run_store_repair, run_store_verify,
+    run_store_ingest_policy, run_store_profile_binding, run_store_profile_migration,
+    run_store_repair, run_store_verify,
 };
 use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
@@ -296,6 +297,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::Store(args)) => match args.command() {
             Some(StoreCommand::Adopt(args)) => run_store_adopt(args, writer),
             Some(StoreCommand::ProfileBinding(args)) => run_store_profile_binding(args, writer),
+            Some(StoreCommand::ProfileMigrate(args)) => run_store_profile_migration(args, writer),
             Some(StoreCommand::ProfileInspection(args)) => {
                 run_store_profile_inspection(args, writer)
             }

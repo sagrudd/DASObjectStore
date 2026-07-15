@@ -332,6 +332,25 @@ interrupted, the verified destination and its private profile catalogue remain
 durable, the source remains retained, and retrying the same migration resumes
 the journal and commits exactly once.
 
+Registered folder profiles can run that transaction through the supported
+daemon boundary::
+
+   sudo dasobjectstore store profile-migrate \
+     --migration-id generated-data-promotion-1 \
+     --source-store-id generated-data-source \
+     --destination-store-id generated-data-destination \
+     --confirm "confirm profile migration"
+
+The command sends only store and transaction identifiers. The daemon resolves
+both registered roots and capacity policies, keeps checkpoint and provenance
+paths private, performs the shared-catalogue handoff, reconciles the durable
+destination capacity ledger to authoritative logical usage, and returns
+``retirement_pending`` with ``source_retained: true``. Repeating the same
+command resumes or verifies the same transaction. A migration ID must never be
+reused for a different source/destination pair. Drive destinations continue to
+use the internal guarded engine until packaged device-identity dispatch is
+validated on an available Linux host.
+
 All profiles implement the same backend capability boundary: validation,
 reservation, staging, durable finalization, reads, enumeration, verification,
 health, reconciliation, and removal. A profile may report an unsupported

@@ -25,6 +25,18 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn reconcile_profile_capacity(
+        &self,
+        store_id: &StoreId,
+        used_bytes: u64,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.capacity_provider()
+            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "profile capacity provider is not configured".to_string(),
+            })?
+            .reconcile_used_bytes(store_id, used_bytes)
+    }
+
     fn status(
         &self,
         request: DaemonServiceStatusRequest,
