@@ -306,6 +306,7 @@ fn package_installs_named_pam_service_for_local_web_login() {
     );
     assert_contains(BUILD_RPM, "etc/pam.d");
     assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
+    assert_contains(BUILD_RPM, "%global debug_package %{nil}");
     assert_contains(BUILD_RPM, "BuildRequires:  clang");
     assert_contains(BUILD_RPM, "BuildRequires:  clang-devel");
     assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");

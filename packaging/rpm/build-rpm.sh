@@ -106,6 +106,8 @@ install -d "$rpm_root/BUILD" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPE
 tar -C "$staging_root" -czf "$source_path" "$payload_name"
 
 cat >"$spec_path" <<SPEC
+%global debug_package %{nil}
+
 Name:           $package_name
 Version:        $version
 Release:        $release%{?dist}
