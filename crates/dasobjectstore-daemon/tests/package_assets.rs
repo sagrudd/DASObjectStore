@@ -289,7 +289,18 @@ fn package_removal_stops_units_without_deleting_managed_state() {
 #[test]
 fn sysusers_declares_packaged_service_identity() {
     assert_contains(SYSUSERS, &format!("u {DEFAULT_DAEMON_SERVICE_USER} "));
-    assert_contains(SYSUSERS, &format!("g {DEFAULT_DAEMON_GROUP} "));
+    assert!(
+        SYSUSERS
+            .lines()
+            .any(|line| line == format!("g {DEFAULT_DAEMON_GROUP} -")),
+        "the daemon group declaration must use systemd-sysusers' three-field group syntax"
+    );
+    assert!(
+        SYSUSERS
+            .lines()
+            .any(|line| line == "g dasobjectstore-admin -"),
+        "the administrator group declaration must use systemd-sysusers' three-field group syntax"
+    );
 }
 
 #[test]
