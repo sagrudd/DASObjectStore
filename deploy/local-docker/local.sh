@@ -65,6 +65,7 @@ Commands:
   status       Show daemon and nested Garage Compose status without secrets.
   down         Stop Garage through the daemon, then stop the daemon container.
   config       Print the generated scoped consumer adapter config path.
+  describe     Print secret-free endpoint/ObjectStore identity as JSON.
   paths        Print non-secret root/project paths without creating them.
 
 Configuration is supplied through environment variables. The defaults target
@@ -178,6 +179,17 @@ print_paths() {
     printf 'private_root=%s\n' "$PRIVATE_ROOT"
     printf 'stack_project=%s\n' "$PROJECT"
     printf 'garage_project=%s\n' "$GARAGE_PROJECT"
+}
+
+describe_profile() {
+    [ -f "$CONSUMER_CONFIG" ] || die "profile is not provisioned: run '$0 up'"
+    printf '{"schema_version":"dasobjectstore.local_profile_description.v1",'
+    printf '"endpoint_id":"local-docker-%s",' "$ROOT_KEY"
+    printf '"object_store_id":"%s",' "$STORE_ID"
+    printf '"profile_id":"%s",' "$PROFILE"
+    printf '"status":"ready",'
+    printf '"api_url":"http://127.0.0.1:%s",' "$API_PORT"
+    printf '"credential_ref":"dasobjectstore.local-profile:%s:%s"}\n' "$PROFILE" "$ROOT_KEY"
 }
 
 ensure_local_ssd_marker() {
@@ -576,6 +588,9 @@ case "$command" in
         ;;
     config)
         printf '%s\n' "$CONSUMER_CONFIG"
+        ;;
+    describe)
+        describe_profile
         ;;
     paths)
         print_paths

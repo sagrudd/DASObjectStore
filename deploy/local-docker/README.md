@@ -68,6 +68,10 @@ cargo build --locked -p dasobjectstore-cli
 ./deploy/local-docker/local.sh up
 ```
 
+After provisioning, ``local.sh describe`` emits a secret-free JSON record with
+the stable endpoint, ObjectStore, profile, loopback API, and opaque credential
+reference. Consumers store that record rather than parsing Garage credentials.
+
 `up` renders the profile, builds the daemon image, starts the daemon, starts
 Garage through the daemon, provisions the `alleleanchor_mvp` store (bucket
 `alleleanchor-mvp`) and scoped key, and writes an AlleleAnchor adapter config.

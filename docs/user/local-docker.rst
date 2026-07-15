@@ -80,7 +80,9 @@ an empty directory and keeps credentials under
 profile, ``pinakotheke_local`` as the store ID, ``pinakotheke-local`` as the
 bucket, ``media`` as the prefix, and ``pinakotheke`` as the consumer through
 the corresponding ``DASOBJECTSTORE_LOCAL_*`` environment variables. Arbitrary
-home-directory roots remain rejected.
+home-directory roots remain rejected. After provisioning, ``local.sh describe``
+returns the stable secret-free endpoint/ObjectStore identity and opaque
+credential reference for the consumer.
 
 The local profile can close a local S3-compatible adapter validation gate for
 AlleleAnchor and other clients. It does not replace Linux appliance soak,
