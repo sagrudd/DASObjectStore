@@ -7,6 +7,28 @@ use std::fmt::{self, Display};
 pub const PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION: &str =
     "dasobjectstore.product_policy_template.v1";
 
+/// Product identities with an approved policy-adapter boundary. These
+/// identities select ownership validation only; products still provide their
+/// own policy values and provisioning decisions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProductPolicyAdapterKind {
+    Synoptikon,
+    Mneion,
+    Mnemosyne,
+    Standalone,
+}
+
+impl ProductPolicyAdapterKind {
+    pub const fn adapter_id(self) -> &'static str {
+        match self {
+            Self::Synoptikon => "synoptikon",
+            Self::Mneion => "mneion",
+            Self::Mnemosyne => "mnemosyne",
+            Self::Standalone => "standalone",
+        }
+    }
+}
+
 /// Identifies the product adapter validating a template. It does not provide
 /// defaults or provisioning; those remain owned by the calling product.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,6 +45,12 @@ impl ProductPolicyTemplateAdapter {
 
     pub fn adapter_id(&self) -> &str {
         &self.adapter_id
+    }
+
+    pub fn for_product(kind: ProductPolicyAdapterKind) -> Self {
+        Self {
+            adapter_id: kind.adapter_id().to_string(),
+        }
     }
 
     pub fn adapt(
@@ -102,7 +130,7 @@ fn validate_slug(value: &str) -> Result<(), ProductPolicyTemplateAdapterError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
+        ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
         PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
@@ -166,5 +194,23 @@ mod tests {
         );
         assert_eq!(encoded["adapter_id"], "mnemosyne");
         assert_eq!(encoded["template"]["profile"], "folder");
+    }
+
+    #[test]
+    fn typed_product_adapters_preserve_explicit_ownership_without_defaults() {
+        for kind in [
+            ProductPolicyAdapterKind::Synoptikon,
+            ProductPolicyAdapterKind::Mneion,
+            ProductPolicyAdapterKind::Mnemosyne,
+            ProductPolicyAdapterKind::Standalone,
+        ] {
+            let adapter = ProductPolicyTemplateAdapter::for_product(kind);
+            assert_eq!(adapter.adapter_id(), kind.adapter_id());
+            let envelope = adapter
+                .adapt(template(kind.adapter_id()))
+                .expect("typed product adapter accepts owned template");
+            assert_eq!(envelope.template.owner_product, kind.adapter_id());
+            assert_eq!(envelope.template.template_id, "default-bounded");
+        }
     }
 }

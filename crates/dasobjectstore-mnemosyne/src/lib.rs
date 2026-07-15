@@ -70,8 +70,8 @@ pub use nas_nfs_runtime::{
     NAS_NFS_RUNTIME_VALIDATION_PLAN_SCHEMA_VERSION,
 };
 pub use policy_templates::{
-    ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError, ProductPolicyTemplateEnvelope,
-    PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
+    ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
+    ProductPolicyTemplateEnvelope, PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,

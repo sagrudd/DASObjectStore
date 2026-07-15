@@ -425,8 +425,10 @@ name.
 The Mnemosyne adapter crate now provides a strict versioned envelope for this
 boundary. An adapter can validate that a template is owned by its product and
 forward the request without adding defaults or filesystem/provider details.
-Synoptikon, Mneion, Mnemosyne, and standalone provisioning implementations
-remain responsible for their own product decisions.
+Typed adapter identities are available for Synoptikon, Mneion, Mnemosyne, and
+standalone/package-managed deployments; they select ownership validation only.
+Provisioning implementations remain responsible for their own product
+decisions.
 
 Profile promotion uses an explicit resumable state contract: planned, copying,
 destination verified, retirement pending, completed, or failed. Source

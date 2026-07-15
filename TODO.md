@@ -1155,6 +1155,10 @@ hardware acceptance.
     template identity and emits a strict versioned shape without product
     defaults, paths, credentials, or provisioning behavior; concrete product
     defaults and provisioning adapters remain open.
+  - [x] Add typed adapter identities for Synoptikon, Mneion, Mnemosyne, and
+    standalone/package-managed deployments. The registry only selects strict
+    ownership validation; it does not invent product defaults or provision
+    storage, leaving those decisions with each product.
 - [~] Implement folder-to-drive, folder/drive-to-appliance, and portable export/
   import jobs preserving IDs, versions, hashes, provenance, and protection.
   - [x] Add a core resumable promotion state machine that retains source

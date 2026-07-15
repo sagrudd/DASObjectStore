@@ -1478,6 +1478,10 @@ authentication remains separate.
 Capacity-enabled local ingest also rejects a client copy-count override before
 any source read when it differs from the daemon ObjectStore policy; legacy
 standalone executor paths retain their explicit override behavior.
+The Mnemosyne adapter boundary now includes typed ownership identities for
+Synoptikon, Mneion, Mnemosyne, and standalone/package-managed deployments;
+these identities validate ownership without introducing product defaults,
+credentials, paths, or provisioning behavior.
 Reservation IDs include the client request identity when supplied, otherwise a
 stable source-path digest, preventing unrelated same-second jobs from
 colliding while preserving deterministic retries for the same source.
