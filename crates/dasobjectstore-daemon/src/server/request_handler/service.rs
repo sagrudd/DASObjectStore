@@ -467,15 +467,21 @@ where
                         ),
                     )
                 })?;
-                validate_profile_binding_claim(
+                let provision_root_created = prepare_profile_provision_root(&request)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                if let Err(error) = validate_profile_binding_claim(
                     &handler.profile_binding_registry_path,
                     BackendProfileBinding {
                         manifest: request.manifest.clone(),
                         backend_root: request.backend_root.clone(),
                         ssd_staging_root: request.ssd_staging_root.clone(),
                     },
-                )
-                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                ) {
+                    if provision_root_created {
+                        rollback_empty_profile_provision_root(&request);
+                    }
+                    return Err(DaemonRequestHandlerError::ServiceRuntime(error));
+                }
                 if request.operation == ProfileBindingOperation::Provision {
                     reused = validate_profile_provision_claim(
                         &handler.profile_binding_registry_path,

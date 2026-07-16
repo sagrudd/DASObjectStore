@@ -129,9 +129,10 @@ use self::job_projection::{
 };
 pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
-    create_object_store_with_capacity, ensure_profile_backend, register_profile_binding,
-    resolve_authorization_store_id, rotated_easyconnect_renewal_token, stable_easyconnect_id,
-    validate_profile_provision_claim,
+    create_object_store_with_capacity, ensure_profile_backend, prepare_profile_provision_root,
+    register_profile_binding, resolve_authorization_store_id,
+    rollback_empty_profile_provision_root, rotated_easyconnect_renewal_token,
+    stable_easyconnect_id, validate_profile_provision_claim,
 };
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
@@ -887,7 +888,6 @@ mod tests {
         StoreServiceDefinition,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
-    use std::time::{SystemTime, UNIX_EPOCH};
     use rusqlite::{params, Connection};
     use sha2::{Digest, Sha256};
     use std::cell::RefCell;
@@ -895,6 +895,7 @@ mod tests {
     use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn dispatches_service_status_to_orchestrator() {

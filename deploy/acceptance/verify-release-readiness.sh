@@ -29,6 +29,7 @@ require_field() {
 
 MACOS="$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
 DOCKER="$EVIDENCE_DIR/local-docker-s3-$COMMIT.txt"
+PRODUCT="$EVIDENCE_DIR/product-profile-mvp-$COMMIT.txt"
 UBUNTU="$LIMA_DIR/ubuntu-arm64.txt"
 ALMA="$LIMA_DIR/alma-arm64.txt"
 
@@ -43,6 +44,14 @@ for field in put head list get checksum delete; do
 done
 require_field "$DOCKER" source_commit "$COMMIT"
 require_field "$DOCKER" generated_bytes 65536
+
+for field in profile_provision idempotent_reprovision put_list_get_range_verify_delete quota_rejection restart_recovery product_profile_mvp; do
+    require_field "$PRODUCT" "$field" passed
+done
+require_field "$PRODUCT" source_commit "$COMMIT"
+require_field "$PRODUCT" generated_object_count 64
+require_field "$PRODUCT" generated_object_bytes 4096
+require_field "$PRODUCT" customer_or_project_data_used no
 
 for evidence in "$UBUNTU" "$ALMA"; do
     for field in install upgrade reboot uninstall; do
@@ -64,6 +73,7 @@ REPORT="$EVIDENCE_DIR/local-release-readiness-$COMMIT.txt"
     printf 'ubuntu_arm64_package=passed\n'
     printf 'almalinux_arm64_package=passed\n'
     printf 'local_docker_garage_s3=passed\n'
+    printf 'product_profile_mvp=passed\n'
     printf 'local_deployment_readiness=passed\n'
     printf 'physical_das_acceptance=blocked_unavailable_host\n'
     printf 'x86_64_package_parity=blocked_unavailable_host\n'

@@ -490,6 +490,13 @@ submission, then sends ``ProfileBindingOperation::Provision`` through the same
 typed daemon client used by other management surfaces. Repeating an identical
 request therefore uses the daemon's existing idempotent binding behavior.
 
+For a folder ``Provision`` operation, the daemon may create the explicit final
+backend directory when its parent already exists. It then canonicalizes and
+collision-checks that directory before initializing the private namespace.
+Missing parent trees are rejected, and this convenience never applies to drive
+mounts or appliance pools. A claim conflict removes only the newly created,
+still-empty leaf; it never recursively removes a directory or user data.
+
 This boundary deliberately contains no provider credential or endpoint and
 does not derive a filesystem path or product default. Paths exist only in the
 deployment plan presented to the authenticated daemon; the portable manifest

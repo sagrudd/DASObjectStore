@@ -27,7 +27,7 @@ evidence and detailed source tasks.
   closed that item. A partial gate remains open until every required child task
   is implemented, validated, documented, committed, and pushed.
 
-### Current campaign gate status (2026-07-15)
+### Current campaign gate status (2026-07-16)
 
 - `[x]` Gate 0 — root-isolated local Docker rendering, daemon bootstrap,
   daemon-owned Garage provisioning, scoped credential export, and an S3
@@ -47,8 +47,10 @@ evidence and detailed source tasks.
   capacity reconciliation, list transport DTOs, and authenticated daemon/HTTP
   dispatch are delivered; provider-native capability verification and appliance
   migration adapters remain.
-- `[ ]` Gate 6 — integration and market-readiness acceptance awaits the
-  blocked deployment, security, stress, and product-workflow matrices.
+- `[~]` Gate 6 — a same-commit generated-data Synoptikon product-profile MVP
+  matrix now covers daemon provisioning, idempotent retry, profile S3, quota,
+  deletion, and restart recovery. Physical DAS, x86_64, multi-HDD, and
+  production security/performance acceptance remain externally blocked.
 
 ## Current External Blockers (2026-07-13)
 
@@ -1295,6 +1297,11 @@ appliance and representative product workflows before release readiness.
   - [x] Validate a representative non-secret Synoptikon project-provisioning
     workflow from owned template through the common daemon job response,
     including strict serialization and mismatch rejection.
+  - [x] Add a same-commit executable Synoptikon MVP acceptance workflow using
+    only the approved generated-data root. It provisions a previously absent
+    daemon-owned folder root, proves idempotent reprovisioning, exercises 64
+    objects through profile PUT/list/GET/range/verify/DELETE, rejects quota
+    overrun, and verifies catalogue/accounting recovery after reopen.
 - [~] Require real-world validation readiness, operator runbooks, release notes,
   and no unexplained critical TODO blockers before declaring a profile ready.
   - [x] Add a same-commit deployment evidence verifier and operator runbook for

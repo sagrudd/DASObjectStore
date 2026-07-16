@@ -1647,6 +1647,11 @@ identity, rejects cross-contract drift, and submits the existing idempotent
 daemon profile-provisioning job. It is profile-neutral and shared by the typed
 Synoptikon, Mneion, Mnemosyne, and standalone identities; physical appliance
 acceptance remains part of the hardware matrix rather than this contract.
+The same-commit MVP harness now exercises that adapter through the real daemon
+handler into a newly created bounded folder backend and validates generated
+profile-S3, quota, deletion, and restart behavior. This closes the locally
+executable Milestone 30 provisioning workflow rather than treating a mock
+transport response as product acceptance.
 
 ## Milestone 31: Migration, Protection, and Market-Readiness Acceptance
 

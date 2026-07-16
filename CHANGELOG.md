@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.87.0 - 2026-07-16
+
+- Add a same-commit product-profile MVP acceptance workflow covering real
+  daemon provisioning and idempotent retry plus generated-data profile PUT,
+  list, GET/range, verification, deletion, quota rejection, and restart.
+- Allow an authenticated folder-profile ``Provision`` request to create its
+  explicit missing leaf directory beneath an existing parent before canonical
+  claim validation; drive/appliance roots and missing parent trees remain
+  fail-closed.
+- Require this non-secret product workflow evidence in the local release-
+  readiness verifier while keeping physical DAS and x86_64 gates blocked.
+
 ## 0.86.0 - 2026-07-15
 
 - Connect product-owned policy templates to an executable, idempotent daemon

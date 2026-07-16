@@ -123,6 +123,58 @@ pub(super) fn validate_profile_provision_claim(
     Ok(true)
 }
 
+/// Create only the final folder component needed by an idempotent provision.
+///
+/// Claim validation canonicalizes roots to prevent aliasing and symlink
+/// escapes, but a first provision has no root to canonicalize yet. The daemon
+/// may create that one explicit leaf after validating its existing parent; it
+/// never creates a missing parent tree or performs this behavior for drive or
+/// appliance profiles.
+pub(super) fn prepare_profile_provision_root(
+    request: &ProfileBindingRequest,
+) -> Result<bool, DaemonServiceRuntimeError> {
+    if request.operation != ProfileBindingOperation::Provision
+        || request.manifest.deployment_profile != DeploymentProfile::Folder
+        || request.backend_root.exists()
+    {
+        return Ok(false);
+    }
+    let parent = request.backend_root.parent().ok_or_else(|| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile provision backend root has no parent".to_string(),
+        }
+    })?;
+    let canonical_parent = fs::canonicalize(parent).map_err(|error| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "profile provision requires an existing backend parent {}: {error}",
+                parent.display()
+            ),
+        }
+    })?;
+    if !canonical_parent.is_dir() {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "profile provision backend parent is not a directory: {}",
+                canonical_parent.display()
+            ),
+        });
+    }
+    fs::create_dir(&request.backend_root).map_err(|error| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "create profile provision backend root {}: {error}",
+                request.backend_root.display()
+            ),
+        }
+    })?;
+    Ok(true)
+}
+
+pub(super) fn rollback_empty_profile_provision_root(request: &ProfileBindingRequest) {
+    let _ = fs::remove_dir(&request.backend_root);
+}
+
 /// Create the daemon-private folder namespace for a new bounded folder store.
 ///
 /// Create the private namespace and, for explicit adoption, execute the
