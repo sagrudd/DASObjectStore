@@ -15,7 +15,10 @@ WORKDIR /src
 COPY DASObjectStore /src/DASObjectStore
 COPY prosopikon /src/prosopikon
 WORKDIR /src/DASObjectStore
-RUN cargo build --release --locked -p dasobjectstore-cli -p dasobjectstore-daemon
+RUN sed -i \
+        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "c1dd477270e3ab34f5444e2c0565af845a930a70" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
+        Cargo.toml \
+    && cargo build --release -p dasobjectstore-cli -p dasobjectstore-daemon
 
 FROM docker:27.5.1-cli AS docker-cli
 
