@@ -1,5 +1,6 @@
 use super::*;
 use crate::api::ProfileBindingOperation;
+use crate::runtime::export_profile_catalogue;
 
 /// Handles daemon service, provisioning, local administration, and job requests.
 pub(super) fn request<S, C>(
@@ -809,6 +810,42 @@ where
                     }
                 }
                 None => reasons.push("capacity status is unavailable".to_string()),
+            }
+            if binding.manifest.deployment_profile == DeploymentProfile::Folder
+                && root_state == ProfileInspectionRootState::Available
+            {
+                let policy = read_store_registry(&handler.store_registry_path)
+                    .ok()
+                    .and_then(|definitions| {
+                        definitions
+                            .into_iter()
+                            .find(|definition| definition.store_id == binding.manifest.store_id)
+                    })
+                    .map(|definition| definition.policy.capacity);
+                let shared_matches = policy.and_then(|policy| {
+                    FolderBackend::open(&binding.backend_root, binding.manifest.clone(), policy, 0)
+                        .ok()
+                        .and_then(|backend| {
+                            export_profile_catalogue(&binding.manifest.store_id, &backend).ok()
+                        })
+                        .and_then(|catalogue| {
+                            dasobjectstore_metadata::profile_catalogue_snapshot_matches(
+                                &handler.live_sqlite_path,
+                                &format!("profile-s3:{}", binding.manifest.store_id.as_str()),
+                                &binding.manifest.store_id,
+                                &catalogue,
+                            )
+                            .ok()
+                        })
+                });
+                match shared_matches {
+                    Some(true) => {}
+                    Some(false) => reasons.push(
+                        "shared catalogue does not match the authoritative profile catalogue"
+                            .to_string(),
+                    ),
+                    None => reasons.push("shared catalogue status is unavailable".to_string()),
+                }
             }
             let response = ProfileReadinessResponse {
                 schema_version: crate::api::PROFILE_READINESS_SCHEMA_VERSION.to_string(),

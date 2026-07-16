@@ -115,7 +115,10 @@ locations or pretending that hardware-only health is available locally:
 
 The command is read-only. A missing or unreadable root, unmanaged/unsafe folder
 entries, or unavailable/blocked capacity appears as an explicit not-ready
-reason and must be resolved through the daemon's managed workflow.
+reason and must be resolved through the daemon's managed workflow. Folder
+readiness also compares every authoritative private catalogue record with the
+shared-SQLite namespace. Missing, extra, unreadable, or changed shared rows
+block readiness; this check is read-only and never repairs metadata implicitly.
 
 The same projection is available to authenticated Web clients at
 ``/api/v1/profile-readiness/stores/{store_id}``; it uses the daemon bridge and

@@ -797,6 +797,9 @@ transaction wiring; those boundaries stay explicit in the child items below.
     daemon, authenticated Web route, and read-only CLI as ``store
     profile-verify``; success requires payload size/checksum agreement and
     returns no backend location.
+  - [x] Require ``profile-readiness`` to compare the full authoritative folder
+    catalogue with its shared-SQLite namespace. Missing, unreadable, stale, or
+    extra shared rows now block readiness without mutating either authority.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

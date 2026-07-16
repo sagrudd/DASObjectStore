@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.105.0 - 2026-07-16
+
+- Make profile readiness compare the complete authoritative private catalogue
+  with the shared-SQLite namespace and report split or unavailable metadata as
+  an explicit release blocker.
+- Add a read-only exact-snapshot comparison that never creates or repairs
+  metadata while evaluating readiness.
+
 ## 0.104.0 - 2026-07-16
 
 - Recover incomplete profile/shared-catalogue publications automatically at

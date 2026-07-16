@@ -33,6 +33,40 @@ pub struct ProfileCatalogueCommitReport {
     pub idempotent: bool,
 }
 
+pub fn profile_catalogue_snapshot_matches(
+    live_sqlite_path: impl AsRef<Path>,
+    profile_namespace: &str,
+    store_id: &StoreId,
+    catalogue: &PortableObjectCatalogue,
+) -> Result<bool, ProfileCatalogueCommitError> {
+    catalogue
+        .validate()
+        .map_err(|error| ProfileCatalogueCommitError::InvalidCatalogue(error.to_string()))?;
+    let connection = Connection::open(live_sqlite_path)?;
+    let mut statement = connection.prepare(
+        "SELECT object_id, object_version, object_json FROM profile_catalogue_objects
+         WHERE profile_namespace = ?1 AND store_id = ?2",
+    )?;
+    let actual = statement
+        .query_map(params![profile_namespace, store_id.as_str()], |row| {
+            Ok((
+                (row.get::<_, String>(0)?, row.get::<_, u64>(1)?),
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let expected = catalogue
+        .objects
+        .iter()
+        .map(|object| {
+            serde_json::to_string(object)
+                .map(|json| ((object.object_id.to_string(), object.version), json))
+                .map_err(|error| ProfileCatalogueCommitError::Serialization(error.to_string()))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    Ok(actual == expected)
+}
+
 /// Validate and atomically record a portable catalogue handoff.
 ///
 /// Replaying the same transaction and payload is idempotent. Reusing a
@@ -375,6 +409,19 @@ mod tests {
         .expect("replay");
         assert!(replay.idempotent);
         assert_eq!(replay.object_count, 1);
+        assert!(
+            profile_catalogue_snapshot_matches(&db, "folder:primary", &store_id, &catalogue,)
+                .expect("matching snapshot")
+        );
+        let empty = PortableObjectCatalogue {
+            schema_version: PROFILE_CATALOGUE_SCHEMA_VERSION,
+            store_id: store_id.clone(),
+            objects: Vec::new(),
+        };
+        assert!(
+            !profile_catalogue_snapshot_matches(&db, "folder:primary", &store_id, &empty,)
+                .expect("drifted snapshot")
+        );
         let connection = Connection::open(&db).expect("db");
         assert_eq!(
             connection
