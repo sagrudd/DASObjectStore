@@ -230,16 +230,38 @@ where
         Ok(store_id) => store_id,
         Err(error) => return Ok(api_error(error.code(), error.to_string())),
     };
-    let binding =
-        match read_profile_binding(&handler.profile_binding_registry_path, store_id.as_str()) {
-            Ok(Some(binding)) => binding,
-            Ok(None) | Err(_) => {
+    let lifecycle_state = match profile_binding_lifecycle_state(
+        &handler.profile_binding_registry_path,
+        store_id.as_str(),
+    ) {
+        Ok(state) => state,
+        Err(_) => {
+            return Ok(api_error(
+                "profile_diagnostics_unavailable",
+                "profile lifecycle state could not be inspected",
+            ))
+        }
+    };
+    let binding = match read_profile_binding_record(
+        &handler.profile_binding_registry_path,
+        store_id.as_str(),
+    ) {
+        Ok(Some(binding)) => match binding.validate_and_canonicalize() {
+            Ok(binding) => binding,
+            Err(error) => {
                 return Ok(api_error(
                     "profile_diagnostics_unavailable",
-                    "profile diagnostics requires a registered bounded folder profile",
+                    error.to_string(),
                 ))
             }
-        };
+        },
+        Ok(None) | Err(_) => {
+            return Ok(api_error(
+                "profile_diagnostics_unavailable",
+                "profile diagnostics requires a registered bounded folder profile",
+            ))
+        }
+    };
     if binding.manifest.deployment_profile != DeploymentProfile::Folder {
         return Ok(api_error(
             "profile_diagnostics_unavailable",
@@ -282,18 +304,34 @@ where
         Ok(summary) => summary,
         Err(error) => return Ok(api_error("profile_diagnostics_failed", error.to_string())),
     };
+    let actionable_message = match lifecycle_state {
+        ProfileBindingLifecycleState::Active => summary.actionable_message,
+        ProfileBindingLifecycleState::Retiring => Some(
+            "profile retirement is incomplete; restart the daemon or retry store delete"
+                .to_string(),
+        ),
+        ProfileBindingLifecycleState::Retired => Some(
+            "profile is retired; run store repair STORE to preview reactivation, then rerun with --apply"
+                .to_string(),
+        ),
+        ProfileBindingLifecycleState::Recovering => Some(
+            "profile reactivation is incomplete; restart the daemon or retry store repair STORE --apply"
+                .to_string(),
+        ),
+    };
     Ok(DaemonApiResponse::ProfileDiagnostics(
         ProfileDiagnosticsResponse {
             schema_version: crate::api::PROFILE_DIAGNOSTICS_SCHEMA_VERSION.to_string(),
             store_id,
             profile: DeploymentProfile::Folder,
+            lifecycle_state: lifecycle_state.into(),
             state: summary.state,
             catalogue_object_count: summary.catalogue_object_count,
             backend_object_count: summary.backend_object_count,
             uncatalogued_backend_object_count: summary.uncatalogued_backend_object_count,
             catalogue_missing_backend_object_count: summary.catalogue_missing_backend_object_count,
             last_reconciliation_at_unix_seconds: summary.last_reconciliation_at_unix_seconds,
-            actionable_message: summary.actionable_message,
+            actionable_message,
         },
     ))
 }

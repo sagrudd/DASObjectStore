@@ -185,8 +185,8 @@ pub use profile_migration::{
     PROFILE_MIGRATION_CONFIRMATION,
 };
 pub use profile_readiness::{
-    ProfileReadinessRequest, ProfileReadinessResponse, PROFILE_READINESS_ROUTE,
-    PROFILE_READINESS_SCHEMA_VERSION,
+    ProfileLifecycleState, ProfileReadinessRequest, ProfileReadinessResponse,
+    PROFILE_READINESS_ROUTE, PROFILE_READINESS_SCHEMA_VERSION,
 };
 pub use profile_s3::{
     ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,

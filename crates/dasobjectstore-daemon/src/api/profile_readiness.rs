@@ -7,6 +7,16 @@ use serde::{Deserialize, Serialize};
 pub const PROFILE_READINESS_SCHEMA_VERSION: &str = "dasobjectstore.profile_readiness.v1";
 pub const PROFILE_READINESS_ROUTE: &str = "/api/v1/profile-readiness/stores/{store_id}";
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileLifecycleState {
+    #[default]
+    Active,
+    Retiring,
+    Retired,
+    Recovering,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProfileReadinessRequest {
     pub store_id: StoreId,
@@ -30,6 +40,8 @@ pub struct ProfileReadinessResponse {
     pub deployment_profile: DeploymentProfile,
     pub host_mode: HostMode,
     pub protection: ProtectionPolicy,
+    #[serde(default)]
+    pub lifecycle_state: ProfileLifecycleState,
     pub root_state: ProfileInspectionRootState,
     pub ready: bool,
     pub reasons: Vec<String>,
@@ -47,6 +59,9 @@ impl ProfileReadinessResponse {
         if self.ready && !self.reasons.is_empty() {
             return Err("ready profile readiness cannot contain reasons".to_string());
         }
+        if self.ready && self.lifecycle_state != ProfileLifecycleState::Active {
+            return Err("only active profiles can be ready".to_string());
+        }
         Ok(())
     }
 }
@@ -63,6 +78,7 @@ mod tests {
             deployment_profile: DeploymentProfile::Folder,
             host_mode: HostMode::PerUser,
             protection: ProtectionPolicy::LocalOnly,
+            lifecycle_state: ProfileLifecycleState::Active,
             root_state: ProfileInspectionRootState::Available,
             ready: false,
             reasons: vec!["capacity unavailable".to_string()],
@@ -83,5 +99,24 @@ mod tests {
             "/api/v1/profile-readiness/stores/{store_id}"
         );
         assert!(PROFILE_READINESS_ROUTE.contains("{store_id}"));
+    }
+
+    #[test]
+    fn legacy_readiness_without_lifecycle_defaults_to_active() {
+        let payload = serde_json::json!({
+            "schema_version": PROFILE_READINESS_SCHEMA_VERSION,
+            "store_id": "codex",
+            "deployment_profile": "folder",
+            "host_mode": "per_user",
+            "protection": "local_only",
+            "root_state": "available",
+            "ready": true,
+            "reasons": [],
+            "capacity": null
+        });
+        let response: ProfileReadinessResponse =
+            serde_json::from_value(payload).expect("legacy readiness");
+        assert_eq!(response.lifecycle_state, ProfileLifecycleState::Active);
+        response.validate().expect("legacy response validates");
     }
 }

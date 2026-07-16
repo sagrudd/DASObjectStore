@@ -174,6 +174,7 @@ pub(super) fn run_store_profile_readiness(
         writeln!(writer, "Profile readiness")?;
         writeln!(writer, "Store: {}", response.store_id)?;
         writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
+        writeln!(writer, "Lifecycle: {:?}", response.lifecycle_state)?;
         writeln!(writer, "Root state: {:?}", response.root_state)?;
         writeln!(writer, "Ready: {}", response.ready)?;
         for reason in response.reasons {
@@ -208,6 +209,7 @@ pub(super) fn run_store_profile_diagnostics(
     } else {
         writeln!(writer, "Profile diagnostics")?;
         writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "Lifecycle: {:?}", response.lifecycle_state)?;
         writeln!(writer, "State: {:?}", response.state)?;
         writeln!(
             writer,

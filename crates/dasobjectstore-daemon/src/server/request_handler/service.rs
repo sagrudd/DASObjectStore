@@ -755,8 +755,28 @@ where
                     )))
                 }
             };
+            let lifecycle_state = profile_binding_lifecycle_state(
+                &handler.profile_binding_registry_path,
+                request.store_id.as_str(),
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
             let mut root_state = ProfileInspectionRootState::Available;
             let mut reasons = Vec::new();
+            match lifecycle_state {
+                ProfileBindingLifecycleState::Active => {}
+                ProfileBindingLifecycleState::Retiring => reasons.push(
+                    "profile retirement is incomplete; restart the daemon or retry store delete"
+                        .to_string(),
+                ),
+                ProfileBindingLifecycleState::Retired => reasons.push(
+                    "profile is retired; run store repair STORE to preview reactivation"
+                        .to_string(),
+                ),
+                ProfileBindingLifecycleState::Recovering => reasons.push(
+                    "profile reactivation is incomplete; restart the daemon or retry store repair STORE --apply"
+                        .to_string(),
+                ),
+            }
             match fs::symlink_metadata(&binding.backend_root) {
                 Ok(metadata) if !metadata.is_dir() => {
                     root_state = ProfileInspectionRootState::NotDirectory;
@@ -813,6 +833,7 @@ where
             }
             if binding.manifest.deployment_profile == DeploymentProfile::Folder
                 && root_state == ProfileInspectionRootState::Available
+                && lifecycle_state == ProfileBindingLifecycleState::Active
             {
                 let policy = read_store_registry(&handler.store_registry_path)
                     .ok()
@@ -853,6 +874,7 @@ where
                 deployment_profile: binding.manifest.deployment_profile,
                 host_mode: binding.manifest.host_mode,
                 protection: binding.manifest.protection,
+                lifecycle_state: lifecycle_state.into(),
                 root_state,
                 ready: reasons.is_empty(),
                 reasons,

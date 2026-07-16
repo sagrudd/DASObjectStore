@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.110.0 - 2026-07-16
+
+- Add path-free ``active``, ``retiring``, ``retired``, and ``recovering``
+  lifecycle projections to profile diagnostics and readiness responses, with
+  backward-compatible ``active`` defaults for older payloads.
+- Keep retained profiles inspectable while blocking readiness, suppress
+  expected shared-catalogue drift noise outside the active state, and render
+  precise retry/reactivation guidance in CLI diagnostics and readiness output.
+
 ## 0.109.0 - 2026-07-16
 
 - Add supported, source-preserving profile reactivation through ``store repair

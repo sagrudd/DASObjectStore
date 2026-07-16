@@ -21,8 +21,8 @@ use crate::api::{
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
     ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
     ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileMigrationResponse, ProfileReadinessResponse, ProfileS3HeadResponse,
-    ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
+    ProfileLifecycleState, ProfileMigrationResponse, ProfileReadinessResponse,
+    ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
@@ -801,6 +801,17 @@ impl From<ObjectBrowserQueryError> for DaemonRequestHandlerError {
     }
 }
 
+impl From<ProfileBindingLifecycleState> for ProfileLifecycleState {
+    fn from(state: ProfileBindingLifecycleState) -> Self {
+        match state {
+            ProfileBindingLifecycleState::Active => Self::Active,
+            ProfileBindingLifecycleState::Retiring => Self::Retiring,
+            ProfileBindingLifecycleState::Retired => Self::Retired,
+            ProfileBindingLifecycleState::Recovering => Self::Recovering,
+        }
+    }
+}
+
 const LIVE_SQLITE_PATH_ENV: &str = "DASOBJECTSTORE_LIVE_SQLITE_PATH";
 
 fn default_live_sqlite_path() -> PathBuf {
@@ -841,9 +852,9 @@ mod tests {
         ObjectFolderDownloadRequest, ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         PrepareEnclosureResponse, ProfileBindingOperation, ProfileBindingRequest,
-        ProfileBrowserRequest, ProfileInspectionRequest, ProfileInspectionRootState,
-        ProfileMigrationRequest, ProfileReadinessRequest, ProviderStreamChunkHeader,
-        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileInspectionRequest,
+        ProfileInspectionRootState, ProfileMigrationRequest, ProfileReadinessRequest,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
@@ -1392,6 +1403,47 @@ mod tests {
                 .expect("retry retirement report")
                 .already_retired
         );
+        let diagnostics = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileDiagnostics(ProfileDiagnosticsRequest {
+                    store_id: StoreId::new("upload-store").expect("store id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("retired diagnostics");
+        let DaemonApiResponse::ProfileDiagnostics(diagnostics) = diagnostics else {
+            panic!("expected retired profile diagnostics: {diagnostics:?}");
+        };
+        assert_eq!(
+            diagnostics.lifecycle_state,
+            crate::api::ProfileLifecycleState::Retired
+        );
+        assert!(diagnostics
+            .actionable_message
+            .expect("retired action")
+            .contains("store repair"));
+        let readiness = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
+                    store_id: StoreId::new("upload-store").expect("store id"),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("retired readiness");
+        let DaemonApiResponse::ProfileReadiness(readiness) = readiness else {
+            panic!("expected retired profile readiness: {readiness:?}");
+        };
+        assert_eq!(
+            readiness.lifecycle_state,
+            crate::api::ProfileLifecycleState::Retired
+        );
+        assert!(!readiness.ready);
+        assert!(readiness
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("retired")));
 
         let recover = |dry_run| {
             handler

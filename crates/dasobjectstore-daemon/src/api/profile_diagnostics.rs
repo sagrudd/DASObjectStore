@@ -1,4 +1,4 @@
-use crate::api::DaemonRequestValidationError;
+use crate::api::{DaemonRequestValidationError, ProfileLifecycleState};
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,8 @@ pub struct ProfileDiagnosticsResponse {
     pub schema_version: String,
     pub store_id: StoreId,
     pub profile: DeploymentProfile,
+    #[serde(default)]
+    pub lifecycle_state: ProfileLifecycleState,
     pub state: ProfileDiagnosticsState,
     pub catalogue_object_count: u64,
     pub backend_object_count: u64,
@@ -76,6 +78,7 @@ mod tests {
             schema_version: PROFILE_DIAGNOSTICS_SCHEMA_VERSION.to_string(),
             store_id: StoreId::new("codex").expect("store id"),
             profile: DeploymentProfile::Folder,
+            lifecycle_state: ProfileLifecycleState::Active,
             state: ProfileDiagnosticsState::UncataloguedBackendObjects,
             catalogue_object_count: 1,
             backend_object_count: 2,

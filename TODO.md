@@ -819,6 +819,10 @@ transaction wiring; those boundaries stay explicit in the child items below.
     phase, exact private-to-shared catalogue republication, startup completion,
     and activation only after publication succeeds. Physical purge remains a
     separate lifecycle operation rather than being hidden inside delete.
+  - [x] Project ``active``, ``retiring``, ``retired``, and ``recovering``
+    states through path-free diagnostics/readiness APIs and CLI output.
+    Non-active profiles remain inspectable but never ready; responses provide
+    exact retry or reactivation guidance instead of reporting them as unbound.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

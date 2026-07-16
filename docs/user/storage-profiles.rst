@@ -490,6 +490,13 @@ startup resumes the same publication before restoring profile access. Drive
 profile reactivation remains unavailable until its live filesystem-identity
 acceptance can be enforced; recovery never weakens that guard.
 
+Both ``store profile-diagnostics PROFILE`` and ``store profile-readiness
+PROFILE`` report the path-free lifecycle state as ``active``, ``retiring``,
+``retired``, or ``recovering``. A non-active profile remains inspectable but is
+never reported ready. Retirement and recovery transitions include the exact
+retry or reactivation action; expected absence of shared catalogue rows while
+retired is not misreported as ordinary catalogue drift.
+
 Per-user macOS service plans
 ----------------------------
 
