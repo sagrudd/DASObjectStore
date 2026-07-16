@@ -52,6 +52,14 @@ printed. Provisioning also idempotently registers the local folder manifest and
 canonical container-visible backend with the daemon so capacity admission and
 remote completion use the same authority. The default logical capacity is 1
 TiB and can be lowered with ``DASOBJECTSTORE_LOCAL_CAPACITY_LIMIT_BYTES``.
+The daemon joins its daemon-owned Garage network after provisioning and pins
+the Garage signing region, so container-side remote completion verifies through
+the ``garage`` service without Docker Desktop port hairpinning.
+The generated store definition and folder binding receive the same finite
+capacity policy, making restart reconciliation deterministic.
+The authoritative live object catalogue is persisted at
+``/var/lib/dasobjectstore/live.sqlite`` in the mounted daemon state rather than
+using the appliance-only ``/srv`` default.
 
 Configuration paths
 -------------------

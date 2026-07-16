@@ -191,6 +191,13 @@ pub(super) fn run_store_create(
     if let Some(copies) = args.copies() {
         policy.copies = copies;
     }
+    if let Some(limit) = args.capacity_limit_bytes() {
+        policy.capacity = CapacityPolicy::bounded(limit, args.backend_reserve_bytes());
+    } else if args.backend_reserve_bytes() != 0 {
+        return Err(CliError::CommandFailed(
+            "--backend-reserve-bytes requires --capacity-limit-bytes".to_string(),
+        ));
+    }
     policy.validate()?;
     super::enforce_supported_das_for_store_create(args)?;
 

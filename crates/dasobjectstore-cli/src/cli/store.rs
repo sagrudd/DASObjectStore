@@ -738,6 +738,12 @@ pub(crate) struct StoreCreateArgs {
     /// Override the default copy count for this store class.
     #[arg(long)]
     copies: Option<u8>,
+    /// Optional finite logical capacity for folder or drive-backed profiles.
+    #[arg(long)]
+    capacity_limit_bytes: Option<u64>,
+    /// Bytes reserved from backend capacity when a logical limit is supplied.
+    #[arg(long, default_value_t = 0)]
+    backend_reserve_bytes: u64,
     /// Explicit S3 bucket name; defaults to a stable name derived from the store ID.
     #[arg(long)]
     bucket: Option<String>,
@@ -769,6 +775,12 @@ impl StoreCreateArgs {
     }
     pub(crate) fn copies(&self) -> Option<u8> {
         self.copies
+    }
+    pub(crate) fn capacity_limit_bytes(&self) -> Option<u64> {
+        self.capacity_limit_bytes
+    }
+    pub(crate) fn backend_reserve_bytes(&self) -> u64 {
+        self.backend_reserve_bytes
     }
     pub(crate) fn bucket(&self) -> Option<&str> {
         self.bucket.as_deref()

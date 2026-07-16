@@ -325,6 +325,8 @@ services:
     environment:
       DASOBJECTSTORE_STORE_REGISTRY_PATH: /var/lib/dasobjectstore/stores.json
       DASOBJECTSTORE_SUBOBJECT_REGISTRY_PATH: /var/lib/dasobjectstore/subobjects.json
+      DASOBJECTSTORE_LIVE_SQLITE_PATH: /var/lib/dasobjectstore/live.sqlite
+      AWS_DEFAULT_REGION: garage
     volumes:
       - "$CONFIG_DIR:/etc/dasobjectstore:ro"
       - "$STATE_DIR:/var/lib/dasobjectstore"
@@ -363,6 +365,8 @@ render_profile() {
     "$bin" store create "$STORE_ID" \
         --class generated_data \
         --copies 1 \
+        --capacity-limit-bytes "$CAPACITY_LIMIT_BYTES" \
+        --backend-reserve-bytes 0 \
         --bucket "$STORE_BUCKET" \
         --ssd-root "$PROFILE_ROOT" \
         --registry-path "$REGISTRY_PATH" \
@@ -428,6 +432,17 @@ start_garage() {
         --project-directory /var/lib/dasobjectstore/garage
 }
 
+connect_daemon_to_garage_network() {
+    local daemon_container garage_network
+    daemon_container="$(docker_compose ps -q dasobjectstored)"
+    garage_network="${GARAGE_PROJECT}_default"
+    [ -n "$daemon_container" ] || die "daemon container is not running"
+    if ! docker network inspect --format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' \
+        "$garage_network" | grep -Fxq "$(docker inspect --format '{{.Name}}' "$daemon_container" | sed 's#^/##')"; then
+        docker network connect "$garage_network" "$daemon_container"
+    fi
+}
+
 wait_for_garage() {
     local attempt code
     for attempt in $(seq 1 60); do
@@ -457,6 +472,7 @@ provision() {
         --capacity-limit-bytes "$CAPACITY_LIMIT_BYTES" \
         --operation provision >/dev/null
     start_garage >/dev/null
+    connect_daemon_to_garage_network
     wait_for_garage
     docker_compose exec -T dasobjectstored \
         dasobjectstore service provision --provider garage >/dev/null

@@ -559,6 +559,32 @@ where
                 }
                 response.store_definition_published = !response.accepted.dry_run;
             }
+            if !response.accepted.dry_run {
+                let definitions = read_store_registry(&handler.store_registry_path)
+                    .map_err(DaemonServiceRuntimeError::ObjectService)
+                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                let definition = definitions
+                    .iter()
+                    .find(|definition| definition.store_id == rollback_request.manifest.store_id)
+                    .ok_or_else(|| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: format!(
+                                    "profile binding has no store definition for {}",
+                                    rollback_request.manifest.store_id
+                                ),
+                            },
+                        )
+                    })?;
+                ensure_profile_catalogue_store(&handler.live_sqlite_path, definition, &now)
+                    .map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: error.to_string(),
+                            },
+                        )
+                    })?;
+            }
             handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
         }
@@ -666,13 +692,13 @@ where
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "profile_binding_not_found",
                         "no persisted profile binding exists for this ObjectStore",
-                    )))
+                    )));
                 }
                 Err(_) => {
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "profile_inspection_unavailable",
                         "the persisted profile binding could not be inspected",
-                    )))
+                    )));
                 }
             };
             let mut response = ProfileInspectionResponse {
@@ -746,13 +772,13 @@ where
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "profile_binding_not_found",
                         "no persisted profile binding exists for this ObjectStore",
-                    )))
+                    )));
                 }
                 Err(_) => {
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "profile_readiness_unavailable",
                         "the persisted profile binding could not be inspected",
-                    )))
+                    )));
                 }
             };
             let lifecycle_state = profile_binding_lifecycle_state(
@@ -934,6 +960,58 @@ where
             .map_err(DaemonRequestHandlerError::ServiceRuntime),
         _ => unreachable!("service dispatcher received a non-service request"),
     }
+}
+
+fn ensure_profile_catalogue_store(
+    live_sqlite_path: &std::path::Path,
+    definition: &dasobjectstore_object_service::StoreServiceDefinition,
+    recorded_at_utc: &str,
+) -> Result<(), dasobjectstore_core::backend::BackendError> {
+    use rusqlite::{Connection, params};
+
+    let sqlite_error = |error: rusqlite::Error| {
+        dasobjectstore_core::backend::BackendError::InvalidRequest(format!(
+            "profile catalogue registration failed: {error}"
+        ))
+    };
+    if let Some(parent) = live_sqlite_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            dasobjectstore_core::backend::BackendError::InvalidRequest(error.to_string())
+        })?;
+    }
+    let mut connection = Connection::open(live_sqlite_path).map_err(sqlite_error)?;
+    connection
+        .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
+        .map_err(sqlite_error)?;
+    let transaction = connection.transaction().map_err(sqlite_error)?;
+    transaction
+        .execute(
+            "INSERT OR IGNORE INTO pools (pool_id, state, created_at_utc, updated_at_utc)
+             VALUES ('profile-pool', 'Clean', ?1, ?1)",
+            [recorded_at_utc],
+        )
+        .map_err(sqlite_error)?;
+    let policy_json = serde_json::to_string(&definition.policy).map_err(|error| {
+        dasobjectstore_core::backend::BackendError::InvalidRequest(error.to_string())
+    })?;
+    transaction
+        .execute(
+            "INSERT INTO stores (store_id, pool_id, class, policy_json, created_at_utc, updated_at_utc)
+             VALUES (?1, 'profile-pool', ?2, ?3, ?4, ?4)
+             ON CONFLICT(store_id) DO UPDATE SET
+               class = excluded.class,
+               policy_json = excluded.policy_json,
+               updated_at_utc = excluded.updated_at_utc",
+            params![
+                definition.store_id.as_str(),
+                definition.policy.class.name(),
+                policy_json,
+                recorded_at_utc,
+            ],
+        )
+        .map_err(sqlite_error)?;
+    transaction.commit().map_err(sqlite_error)?;
+    Ok(())
 }
 
 fn rollback_profile_registration<S, C>(

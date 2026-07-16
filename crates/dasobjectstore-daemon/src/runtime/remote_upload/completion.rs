@@ -7,9 +7,9 @@ use super::{
 use crate::runtime::service::ServiceCommandRunner;
 use dasobjectstore_core::ids::{ObjectId, PlacementId, StoreId};
 use dasobjectstore_core::object_catalogue::{
-    ObjectDigest, PortableLifecycleState, PortableObjectCatalogue, PortableObjectVersion,
-    PortablePlacement, PortablePlacementLocation, PortableProtectionState, PortableProvenance,
-    PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
+    ObjectDigest, PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION, PortableLifecycleState,
+    PortableObjectCatalogue, PortableObjectVersion, PortablePlacement, PortablePlacementLocation,
+    PortableProtectionState, PortableProvenance,
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
 use serde::Deserialize;
@@ -138,7 +138,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                 checksum: digest.clone(),
                 provenance: PortableProvenance {
                     source_kind: "remote_upload".to_string(),
-                    locator: Some(self.completion.upload_id.clone()),
+                    locator: Some(self.completion.object_key.clone()),
                     revision: None,
                 },
                 lifecycle: PortableLifecycleState::HashVerified,
@@ -147,7 +147,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                 placements: vec![PortablePlacement {
                     placement_id: PlacementId::new(format!(
                         "provider-{}",
-                        self.completion.upload_id
+                        &metadata.expected_checksum[7..31]
                     ))
                     .map_err(|error| RemoteUploadCompletionCommitError::new(error.to_string()))?,
                     location: PortablePlacementLocation::Provider {
@@ -158,7 +158,9 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                         ),
                     },
                     checksum: digest,
-                    verified_at_utc: Some(self.committed_at_utc.clone()),
+                    // The enclosing catalogue transaction records commit time.
+                    // Keep immutable placement identity independent of retry time.
+                    verified_at_utc: None,
                 }],
             }],
         };
@@ -311,9 +313,11 @@ mod tests {
 
         let calls = runner.calls.lock().expect("calls lock");
         assert_eq!(calls.len(), 2);
-        assert!(calls[0]
-            .windows(2)
-            .any(|args| args == ["--bucket", "store-a"]));
+        assert!(
+            calls[0]
+                .windows(2)
+                .any(|args| args == ["--bucket", "store-a"])
+        );
         let connection = Connection::open(db).expect("open metadata");
         let transactions: u64 = connection
             .query_row(
