@@ -925,3 +925,13 @@ pub struct SessionCheckResponse {
     pub valid: bool,
     pub expires_at_unix_seconds: i64,
 }
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct FederatedHostSessionResponse {
+    pub subject_id: String,
+    pub authority: String,
+    pub roles: Vec<String>,
+    pub expires_at_unix_seconds: Option<i64>,
+    pub correlation_id: Option<String>,
+}

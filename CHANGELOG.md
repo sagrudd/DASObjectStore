@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.94.0 - 2026-07-16
+
+- Add a typed federated host-session endpoint and Yew host mode selected by a
+  host-owned HTML marker, with no DAS bearer stored in the browser.
+- Redirect missing/expired federated sessions to host login, delegate logout
+  to the host, and retain intrinsic login only for compatibility standalone
+  pages without a host marker.
+- Allow Monas-owned Web routes and the DASObjectStore operational API to share
+  one fail-closed in-process Prosopikon middleware boundary.
+
 ## 0.93.0 - 2026-07-16
 
 - Replace the sibling-path Prosopikon dependency with exact Git commit

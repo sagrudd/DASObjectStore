@@ -157,6 +157,26 @@ async fn assert_monas_product_api_accepts(
         .await
         .expect("request completes");
     assert_eq!(response.status(), expected);
+    if expected == StatusCode::OK {
+        let response = monas_dasobjectstore_api_router(store.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/host-session")
+                    .header(COOKIE, format!("monas_session=operator:{session_token}"))
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .expect("session response body");
+        let session: serde_json::Value = serde_json::from_slice(&body).expect("session JSON");
+        assert_eq!(session["subject_id"], "operator");
+        assert_eq!(session["authority"], "monas_standalone");
+        assert!(session.get("session_token").is_none());
+    }
 }
 
 async fn assert_monas_product_api_omits_intrinsic_login(

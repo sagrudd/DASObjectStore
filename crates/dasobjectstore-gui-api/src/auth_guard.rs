@@ -27,6 +27,27 @@ pub struct AuthenticatedGuiActor {
     pub correlation_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FederatedHostSessionResponse {
+    pub subject_id: String,
+    pub authority: AuthenticatedActorAuthority,
+    pub roles: Vec<String>,
+    pub expires_at_unix_seconds: Option<i64>,
+    pub correlation_id: Option<String>,
+}
+
+impl From<AuthenticatedGuiActor> for FederatedHostSessionResponse {
+    fn from(actor: AuthenticatedGuiActor) -> Self {
+        Self {
+            subject_id: actor.subject_id,
+            authority: actor.authority,
+            roles: actor.roles,
+            expires_at_unix_seconds: actor.expires_at_unix_seconds,
+            correlation_id: actor.correlation_id,
+        }
+    }
+}
+
 impl AuthenticatedGuiActor {
     pub fn local_standalone(username: impl Into<String>, expires_at_unix_seconds: i64) -> Self {
         Self {

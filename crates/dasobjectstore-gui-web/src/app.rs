@@ -51,6 +51,7 @@ enum SessionValidation {
 }
 
 async fn validate_server_session(
+    host: FrontendHost,
     auth_base_path: &str,
     api_base_path: &str,
     expected_identity: Option<ServerIdentity>,
@@ -75,6 +76,19 @@ async fn validate_server_session(
         }
     }
 
+    if host.is_federated() {
+        return match api::verify_host_session(api_base_path).await {
+            Ok(response) => SessionValidation::Valid {
+                username: response.subject_id,
+                identity,
+            },
+            Err(error) if error.is_transport_failure() => {
+                SessionValidation::Unreachable(SERVER_UNREACHABLE_MESSAGE.to_string())
+            }
+            Err(_) => SessionValidation::Invalid(SESSION_INVALIDATED_MESSAGE.to_string()),
+        };
+    }
+
     let Some((stored_username, session_token)) = storage::stored_session() else {
         return SessionValidation::Invalid(SESSION_INVALIDATED_MESSAGE.to_string());
     };
@@ -93,6 +107,7 @@ async fn validate_server_session(
 
 fn apply_session_validation(
     validation: SessionValidation,
+    host: FrontendHost,
     stable_state: UseStateHandle<StableState>,
     app_state: UseStateHandle<AppState>,
     username: UseStateHandle<String>,
@@ -114,6 +129,9 @@ fn apply_session_validation(
             server_identity.set(None);
             stable_state.set(StableState::Disconnected);
             app_state.set(AppState::SessionInvalid(message));
+            if host.is_federated() {
+                redirect_to_host_login();
+            }
         }
         SessionValidation::Unreachable(message) => {
             storage::clear_session();
@@ -125,15 +143,43 @@ fn apply_session_validation(
     }
 }
 
+fn configured_frontend_host() -> FrontendHost {
+    let marker = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| {
+            document
+                .query_selector("meta[name='dasobjectstore-host']")
+                .ok()
+                .flatten()
+        })
+        .and_then(|element| element.get_attribute("content"));
+    FrontendHost::from_marker(marker.as_deref())
+}
+
+fn redirect_to_host_login() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let location = window.location();
+    let return_to = location
+        .pathname()
+        .unwrap_or_else(|_| "/products/dasobjectstore/".to_string());
+    let encoded = js_sys::encode_uri_component(&return_to)
+        .as_string()
+        .unwrap_or_else(|| "%2Fproducts%2Fdasobjectstore%2F".to_string());
+    let _ = location.set_href(&format!("/login?return_to={encoded}"));
+}
+
 #[function_component(App)]
 pub fn app() -> Html {
-    let mount = FrontendMount::default_for(FrontendHost::Standalone);
+    let mount = FrontendMount::default_for(configured_frontend_host());
+    let host = mount.host;
     let api_base_path = mount.api_base_path.clone();
     let auth_base_path = mount.auth_base_path();
     let initial_session = storage::stored_session();
     let stable_state = use_state(|| StableState::Disconnected);
     let app_state = use_state(|| {
-        if initial_session.is_some() {
+        if host.is_federated() || initial_session.is_some() {
             AppState::CheckingSession
         } else {
             AppState::Disconnected
@@ -156,12 +202,13 @@ pub fn app() -> Html {
         let username = username.clone();
         let server_identity = server_identity.clone();
         use_effect_with((), move |_| {
-            if storage::stored_session().is_some() {
+            if host.is_federated() || storage::stored_session().is_some() {
                 wasm_bindgen_futures::spawn_local(async move {
                     let validation =
-                        validate_server_session(&auth_base_path, &api_base_path, None).await;
+                        validate_server_session(host, &auth_base_path, &api_base_path, None).await;
                     apply_session_validation(
                         validation,
+                        host,
                         stable_state,
                         app_state,
                         username,
@@ -191,6 +238,7 @@ pub fn app() -> Html {
                     let server_identity = server_identity.clone();
                     wasm_bindgen_futures::spawn_local(async move {
                         let validation = validate_server_session(
+                            host,
                             &auth_base_path,
                             &api_base_path,
                             (*server_identity).clone(),
@@ -198,6 +246,7 @@ pub fn app() -> Html {
                         .await;
                         apply_session_validation(
                             validation,
+                            host,
                             stable_state,
                             app_state,
                             username,
@@ -313,6 +362,13 @@ pub fn app() -> Html {
             let username = username.clone();
             let server_identity = server_identity.clone();
             wasm_bindgen_futures::spawn_local(async move {
+                if host.is_federated() {
+                    api::host_logout().await;
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().set_href("/login");
+                    }
+                    return;
+                }
                 if let Some((stored_username, session_token)) = storage::stored_session() {
                     let _ = api::logout(&auth_base_path, stored_username, session_token).await;
                 }

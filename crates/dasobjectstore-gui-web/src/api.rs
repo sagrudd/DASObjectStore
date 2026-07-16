@@ -87,6 +87,22 @@ pub async fn verify_session(
 }
 
 #[cfg(target_arch = "wasm32")]
+pub async fn verify_host_session(
+    api_base_path: &str,
+) -> Result<FederatedHostSessionResponse, ApiError> {
+    get_json_without_session(&format!(
+        "{}/host-session",
+        api_base_path.trim_end_matches('/')
+    ))
+    .await
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn host_logout() {
+    let _ = Request::post("/logout").send().await;
+}
+
+#[cfg(target_arch = "wasm32")]
 pub async fn get_api_health(api_base_path: &str) -> Result<ApiHealthResponse, ApiError> {
     get_json_without_session(&format!("{}/health", api_base_path.trim_end_matches('/'))).await
 }

@@ -3397,6 +3397,11 @@ browser and appliance acceptance remain external validation gates.
     DASObjectStore and Prosopikon dependencies. Prove the shared cookie reaches
     EasyConnect, intrinsic DAS login is absent, and logout revokes product
     access without forwarding the legacy ``x-img.host-context.v1`` header.
+  - [x] Make the Yew application host-session aware. Federated mode is selected
+    by a host-owned HTML marker, validates ``/api/v1/host-session`` without a
+    DAS token in browser storage, redirects stale sessions to the host login,
+    delegates logout to the host, and permits host Web routes to share the same
+    fail-closed Monas middleware as the operational API.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,

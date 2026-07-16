@@ -1741,6 +1741,15 @@ header or browser bearer crosses a forwarding boundary. Actual Synoptikon
 source/deployment mounting and browser equivalence evidence remain outstanding;
 the typed fail-closed Synoptikon composer remains the local surrogate meanwhile.
 
+Delivered federated browser core (0.94.0): the Yew application can now select
+Monas or Synoptikon authentication from a host-owned HTML marker, validate the
+typed host-session endpoint using only the HttpOnly host cookie, redirect stale
+sessions to host login with a same-origin return path, and delegate logout to
+the host. No DAS browser token is created or stored in federated mode. The
+Monas composer can wrap host-owned Web routes and the operational API in one
+session boundary. Pinned Monas asset serving and browser evidence are the next
+local acceptance step.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

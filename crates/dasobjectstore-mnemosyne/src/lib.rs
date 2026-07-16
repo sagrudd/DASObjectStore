@@ -51,8 +51,8 @@ pub use host_auth_adapter::{
     MonasHostSessionIssue, SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
 };
 pub use host_auth_router::{
-    monas_dasobjectstore_api_router, monas_federated_router, synoptikon_federated_router,
-    SynoptikonHostRequestAuthentication, MONAS_SESSION_COOKIE,
+    monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
+    synoptikon_federated_router, SynoptikonHostRequestAuthentication, MONAS_SESSION_COOKIE,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

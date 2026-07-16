@@ -1,6 +1,7 @@
 //! Router composition for standalone authentication and administration.
 
 use super::*;
+use crate::FederatedHostSessionResponse;
 use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
@@ -45,7 +46,15 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
 /// issuance is intentionally omitted so Monas or Synoptikon remains the sole
 /// browser authentication authority.
 pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
-    federated_operational_router(auth_store)
+    Router::new()
+        .route("/api/v1/host-session", get(federated_host_session))
+        .merge(federated_operational_router(auth_store))
+}
+
+async fn federated_host_session(
+    actor: AuthenticatedGuiActor,
+) -> Json<FederatedHostSessionResponse> {
+    Json(actor.into())
 }
 
 fn federated_operational_router(auth_store: LocalAuthStore) -> Router {

@@ -16,6 +16,18 @@ impl FrontendHost {
             Self::Synoptikon => "synoptikon",
         }
     }
+
+    pub fn from_marker(value: Option<&str>) -> Self {
+        match value {
+            Some("monas") => Self::Monas,
+            Some("synoptikon") => Self::Synoptikon,
+            _ => Self::Standalone,
+        }
+    }
+
+    pub const fn is_federated(self) -> bool {
+        !matches!(self, Self::Standalone)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -28,8 +40,10 @@ pub struct FrontendMount {
 impl FrontendMount {
     pub fn default_for(host: FrontendHost) -> Self {
         let base_path = match host {
-            FrontendHost::Standalone => "/products/dasobjectstore".to_string(),
-            FrontendHost::Monas | FrontendHost::Synoptikon => {
+            FrontendHost::Standalone | FrontendHost::Monas => {
+                "/products/dasobjectstore".to_string()
+            }
+            FrontendHost::Synoptikon => {
                 format!("/{}/dasobjectstore", host.name())
             }
         };
@@ -72,5 +86,15 @@ mod tests {
             .expect("mount serializes");
 
         assert_eq!(encoded["host"], "monas");
+    }
+
+    #[test]
+    fn monas_marker_selects_federated_product_mount() {
+        let host = FrontendHost::from_marker(Some("monas"));
+        let mount = FrontendMount::default_for(host);
+
+        assert!(host.is_federated());
+        assert_eq!(mount.base_path, "/products/dasobjectstore");
+        assert_eq!(mount.api_base_path, "/products/dasobjectstore/api/v1");
     }
 }

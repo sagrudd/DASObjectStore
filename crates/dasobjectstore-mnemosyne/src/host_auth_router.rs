@@ -35,8 +35,18 @@ pub fn monas_federated_router(router: Router, auth_store: ProsopikonAuthStore) -
 }
 
 pub fn monas_dasobjectstore_api_router(auth_store: ProsopikonAuthStore) -> Router {
+    monas_dasobjectstore_router(Router::new(), auth_store)
+}
+
+/// Mount host-owned Web routes and the DASObjectStore operational API behind
+/// one Monas session boundary.
+pub fn monas_dasobjectstore_router(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+) -> Router {
     let product_router =
-        federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()));
+        federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
+            .merge(host_product_routes);
     monas_federated_router(product_router, auth_store)
 }
 

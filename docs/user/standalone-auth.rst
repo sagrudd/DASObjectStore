@@ -118,6 +118,13 @@ mounts this router directly at ``/products/dasobjectstore``. Both projects pin
 Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
 store is type- and schema-identical in a clean checkout.
 
+Federated HTML must include
+``<meta name="dasobjectstore-host" content="monas">`` (or ``synoptikon``).
+The Yew client then checks ``/api/v1/host-session`` with the HttpOnly host
+cookie, never creates a DAS token in browser storage, returns an invalid session
+to the host login, and sends logout to the host. Standalone pages without this
+marker retain the compatibility DAS login during migration.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication

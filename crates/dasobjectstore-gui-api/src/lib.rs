@@ -43,7 +43,7 @@ pub use auth::{
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
-    STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+    FederatedHostSessionResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
     federated_gui_api_router, gui_api_router_for_host_mode,
