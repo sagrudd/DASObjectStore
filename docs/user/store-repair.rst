@@ -40,6 +40,12 @@ the exact private catalogue through the crash-safe handoff. It does not scan
 user files, rebuild appliance placements, or expose the backend root. Profile
 repair cannot be combined with ``--reconcile-s3``.
 
+Before repair, ``dasobjectstore store profile-diagnostics STORE`` reports the
+catalogue and backend object counts, uncatalogued payload count, missing
+payload count, and daemon-owned next action. Add ``--json`` for automation.
+The command is read-only and never reveals the profile root or private object
+locations. After applying repair, finish with ``store profile-readiness``.
+
 Recover uncatalogued Garage uploads
 -----------------------------------
 

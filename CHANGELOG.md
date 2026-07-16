@@ -6,6 +6,12 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.107.0 - 2026-07-16
+
+- Expose daemon-owned profile diagnostics through `store profile-diagnostics`
+  with JSON and path-free operator output for catalogue/backend drift counts
+  and actionable repair guidance.
+
 ## 0.106.0 - 2026-07-16
 
 - Route targeted bounded-folder `store repair` through daemon-owned catalogue

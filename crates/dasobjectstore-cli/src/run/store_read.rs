@@ -193,6 +193,45 @@ pub(super) fn run_store_profile_readiness(
     Ok(())
 }
 
+pub(super) fn run_store_profile_diagnostics(
+    args: &StoreProfileReadinessArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let store_id = StoreId::new(args.store_id())
+        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let config = DaemonRuntimeConfig::default_packaged();
+    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
+        .profile_diagnostics(ProfileDiagnosticsRequest { store_id })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Profile diagnostics")?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(writer, "State: {:?}", response.state)?;
+        writeln!(
+            writer,
+            "Catalogue objects: {}",
+            response.catalogue_object_count
+        )?;
+        writeln!(writer, "Backend objects: {}", response.backend_object_count)?;
+        writeln!(
+            writer,
+            "Uncatalogued backend objects: {}",
+            response.uncatalogued_backend_object_count
+        )?;
+        writeln!(
+            writer,
+            "Missing backend objects: {}",
+            response.catalogue_missing_backend_object_count
+        )?;
+        if let Some(message) = response.actionable_message {
+            writeln!(writer, "Action: {message}")?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_user_service_plan(
     args: &StoreUserServicePlanArgs,
     writer: &mut impl Write,

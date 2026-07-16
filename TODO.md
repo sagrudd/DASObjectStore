@@ -804,6 +804,9 @@ transaction wiring; those boundaries stay explicit in the child items below.
     comparison. Dry-run reports drift; confirmed apply republishes the current
     private catalogue through the crash-safe handoff without scanning or
     rebuilding appliance placement metadata.
+  - [x] Expose the daemon's read-only profile/backend drift diagnostics through
+    ``store profile-diagnostics`` so operators have one supported CLI sequence
+    for diagnosis, repair preview/apply, and final readiness verification.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

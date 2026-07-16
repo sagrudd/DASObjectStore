@@ -44,6 +44,9 @@ pub(crate) enum StoreCommand {
     /// Report whether a bounded profile is ready for daemon-owned use.
     #[command(name = "profile-readiness")]
     ProfileReadiness(StoreProfileReadinessArgs),
+    /// Compare profile catalogue authority with backend payload enumeration.
+    #[command(name = "profile-diagnostics")]
+    ProfileDiagnostics(StoreProfileReadinessArgs),
     /// Render a validated per-user macOS launchd service plan without installing it.
     #[command(name = "user-service-plan")]
     UserServicePlan(StoreUserServicePlanArgs),
@@ -1213,6 +1216,26 @@ mod tests {
         };
         assert_eq!(readiness.store_id(), "generated-data");
         assert!(readiness.json());
+    }
+
+    #[test]
+    fn parses_profile_diagnostics_request() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "profile-diagnostics",
+            "generated-data",
+            "--json",
+        ])
+        .expect("profile diagnostics parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::ProfileDiagnostics(diagnostics)) = args.command() else {
+            panic!("expected profile diagnostics command")
+        };
+        assert_eq!(diagnostics.store_id(), "generated-data");
+        assert!(diagnostics.json());
     }
 
     #[test]
