@@ -431,8 +431,10 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-local-auth-helper");
+    assert_contains(BUILD_DEB, "target/release/dasobjectstore-auth-migrate");
     assert_contains(BUILD_DEB, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
+    assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-auth-migrate");
     assert_contains(
         BUILD_DEB,
         "usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
@@ -463,8 +465,10 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-local-auth-helper");
+    assert_contains(BUILD_RPM, "target/release/dasobjectstore-auth-migrate");
     assert_contains(BUILD_RPM, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
+    assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-auth-migrate");
     assert_contains(
         BUILD_RPM,
         "/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",

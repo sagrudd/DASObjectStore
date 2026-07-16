@@ -1773,6 +1773,14 @@ Synoptikon identities remain fail-closed until an explicit mapping exists.
 The pinned Monas host additionally passes mounted CSRF wiring and real-browser
 ordinary/admin OS-policy and expired-session return checks.
 
+Delivered rollback-safe auth registry migration (0.97.0): the packaged offline
+utility validates and atomically copies the existing Prosopikon-compatible
+DASObjectStore registry into a distinct Monas root, retains the source, records
+checksum provenance, rejects conflicts and concurrent change, and supports
+idempotent replay. Browser sessions deliberately reauthenticate at the cookie
+boundary rather than exporting a bearer. Deployment switching, rollback proof,
+and intrinsic-route removal remain host-gated.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

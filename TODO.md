@@ -3421,6 +3421,14 @@ browser and appliance acceptance remain external validation gates.
     ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. Mounted-router tests prove
     CSRF wiring, and the real browser proves ordinary/admin OS-policy access,
     current product provenance, and expired-session return to Monas login.
+  - [x] Deliver the offline identity/session registry migration seam. The
+    packaged ``dasobjectstore-auth-migrate`` utility validates and atomically
+    copies the already Prosopikon-compatible intrinsic registry into a distinct
+    Monas root, rejects symlinks/conflicts/concurrent source changes, records a
+    checksum marker, preserves the source for rollback, and supports
+    idempotent interruption recovery. Browser reauthentication is explicit
+    because a DAS header/local-storage session cannot become a Monas HttpOnly
+    cookie without exposing the bearer.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
@@ -3430,7 +3438,9 @@ browser and appliance acceptance remain external validation gates.
   - [ ] Migrate compatible standalone identities/sessions, prove package
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe
-    release.
+    release. The offline registry tool and local interruption/rollback contract
+    are complete; package-host execution, coordinated authority switch, and
+    final removal remain gated by the actual deployment hosts.
 
 - [x] Keep CLI examples synchronized between `README.md`,
   `docs/requirements.md`, `ROADMAP.md`, and this file.

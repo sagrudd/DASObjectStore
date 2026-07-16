@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.97.0 - 2026-07-16
+
+- Add the packaged ``dasobjectstore-auth-migrate`` utility for dry-run-first,
+  rollback-safe migration of the existing Prosopikon-compatible intrinsic
+  registry into a distinct Monas authentication root.
+- Validate the source schema, reject symlinks and conflicting targets, require
+  exact confirmation, copy the complete registry atomically with mode 0600,
+  retain the source, and persist checksum/provenance evidence. Interrupted
+  identical replays are idempotent; browser reauthentication remains explicit.
+
 ## 0.96.0 - 2026-07-16
 
 - Map Monas standalone subjects into the appliance-local OS identity namespace

@@ -62,6 +62,8 @@ install -d \
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$payload_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$payload_root/usr/bin/dasobjectstore-server"
+install -m 0755 "$repo_root/target/release/dasobjectstore-auth-migrate" \
+  "$payload_root/usr/bin/dasobjectstore-auth-migrate"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$payload_root/usr/bin/dasobjectstored"
 install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
@@ -320,6 +322,7 @@ fi
 /opt/dasobjectstore/web
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
+/usr/bin/dasobjectstore-auth-migrate
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper

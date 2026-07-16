@@ -158,3 +158,48 @@ migration. Operators must run exactly one authority mode for a deployment; do
 not proxy host authentication while also exposing the standalone login routes.
 Removal follows only after the Monas and Synoptikon adapters, identity/session
 migration, browser behavior, package rollback, and recovery evidence pass.
+
+Migrating the intrinsic registry to Monas
+-----------------------------------------
+
+The intrinsic registry already uses the pinned Prosopikon schema. Migration
+therefore preserves users, password hashes, groups, rights, device tokens, and
+session records without translating or printing secrets. It does not mutate or
+remove the source registry.
+
+Stop the intrinsic DASObjectStore Web server and the deployed Monas process
+before migration so the source is quiescent. Monas's service name is owned by
+its deployment and is intentionally not assumed here. First inspect the plan
+using explicit roots::
+
+   sudo systemctl stop dasobjectstore-server.service
+   sudo dasobjectstore-auth-migrate \
+     --source-root /var/lib/dasobjectstore/auth \
+     --target-root /var/lib/prosopikon \
+     --json
+
+The dry run creates nothing. Review the user/session counts and checksum, then
+apply with the exact confirmation phrase::
+
+   sudo dasobjectstore-auth-migrate \
+     --source-root /var/lib/dasobjectstore/auth \
+     --target-root /var/lib/prosopikon \
+     --apply \
+     --confirm "confirm auth migration" \
+     --json
+
+The target must be absent, empty, or contain the byte-identical interrupted
+copy. A different target registry fails closed. Symlinked roots/registries and
+a source that changes during copying are rejected. The target receives a
+mode-0600 registry and ``dasobjectstore-auth-migration.json`` checksum marker.
+Repeating the same command is idempotent.
+
+Configure Monas to use the target root and verify login before disabling the
+intrinsic authority. Existing session records remain available to the shared
+store, but browsers must authenticate once through Monas: a DAS header or
+local-storage bearer is never converted into an HttpOnly Monas cookie.
+
+For rollback, stop Monas and restore the prior package/configuration pointing
+at the retained ``/var/lib/dasobjectstore/auth`` source. Do not delete either
+registry until the package upgrade, Monas login, and rollback acceptance have
+passed on the deployment host.

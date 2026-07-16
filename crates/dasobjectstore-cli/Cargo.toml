@@ -17,6 +17,10 @@ path = "src/server_main.rs"
 name = "dasobjectstore-local-auth-helper"
 path = "src/local_auth_helper_main.rs"
 
+[[bin]]
+name = "dasobjectstore-auth-migrate"
+path = "src/auth_migrate_main.rs"
+
 [dependencies]
 axum.workspace = true
 axum-server.workspace = true
@@ -30,6 +34,7 @@ dasobjectstore-object-service.workspace = true
 dasobjectstore-platform.workspace = true
 dasobjectstore-tui.workspace = true
 libc.workspace = true
+prosopikon-core.workspace = true
 ratatui.workspace = true
 rand_core.workspace = true
 serde.workspace = true
