@@ -473,6 +473,23 @@ retry is also idempotent. This is retirement, not physical purge: do not remove
 the retained root manually, because a future explicit recovery or purge
 operation needs that evidence.
 
+To reactivate a retained folder profile, first preview the recovery::
+
+   dasobjectstore store repair PROFILE
+
+The preview validates the retained binding, private catalogue, payload root,
+and capacity policy without changing lifecycle state. Apply it using the
+normal repair confirmation::
+
+   dasobjectstore store repair PROFILE --apply --confirm "confirm store repair"
+
+The daemon durably marks the profile ``recovering``, republishes its exact
+private catalogue into shared metadata, and makes the binding active only after
+publication succeeds. If the process or host stops during recovery, daemon
+startup resumes the same publication before restoring profile access. Drive
+profile reactivation remains unavailable until its live filesystem-identity
+acceptance can be enforced; recovery never weakens that guard.
+
 Per-user macOS service plans
 ----------------------------
 

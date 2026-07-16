@@ -45,11 +45,13 @@ use crate::auth::{
 };
 use crate::runtime::{
     appliance_telemetry_state_path, application_audit_log_path, application_identity_registry_path,
-    application_key_registry_path, begin_profile_binding_retirement,
-    complete_upload_with_capability, deactivate_application_identity, deactivate_application_key,
-    default_endpoint_registry_path, default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
-    finish_profile_binding_retirement, head_profile_object, issue_application_upload_capability,
-    list_profile_objects_page, migrate_registered_folder_store, profile_binding_retired_at,
+    application_key_registry_path, begin_profile_binding_recovery,
+    begin_profile_binding_retirement, complete_upload_with_capability,
+    deactivate_application_identity, deactivate_application_key, default_endpoint_registry_path,
+    default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
+    finish_profile_binding_recovery, finish_profile_binding_retirement, head_profile_object,
+    issue_application_upload_capability, list_profile_objects_page,
+    migrate_registered_folder_store, profile_binding_lifecycle_state, profile_binding_retired_at,
     profile_diagnostics, profile_health, profile_s3_list_response, provision_garage_store_registry,
     query_object_browser_metadata, read_application_identity, read_application_key,
     read_application_upload_capability, read_object_browser_metadata, read_profile_binding,
@@ -65,7 +67,7 @@ use crate::runtime::{
     FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
     GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
     LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    PendingApplicationUploadCapability, ReconciliationManifest,
+    PendingApplicationUploadCapability, ProfileBindingLifecycleState, ReconciliationManifest,
     RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
     RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
     RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
@@ -1390,6 +1392,80 @@ mod tests {
                 .expect("retry retirement report")
                 .already_retired
         );
+
+        let recover = |dry_run| {
+            handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::StoreRepair(StoreRepairRequest {
+                        store_id: Some(StoreId::new("upload-store").expect("store id")),
+                        dry_run,
+                        confirmation: if dry_run {
+                            String::new()
+                        } else {
+                            crate::api::STORE_REPAIR_CONFIRMATION.to_string()
+                        },
+                        reconcile_s3: false,
+                        s3_prefix: None,
+                    }),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("profile recovery dispatch")
+        };
+        let DaemonApiResponse::StoreRepair(preview) = recover(true) else {
+            panic!("expected profile recovery preview");
+        };
+        assert!(preview.report.warning.contains("reactivate"));
+        assert!(read_profile_binding(&profile_registry, "upload-store")
+            .expect("retired binding after preview")
+            .is_none());
+        let DaemonApiResponse::StoreRepair(recovered) = recover(false) else {
+            panic!("expected profile recovery response");
+        };
+        assert!(recovered.report.warning.contains("reactivated"));
+        assert!(read_profile_binding(&profile_registry, "upload-store")
+            .expect("binding after recovery")
+            .is_some());
+        let connection = Connection::open(&live_sqlite).expect("shared catalogue after recovery");
+        let shared_transactions = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_transactions WHERE store_id = 'upload-store'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("shared transaction count after recovery");
+        assert_eq!(shared_transactions, 1);
+
+        let retired_again = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                    store_id: "upload-store".to_string(),
+                    dry_run: false,
+                    allow_store_delete: true,
+                    confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("second retirement");
+        assert!(matches!(retired_again, DaemonApiResponse::StoreDelete(_)));
+        crate::runtime::begin_profile_binding_recovery(
+            &profile_registry,
+            "upload-store",
+            "2026-07-16T15:00:00Z",
+        )
+        .expect("interrupted recovery begins");
+        let startup_recovery = crate::runtime::recover_profile_reactivations(
+            &profile_registry,
+            &store_registry,
+            &live_sqlite,
+            "2026-07-16T15:01:00Z",
+        )
+        .expect("startup profile reactivation");
+        assert_eq!(startup_recovery.reactivations_completed, 1);
+        assert!(read_profile_binding(&profile_registry, "upload-store")
+            .expect("binding after startup recovery")
+            .is_some());
         cleanup(&root);
     }
 

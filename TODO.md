@@ -814,8 +814,11 @@ transaction wiring; those boundaries stay explicit in the child items below.
     catalogue/payload/registry state, reserves the original binding claim, and
     is previewable and idempotent. A durable fail-closed ``retiring`` state now
     precedes shared withdrawal; daemon startup completes interrupted retirement
-    before active catalogue recovery. Physical purge and explicit recovery
-    remain separate lifecycle operations rather than being hidden inside delete.
+    before active catalogue recovery. Explicit folder-profile recovery now uses
+    ``store repair STORE --apply`` with a durable fail-closed ``recovering``
+    phase, exact private-to-shared catalogue republication, startup completion,
+    and activation only after publication succeeds. Physical purge remains a
+    separate lifecycle operation rather than being hidden inside delete.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

@@ -27,6 +27,72 @@ pub struct ProfileRetirementRecoveryReport {
     pub retirements_completed: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProfileReactivationRecoveryReport {
+    pub reactivations_completed: u64,
+}
+
+/// Republish authoritative private catalogues and activate profiles whose
+/// explicit recovery was interrupted after entering the fail-closed state.
+pub fn recover_profile_reactivations(
+    binding_registry_path: impl AsRef<Path>,
+    store_registry_path: impl AsRef<Path>,
+    live_sqlite_path: impl AsRef<Path>,
+    committed_at_utc: &str,
+) -> Result<ProfileReactivationRecoveryReport, BackendError> {
+    let binding_registry_path = binding_registry_path.as_ref();
+    let recovering = super::recovering_profile_store_ids(binding_registry_path)
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    if recovering.is_empty() {
+        return Ok(ProfileReactivationRecoveryReport::default());
+    }
+    let definitions = dasobjectstore_object_service::read_store_registry(store_registry_path)
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    let mut report = ProfileReactivationRecoveryReport::default();
+    for store_id in recovering {
+        let binding = super::read_profile_binding_record(binding_registry_path, &store_id)
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?
+            .ok_or_else(|| BackendError::NotFound(format!("profile binding {store_id}")))?
+            .validate_and_canonicalize()
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        if binding.manifest.deployment_profile
+            != dasobjectstore_core::deployment::DeploymentProfile::Folder
+        {
+            return Err(BackendError::InvalidRequest(
+                "only folder profile recovery is currently supported".to_string(),
+            ));
+        }
+        let definition = definitions
+            .iter()
+            .find(|definition| definition.store_id == binding.manifest.store_id)
+            .ok_or_else(|| BackendError::NotFound("profile capacity policy".to_string()))?;
+        let backend = super::FolderBackend::open(
+            &binding.backend_root,
+            binding.manifest.clone(),
+            definition.policy.capacity.clone(),
+            0,
+        )?;
+        let namespace = format!("profile-s3:{}", binding.manifest.store_id.as_str());
+        publish_profile_catalogue_with_metadata(
+            &binding.manifest.store_id,
+            &backend,
+            live_sqlite_path.as_ref(),
+            binding
+                .backend_root
+                .join(".dasobjectstore/profile-catalogue-handoffs"),
+            &namespace,
+            committed_at_utc,
+        )?;
+        super::finish_profile_binding_recovery(
+            binding_registry_path,
+            binding.manifest.store_id.as_str(),
+        )
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        report.reactivations_completed += 1;
+    }
+    Ok(report)
+}
+
 /// Complete crash-interrupted retirements before active catalogue publication
 /// recovery runs. A retiring binding is already unavailable to data-plane
 /// opens; shared visibility is withdrawn idempotently before the durable final

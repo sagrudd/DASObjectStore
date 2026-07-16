@@ -174,8 +174,9 @@ pub use profile_catalogue::{
     export_profile_catalogue, import_profile_catalogue, import_profile_catalogue_with_metadata,
     profile_catalogue_live_sqlite_path, publish_profile_catalogue_with_metadata,
     read_profile_catalogue_handoff, reconcile_profile_catalogue_handoff,
-    recover_profile_catalogue_publications, recover_profile_retirements,
-    ProfileCatalogueHandoffRecord, ProfileCatalogueHandoffState, ProfileCatalogueRecoveryReport,
+    recover_profile_catalogue_publications, recover_profile_reactivations,
+    recover_profile_retirements, ProfileCatalogueHandoffRecord, ProfileCatalogueHandoffState,
+    ProfileCatalogueRecoveryReport, ProfileReactivationRecoveryReport,
     ProfileRetirementRecoveryReport,
 };
 pub use profile_migration::{
@@ -183,13 +184,15 @@ pub use profile_migration::{
     RegisteredProfileMigrationReport,
 };
 pub use profile_registry::{
-    begin_profile_binding_retirement, default_profile_binding_registry_path,
-    finish_profile_binding_retirement, profile_binding_registry_path, profile_binding_retired_at,
-    read_profile_binding, read_profile_binding_record, read_profile_bindings,
+    begin_profile_binding_recovery, begin_profile_binding_retirement,
+    default_profile_binding_registry_path, finish_profile_binding_recovery,
+    finish_profile_binding_retirement, profile_binding_lifecycle_state,
+    profile_binding_registry_path, profile_binding_retired_at, read_profile_binding,
+    read_profile_binding_record, read_profile_bindings, recovering_profile_store_ids,
     remove_profile_binding_if_matches, restore_profile_binding_if_matches,
     retiring_profile_store_ids, upsert_profile_binding, validate_profile_binding_claim,
-    BackendProfileBinding, PROFILE_BINDING_REGISTRY_ENV, PROFILE_BINDING_REGISTRY_FILE_NAME,
-    PROFILE_BINDING_REGISTRY_SCHEMA,
+    BackendProfileBinding, ProfileBindingLifecycleState, PROFILE_BINDING_REGISTRY_ENV,
+    PROFILE_BINDING_REGISTRY_FILE_NAME, PROFILE_BINDING_REGISTRY_SCHEMA,
 };
 pub use profile_s3::{
     assemble_profile_s3_multipart, complete_profile_s3_multipart,

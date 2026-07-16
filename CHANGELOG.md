@@ -6,6 +6,16 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.109.0 - 2026-07-16
+
+- Add supported, source-preserving profile reactivation through ``store repair
+  PROFILE --apply``. The daemon reopens retained private authority, republishes
+  the exact shared catalogue, and only then makes the binding active.
+- Make reactivation restart-safe with a durable fail-closed ``recovering``
+  phase. Daemon startup completes interrupted catalogue publication before
+  restoring data-plane access; dry-run remains non-mutating and drive profiles
+  remain explicitly unsupported until live identity acceptance is available.
+
 ## 0.108.1 - 2026-07-16
 
 - Make profile retirement restart-safe with a durable fail-closed ``retiring``

@@ -395,7 +395,7 @@ impl StoreCapacityArgs {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct StoreRepairArgs {
-    /// Limit the scan/rebuild to one ObjectStore; omit to inspect all registered stores.
+    /// Target one ObjectStore; a retired folder profile previews or applies reactivation.
     store_id: Option<StoreId>,
     /// Apply the reconstructed metadata. Without this flag the command is read-only.
     #[arg(long)]

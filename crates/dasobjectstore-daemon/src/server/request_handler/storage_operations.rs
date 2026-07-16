@@ -243,11 +243,41 @@ where
             }
         }
         if let Some(store_id) = request.store_id.as_ref() {
+            let lifecycle = profile_binding_lifecycle_state(
+                &self.profile_binding_registry_path,
+                store_id.as_str(),
+            )
+            .map_err(|error| ("profile_repair_unavailable", error.to_string()))?;
+            if matches!(
+                lifecycle,
+                ProfileBindingLifecycleState::Retired | ProfileBindingLifecycleState::Recovering
+            ) {
+                let binding = read_profile_binding_record(
+                    &self.profile_binding_registry_path,
+                    store_id.as_str(),
+                )
+                .map_err(|error| ("profile_repair_unavailable", error.to_string()))?
+                .ok_or_else(|| {
+                    (
+                        "profile_repair_unavailable",
+                        "retained profile binding is unavailable".to_string(),
+                    )
+                })?
+                .validate_and_canonicalize()
+                .map_err(|error| ("profile_repair_unavailable", error.to_string()))?;
+                return self.recover_retired_folder_profile(&request, binding, lifecycle);
+            }
+            if lifecycle == ProfileBindingLifecycleState::Retiring {
+                return Err((
+                    "profile_repair_unavailable",
+                    "profile retirement is incomplete and must finish before recovery".to_string(),
+                ));
+            }
             if let Ok(Some(binding)) =
                 read_profile_binding(&self.profile_binding_registry_path, store_id.as_str())
             {
                 if binding.manifest.deployment_profile == DeploymentProfile::Folder {
-                    return self.repair_folder_profile_catalogue(&request, binding);
+                    return self.repair_folder_profile_catalogue(&request, binding, false);
                 }
             }
         }
@@ -382,6 +412,7 @@ where
         &self,
         request: &StoreRepairRequest,
         binding: BackendProfileBinding,
+        force_publish: bool,
     ) -> Result<StoreRepairResponse, (&'static str, String)> {
         if request.reconcile_s3 {
             return Err((
@@ -417,7 +448,7 @@ where
             &catalogue,
         )
         .unwrap_or(false);
-        if !request.dry_run && !matched {
+        if !request.dry_run && (force_publish || !matched) {
             self.publish_profile_s3_catalogue(&binding.manifest.store_id, &backend)
                 .map_err(|error| ("profile_repair_failed", error.to_string()))?;
         }
@@ -428,7 +459,7 @@ where
                 dry_run: request.dry_run,
                 stores_scanned: 1,
                 payload_files: catalogue.objects.len() as u64,
-                objects_recovered: u64::from(!request.dry_run && !matched),
+                objects_recovered: u64::from(!request.dry_run && (force_publish || !matched)),
                 placements_recovered: 0,
                 payload_bytes: catalogue
                     .objects
@@ -447,6 +478,50 @@ where
             },
             s3_reconciliation: None,
         })
+    }
+
+    fn recover_retired_folder_profile(
+        &self,
+        request: &StoreRepairRequest,
+        binding: BackendProfileBinding,
+        lifecycle: ProfileBindingLifecycleState,
+    ) -> Result<StoreRepairResponse, (&'static str, String)> {
+        if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+            return Err((
+                "profile_repair_unsupported",
+                "only retained folder profiles can currently be reactivated".to_string(),
+            ));
+        }
+        if request.reconcile_s3 {
+            return Err((
+                "profile_repair_invalid_request",
+                "profile reactivation cannot be combined with Garage reconciliation".to_string(),
+            ));
+        }
+        if request.dry_run {
+            let mut response = self.repair_folder_profile_catalogue(request, binding, false)?;
+            response.report.warning =
+                "profile is retired; rerun with --apply to republish its retained catalogue and reactivate it"
+                    .to_string();
+            return Ok(response);
+        }
+        if lifecycle == ProfileBindingLifecycleState::Retired {
+            begin_profile_binding_recovery(
+                &self.profile_binding_registry_path,
+                binding.manifest.store_id.as_str(),
+                &self.clock.now_utc(),
+            )
+            .map_err(|error| ("profile_recovery_failed", error.to_string()))?;
+        }
+        let mut response = self.repair_folder_profile_catalogue(request, binding.clone(), true)?;
+        finish_profile_binding_recovery(
+            &self.profile_binding_registry_path,
+            binding.manifest.store_id.as_str(),
+        )
+        .map_err(|error| ("profile_recovery_failed", error.to_string()))?;
+        response.report.warning =
+            "retained profile catalogue republished and profile reactivated".to_string();
+        Ok(response)
     }
 
     pub(super) fn store_verify_for_actor(
