@@ -4,6 +4,7 @@ pub mod binding;
 pub mod boundary;
 pub mod flounder_telemetry;
 pub mod host_boundary;
+pub mod host_auth_adapter;
 pub mod host_mode;
 pub mod integrated_session;
 pub mod monas_host_boundary;
@@ -43,6 +44,10 @@ pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
     SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedHostBoundaryError,
     REQUEST_CONTEXT_SCHEMA_VERSION,
+};
+pub use host_auth_adapter::{
+    accept_monas_host_session, accept_synoptikon_host_session, HostSessionAdapterError,
+    MonasHostSessionIssue, SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

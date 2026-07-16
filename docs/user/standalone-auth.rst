@@ -96,6 +96,18 @@ binding to the host's CSRF state. It does not contain a storage permission.
 Daemon-owned local group, administrator, ObjectStore, pairing, and action policy
 still decide whether an authenticated actor may read or mutate storage.
 
+The Monas adapter reads the host's pinned Prosopikon session store directly and
+verifies the browser session for each adaptation. The bearer token is never
+placed in the context, response, or audit identity: DASObjectStore receives an
+opaque SHA-256-derived session identifier and a context valid for at most five
+minutes and never longer than the host session. Monas caller input cannot mint
+administrator or storage roles; the adapter emits only ``authenticated``.
+
+The Synoptikon adapter first validates the integrated request/session boundary,
+then requires Synoptikon to confirm the live entitlement and revocation state.
+Its governance storage binding is not copied into the GUI authentication
+context and therefore cannot become DASObjectStore storage authority.
+
 The intrinsic DASObjectStore login remains a compatibility path during the
 migration. Operators must run exactly one authority mode for a deployment; do
 not proxy host authentication while also exposing the standalone login routes.

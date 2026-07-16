@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.91.0 - 2026-07-16
+
+- Add concrete Monas/Prosopikon and Synoptikon session adapters that produce
+  the verified GUI host-authentication context and drive protected routes.
+- Reverify Monas sessions against the pinned store on every adaptation, hide
+  the bearer behind an opaque SHA-256-derived identifier, cap request context
+  lifetime at five minutes, and reject sessions immediately after logout.
+- Require Synoptikon structural boundary validation plus a live entitlement/
+  revocation verifier, and discard governance storage bindings before GUI
+  extraction so host identity cannot grant DASObjectStore storage authority.
+
 ## 0.90.0 - 2026-07-16
 
 - Add a strict versioned host-authenticated context for Monas standalone and

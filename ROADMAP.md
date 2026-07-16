@@ -1711,6 +1711,15 @@ context fails closed. The compatibility login remains until concrete host
 composition, migration, browser equivalence, and rollback evidence satisfy the
 exit criteria above; this avoids a partial dual-authority removal.
 
+Delivered composition core (0.91.0): concrete adapters now turn a live Monas
+Prosopikon session or a structurally accepted, live-verified Synoptikon session
+into the verified GUI context. The Monas bearer is never exported, its opaque
+identifier is hash-derived, and its request context is capped at five minutes.
+The Synoptikon adapter requires a host-provided entitlement/revocation check and
+drops the storage binding before extraction. Both adapters drive a protected
+GUI route in contract tests and fail after logout/revocation. Host-router and
+real-browser composition remains the next gate before migration and removal.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

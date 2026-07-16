@@ -1222,3 +1222,10 @@ GUI extractor accepts only the verified wrapper produced after schema,
 issuer/audience, lifetime, CSRF-binding, and live-session checks. Monas uses the
 same contract when it hosts DASObjectStore in standalone product mode. Neither
 authority context grants storage access; daemon policy remains decisive.
+
+The checked adapter contract is implemented in the Mnemosyne integration
+crate. Host routers must call it in process; they must not trust identity JSON
+from a browser or translate the legacy Monas ``x-img.host-context.v1`` header
+into a verified context. Until the pinned host routers are migrated and browser
+acceptance passes, keep the deployment in exactly one compatibility authority
+mode and do not expose both login surfaces.

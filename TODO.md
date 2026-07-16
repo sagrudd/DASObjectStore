@@ -3382,11 +3382,19 @@ browser and appliance acceptance remain external validation gates.
     bounded freshness, CSRF binding, correlation identity, and live host
     session/revocation verification before the GUI extractor accepts it; raw
     host context fails closed and cannot encode storage-write authority.
-  - [ ] Compose concrete Monas and Synoptikon host adapters around the pinned
-    session stores, prove deep-link/login/logout/expiry and policy equivalence,
-    migrate compatible standalone identities/sessions, then remove the
-    intrinsic Yew login, password/session issuer APIs, and product login routes
-    in one rollback-safe release.
+  - [x] Add concrete Rust adapters for both host authorities. The Monas adapter
+    verifies the pinned Prosopikon store on every adaptation, hashes rather
+    than exports the bearer, and issues a five-minute context; the Synoptikon
+    adapter requires the existing integrated boundary plus a live entitlement/
+    revocation verifier and discards its storage binding before GUI extraction.
+  - [ ] Mount these adapters in the pinned Monas and Synoptikon host routers,
+    replacing Monas's legacy ``x-img.host-context.v1`` forwarding contract;
+    prove deep-link/login/logout/expiry, CSRF, EasyConnect, and administrator/
+    ordinary-user policy equivalence in real browsers.
+  - [ ] Migrate compatible standalone identities/sessions, prove package
+    upgrade/rollback and recovery, then remove the intrinsic Yew login,
+    password/session issuer APIs, and product login routes in one rollback-safe
+    release.
 
 - [x] Keep CLI examples synchronized between `README.md`,
   `docs/requirements.md`, `ROADMAP.md`, and this file.
