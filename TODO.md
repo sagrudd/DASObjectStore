@@ -926,8 +926,11 @@ hardware acceptance.
   - [x] Add the typed profile-S3 DELETE daemon operation and authenticated Web
     route. Missing keys are idempotent no-ops; existing keys require daemon
     capacity admission and reconcile logical used bytes only after the
-    catalogue-authoritative removal. Backend paths and provider credentials
-    remain outside the request/response contract.
+    catalogue-authoritative removal. The production dispatcher now routes the
+    operation, and both deleted and idempotently missing results publish an
+    exact, content-addressed shared-catalogue snapshot before acknowledgement.
+    Backend paths and provider credentials remain outside the request/response
+    contract.
   - [x] Add a provider-neutral profile PUT adapter requiring a known content
     length, transactional quota reservation, in-flight hashing, staged
     fsync/rename finalization, and catalogue commit; failed staging/finalization

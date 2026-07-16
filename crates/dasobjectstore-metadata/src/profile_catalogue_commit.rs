@@ -9,6 +9,7 @@ use crate::schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_catalogue::PortableObjectCatalogue;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 use std::path::Path;
 
@@ -20,6 +21,9 @@ pub struct ProfileCatalogueCommitRequest<'a> {
     pub store_id: &'a StoreId,
     pub catalogue: &'a PortableObjectCatalogue,
     pub source_retained: bool,
+    /// Reconcile this namespace to the exact catalogue snapshot. Migration
+    /// and incremental import callers must leave this false.
+    pub exact_snapshot: bool,
     pub committed_at_utc: &'a str,
 }
 
@@ -117,6 +121,42 @@ pub fn commit_profile_catalogue(
             request.committed_at_utc,
         ],
     )?;
+
+    let expected_keys = request
+        .catalogue
+        .objects
+        .iter()
+        .map(|object| (object.object_id.to_string(), object.version))
+        .collect::<BTreeSet<_>>();
+    let existing_keys = {
+        let mut statement = transaction.prepare(
+            "SELECT object_id, object_version FROM profile_catalogue_objects
+             WHERE profile_namespace = ?1 AND store_id = ?2",
+        )?;
+        let rows = statement
+            .query_map(
+                params![request.profile_namespace, request.store_id.as_str()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?)),
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+
+    for (object_id, object_version) in existing_keys {
+        if request.exact_snapshot && !expected_keys.contains(&(object_id.clone(), object_version)) {
+            transaction.execute(
+                "DELETE FROM profile_catalogue_objects
+                 WHERE profile_namespace = ?1 AND store_id = ?2
+                   AND object_id = ?3 AND object_version = ?4",
+                params![
+                    request.profile_namespace,
+                    request.store_id.as_str(),
+                    object_id,
+                    object_version,
+                ],
+            )?;
+        }
+    }
 
     for object in &request.catalogue.objects {
         let object_json = serde_json::to_string(object)
@@ -314,6 +354,7 @@ mod tests {
             store_id: &store_id,
             catalogue: &catalogue,
             source_retained: true,
+            exact_snapshot: false,
             committed_at_utc: "2026-07-14T00:00:00Z",
         };
         let first = commit_profile_catalogue(&db, request).expect("first commit");
@@ -327,6 +368,7 @@ mod tests {
                 store_id: &store_id,
                 catalogue: &catalogue,
                 source_retained: true,
+                exact_snapshot: false,
                 committed_at_utc: "2026-07-14T00:00:00Z",
             },
         )
@@ -359,6 +401,7 @@ mod tests {
                 store_id: &store_id,
                 catalogue: &catalogue,
                 source_retained: false,
+                exact_snapshot: false,
                 committed_at_utc: "now",
             },
         )
@@ -367,6 +410,77 @@ mod tests {
             error,
             ProfileCatalogueCommitError::SourceRetentionRequired
         ));
+    }
+
+    #[test]
+    fn replaces_namespace_rows_with_the_exact_authoritative_snapshot() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-catalogue-snapshot-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let db = root.join("live.sqlite");
+        let connection = Connection::open(&db).expect("db");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('store-a', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        drop(connection);
+
+        let store_id = StoreId::new("store-a").expect("store id");
+        let mut first = sample_catalogue();
+        let mut second_object = first.objects[0].clone();
+        second_object.object_id = ObjectId::new("object-b").expect("object id");
+        second_object.placements[0].placement_id =
+            PlacementId::new("placement-b").expect("placement id");
+        first.objects.push(second_object);
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-full",
+                profile_namespace: "folder:primary",
+                store_id: &store_id,
+                catalogue: &first,
+                source_retained: true,
+                exact_snapshot: true,
+                committed_at_utc: "2026-07-16T00:00:00Z",
+            },
+        )
+        .expect("full snapshot");
+        let remaining = sample_catalogue();
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-delete",
+                profile_namespace: "folder:primary",
+                store_id: &store_id,
+                catalogue: &remaining,
+                source_retained: true,
+                exact_snapshot: true,
+                committed_at_utc: "2026-07-16T00:01:00Z",
+            },
+        )
+        .expect("replacement snapshot");
+        let connection = Connection::open(&db).expect("db");
+        let rows = connection
+            .prepare("SELECT object_id FROM profile_catalogue_objects ORDER BY object_id")
+            .expect("query")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("object ids");
+        assert_eq!(rows, vec!["object-a"]);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn sample_catalogue() -> PortableObjectCatalogue {

@@ -5,20 +5,36 @@ pub(super) fn publish_profile_s3_catalogue<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     store_id: &StoreId,
     backend: &FolderBackend,
-    operation_id: &str,
 ) -> Result<(), DaemonApiResponse>
 where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
     handler
-        .publish_profile_s3_catalogue(store_id, backend, operation_id)
-        .map_err(|error| {
-            api_error(
-                "profile_s3_catalogue_publication_failed",
-                error.to_string(),
-            )
-        })
+        .publish_profile_s3_catalogue(store_id, backend)
+        .map_err(|error| api_error("profile_s3_catalogue_publication_failed", error.to_string()))
+}
+
+pub(super) fn delete_profile_s3_object<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    provider: &dyn crate::runtime::CapacityAdmissionProvider,
+    store_id: &StoreId,
+    backend: &mut FolderBackend,
+    key: &dasobjectstore_core::backend::BackendObjectKey,
+) -> Result<bool, DaemonApiResponse>
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    let deleted = crate::runtime::delete_profile_object_with_capacity_provider(
+        provider,
+        store_id.as_str(),
+        backend,
+        key,
+    )
+    .map_err(|error| api_error("profile_s3_delete_failed", error.to_string()))?;
+    publish_profile_s3_catalogue(handler, store_id, backend)?;
+    Ok(deleted)
 }
 
 pub(super) fn profile_browser<S, C>(

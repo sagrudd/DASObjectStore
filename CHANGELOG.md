@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.103.0 - 2026-07-16
+
+- Route the existing profile-S3 DELETE contract through the production daemon
+  dispatcher and publish deletions to shared SQLite before acknowledging them.
+- Give profile-S3 catalogue snapshots content-derived replay identities and
+  atomically remove shared namespace rows absent from an exact authoritative
+  snapshot, while preserving additive migration/import semantics.
+
 ## 0.102.0 - 2026-07-16
 
 - Publish normal profile-backed single-object PUT and multipart completion

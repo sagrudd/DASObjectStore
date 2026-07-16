@@ -1068,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_stream_upload_commits_folder_profile_before_acknowledgement() {
+    fn profile_s3_write_and_delete_publish_shared_catalogue_before_acknowledgement() {
         let root = temp_root("provider-stream-upload");
         cleanup(&root);
         let backend_root = root.join("backend");
@@ -1216,7 +1216,7 @@ mod tests {
             .read_to_end(&mut payload)
             .expect("read committed payload");
         assert_eq!(payload, b"hello");
-        let connection = Connection::open(live_sqlite).expect("open shared catalogue");
+        let connection = Connection::open(&live_sqlite).expect("open shared catalogue");
         let published: (String, String, i64) = connection
             .query_row(
                 "SELECT profile_namespace, object_id, object_version
@@ -1228,6 +1228,32 @@ mod tests {
         assert_eq!(published.0, "profile-s3:upload-store");
         assert_eq!(published.1, "objects/hello.txt");
         assert_eq!(published.2, 1);
+        drop(connection);
+
+        let delete = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileS3Delete(crate::api::ProfileS3DeleteRequest {
+                    store_id: StoreId::new("upload-store").expect("store id"),
+                    key: record.key,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("delete dispatch");
+        let DaemonApiResponse::ProfileS3Delete(delete) = delete else {
+            panic!("expected profile delete response: {delete:?}");
+        };
+        assert!(delete.deleted);
+        let connection = Connection::open(live_sqlite).expect("open shared catalogue");
+        let remaining = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_objects
+                 WHERE profile_namespace = 'profile-s3:upload-store'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("shared object count");
+        assert_eq!(remaining, 0);
         cleanup(&root);
     }
 

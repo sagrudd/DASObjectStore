@@ -170,6 +170,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                 store_id: &store_id,
                 catalogue: &catalogue,
                 source_retained: true,
+                exact_snapshot: false,
                 committed_at_utc: &self.committed_at_utc,
             },
         )

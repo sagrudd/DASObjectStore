@@ -485,19 +485,15 @@ where
                     "profile S3 deletion requires daemon capacity admission",
                 )));
             };
-            let deleted = match crate::runtime::delete_profile_object_with_capacity_provider(
+            let deleted = match storage_profiles::delete_profile_s3_object(
+                handler,
                 provider.as_ref(),
-                store_id.as_str(),
+                &store_id,
                 &mut backend,
                 &request.key,
             ) {
                 Ok(deleted) => deleted,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "profile_s3_delete_failed",
-                        error.to_string(),
-                    )));
-                }
+                Err(response) => return Ok(response),
             };
             Ok(DaemonApiResponse::ProfileS3Delete(
                 crate::api::ProfileS3DeleteResponse {
@@ -649,9 +645,9 @@ where
                         )));
                     }
                 };
-            if let Err(response) = storage_profiles::publish_profile_s3_catalogue(
-                handler, &store_id, &backend, &request.reservation_id,
-            ) {
+            if let Err(response) =
+                storage_profiles::publish_profile_s3_catalogue(handler, &store_id, &backend)
+            {
                 return Ok(response);
             }
             let response = crate::api::ProfileS3MultipartCompletionResponse {

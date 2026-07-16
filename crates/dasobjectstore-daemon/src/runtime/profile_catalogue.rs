@@ -10,6 +10,7 @@ use dasobjectstore_core::object_catalogue::{
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -143,14 +144,21 @@ pub fn publish_profile_catalogue_with_metadata(
     authority: &dyn ObjectCatalogueAuthority,
     live_sqlite_path: impl AsRef<Path>,
     handoff_root: impl AsRef<Path>,
-    transaction_id: &str,
     profile_namespace: &str,
     committed_at_utc: &str,
 ) -> Result<u64, BackendError> {
     let catalogue = export_profile_catalogue(store_id, authority)?;
+    let encoded = catalogue.encode_json().map_err(|error| {
+        BackendError::InvalidRequest(format!("profile catalogue snapshot is invalid: {error}"))
+    })?;
+    let snapshot_digest = Sha256::digest(encoded.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let transaction_id = format!("profile-s3-{}-{snapshot_digest}", store_id.as_str());
     let journal = HandoffJournal::prepare(
         handoff_root.as_ref(),
-        transaction_id,
+        &transaction_id,
         profile_namespace,
         store_id,
         &catalogue,
@@ -159,11 +167,12 @@ pub fn publish_profile_catalogue_with_metadata(
     dasobjectstore_metadata::commit_profile_catalogue(
         live_sqlite_path,
         dasobjectstore_metadata::ProfileCatalogueCommitRequest {
-            transaction_id,
+            transaction_id: &transaction_id,
             profile_namespace,
             store_id,
             catalogue: &catalogue,
             source_retained: true,
+            exact_snapshot: true,
             committed_at_utc,
         },
     )
@@ -251,6 +260,7 @@ pub fn import_profile_catalogue_with_metadata(
             store_id,
             catalogue,
             source_retained: true,
+            exact_snapshot: false,
             committed_at_utc,
         },
     )
@@ -622,13 +632,22 @@ mod tests {
             &backend,
             root.join("missing/live.sqlite"),
             &handoffs,
-            "tx-publish-failure",
             "profile-s3:codex",
             "2026-07-16T00:00:00Z",
         )
         .expect_err("missing SQLite parent must fail");
         assert!(error.to_string().contains("metadata publication"));
-        let journal = read_profile_catalogue_handoff(&handoffs, "tx-publish-failure")
+        let journal_path = std::fs::read_dir(&handoffs)
+            .expect("handoff directory")
+            .next()
+            .expect("journal entry")
+            .expect("journal path")
+            .path();
+        let transaction_id = journal_path
+            .file_stem()
+            .expect("journal stem")
+            .to_string_lossy();
+        let journal = read_profile_catalogue_handoff(&handoffs, &transaction_id)
             .expect("journal read")
             .expect("journal retained");
         assert_eq!(

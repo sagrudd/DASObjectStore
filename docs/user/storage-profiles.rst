@@ -439,6 +439,14 @@ shared metadata publication is interrupted, the payload remains durable and
 the journal remains ``profile_committed`` for restart replay; clients receive
 an error instead of a misleading successful write.
 
+DELETE follows the same authority rule. The daemon removes the private
+catalogue record and payload, reconciles logical capacity, then atomically
+replaces that profile namespace in shared SQLite with the resulting exact
+snapshot before acknowledging deletion. Snapshot transaction identities are
+derived from the validated catalogue content, so retrying an interrupted
+DELETE replays the same handoff without allowing a later, different catalogue
+state to masquerade as the earlier operation.
+
 Per-user macOS service plans
 ----------------------------
 

@@ -63,6 +63,7 @@ where
         | DaemonApiRequest::ProfileCatalogueExport(_)
         | DaemonApiRequest::ProfileCatalogueImport(_)
         | DaemonApiRequest::ProfileS3List(_)
+        | DaemonApiRequest::ProfileS3Delete(_)
         | DaemonApiRequest::ProfileS3MultipartComplete(_)
         | DaemonApiRequest::ProfileS3Head(_)
         | DaemonApiRequest::ProfileS3Verify(_)
