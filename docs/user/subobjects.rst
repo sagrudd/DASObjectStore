@@ -46,8 +46,16 @@ parent store's placement, copy-count, and service policy:
 
 Omit ``--capacity-limit-bytes`` to inherit the parent capacity boundary. The
 budget is stored in the portable SubObject registry, appears in list and search
-output, and is available to daemon admission and reconciliation code. It does
-not reserve physical space or weaken the parent store's capacity checks.
+output, and is enforced by daemon-owned file-ingest admission. A reservation
+against a bounded SubObject updates the child and parent allocation together;
+commit and release do the same. It does not reserve physical space or weaken
+the parent store's capacity checks.
+
+The daemon upgrades an empty legacy store ledger to the hierarchical format on
+the first top-level bounded-SubObject admission. If a store already has
+accounted data, or a nested SubObject declares a budget, the daemon fails closed
+until child or ancestor usage has been reconciled; it does not guess how
+existing bytes should be attributed to a bounded prefix.
 
 Create a nested SubObject:
 

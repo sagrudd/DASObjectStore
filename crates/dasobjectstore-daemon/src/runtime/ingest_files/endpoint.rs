@@ -21,6 +21,7 @@ pub(super) struct FileIngestEntry {
 pub(super) struct ResolvedIngestEndpoint {
     pub(super) endpoint_name: String,
     pub(super) endpoint_kind: &'static str,
+    pub(super) subobject_name: Option<String>,
     pub(super) store: StoreServiceDefinition,
     pub(super) object_prefix: String,
 }
@@ -50,6 +51,7 @@ pub(super) fn resolve_ingest_endpoint(
         return Ok(ResolvedIngestEndpoint {
             endpoint_name: endpoint.as_str().to_string(),
             endpoint_kind: "object_store",
+            subobject_name: None,
             store: store.clone(),
             object_prefix: store.store_id.as_str().to_string(),
         });
@@ -70,6 +72,7 @@ pub(super) fn resolve_ingest_endpoint(
         return Ok(ResolvedIngestEndpoint {
             endpoint_name: subobject.name.clone(),
             endpoint_kind: "subobject",
+            subobject_name: Some(subobject.name.clone()),
             store: store.clone(),
             object_prefix: subobject.object_prefix(),
         });

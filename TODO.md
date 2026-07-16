@@ -572,7 +572,12 @@ transaction wiring; those boundaries stay explicit in the child items below.
     SubObject definitions and expose it through CLI and Web creation plans.
     List/search output distinguishes bounded from inherited children; atomic
     daemon admission wiring between this registry policy and the hierarchical
-    parent/child ledger remains open.
+    parent/child ledger is now delivered for local file ingest. The canonical
+    ledger upgrades atomically from the flat format, persists root and child
+    reservations in one snapshot, and preserves shared-parent enforcement
+    across restart. Existing non-empty stores fail closed until child usage is
+    reconciled. Nested-budget ancestor reconciliation, S3, and remote-upload
+    endpoint resolution remain open.
 - [~] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add a read-only daemon ``capacity_status`` transport response backed by

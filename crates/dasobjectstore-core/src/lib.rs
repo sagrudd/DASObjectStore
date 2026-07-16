@@ -61,7 +61,8 @@ pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidation
 pub use protection::ProtectionPolicy;
 pub use store::LogicalObjectVersionCharge;
 pub use subobject_capacity::{
-    SubObjectCapacityError, SubObjectCapacityLedger, SubObjectCapacityLedgerSnapshot,
+    ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,
+    SubObjectCapacityLedgerSnapshot, SubObjectCapacityReservationScope,
     SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
 };
 

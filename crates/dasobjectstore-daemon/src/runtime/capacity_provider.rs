@@ -17,7 +17,11 @@ use crate::runtime::profile_registry::{profile_binding_registry_path, read_profi
 use crate::runtime::service::DaemonServiceRuntimeError;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::CapacityReservationLedger;
-use dasobjectstore_object_service::{default_store_registry_path, read_store_registry};
+use dasobjectstore_core::SubObjectCapacityLedger;
+use dasobjectstore_object_service::{
+    default_store_registry_path, default_subobject_registry_path, read_store_registry,
+    read_subobject_registry,
+};
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::fs;
@@ -121,6 +125,24 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         })
     }
 
+    fn admit_subobject_ingest(
+        &self,
+        object_store: &str,
+        _subobject: &str,
+        requested_bytes: u64,
+        copy_count: u8,
+        ingress_origin: crate::api::DaemonIngressOrigin,
+        reservation_id: &str,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        self.admit_ingest(
+            object_store,
+            requested_bytes,
+            copy_count,
+            ingress_origin,
+            reservation_id,
+        )
+    }
+
     fn commit(
         &self,
         _store_id: &StoreId,
@@ -129,6 +151,15 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         Err(unavailable(
             "capacity reservation commit provider is not configured",
         ))
+    }
+
+    fn commit_subobject(
+        &self,
+        store_id: &StoreId,
+        _subobject: &str,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.commit(store_id, reservation_id)
     }
 
     /// Inspect one daemon-owned reservation without exposing the ledger path.
@@ -153,6 +184,15 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         ))
     }
 
+    fn release_subobject(
+        &self,
+        store_id: &StoreId,
+        _subobject: &str,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.release(store_id, reservation_id)
+    }
+
     fn reconcile_used_bytes(
         &self,
         _store_id: &StoreId,
@@ -166,6 +206,7 @@ pub trait CapacityAdmissionProvider: Send + Sync {
 
 pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
     store_registry_path: PathBuf,
+    subobject_registry_path: PathBuf,
     ledger_directory: PathBuf,
     backend_probe_root: PathBuf,
     ssd_probe_root: PathBuf,
@@ -177,8 +218,30 @@ pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
 
 #[derive(Default)]
 struct CapacityProviderState {
-    ledgers: HashMap<String, CapacityReservationLedger>,
+    ledgers: HashMap<String, StoreCapacityLedger>,
     active_reservations: HashMap<String, HashSet<String>>,
+}
+
+#[derive(Clone, PartialEq)]
+enum StoreCapacityLedger {
+    Flat(CapacityReservationLedger),
+    Hierarchical(SubObjectCapacityLedger),
+}
+
+impl StoreCapacityLedger {
+    fn parent(&self) -> &CapacityReservationLedger {
+        match self {
+            Self::Flat(ledger) => ledger,
+            Self::Hierarchical(ledger) => ledger.parent(),
+        }
+    }
+
+    fn parent_mut(&mut self) -> &mut CapacityReservationLedger {
+        match self {
+            Self::Flat(ledger) => ledger,
+            Self::Hierarchical(ledger) => ledger.parent_mut(),
+        }
+    }
 }
 
 impl FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe> {
@@ -190,6 +253,7 @@ impl FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe> {
             crate::runtime::default_ssd_root(),
             StatvfsCapacitySpaceProbe,
         )
+        .with_subobject_registry_path(default_subobject_registry_path())
         .with_profile_binding_registry_path(profile_binding_registry_path(state_dir))
     }
 }
@@ -204,6 +268,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
     ) -> Self {
         Self {
             store_registry_path: store_registry_path.into(),
+            subobject_registry_path: default_subobject_registry_path(),
             ledger_directory: ledger_directory.into(),
             backend_probe_root: backend_probe_root.into(),
             ssd_probe_root: ssd_probe_root.into(),
@@ -212,6 +277,11 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             probe,
             state: Mutex::new(CapacityProviderState::default()),
         }
+    }
+
+    pub fn with_subobject_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.subobject_registry_path = path.into();
+        self
     }
 
     pub fn with_profile_binding_registry_path(mut self, path: impl Into<PathBuf>) -> Self {
@@ -260,9 +330,8 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
     ) -> Result<bool, DaemonServiceRuntimeError> {
         let path = self.ledger_path(store_id.as_str());
         if path.exists() {
-            let existing = load_capacity_ledger(&path)
-                .map_err(|error| unavailable(format!("capacity ledger load failed: {error}")))?;
-            if existing.policy() != &policy {
+            let existing = self.load_or_initialize(store_id.as_str(), policy.clone())?;
+            if existing.parent().policy() != &policy {
                 return Err(unavailable(format!(
                     "capacity ledger policy conflicts with requested policy for {store_id}"
                 )));
@@ -301,10 +370,10 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
 
     fn ledger_for_store<'a>(
         &'a self,
-        ledgers: &'a mut HashMap<String, CapacityReservationLedger>,
+        ledgers: &'a mut HashMap<String, StoreCapacityLedger>,
         store_id: &StoreId,
         policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<&'a mut CapacityReservationLedger, DaemonServiceRuntimeError> {
+    ) -> Result<&'a mut StoreCapacityLedger, DaemonServiceRuntimeError> {
         if !ledgers.contains_key(store_id.as_str()) {
             let ledger = self.load_or_initialize(store_id.as_str(), policy)?;
             ledgers.insert(store_id.as_str().to_string(), ledger);
@@ -318,7 +387,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         &self,
         store_id: &str,
         policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<CapacityReservationLedger, DaemonServiceRuntimeError> {
+    ) -> Result<StoreCapacityLedger, DaemonServiceRuntimeError> {
         let path = self.ledger_path(store_id);
         if !path.exists() {
             if policy.logical_limit_bytes.is_some() {
@@ -326,14 +395,109 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
                     "capacity ledger is not initialized for bounded store {store_id}"
                 )));
             }
-            return CapacityReservationLedger::new(policy, 0).map_err(|error| {
-                unavailable(format!("capacity ledger initialization failed: {error:?}"))
-            });
+            return CapacityReservationLedger::new(policy, 0)
+                .map(StoreCapacityLedger::Flat)
+                .map_err(|error| {
+                    unavailable(format!("capacity ledger initialization failed: {error:?}"))
+                });
         }
         match load_capacity_ledger(&path) {
-            Ok(ledger) => Ok(ledger),
-            Err(error) => Err(unavailable(format!("capacity ledger load failed: {error}"))),
+            Ok(ledger) => Ok(StoreCapacityLedger::Flat(ledger)),
+            Err(flat_error) => match crate::runtime::load_subobject_capacity_ledger(&path) {
+                Ok(ledger) => Ok(StoreCapacityLedger::Hierarchical(ledger)),
+                Err(hierarchical_error) => Err(unavailable(format!(
+                    "capacity ledger load failed: flat={flat_error}; hierarchical={hierarchical_error}"
+                ))),
+            },
         }
+    }
+
+    fn save_store_ledger(
+        &self,
+        store_id: &StoreId,
+        ledger: &StoreCapacityLedger,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        match ledger {
+            StoreCapacityLedger::Flat(ledger) => {
+                save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger).map_err(|error| {
+                    unavailable(format!("capacity ledger persistence failed: {error}"))
+                })
+            }
+            StoreCapacityLedger::Hierarchical(ledger) => {
+                crate::runtime::save_subobject_capacity_ledger(
+                    self.ledger_path(store_id.as_str()),
+                    ledger,
+                )
+                .map_err(|error| {
+                    unavailable(format!("SubObject capacity persistence failed: {error}"))
+                })
+            }
+        }
+    }
+
+    fn ensure_hierarchical_store(
+        &self,
+        store_id: &StoreId,
+        ledger: &mut StoreCapacityLedger,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let definitions = read_subobject_registry(&self.subobject_registry_path)
+            .map_err(DaemonServiceRuntimeError::ObjectService)?
+            .into_iter()
+            .filter(|definition| definition.store_id == *store_id)
+            .collect::<Vec<_>>();
+        if definitions.iter().any(|definition| {
+            definition.capacity.is_some()
+                && matches!(
+                    &definition.parent,
+                    dasobjectstore_object_service::SubObjectParent::SubObject { .. }
+                )
+        }) {
+            return Err(unavailable(format!(
+                "nested bounded SubObjects for {store_id} require ancestor-ledger reconciliation"
+            )));
+        }
+        let children = definitions
+            .into_iter()
+            .filter_map(|definition| definition.capacity.map(|policy| (definition.name, policy)))
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            return Err(unavailable(format!(
+                "object store {store_id} has no bounded SubObjects"
+            )));
+        }
+        if let StoreCapacityLedger::Flat(parent) = ledger {
+            if parent.used_bytes() != 0 {
+                return Err(unavailable(format!(
+                    "bounded SubObject usage for {store_id} must be reconciled before admission"
+                )));
+            }
+            *ledger = StoreCapacityLedger::Hierarchical(
+                SubObjectCapacityLedger::from_parent(parent.clone())
+                    .map_err(|error| unavailable(format!("capacity upgrade failed: {error}")))?,
+            );
+        }
+        let StoreCapacityLedger::Hierarchical(hierarchical) = ledger else {
+            unreachable!("flat ledger upgraded above")
+        };
+        for (child_id, policy) in children {
+            if hierarchical.has_child(&child_id) {
+                hierarchical
+                    .update_child_policy(&child_id, policy)
+                    .map_err(|error| unavailable(format!("child policy update failed: {error}")))?;
+            } else {
+                if hierarchical.parent().used_bytes() != 0 {
+                    return Err(unavailable(format!(
+                        "new bounded SubObject {child_id} requires usage reconciliation"
+                    )));
+                }
+                hierarchical
+                    .add_child(child_id, policy, 0)
+                    .map_err(|error| {
+                        unavailable(format!("child ledger creation failed: {error}"))
+                    })?;
+            }
+        }
+        Ok(())
     }
 
     /// Reclaim only reservations with durable creation timestamps older than
@@ -354,10 +518,14 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
         let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
         let before = ledger.clone();
-        ledger
-            .update_policy(policy)
+        let StoreCapacityLedger::Flat(flat) = ledger else {
+            return Err(unavailable(
+                "hierarchical reservation expiry requires scoped lease maintenance",
+            ));
+        };
+        flat.update_policy(policy)
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        let reclaimed_bytes = ledger
+        let reclaimed_bytes = flat
             .expire_reservations(now_unix_seconds, max_age_seconds)
             .into_iter()
             .map(|(_, bytes)| bytes)
@@ -365,7 +533,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         if reclaimed_bytes == 0 {
             return Ok(0);
         }
-        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), flat) {
             *ledger = before;
             return Err(unavailable(format!(
                 "capacity ledger persistence failed: {error}"
@@ -412,21 +580,24 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
                 definition.policy.capacity.clone(),
             )?;
             let before = ledger.clone();
-            ledger
-                .update_policy(definition.policy.capacity)
+            let StoreCapacityLedger::Flat(flat) = ledger else {
+                return Err(unavailable(
+                    "hierarchical reservation leases require scoped maintenance",
+                ));
+            };
+            flat.update_policy(definition.policy.capacity)
                 .map_err(|error| {
                     unavailable(format!("capacity policy update failed: {error:?}"))
                 })?;
-            let snapshot = ledger.snapshot_with_expiry();
+            let snapshot = flat.snapshot_with_expiry();
 
             let mut protected_ids = protected.iter().collect::<Vec<_>>();
             protected_ids.sort();
             for reservation_id in protected_ids {
-                let Some(bytes) = ledger.reservation_bytes(reservation_id) else {
+                let Some(bytes) = flat.reservation_bytes(reservation_id) else {
                     continue;
                 };
-                ledger
-                    .renew_reservation_at_unix_seconds(reservation_id, now_unix_seconds)
+                flat.renew_reservation_at_unix_seconds(reservation_id, now_unix_seconds)
                     .map_err(|error| {
                         unavailable(format!("capacity reservation renewal failed: {error:?}"))
                     })?;
@@ -460,7 +631,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
                 }
             }
 
-            let expired = ledger.expire_reservations(now_unix_seconds, lease_seconds);
+            let expired = flat.expire_reservations(now_unix_seconds, lease_seconds);
             for (reservation_id, bytes) in expired {
                 report.expired_reservations += 1;
                 report.reclaimed_bytes = report.reclaimed_bytes.saturating_add(bytes);
@@ -472,8 +643,8 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
                 });
             }
 
-            if ledger != &before {
-                if let Err(error) = save_capacity_ledger(self.ledger_path(&store_key), ledger) {
+            if StoreCapacityLedger::Flat(flat.clone()) != before {
+                if let Err(error) = save_capacity_ledger(self.ledger_path(&store_key), flat) {
                     *ledger = before;
                     return Err(unavailable(format!(
                         "capacity ledger persistence failed: {error}"
@@ -548,10 +719,17 @@ where
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
         let path = self.ledger_path(store_id.as_str());
-        let ledger = load_capacity_ledger(&path).map_err(|error| {
-            unavailable(format!("capacity ledger rollback load failed: {error}"))
-        })?;
-        if ledger.used_bytes() != 0 || ledger.reserved_bytes() != 0 {
+        let ledger = match load_capacity_ledger(&path) {
+            Ok(ledger) => StoreCapacityLedger::Flat(ledger),
+            Err(flat_error) => crate::runtime::load_subobject_capacity_ledger(&path)
+                .map(StoreCapacityLedger::Hierarchical)
+                .map_err(|hierarchical_error| {
+                    unavailable(format!(
+                        "capacity ledger rollback load failed: flat={flat_error}; hierarchical={hierarchical_error}"
+                    ))
+                })?,
+        };
+        if ledger.parent().used_bytes() != 0 || ledger.parent().reserved_bytes() != 0 {
             return Err(unavailable(format!(
                 "refusing to roll back non-empty capacity ledger for {store_id}"
             )));
@@ -609,6 +787,7 @@ where
                 .expect("ledger inserted before lookup")
         };
         ledger
+            .parent_mut()
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
         let (backend_probe_root, ssd_probe_root) = self.probe_roots(&store_id)?;
@@ -628,7 +807,7 @@ where
         CapacityStatusResponse::from_ledger(
             &request,
             &definition.policy.capacity,
-            ledger,
+            ledger.parent(),
             definition.policy.copies,
             requires_ssd_staging,
             backend_free_bytes,
@@ -680,6 +859,7 @@ where
         };
         let before = ledger.clone();
         ledger
+            .parent_mut()
             .update_policy(definition.policy.capacity.clone())
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
 
@@ -696,24 +876,40 @@ where
             0
         };
 
-        let response = match CapacityAdmissionResponse::evaluate_and_reserve(
+        let response = match CapacityAdmissionResponse::evaluate_with_ledger(
             &request,
             &definition.policy.capacity,
-            ledger,
+            ledger.parent(),
             backend_free_bytes,
             ssd_free_bytes,
         ) {
             Ok(response) => response,
-            Err(crate::api::CapacityAdmissionReservationError::Rejected(response)) => {
-                return Ok(response)
-            }
             Err(error) => return Err(unavailable(format!("capacity admission failed: {error}"))),
         };
-        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+        if response.decision == crate::api::CapacityAdmissionDecision::Rejected {
+            return Ok(response);
+        }
+        let reservation_id_ref = reservation_id
+            .as_deref()
+            .ok_or_else(|| unavailable("capacity reservation ID is required"))?;
+        let reserve_result = match ledger {
+            StoreCapacityLedger::Flat(ledger) => ledger
+                .reserve_object_version(
+                    reservation_id_ref.to_string(),
+                    dasobjectstore_core::store::LogicalObjectVersionCharge::new(
+                        request.requested_bytes,
+                    ),
+                )
+                .map_err(|error| format!("{error:?}")),
+            StoreCapacityLedger::Hierarchical(ledger) => ledger
+                .reserve_store(reservation_id_ref, request.requested_bytes)
+                .map_err(|error| error.to_string()),
+        };
+        reserve_result
+            .map_err(|error| unavailable(format!("capacity reservation failed: {error}")))?;
+        if let Err(error) = self.save_store_ledger(&store_id, ledger) {
             *ledger = before;
-            return Err(unavailable(format!(
-                "capacity ledger persistence failed: {error}"
-            )));
+            return Err(error);
         }
         if let Some(reservation_id) = reservation_id {
             state
@@ -723,6 +919,94 @@ where
                 .insert(reservation_id);
         }
         Ok(response)
+    }
+
+    fn admit_subobject_ingest(
+        &self,
+        object_store: &str,
+        subobject: &str,
+        requested_bytes: u64,
+        copy_count: u8,
+        ingress_origin: crate::api::DaemonIngressOrigin,
+        reservation_id: &str,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        let store_id = StoreId::new(object_store.to_string())
+            .map_err(|error| unavailable(format!("invalid object store: {error}")))?;
+        let parent_policy = self.policy_for_store(&store_id)?;
+        if copy_count != self.copies_for_store(&store_id)? {
+            return Err(unavailable("copy count does not match daemon store policy"));
+        }
+        let request = CapacityAdmissionRequest {
+            store_id: object_store.to_string(),
+            requested_bytes,
+            copy_count,
+            ingress_origin,
+            client_request_id: Some(reservation_id.to_string()),
+        };
+        let (backend_root, ssd_root) = self.probe_roots(&store_id)?;
+        let backend_free_bytes = self
+            .probe
+            .free_bytes(&backend_root)
+            .map_err(|error| unavailable(format!("backend capacity probe failed: {error}")))?;
+        let ssd_free_bytes = if request.requires_ssd_staging() {
+            self.probe
+                .free_bytes(&ssd_root)
+                .map_err(|error| unavailable(format!("SSD capacity probe failed: {error}")))?
+        } else {
+            0
+        };
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, &store_id, parent_policy.clone())?;
+        let before = ledger.clone();
+        self.ensure_hierarchical_store(&store_id, ledger)?;
+        let StoreCapacityLedger::Hierarchical(hierarchical) = ledger else {
+            unreachable!("hierarchical store ensured")
+        };
+        hierarchical
+            .update_parent_policy(parent_policy.clone())
+            .map_err(|error| unavailable(format!("parent policy update failed: {error}")))?;
+        let child = hierarchical
+            .child(subobject)
+            .ok_or_else(|| unavailable(format!("unknown bounded SubObject {subobject}")))?;
+        let child_policy = child.policy().clone();
+        let parent_response = CapacityAdmissionResponse::evaluate_with_ledger(
+            &request,
+            &parent_policy,
+            hierarchical.parent(),
+            backend_free_bytes,
+            ssd_free_bytes,
+        )
+        .map_err(|error| unavailable(format!("parent capacity admission failed: {error}")))?;
+        if parent_response.decision == crate::api::CapacityAdmissionDecision::Rejected {
+            return Ok(parent_response);
+        }
+        let child_response = CapacityAdmissionResponse::evaluate_with_ledger(
+            &request,
+            &child_policy,
+            child,
+            backend_free_bytes,
+            ssd_free_bytes,
+        )
+        .map_err(|error| unavailable(format!("SubObject capacity admission failed: {error}")))?;
+        if child_response.decision == crate::api::CapacityAdmissionDecision::Rejected {
+            return Ok(child_response);
+        }
+        hierarchical
+            .reserve(subobject, reservation_id, requested_bytes)
+            .map_err(|error| unavailable(format!("SubObject reservation failed: {error}")))?;
+        if let Err(error) = self.save_store_ledger(&store_id, ledger) {
+            *ledger = before;
+            return Err(error);
+        }
+        state
+            .active_reservations
+            .entry(store_id.as_str().to_string())
+            .or_default()
+            .insert(reservation_id.to_string());
+        Ok(child_response)
     }
 
     fn admit_remote_upload(
@@ -756,18 +1040,53 @@ where
         {
             let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
             let before = ledger.clone();
-            ledger.update_policy(policy).map_err(|error| {
+            ledger.parent_mut().update_policy(policy).map_err(|error| {
                 unavailable(format!("capacity policy update failed: {error:?}"))
             })?;
-            ledger.commit(reservation_id).map_err(|error| {
-                unavailable(format!("capacity reservation commit failed: {error:?}"))
-            })?;
-            if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-                *ledger = before;
-                return Err(unavailable(format!(
-                    "capacity ledger persistence failed: {error}"
-                )));
+            match ledger {
+                StoreCapacityLedger::Flat(ledger) => {
+                    ledger.commit(reservation_id).map_err(|error| {
+                        unavailable(format!("capacity reservation commit failed: {error:?}"))
+                    })?
+                }
+                StoreCapacityLedger::Hierarchical(ledger) => {
+                    ledger.commit_store(reservation_id).map_err(|error| {
+                        unavailable(format!("capacity reservation commit failed: {error}"))
+                    })?
+                }
             }
+            if let Err(error) = self.save_store_ledger(store_id, ledger) {
+                *ledger = before;
+                return Err(error);
+            }
+        }
+        remove_active_reservation(&mut state, store_id, reservation_id);
+        Ok(())
+    }
+
+    fn commit_subobject(
+        &self,
+        store_id: &StoreId,
+        subobject: &str,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy)?;
+        let before = ledger.clone();
+        self.ensure_hierarchical_store(store_id, ledger)?;
+        let StoreCapacityLedger::Hierarchical(hierarchical) = ledger else {
+            unreachable!("hierarchical store ensured")
+        };
+        hierarchical
+            .commit(subobject, reservation_id)
+            .map_err(|error| unavailable(format!("SubObject capacity commit failed: {error}")))?;
+        if let Err(error) = self.save_store_ledger(store_id, ledger) {
+            *ledger = before;
+            return Err(error);
         }
         remove_active_reservation(&mut state, store_id, reservation_id);
         Ok(())
@@ -784,7 +1103,12 @@ where
             .lock()
             .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
         let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy)?;
-        Ok(ledger.reservation_bytes(reservation_id))
+        Ok(match ledger {
+            StoreCapacityLedger::Flat(ledger) => ledger.reservation_bytes(reservation_id),
+            StoreCapacityLedger::Hierarchical(ledger) => {
+                ledger.store_reservation_bytes(reservation_id)
+            }
+        })
     }
 
     fn release(
@@ -800,18 +1124,53 @@ where
         {
             let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
             let before = ledger.clone();
-            ledger.update_policy(policy).map_err(|error| {
+            ledger.parent_mut().update_policy(policy).map_err(|error| {
                 unavailable(format!("capacity policy update failed: {error:?}"))
             })?;
-            ledger.release(reservation_id).map_err(|error| {
-                unavailable(format!("capacity reservation release failed: {error:?}"))
-            })?;
-            if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
-                *ledger = before;
-                return Err(unavailable(format!(
-                    "capacity ledger persistence failed: {error}"
-                )));
+            match ledger {
+                StoreCapacityLedger::Flat(ledger) => {
+                    ledger.release(reservation_id).map_err(|error| {
+                        unavailable(format!("capacity reservation release failed: {error:?}"))
+                    })?;
+                }
+                StoreCapacityLedger::Hierarchical(ledger) => {
+                    ledger.release_store(reservation_id).map_err(|error| {
+                        unavailable(format!("capacity reservation release failed: {error}"))
+                    })?;
+                }
             }
+            if let Err(error) = self.save_store_ledger(store_id, ledger) {
+                *ledger = before;
+                return Err(error);
+            }
+        }
+        remove_active_reservation(&mut state, store_id, reservation_id);
+        Ok(())
+    }
+
+    fn release_subobject(
+        &self,
+        store_id: &StoreId,
+        subobject: &str,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy)?;
+        let before = ledger.clone();
+        self.ensure_hierarchical_store(store_id, ledger)?;
+        let StoreCapacityLedger::Hierarchical(hierarchical) = ledger else {
+            unreachable!("hierarchical store ensured")
+        };
+        hierarchical
+            .release(subobject, reservation_id)
+            .map_err(|error| unavailable(format!("SubObject capacity release failed: {error}")))?;
+        if let Err(error) = self.save_store_ledger(store_id, ledger) {
+            *ledger = before;
+            return Err(error);
         }
         remove_active_reservation(&mut state, store_id, reservation_id);
         Ok(())
@@ -830,16 +1189,18 @@ where
         let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy.clone())?;
         let before = ledger.clone();
         ledger
+            .parent_mut()
             .update_policy(policy)
             .map_err(|error| unavailable(format!("capacity policy update failed: {error:?}")))?;
-        ledger.reconcile_used_bytes(used_bytes).map_err(|error| {
-            unavailable(format!("capacity usage reconciliation failed: {error:?}"))
-        })?;
-        if let Err(error) = save_capacity_ledger(self.ledger_path(store_id.as_str()), ledger) {
+        ledger
+            .parent_mut()
+            .reconcile_used_bytes(used_bytes)
+            .map_err(|error| {
+                unavailable(format!("capacity usage reconciliation failed: {error:?}"))
+            })?;
+        if let Err(error) = self.save_store_ledger(store_id, ledger) {
             *ledger = before;
-            return Err(unavailable(format!(
-                "capacity ledger persistence failed: {error}"
-            )));
+            return Err(error);
         }
         Ok(())
     }
@@ -874,7 +1235,9 @@ mod tests {
         CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
         CapacityStatusRequest, DaemonIngressOrigin,
     };
-    use crate::runtime::{load_capacity_ledger, save_capacity_ledger};
+    use crate::runtime::{
+        load_capacity_ledger, load_subobject_capacity_ledger, save_capacity_ledger,
+    };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::manifest::{
@@ -884,7 +1247,9 @@ mod tests {
     use dasobjectstore_core::store::{
         CapacityPolicy, CapacityReservationLedger, StoreClass, StorePolicy,
     };
-    use dasobjectstore_object_service::StoreServiceDefinition;
+    use dasobjectstore_object_service::{
+        StoreServiceDefinition, SubObjectDefinition, SubObjectParent,
+    };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1037,6 +1402,128 @@ mod tests {
         let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
         assert_eq!(released.reserved_bytes(), 0);
         assert_eq!(released.used_bytes(), 100);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bounded_subobject_admission_is_atomic_with_parent_store_capacity() {
+        let root = root("subobject-admit");
+        let (registry_path, subobject_registry_path) = registry(&root);
+        let store_id = StoreId::new("codex").expect("store id");
+        let subobject = SubObjectDefinition {
+            name: "experiment-a".to_string(),
+            store_id: store_id.clone(),
+            parent: SubObjectParent::Store {
+                store_id: store_id.clone(),
+            },
+            capacity: Some(CapacityPolicy::bounded(150, 0)),
+            path: vec!["experiment-a".to_string()],
+        };
+        std::fs::write(
+            &subobject_registry_path,
+            serde_json::to_vec(&[subobject]).expect("SubObject registry JSON"),
+        )
+        .expect("SubObject registry");
+        let ledger_dir = root.join("ledgers");
+        let ledger_path = ledger_dir.join("codex.json");
+        save_capacity_ledger(
+            &ledger_path,
+            &CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0)
+                .expect("flat ledger"),
+        )
+        .expect("flat ledger seed");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path.clone(),
+            ledger_dir.clone(),
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        )
+        .with_subobject_registry_path(subobject_registry_path.clone());
+
+        let admitted = provider
+            .admit_subobject_ingest(
+                "codex",
+                "experiment-a",
+                100,
+                2,
+                DaemonIngressOrigin::RemoteS3,
+                "child-upload-1",
+            )
+            .expect("child reservation admitted");
+        assert_eq!(admitted.decision, CapacityAdmissionDecision::Admitted);
+        assert_eq!(admitted.logical_limit_bytes, Some(150));
+        let rejected = provider
+            .admit_subobject_ingest(
+                "codex",
+                "experiment-a",
+                60,
+                2,
+                DaemonIngressOrigin::RemoteS3,
+                "child-upload-2",
+            )
+            .expect("child quota rejection is a decision");
+        assert_eq!(rejected.decision, CapacityAdmissionDecision::Rejected);
+        assert_eq!(
+            rejected.reason,
+            Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        );
+        let persisted =
+            load_subobject_capacity_ledger(&ledger_path).expect("hierarchical ledger persisted");
+        assert_eq!(persisted.parent().reserved_bytes(), 100);
+        assert_eq!(
+            persisted
+                .child("experiment-a")
+                .expect("child ledger")
+                .reserved_bytes(),
+            100
+        );
+
+        provider
+            .commit_subobject(&store_id, "experiment-a", "child-upload-1")
+            .expect("child commit updates both ledgers");
+        drop(provider);
+        let restarted = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        )
+        .with_subobject_registry_path(subobject_registry_path);
+        let parent_rejected = restarted
+            .admit(CapacityAdmissionRequest {
+                store_id: "codex".to_string(),
+                requested_bytes: 801,
+                copy_count: 2,
+                ingress_origin: DaemonIngressOrigin::RemoteS3,
+                client_request_id: Some("root-upload".to_string()),
+            })
+            .expect("parent rejection after restart");
+        assert_eq!(
+            parent_rejected.decision,
+            CapacityAdmissionDecision::Rejected
+        );
+        assert_eq!(
+            parent_rejected.reason,
+            Some(CapacityAdmissionRejectionReason::LogicalQuota)
+        );
+        let persisted = load_subobject_capacity_ledger(&ledger_path)
+            .expect("hierarchical commit survives restart");
+        assert_eq!(persisted.parent().used_bytes(), 100);
+        assert_eq!(
+            persisted
+                .child("experiment-a")
+                .expect("child ledger")
+                .used_bytes(),
+            100
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

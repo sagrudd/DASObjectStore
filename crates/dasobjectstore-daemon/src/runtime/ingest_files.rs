@@ -234,6 +234,7 @@ impl LocalFileIngestExecutor {
         let mut capacity_reservations = IngestCapacityReservations::new(
             self.capacity_provider.clone(),
             endpoint.store.store_id.clone(),
+            endpoint.subobject_name.clone(),
             reservation_scope(&request),
         );
 

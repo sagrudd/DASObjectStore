@@ -21,6 +21,7 @@ pub(super) fn reservation_scope(request: &super::SubmitIngestFilesRequest) -> St
 pub(super) struct IngestCapacityReservations {
     provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     store_id: StoreId,
+    subobject_name: Option<String>,
     scope: String,
     reservations: HashMap<String, String>,
 }
@@ -29,11 +30,13 @@ impl IngestCapacityReservations {
     pub(super) fn new(
         provider: Option<Arc<dyn CapacityAdmissionProvider>>,
         store_id: StoreId,
+        subobject_name: Option<String>,
         scope: String,
     ) -> Self {
         Self {
             provider,
             store_id,
+            subobject_name,
             scope,
             reservations: HashMap::new(),
         }
@@ -50,20 +53,29 @@ impl IngestCapacityReservations {
             return Ok(());
         };
         let reservation_id = format!("{job_id}/{}/{}", self.scope, entry.object_id);
-        let response = provider
-            .admit_ingest(
+        let response = match self.subobject_name.as_deref() {
+            Some(subobject) => provider.admit_subobject_ingest(
+                self.store_id.as_str(),
+                subobject,
+                entry.size_bytes,
+                copies,
+                ingress_origin,
+                &reservation_id,
+            ),
+            None => provider.admit_ingest(
                 self.store_id.as_str(),
                 entry.size_bytes,
                 copies,
                 ingress_origin,
                 &reservation_id,
-            )
-            .map_err(|error| {
-                DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                    "capacity admission failed for {}: {error}",
-                    entry.relative_path.display()
-                ))
-            })?;
+            ),
+        }
+        .map_err(|error| {
+            DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "capacity admission failed for {}: {error}",
+                entry.relative_path.display()
+            ))
+        })?;
         if response.decision != crate::api::CapacityAdmissionDecision::Admitted {
             return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
                 "capacity admission rejected for {}: {}",
@@ -88,14 +100,16 @@ impl IngestCapacityReservations {
         let Some(provider) = &self.provider else {
             return Ok(());
         };
-        provider
-            .commit(&self.store_id, reservation_id)
-            .map_err(|error| {
-                DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                    "capacity commit failed for {}: {error}",
-                    entry.relative_path.display()
-                ))
-            })?;
+        let result = match self.subobject_name.as_deref() {
+            Some(subobject) => provider.commit_subobject(&self.store_id, subobject, reservation_id),
+            None => provider.commit(&self.store_id, reservation_id),
+        };
+        result.map_err(|error| {
+            DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "capacity commit failed for {}: {error}",
+                entry.relative_path.display()
+            ))
+        })?;
         self.reservations.remove(entry.object_id.as_str());
         Ok(())
     }
@@ -107,7 +121,12 @@ impl Drop for IngestCapacityReservations {
             return;
         };
         for reservation_id in self.reservations.values() {
-            let _ = provider.release(&self.store_id, reservation_id);
+            let _ = match self.subobject_name.as_deref() {
+                Some(subobject) => {
+                    provider.release_subobject(&self.store_id, subobject, reservation_id)
+                }
+                None => provider.release(&self.store_id, reservation_id),
+            };
         }
     }
 }
