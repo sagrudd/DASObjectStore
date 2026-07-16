@@ -447,6 +447,13 @@ derived from the validated catalogue content, so retrying an interrupted
 DELETE replays the same handoff without allowing a later, different catalogue
 state to masquerade as the earlier operation.
 
+At daemon startup, registered folder profiles are checked for incomplete
+catalogue handoffs. When one exists, the daemon reopens the validated binding,
+loads the current private catalogue, and republishes that exact snapshot before
+serving requests. Older incomplete journals are removed only after publication
+succeeds. A missing binding, capacity policy, backend root, or shared catalogue
+causes startup to fail closed rather than serving a split authority.
+
 Per-user macOS service plans
 ----------------------------
 

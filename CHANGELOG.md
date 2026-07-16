@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.104.0 - 2026-07-16
+
+- Recover incomplete profile/shared-catalogue publications automatically at
+  packaged-daemon startup, republishing the current private catalogue as the
+  authority and removing superseded incomplete journals only after success.
+- Fail daemon startup closed when a bound profile with pending publication
+  cannot be validated or republished.
+
 ## 0.103.0 - 2026-07-16
 
 - Route the existing profile-S3 DELETE contract through the production daemon

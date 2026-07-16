@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -708,7 +708,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -716,7 +716,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "base64",
  "dasobjectstore-core",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "axum",
  "bytes",
@@ -762,7 +762,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "gloo-net",
  "gloo-timers",
@@ -780,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "axum",
  "dasobjectstore-core",
@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "clap",
  "dasobjectstore-core",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.103.0"
+version = "0.104.0"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",

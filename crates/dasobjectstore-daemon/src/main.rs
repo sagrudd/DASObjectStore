@@ -3,10 +3,11 @@ use dasobjectstore_daemon::runtime::{
     profile_binding_registry_path,
 };
 use dasobjectstore_daemon::{
-    admin_job_registry_path, appliance_telemetry_state_path, AdminJobRegistry,
-    ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
-    ApplianceTelemetrySource, CapacityReservationLeaseReport, DaemonRequestHandler,
-    DaemonRuntimeConfig, FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
+    admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
+    recover_profile_catalogue_publications, AdminJobRegistry, ApplianceTelemetryLoop,
+    ApplianceTelemetryLoopConfig, ApplianceTelemetrySink, ApplianceTelemetrySource,
+    CapacityReservationLeaseReport, DaemonRequestHandler, DaemonRuntimeConfig,
+    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
     FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
     LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
     UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
@@ -62,12 +63,26 @@ fn run() -> Result<(), String> {
     if interrupted > 0 {
         eprintln!("marked {interrupted} interrupted daemon job(s) failed after restart");
     }
+    let profile_registry = profile_binding_registry_path(&config.state_dir);
+    let recovery = recover_profile_catalogue_publications(
+        &profile_registry,
+        dasobjectstore_object_service::default_store_registry_path(),
+        profile_catalogue_live_sqlite_path(),
+        &current_utc_timestamp(),
+    )
+    .map_err(|error| format!("profile catalogue startup recovery failed: {error}"))?;
+    if recovery.stores_republished > 0 {
+        eprintln!(
+            "recovered {} profile catalogue publication(s); removed {} stale journal(s)",
+            recovery.stores_republished, recovery.stale_journals_removed
+        );
+    }
     let handler = DaemonRequestHandler::new_with_admin_job_registry(
         garage,
         SystemDaemonClock,
         admin_job_registry,
     )
-    .with_profile_binding_registry_path(profile_binding_registry_path(&config.state_dir))
+    .with_profile_binding_registry_path(profile_registry)
     .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))

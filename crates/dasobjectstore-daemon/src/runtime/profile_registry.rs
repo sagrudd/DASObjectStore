@@ -107,6 +107,16 @@ pub fn read_profile_binding(
         .transpose()
 }
 
+pub fn read_profile_bindings(
+    path: impl AsRef<Path>,
+) -> Result<Vec<BackendProfileBinding>, DaemonServiceRuntimeError> {
+    read_registry(path.as_ref())?
+        .bindings
+        .into_iter()
+        .map(BackendProfileBinding::validate_and_canonicalize)
+        .collect()
+}
+
 /// Read a persisted binding without requiring local roots to be mounted.
 /// Capacity probes and backend opens must continue using
 /// `read_profile_binding`, which canonicalizes and fails closed when a root is

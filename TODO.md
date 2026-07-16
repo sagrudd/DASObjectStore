@@ -416,7 +416,10 @@ completion.
   - [x] Add restart reconciliation for prepared/profile-committed journal
     entries. Replay re-verifies destination payloads and reuses the idempotent
     profile plus SQLite commit; fully committed entries are no-op reads, while
-    missing or mismatched journals fail closed.
+    missing or mismatched journals fail closed. The packaged daemon now scans
+    registered folder bindings at startup, republishes the current private
+    catalogue whenever an incomplete handoff exists, and removes superseded
+    incomplete journals only after shared SQLite accepts the exact snapshot.
   - [x] Add the daemon-owned profile-binding registry: portable manifests are
     validated against canonical folder/drive roots, persisted atomically, and
     per-store capacity probes use the binding when present; profile-binding

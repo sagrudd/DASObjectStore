@@ -15,6 +15,103 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProfileCatalogueRecoveryReport {
+    pub stores_scanned: u64,
+    pub stores_republished: u64,
+    pub stale_journals_removed: u64,
+}
+
+pub fn profile_catalogue_live_sqlite_path() -> std::path::PathBuf {
+    std::env::var_os("DASOBJECTSTORE_LIVE_SQLITE_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("DASOBJECTSTORE_SSD_ROOT")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("/srv/dasobjectstore/ssd"))
+                .join(dasobjectstore_metadata::METADATA_DIR_NAME)
+                .join(dasobjectstore_metadata::LIVE_SQLITE_FILE_NAME)
+        })
+}
+
+/// Recover incomplete profile/shared-catalogue publications at daemon start.
+/// The current private catalogue always wins over an older journal snapshot.
+pub fn recover_profile_catalogue_publications(
+    binding_registry_path: impl AsRef<Path>,
+    store_registry_path: impl AsRef<Path>,
+    live_sqlite_path: impl AsRef<Path>,
+    committed_at_utc: &str,
+) -> Result<ProfileCatalogueRecoveryReport, BackendError> {
+    let bindings = super::read_profile_bindings(binding_registry_path)
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    if bindings.is_empty() {
+        return Ok(ProfileCatalogueRecoveryReport::default());
+    }
+    let definitions = dasobjectstore_object_service::read_store_registry(store_registry_path)
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    let mut report = ProfileCatalogueRecoveryReport::default();
+    for binding in bindings {
+        if binding.manifest.deployment_profile
+            != dasobjectstore_core::deployment::DeploymentProfile::Folder
+        {
+            continue;
+        }
+        report.stores_scanned += 1;
+        let handoff_root = binding
+            .backend_root
+            .join(".dasobjectstore/profile-catalogue-handoffs");
+        let mut incomplete = Vec::new();
+        if handoff_root.is_dir() {
+            for entry in fs::read_dir(&handoff_root).map_err(io_error)? {
+                let entry = entry.map_err(io_error)?;
+                let path = entry.path();
+                let Some(transaction_id) = path.file_stem().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                    continue;
+                }
+                if read_profile_catalogue_handoff(&handoff_root, transaction_id)?
+                    .is_some_and(|journal| journal.state != ProfileCatalogueHandoffState::Committed)
+                {
+                    incomplete.push(path);
+                }
+            }
+        }
+        if incomplete.is_empty() {
+            continue;
+        }
+        let capacity = definitions
+            .iter()
+            .find(|definition| definition.store_id == binding.manifest.store_id)
+            .ok_or_else(|| BackendError::NotFound("profile capacity policy is unavailable".into()))?
+            .policy
+            .capacity
+            .clone();
+        let backend = super::FolderBackend::open(
+            &binding.backend_root,
+            binding.manifest.clone(),
+            capacity,
+            0,
+        )?;
+        let namespace = format!("profile-s3:{}", binding.manifest.store_id.as_str());
+        publish_profile_catalogue_with_metadata(
+            &binding.manifest.store_id,
+            &backend,
+            live_sqlite_path.as_ref(),
+            &handoff_root,
+            &namespace,
+            committed_at_utc,
+        )?;
+        report.stores_republished += 1;
+        for path in incomplete {
+            fs::remove_file(path).map_err(io_error)?;
+            report.stale_journals_removed += 1;
+        }
+    }
+    Ok(report)
+}
+
 pub trait ProfileCatalogueBackend: ObjectStoreBackend + ObjectCatalogueAuthority {}
 
 impl<T> ProfileCatalogueBackend for T where T: ObjectStoreBackend + ObjectCatalogueAuthority {}
@@ -445,6 +542,25 @@ mod tests {
     use dasobjectstore_core::manifest::ObjectStoreManifest;
     use rusqlite::Connection;
     use std::io::{Cursor, Read};
+
+    #[test]
+    fn startup_recovery_is_a_noop_without_profile_bindings() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-recovery-empty-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let report = recover_profile_catalogue_publications(
+            root.join("missing-bindings.json"),
+            root.join("missing-stores.json"),
+            root.join("missing-live.sqlite"),
+            "2026-07-16T00:00:00Z",
+        )
+        .expect("empty recovery");
+        assert_eq!(report, ProfileCatalogueRecoveryReport::default());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     struct FakeBackend {
         record: BackendObjectRecord,
