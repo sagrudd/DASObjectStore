@@ -294,6 +294,7 @@ where
                     endpoint_url: request.endpoint_url,
                 },
                 capacity_reservation_id: Some(reservation_id.clone()),
+                capacity_settlement: crate::runtime::ApplicationUploadCapacitySettlement::Reserved,
             },
             now,
         );
@@ -384,9 +385,40 @@ where
                         now_utc,
                     )
                     .map_err(|error| error.to_string())?;
-                capacity_provider
-                    .commit(&pending.capability.store_id, &reservation_id)
-                    .map_err(|error| error.to_string())
+                let settlement = crate::runtime::prepare_application_upload_capacity_settlement(
+                    &self.application_upload_capability_path,
+                    &pending.capability.capability_id,
+                )
+                .map_err(|error| error.to_string())?;
+                if settlement != crate::runtime::ApplicationUploadCapacitySettlement::Committed {
+                    match capacity_provider
+                        .reservation_bytes(&pending.capability.store_id, &reservation_id)
+                        .map_err(|error| error.to_string())?
+                    {
+                        Some(bytes) if bytes == pending.capability.expected_size_bytes => {
+                            capacity_provider
+                                .commit(&pending.capability.store_id, &reservation_id)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        Some(bytes) => {
+                            return Err(format!(
+                                "capacity reservation size drift: expected {}, got {bytes}",
+                                pending.capability.expected_size_bytes
+                            ));
+                        }
+                        None => {
+                            // A durable Prepared marker is written before settlement.
+                            // Capabilities expire before reservation leases, so a missing
+                            // reservation here represents the prior commit crash window.
+                        }
+                    }
+                    crate::runtime::commit_application_upload_capacity_settlement(
+                        &self.application_upload_capability_path,
+                        &pending.capability.capability_id,
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
+                Ok(())
             },
         )?;
         Ok(ApplicationUploadCompletionResponse {

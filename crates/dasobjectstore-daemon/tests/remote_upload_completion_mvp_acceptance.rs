@@ -15,7 +15,8 @@ use dasobjectstore_daemon::{
         CapacityAdmissionRejectionReason, CapacityAdmissionRequest, CapacityAdmissionResponse,
     },
     runtime::{
-        upsert_application_identity, CapacityAdmissionProvider, DaemonServiceRuntimeError,
+        prepare_application_upload_capacity_settlement, upsert_application_identity,
+        CapacityAdmissionProvider, DaemonServiceRuntimeError,
         FileBackedRemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionRecord,
         RemoteEasyconnectPairedSessionStore, RemoteUploadCompletionRecord,
         RemoteUploadProviderCompletion,
@@ -30,6 +31,7 @@ use dasobjectstore_object_service::{
     write_managed_credential_registry, ManagedCredentialRegistry, ManagedStoreCredentialRecord,
 };
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -167,6 +169,66 @@ fn capability_completion_verifies_commits_replays_and_recovers_from_commit_failu
         "capacity rejection must not publish or complete an upload"
     );
 
+    let prepared = client
+        .issue_application_upload_capability(issue_request(
+            "upload-prepared",
+            "analysis/prepared.txt",
+        ))
+        .expect("prepared capability issuance succeeds");
+    prepare_application_upload_capacity_settlement(
+        &paths.capabilities,
+        &prepared.capability.capability_id,
+    )
+    .expect("simulate crash after durable prepare");
+    assert_eq!(
+        client
+            .complete_application_upload(ApplicationUploadCompletionRequest {
+                capability: prepared.capability,
+            })
+            .expect("prepared reservation resumes")
+            .outcome,
+        ApplicationUploadCompletionOutcome::Committed
+    );
+
+    let already_settled = client
+        .issue_application_upload_capability(issue_request(
+            "upload-settled",
+            "analysis/settled.txt",
+        ))
+        .expect("settled capability issuance succeeds");
+    prepare_application_upload_capacity_settlement(
+        &paths.capabilities,
+        &already_settled.capability.capability_id,
+    )
+    .expect("simulate settlement intent");
+    let reservation_id = format!(
+        "application-upload-{}",
+        already_settled.capability.capability_id
+    );
+    state
+        .capacity_reservations
+        .lock()
+        .expect("reservations")
+        .remove(&reservation_id);
+    assert_eq!(
+        client
+            .complete_application_upload(ApplicationUploadCompletionRequest {
+                capability: already_settled.capability,
+            })
+            .expect("post-settlement crash resumes without a second charge")
+            .outcome,
+        ApplicationUploadCompletionOutcome::Committed
+    );
+    assert!(
+        !state
+            .capacity_events
+            .lock()
+            .expect("capacity")
+            .iter()
+            .any(|event| event == &format!("commit:{reservation_id}")),
+        "post-settlement recovery must not charge logical capacity twice"
+    );
+
     cleanup(&root);
 }
 
@@ -292,6 +354,7 @@ struct CompletionState {
     saw_managed_credentials: AtomicBool,
     committed_uploads: Mutex<Vec<&'static str>>,
     capacity_events: Mutex<Vec<String>>,
+    capacity_reservations: Mutex<HashMap<String, u64>>,
 }
 
 struct AcceptanceOrchestrator {
@@ -355,6 +418,8 @@ impl DaemonServiceOrchestrator for AcceptanceOrchestrator {
         let upload = match record.job_id.as_str() {
             "upload-1" => "upload-1",
             "upload-2" => "upload-2",
+            "upload-prepared" => "upload-prepared",
+            "upload-settled" => "upload-settled",
             other => panic!("unexpected upload {other}"),
         };
         self.state
@@ -409,6 +474,13 @@ impl CapacityAdmissionProvider for AcceptanceCapacityProvider {
             .state
             .reject_next_admission
             .swap(false, Ordering::SeqCst);
+        if !rejected {
+            self.state
+                .capacity_reservations
+                .lock()
+                .expect("reservations")
+                .insert(reservation_id.to_string(), request.requested_bytes);
+        }
         Ok(CapacityAdmissionResponse {
             store_id: StoreId::new(request.store_id).expect("store"),
             decision: if rejected {
@@ -441,6 +513,13 @@ impl CapacityAdmissionProvider for AcceptanceCapacityProvider {
         _store_id: &StoreId,
         reservation_id: &str,
     ) -> Result<(), DaemonServiceRuntimeError> {
+        let removed = self
+            .state
+            .capacity_reservations
+            .lock()
+            .expect("reservations")
+            .remove(reservation_id);
+        assert!(removed.is_some(), "capacity commit requires a reservation");
         self.state
             .capacity_events
             .lock()
@@ -449,11 +528,30 @@ impl CapacityAdmissionProvider for AcceptanceCapacityProvider {
         Ok(())
     }
 
+    fn reservation_bytes(
+        &self,
+        _store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<Option<u64>, DaemonServiceRuntimeError> {
+        Ok(self
+            .state
+            .capacity_reservations
+            .lock()
+            .expect("reservations")
+            .get(reservation_id)
+            .copied())
+    }
+
     fn release(
         &self,
         _store_id: &StoreId,
         reservation_id: &str,
     ) -> Result<(), DaemonServiceRuntimeError> {
+        self.state
+            .capacity_reservations
+            .lock()
+            .expect("reservations")
+            .remove(reservation_id);
         self.state
             .capacity_events
             .lock()

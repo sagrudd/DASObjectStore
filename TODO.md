@@ -249,6 +249,11 @@ completion.
     failed capability persistence releases admission, catalogue failure keeps
     the reservation retryable, and successful verified catalogue publication
     settles quota before the single-use capability is reported committed.
+  - [x] Make upload-completion quota settlement restart-safe. A durable
+    three-state settlement marker precedes ledger mutation; restart inspects
+    the exact reservation to finish an interrupted commit or recognize that
+    the prior commit succeeded before replay publication, preventing both
+    stranded capabilities and duplicate logical charges.
   - [x] Make the daemon-owned Garage endpoint an explicit, backward-compatible
     runtime setting instead of advertising the non-routable wildcard bind
     address. Packaged appliances retain the loopback default; container and VM

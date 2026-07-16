@@ -58,6 +58,10 @@ forged-capability rejection, verify-before-commit ordering, quota settlement
 only after catalogue publication, exact-replay idempotency, and retry after
 catalogue failure. A capability without its persisted capacity reservation
 fails closed rather than publishing an uncharged object version.
+The capacity handoff is restart-safe: the capability registry records a
+settlement intent before quota mutation and records completion afterward. An
+exact retry inspects that reservation, completing it when still present or
+recognizing the bounded post-commit crash window when it is already absent.
 The evidence labels provider execution as ``surrogate_only``: it does not
 replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 

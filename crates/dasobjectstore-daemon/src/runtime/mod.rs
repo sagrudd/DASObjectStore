@@ -88,9 +88,11 @@ pub use application_key_registry::{
     APPLICATION_KEY_REGISTRY_SCHEMA,
 };
 pub use application_upload_capabilities::{
-    application_upload_capability_path, issue_application_upload_capability,
-    read_application_upload_capability, PendingApplicationUploadCapability,
-    APPLICATION_UPLOAD_CAPABILITY_FILE_NAME, APPLICATION_UPLOAD_CAPABILITY_SCHEMA,
+    application_upload_capability_path, commit_application_upload_capacity_settlement,
+    issue_application_upload_capability, prepare_application_upload_capacity_settlement,
+    read_application_upload_capability, ApplicationUploadCapacitySettlement,
+    PendingApplicationUploadCapability, APPLICATION_UPLOAD_CAPABILITY_FILE_NAME,
+    APPLICATION_UPLOAD_CAPABILITY_SCHEMA,
 };
 pub use capacity_lease::{
     CapacityReservationLeaseAction, CapacityReservationLeaseEvent,

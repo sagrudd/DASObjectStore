@@ -23,6 +23,17 @@ pub struct PendingApplicationUploadCapability {
     /// data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capacity_reservation_id: Option<String>,
+    #[serde(default)]
+    pub capacity_settlement: ApplicationUploadCapacitySettlement,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationUploadCapacitySettlement {
+    #[default]
+    Reserved,
+    Prepared,
+    Committed,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -96,6 +107,56 @@ pub fn read_application_upload_capability(
         )),
         None => Err(invalid("upload capability was not issued or has expired")),
     }
+}
+
+pub fn prepare_application_upload_capacity_settlement(
+    path: impl AsRef<Path>,
+    capability_id: &str,
+) -> Result<ApplicationUploadCapacitySettlement, DaemonServiceRuntimeError> {
+    update_settlement(path.as_ref(), capability_id, |state| match state {
+        ApplicationUploadCapacitySettlement::Reserved => {
+            ApplicationUploadCapacitySettlement::Prepared
+        }
+        state => state,
+    })
+}
+
+pub fn commit_application_upload_capacity_settlement(
+    path: impl AsRef<Path>,
+    capability_id: &str,
+) -> Result<ApplicationUploadCapacitySettlement, DaemonServiceRuntimeError> {
+    update_settlement(path.as_ref(), capability_id, |state| match state {
+        ApplicationUploadCapacitySettlement::Prepared
+        | ApplicationUploadCapacitySettlement::Committed => {
+            ApplicationUploadCapacitySettlement::Committed
+        }
+        ApplicationUploadCapacitySettlement::Reserved => state,
+    })
+}
+
+fn update_settlement(
+    path: &Path,
+    capability_id: &str,
+    transition: impl FnOnce(ApplicationUploadCapacitySettlement) -> ApplicationUploadCapacitySettlement,
+) -> Result<ApplicationUploadCapacitySettlement, DaemonServiceRuntimeError> {
+    let _guard = lock()?;
+    let mut registry = read(path)?;
+    let record = registry
+        .records
+        .iter_mut()
+        .find(|record| record.capability.capability_id == capability_id)
+        .ok_or_else(|| invalid("upload capacity settlement capability is not registered"))?;
+    let next = transition(record.capacity_settlement);
+    if next == ApplicationUploadCapacitySettlement::Reserved
+        && record.capacity_settlement == ApplicationUploadCapacitySettlement::Reserved
+    {
+        return Err(invalid(
+            "upload capacity settlement must be prepared before commit",
+        ));
+    }
+    record.capacity_settlement = next;
+    write(path, &registry)?;
+    Ok(next)
 }
 
 fn lock() -> Result<std::sync::MutexGuard<'static, ()>, DaemonServiceRuntimeError> {
@@ -198,6 +259,7 @@ mod tests {
                 endpoint_url: "https://object.example".to_string(),
             },
             capacity_reservation_id: Some(format!("application-upload-{id}")),
+            capacity_settlement: ApplicationUploadCapacitySettlement::Reserved,
         }
     }
 
@@ -216,6 +278,22 @@ mod tests {
         assert_eq!(
             read_application_upload_capability(&path, &issued.capability, 20).unwrap(),
             issued
+        );
+        assert_eq!(
+            prepare_application_upload_capacity_settlement(&path, &issued.capability.capability_id)
+                .unwrap(),
+            ApplicationUploadCapacitySettlement::Prepared
+        );
+        assert_eq!(
+            commit_application_upload_capacity_settlement(&path, &issued.capability.capability_id)
+                .unwrap(),
+            ApplicationUploadCapacitySettlement::Committed
+        );
+        assert_eq!(
+            read_application_upload_capability(&path, &issued.capability, 20)
+                .unwrap()
+                .capacity_settlement,
+            ApplicationUploadCapacitySettlement::Committed
         );
         let mut forged = issued.capability.clone();
         forged.expected_size_bytes += 1;

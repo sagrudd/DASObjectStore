@@ -131,6 +131,18 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         ))
     }
 
+    /// Inspect one daemon-owned reservation without exposing the ledger path.
+    /// Settlement recovery uses this only after a durable prepared marker.
+    fn reservation_bytes(
+        &self,
+        _store_id: &StoreId,
+        _reservation_id: &str,
+    ) -> Result<Option<u64>, DaemonServiceRuntimeError> {
+        Err(unavailable(
+            "capacity reservation inspection provider is not configured",
+        ))
+    }
+
     fn release(
         &self,
         _store_id: &StoreId,
@@ -761,6 +773,20 @@ where
         Ok(())
     }
 
+    fn reservation_bytes(
+        &self,
+        store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<Option<u64>, DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy)?;
+        Ok(ledger.reservation_bytes(reservation_id))
+    }
+
     fn release(
         &self,
         store_id: &StoreId,
@@ -972,16 +998,28 @@ mod tests {
         assert!(provider
             .admit(request(DaemonIngressOrigin::RemoteS3, "upload-1"))
             .is_err());
+        let store_id = StoreId::new("codex").expect("store id");
+        assert_eq!(
+            provider
+                .reservation_bytes(&store_id, "upload-1")
+                .expect("reservation inspection"),
+            Some(100)
+        );
         assert_eq!(
             load_capacity_ledger(&ledger_path)
                 .expect("ledger reload")
                 .reserved_bytes(),
             100
         );
-        let store_id = StoreId::new("codex").expect("store id");
         provider
             .commit(&store_id, "upload-1")
             .expect("reservation commits");
+        assert_eq!(
+            provider
+                .reservation_bytes(&store_id, "upload-1")
+                .expect("settled reservation inspection"),
+            None
+        );
         let committed = load_capacity_ledger(&ledger_path).expect("committed ledger reload");
         assert_eq!(committed.reserved_bytes(), 0);
         assert_eq!(committed.used_bytes(), 100);

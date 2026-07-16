@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.111.1 - 2026-07-16
+
+- Make application-upload quota settlement restart-safe with durable
+  ``reserved``, ``prepared``, and ``committed`` states. Exact retries inspect
+  the daemon ledger to finish a pre-commit interruption or recognize the
+  post-commit/pre-replay crash window without charging twice.
+
 ## 0.111.0 - 2026-07-16
 
 - Reserve daemon-owned logical capacity before issuing an application upload
