@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## Unreleased
+
+- Package the version-matched remote completion client and digest-pinned AWS
+  CLI in the local Docker authority image so macOS consumers can execute next
+  to the daemon socket instead of relying on unsupported bind-mounted Unix
+  socket connectivity.
+
 ## 0.110.0 - 2026-07-16
 
 - Add path-free ``active``, ``retiring``, ``retired``, and ``recovering``

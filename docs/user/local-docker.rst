@@ -94,3 +94,12 @@ local development profile only. AlleleAnchor's local ``FileStore`` and
 containerised workflow stages remain consumer-side substitutes: they consume
 exported scoped S3 configuration and immutable object/manifests, never private
 DAS host paths or storage lifecycle state.
+
+The local daemon image also contains the version-matched
+``dasobjectstore-remote`` client and a digest-pinned AWS CLI. This is the
+supported foundation for consumers that must submit authoritative completion
+from inside Docker Desktop's Linux VM: macOS cannot connect through a
+container-created Unix socket merely because its bind-mounted pathname is
+visible on the host. A consumer wrapper must still constrain source-path
+translation to the managed profile root and provide scoped credentials; the
+image does not expose the daemon socket or credentials to the browser.
