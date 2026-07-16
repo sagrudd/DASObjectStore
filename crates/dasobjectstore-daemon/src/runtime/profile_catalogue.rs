@@ -132,6 +132,48 @@ pub fn export_profile_catalogue(
     Ok(catalogue)
 }
 
+/// Publish the current profile-authoritative catalogue into shared metadata.
+///
+/// Normal profile ingress uses this after the backend catalogue commit and
+/// before acknowledging the client.  The private journal makes the
+/// profile/SQLite crash window restart-reconcilable, while the immutable
+/// transaction id makes an exact transport retry idempotent.
+pub fn publish_profile_catalogue_with_metadata(
+    store_id: &StoreId,
+    authority: &dyn ObjectCatalogueAuthority,
+    live_sqlite_path: impl AsRef<Path>,
+    handoff_root: impl AsRef<Path>,
+    transaction_id: &str,
+    profile_namespace: &str,
+    committed_at_utc: &str,
+) -> Result<u64, BackendError> {
+    let catalogue = export_profile_catalogue(store_id, authority)?;
+    let journal = HandoffJournal::prepare(
+        handoff_root.as_ref(),
+        transaction_id,
+        profile_namespace,
+        store_id,
+        &catalogue,
+    )?;
+    journal.write_state(HandoffState::ProfileCommitted)?;
+    dasobjectstore_metadata::commit_profile_catalogue(
+        live_sqlite_path,
+        dasobjectstore_metadata::ProfileCatalogueCommitRequest {
+            transaction_id,
+            profile_namespace,
+            store_id,
+            catalogue: &catalogue,
+            source_retained: true,
+            committed_at_utc,
+        },
+    )
+    .map_err(|error| {
+        BackendError::InvalidRequest(format!("profile catalogue metadata publication: {error}"))
+    })?;
+    journal.write_state(HandoffState::Committed)?;
+    Ok(catalogue.objects.len() as u64)
+}
+
 /// Verify destination payloads before committing imported catalogue rows.
 /// This is intentionally metadata-only: source retirement remains a separate
 /// operator-confirmed migration transition.
@@ -550,6 +592,48 @@ mod tests {
                 )
                 .expect("count"),
             1
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn publication_failure_retains_profile_committed_restart_journal() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-publication-failure-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let store_id = StoreId::new("codex").expect("store");
+        let backend = FakeBackend {
+            record: BackendObjectRecord {
+                key: BackendObjectKey {
+                    object_id: "reads/recover.txt".to_string(),
+                    version: 1,
+                },
+                size_bytes: 4,
+                checksum: "sha256:abcd".to_string(),
+                location: ".dasobjectstore/objects/reads/recover.txt".to_string(),
+            },
+        };
+        let handoffs = root.join("handoffs");
+        let error = publish_profile_catalogue_with_metadata(
+            &store_id,
+            &backend,
+            root.join("missing/live.sqlite"),
+            &handoffs,
+            "tx-publish-failure",
+            "profile-s3:codex",
+            "2026-07-16T00:00:00Z",
+        )
+        .expect_err("missing SQLite parent must fail");
+        assert!(error.to_string().contains("metadata publication"));
+        let journal = read_profile_catalogue_handoff(&handoffs, "tx-publish-failure")
+            .expect("journal read")
+            .expect("journal retained");
+        assert_eq!(
+            journal.state,
+            ProfileCatalogueHandoffState::ProfileCommitted
         );
         let _ = std::fs::remove_dir_all(root);
     }

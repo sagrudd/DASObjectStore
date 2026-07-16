@@ -431,6 +431,14 @@ catalogue is reported as unavailable without creating a namespace. Drive
 browsing remains unavailable until the daemon can validate the live
 filesystem/device identity guard for that request.
 
+Profile S3 writes retain that private catalogue as payload authority, but a
+successful single-object PUT or multipart completion is not acknowledged until
+the daemon has also published the exact catalogue snapshot into shared SQLite.
+The daemon records the cross-file transition in a private handoff journal. If
+shared metadata publication is interrupted, the payload remains durable and
+the journal remains ``profile_committed`` for restart replay; clients receive
+an error instead of a misleading successful write.
+
 Per-user macOS service plans
 ----------------------------
 

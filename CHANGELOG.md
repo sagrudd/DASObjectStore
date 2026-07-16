@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.102.0 - 2026-07-16
+
+- Publish normal profile-backed single-object PUT and multipart completion
+  snapshots into daemon-owned shared SQLite before acknowledging success.
+- Retain a private restart-reconcilable handoff journal across the
+  profile-catalogue/shared-metadata crash window, and fail closed without a
+  false client acknowledgement when shared publication fails.
+
 ## 0.101.0 - 2026-07-16
 
 - Make daemon profile provisioning rollback-safe across the profile-binding

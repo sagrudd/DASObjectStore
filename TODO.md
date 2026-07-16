@@ -774,12 +774,12 @@ transaction wiring; those boundaries stay explicit in the child items below.
 - [~] Implement profile-aware browse, download, verify, capacity, health,
   repair, lifecycle, and common S3 operations. Browse, verify, capacity, and
   health contracts are delivered for bounded folder profiles; provider-backed
-  streaming download, repair/lifecycle orchestration, and shared catalogue
-  integration remain open. A provider-neutral bounded writer-stream helper now
-  verifies catalogue authority and exact declared size before reporting a
-  successful copy; the provider-neutral GET reader likewise verifies declared
-  size and checksum as it is consumed, and the bounded stream helper is
-  exported for adapter consumers. The daemon Unix-socket upload envelope now
+  streaming download and normal PUT/multipart shared-catalogue publication are
+  delivered; repair/lifecycle orchestration remains open. A provider-neutral
+  bounded writer-stream helper verifies catalogue authority and exact declared
+  size before reporting a successful copy; the provider-neutral GET reader
+  likewise verifies declared size and checksum as it is consumed, and the
+  bounded stream helper is exported for adapter consumers. The daemon Unix-socket upload envelope now
   drives that writer through authorization, reservation, staged fsync/rename,
     and catalogue commit; HTTP request bodies now use bounded multipart and
     single-object adapters over the same daemon transport.
@@ -794,6 +794,11 @@ transaction wiring; those boundaries stay explicit in the child items below.
     daemon, authenticated Web route, and read-only CLI as ``store
     profile-verify``; success requires payload size/checksum agreement and
     returns no backend location.
+  - [x] Publish successful single-stream PUT and multipart completion snapshots
+    into daemon-owned shared SQLite through the private restart-reconcilable
+    handoff journal before acknowledging the client. Publication failures keep
+    the durable profile object and a ``profile_committed`` journal for exact
+    replay; they never report a split-authority write as successful.
 - [x] Add per-user host mode with XDG state/runtime paths and a user service;
   do not require root for a user-owned folder and test coexistence with system
   mode.
@@ -905,8 +910,11 @@ hardware acceptance.
   GET/range now relays daemon-verified frames through the same bounded bridge;
   multipart part/completion now use the same daemon-owned staging identity and
   transactional semantics, and authenticated DELETE is catalogue-authoritative
-  with post-delete capacity reconciliation. Provider-native verification and
-  appliance acceptance remain separately gated.
+  with post-delete capacity reconciliation. Successful PUT and multipart
+  completion now publish their authoritative profile snapshot through the
+  daemon's shared-SQLite crash journal before returning success.
+  Provider-native verification and appliance acceptance remain separately
+  gated.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative

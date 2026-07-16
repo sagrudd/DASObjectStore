@@ -20,6 +20,28 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    pub(super) fn publish_profile_s3_catalogue(
+        &self,
+        store_id: &StoreId,
+        backend: &FolderBackend,
+        operation_id: &str,
+    ) -> Result<(), dasobjectstore_core::backend::BackendError> {
+        let transaction_id = format!("profile-s3-{}-{operation_id}", store_id.as_str());
+        let profile_namespace = format!("profile-s3:{}", store_id.as_str());
+        crate::runtime::publish_profile_catalogue_with_metadata(
+            store_id,
+            backend,
+            &self.live_sqlite_path,
+            backend
+                .root()
+                .join(".dasobjectstore/profile-catalogue-handoffs"),
+            &transaction_id,
+            &profile_namespace,
+            &self.clock.now_utc(),
+        )
+        .map(|_| ())
+    }
+
     pub(crate) fn handle_provider_stream_multipart_part_upload_for_actor(
         &self,
         request: ProviderStreamMultipartPartUploadOpenRequest,
@@ -210,6 +232,16 @@ where
                 )))
             }
         };
+        if let Err(error) = self.publish_profile_s3_catalogue(
+            &store_id,
+            &backend,
+            &request.upload_id,
+        ) {
+            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "provider_stream_catalogue_publication_failed",
+                error.to_string(),
+            )));
+        }
         emit_response(DaemonApiResponse::ProviderStreamUpload(
             ProviderStreamUploadResponse::from_record(request.upload_id, store_id, &record),
         ))

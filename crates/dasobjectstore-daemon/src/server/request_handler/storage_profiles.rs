@@ -1,6 +1,26 @@
 use super::*;
 use crate::{ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileS3ListRequest};
 
+pub(super) fn publish_profile_s3_catalogue<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    store_id: &StoreId,
+    backend: &FolderBackend,
+    operation_id: &str,
+) -> Result<(), DaemonApiResponse>
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    handler
+        .publish_profile_s3_catalogue(store_id, backend, operation_id)
+        .map_err(|error| {
+            api_error(
+                "profile_s3_catalogue_publication_failed",
+                error.to_string(),
+            )
+        })
+}
+
 pub(super) fn profile_browser<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     request: ProfileBrowserRequest,

@@ -603,16 +603,16 @@ where
                     reader: Box::new(reader),
                 });
             }
-            let mut backend = match FolderBackend::open(backend_root, binding.manifest, capacity, 0)
-            {
-                Ok(backend) => backend,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "profile_s3_unavailable",
-                        error.to_string(),
-                    )));
-                }
-            };
+            let mut backend =
+                match FolderBackend::open(&backend_root, binding.manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
             let Some(provider) = handler.service_orchestrator.capacity_provider() else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_multipart_unavailable",
@@ -649,6 +649,11 @@ where
                         )));
                     }
                 };
+            if let Err(response) = storage_profiles::publish_profile_s3_catalogue(
+                handler, &store_id, &backend, &request.reservation_id,
+            ) {
+                return Ok(response);
+            }
             let response = crate::api::ProfileS3MultipartCompletionResponse {
                 schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
                 store_id,
@@ -947,7 +952,6 @@ where
         _ => unreachable!("storage dispatcher received an unrelated request"),
     }
 }
-
 fn advertise_provider_stream_downloads<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     store_id: &StoreId,
@@ -981,7 +985,6 @@ fn advertise_provider_stream_downloads<S, C>(
     let Ok(records) = backend.records() else {
         return;
     };
-
     for file in &mut response.files {
         if file.download_source.is_some() {
             continue;

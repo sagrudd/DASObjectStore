@@ -1089,6 +1089,7 @@ mod tests {
         )
         .expect("bounded store registry written");
         let profile_registry = root.join("profile-bindings.json");
+        let live_sqlite = create_live_sqlite(&root.join("metadata"), "upload-store");
         let provider = crate::runtime::FileBackedCapacityAdmissionProvider::new(
             &store_registry,
             root.join("capacity-ledgers"),
@@ -1108,6 +1109,7 @@ mod tests {
         let handler =
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-14T09:00:00Z"))
                 .with_registry_paths(&store_registry, &subobject_registry)
+                .with_live_sqlite_path(&live_sqlite)
                 .with_profile_binding_registry_path(&profile_registry);
         let actor = DaemonLocalActor::new(0)
             .with_username("root")
@@ -1214,6 +1216,18 @@ mod tests {
             .read_to_end(&mut payload)
             .expect("read committed payload");
         assert_eq!(payload, b"hello");
+        let connection = Connection::open(live_sqlite).expect("open shared catalogue");
+        let published: (String, String, i64) = connection
+            .query_row(
+                "SELECT profile_namespace, object_id, object_version
+                 FROM profile_catalogue_objects WHERE store_id = 'upload-store'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("published profile object");
+        assert_eq!(published.0, "profile-s3:upload-store");
+        assert_eq!(published.1, "objects/hello.txt");
+        assert_eq!(published.2, 1);
         cleanup(&root);
     }
 
