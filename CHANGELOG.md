@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.96.0 - 2026-07-16
+
+- Map Monas standalone subjects into the appliance-local OS identity namespace
+  for dashboards, administration, EasyConnect, and ObjectStore browsing, so
+  embedded hosting preserves direct standalone policy semantics.
+- Derive groups and sudo-administrator status afresh from the OS and ignore
+  host roles for storage authorization. Synoptikon identities continue to fail
+  closed until an explicit central-to-local identity mapping is configured.
+
 ## 0.95.0 - 2026-07-16
 
 - Enforce a synchronizer-token CSRF boundary on every federated host mutation

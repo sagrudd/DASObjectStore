@@ -18,6 +18,15 @@ pub enum AuthenticatedActorAuthority {
     SynoptikonIntegrated,
 }
 
+impl AuthenticatedActorAuthority {
+    /// Whether this authority identifies a username in the appliance-local OS
+    /// namespace. Host roles are deliberately ignored; authorization is
+    /// derived afresh from the local user's groups and sudo status.
+    pub(crate) fn uses_local_os_policy(self) -> bool {
+        matches!(self, Self::LocalStandalone | Self::MonasStandalone)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AuthenticatedGuiActor {
     pub subject_id: String,
@@ -454,5 +463,12 @@ mod tests {
 
     fn cleanup(root: &Path) {
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn only_standalone_authorities_use_appliance_local_os_policy() {
+        assert!(AuthenticatedActorAuthority::LocalStandalone.uses_local_os_policy());
+        assert!(AuthenticatedActorAuthority::MonasStandalone.uses_local_os_policy());
+        assert!(!AuthenticatedActorAuthority::SynoptikonIntegrated.uses_local_os_policy());
     }
 }

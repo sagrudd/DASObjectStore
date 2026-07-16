@@ -1765,6 +1765,12 @@ digest only after authentication; Yew keeps it in process memory, attaches it
 to mutations, and clears it on invalidation or logout. Missing and mismatched
 tokens fail before product dispatch for both Monas and Synoptikon.
 
+Delivered Monas standalone policy equivalence (0.96.0): a Monas-authenticated
+subject is resolved in the appliance-local OS namespace across dashboards,
+administrator actions, EasyConnect, and ObjectStore browsing. Authorization is
+derived only from current local groups and sudo status, never host roles.
+Synoptikon identities remain fail-closed until an explicit mapping exists.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

@@ -340,11 +340,11 @@ pub(super) async fn easyconnect_discovery(
 pub(super) async fn easyconnect_auth_context(
     actor: AuthenticatedGuiActor,
 ) -> Result<Json<StandaloneEasyconnectAuthContextResponse>, (StatusCode, Json<AuthRouteError>)> {
-    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+    if !actor.authority.uses_local_os_policy() {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "standalone_local_user_required",
-            "easyconnect standalone authentication requires a local standalone browser session",
+            "local_os_policy_identity_required",
+            "easyconnect standalone authentication requires an appliance-local or Monas-authenticated OS identity",
         ));
     }
 

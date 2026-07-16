@@ -425,11 +425,11 @@ fn delegated_object_browser_actor(
     state: &StandaloneObjectBrowserRouteState,
     actor: &AuthenticatedGuiActor,
 ) -> Result<ObjectBrowserDelegatedActor, (StatusCode, Json<AuthRouteError>)> {
-    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+    if !actor.authority.uses_local_os_policy() {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "standalone_local_user_required",
-            "ObjectStore browser access requires a local standalone browser session",
+            "local_os_policy_identity_required",
+            "ObjectStore browser access requires an appliance-local or Monas-authenticated OS identity",
         ));
     }
     let local_user = state

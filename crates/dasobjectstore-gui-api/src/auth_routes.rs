@@ -583,8 +583,11 @@ fn actor_local_user_for_workspace(
     local_user_provider: &dyn LocalUserAuthorityProvider,
     actor: &AuthenticatedGuiActor,
 ) -> Result<crate::LocalUserMetadata, String> {
-    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
-        return Err("standalone local session is required to inspect local authority.".to_string());
+    if !actor.authority.uses_local_os_policy() {
+        return Err(
+            "an appliance-local or Monas standalone OS identity is required to inspect local authority."
+                .to_string(),
+        );
     }
     local_user_provider
         .local_user(&actor.subject_id)
@@ -815,11 +818,11 @@ fn local_standalone_user(
     local_user_provider: &dyn LocalUserAuthorityProvider,
     actor: &AuthenticatedGuiActor,
 ) -> Result<crate::LocalUserMetadata, (StatusCode, Json<AuthRouteError>)> {
-    if actor.authority != crate::AuthenticatedActorAuthority::LocalStandalone {
+    if !actor.authority.uses_local_os_policy() {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "standalone_local_session_required",
-            "standalone local group administration requires a local session",
+            "local_os_policy_identity_required",
+            "standalone storage policy requires an appliance-local or Monas-authenticated OS identity",
         ));
     }
 
@@ -881,7 +884,7 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, standalone_auth_router_with_state,
+        gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
         standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
         standalone_enclosure_admin_router_with_state, standalone_reporting_router_with_state,
         standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
@@ -913,8 +916,9 @@ mod tests {
         LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
-        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
-        LoginResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, LocalAuthStore, LocalPasswordAuthError,
+        LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, STANDALONE_SESSION_TOKEN_HEADER,
+        STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
@@ -3524,6 +3528,44 @@ mod tests {
             username,
             groups.into_iter().map(str::to_string).collect(),
         )
+    }
+
+    #[test]
+    fn monas_standalone_actor_uses_os_derived_policy_without_host_role_grants() {
+        let provider = FixedLocalUserProvider {
+            current_user: local_user("ignored", vec!["users"]),
+        };
+        let actor = AuthenticatedGuiActor {
+            subject_id: "ordinary-user".to_string(),
+            authority: AuthenticatedActorAuthority::MonasStandalone,
+            roles: vec!["administrator".to_string()],
+            expires_at_unix_seconds: Some(2_000),
+            correlation_id: Some("corr-policy".to_string()),
+        };
+
+        let policy_user = local_standalone_user(&provider, &actor).expect("OS identity resolves");
+
+        assert_eq!(policy_user.username, "ordinary-user");
+        assert!(!policy_user.sudo_administrator);
+    }
+
+    #[test]
+    fn synoptikon_actor_requires_explicit_local_identity_mapping() {
+        let provider = FixedLocalUserProvider {
+            current_user: local_user("ignored", vec!["sudo"]),
+        };
+        let actor = AuthenticatedGuiActor {
+            subject_id: "central-user".to_string(),
+            authority: AuthenticatedActorAuthority::SynoptikonIntegrated,
+            roles: vec!["administrator".to_string()],
+            expires_at_unix_seconds: Some(2_000),
+            correlation_id: Some("corr-policy".to_string()),
+        };
+
+        let error = local_standalone_user(&provider, &actor).expect_err("mapping is required");
+
+        assert_eq!(error.0, StatusCode::FORBIDDEN);
+        assert_eq!(error.1.code, "local_os_policy_identity_required");
     }
 
     #[derive(Clone)]

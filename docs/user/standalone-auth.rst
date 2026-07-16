@@ -137,6 +137,15 @@ in process memory. It is not a storage credential. Missing or mismatched
 values fail before a mutation handler runs; session invalidation and logout
 clear the browser copy.
 
+Monas standalone subjects occupy the same appliance-local OS username
+namespace as direct standalone sessions. DASObjectStore therefore resolves a
+Monas subject through the local user provider for dashboards, administrator
+actions, EasyConnect, and ObjectStore browsing. Only current OS groups and
+sudo-derived administrator status authorize storage access; Monas roles remain
+audit context and cannot grant storage authority. Synoptikon subjects are not
+assumed to be local usernames and fail closed until an explicit central-to-
+local identity mapping is configured.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication

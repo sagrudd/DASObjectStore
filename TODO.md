@@ -3412,6 +3412,11 @@ browser and appliance acceptance remain external validation gates.
     endpoint returns a non-authorizing same-origin token, Yew retains it only
     in process memory and attaches it to mutations, and mounted-router tests
     reject missing or mismatched values before dispatch.
+  - [x] Preserve standalone OS policy under Monas composition. Monas subjects
+    resolve through the appliance-local user provider for dashboards,
+    administration, EasyConnect, and ObjectStore browsing; host roles never
+    grant storage authority. Synoptikon remains fail-closed pending an explicit
+    central-to-local identity mapping.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
