@@ -21,6 +21,10 @@ ROOT_KEY="$(printf '%s' "$ROOT" | cksum | awk '{print $1}')"
 PROJECT="${DASOBJECTSTORE_LOCAL_PROJECT:-dasobjectstore-local-${ROOT_KEY}}"
 GARAGE_PROJECT="${DASOBJECTSTORE_LOCAL_GARAGE_PROJECT:-dasobjectstore-${ROOT_KEY}}"
 API_PORT="${DASOBJECTSTORE_LOCAL_API_PORT:-3900}"
+CAPACITY_LIMIT_BYTES="${DASOBJECTSTORE_LOCAL_CAPACITY_LIMIT_BYTES:-1099511627776}"
+RPC_PORT=""
+WEB_PORT=""
+ADMIN_PORT=""
 GARAGE_IMAGE="${DASOBJECTSTORE_GARAGE_IMAGE:-dxflrs/garage:v2.3.0}"
 DAEMON_IMAGE="${DASOBJECTSTORE_LOCAL_IMAGE:-dasobjectstore-local:dev}"
 SOURCE_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || printf 'unavailable')"
@@ -42,6 +46,7 @@ GARAGE_PROJECT_DIR="$STATE_DIR/garage"
 GARAGE_COMPOSE="$CONFIG_DIR/garage.compose.yml"
 GARAGE_CONFIG="$CONFIG_DIR/garage.toml"
 DAEMON_CONFIG="$CONFIG_DIR/daemon.json"
+STORE_MANIFEST="$CONFIG_DIR/store-manifest.json"
 STACK_COMPOSE="$PROFILE_ROOT/compose.yml"
 GARAGE_SECRETS="$CREDENTIALS_DIR/garage.env"
 CONSUMER_CONFIG="$CREDENTIALS_DIR/${CONSUMER_NAME}-store.toml"
@@ -120,8 +125,16 @@ validate_profile_name() {
 }
 
 validate_port() {
-    [[ "$API_PORT" =~ ^[0-9]+$ ]] && [ "$API_PORT" -ge 1 ] && [ "$API_PORT" -le 65535 ] || \
-        die "DASOBJECTSTORE_LOCAL_API_PORT must be between 1 and 65535 (got $API_PORT)"
+    [[ "$API_PORT" =~ ^[0-9]+$ ]] && [ "$API_PORT" -ge 1 ] && [ "$API_PORT" -le 65532 ] || \
+        die "DASOBJECTSTORE_LOCAL_API_PORT must be between 1 and 65532 (got $API_PORT)"
+    RPC_PORT="$((API_PORT + 1))"
+    WEB_PORT="$((API_PORT + 2))"
+    ADMIN_PORT="$((API_PORT + 3))"
+}
+
+validate_capacity_limit() {
+    [[ "$CAPACITY_LIMIT_BYTES" =~ ^[0-9]+$ ]] && [ "$CAPACITY_LIMIT_BYTES" -ge 1048576 ] || \
+        die "DASOBJECTSTORE_LOCAL_CAPACITY_LIMIT_BYTES must be at least 1048576"
 }
 
 require_build_context() {
@@ -233,21 +246,21 @@ replication_factor = 1
 compression_level = 0
 block_size = "10M"
 
-rpc_bind_addr = "[::]:3901"
-rpc_public_addr = "127.0.0.1:3901"
+rpc_bind_addr = "[::]:$RPC_PORT"
+rpc_public_addr = "127.0.0.1:$RPC_PORT"
 rpc_secret = "$(env_value GARAGE_RPC_SECRET)"
 
 [s3_api]
 s3_region = "garage"
-api_bind_addr = "[::]:3900"
+api_bind_addr = "[::]:$API_PORT"
 
 [s3_web]
-bind_addr = "[::]:3902"
+bind_addr = "[::]:$WEB_PORT"
 root_domain = ".web.garage.localhost"
 index = "index.html"
 
 [admin]
-api_bind_addr = "[::]:3903"
+api_bind_addr = "[::]:$ADMIN_PORT"
 admin_token = "$(env_value GARAGE_ADMIN_TOKEN)"
 metrics_token = "$(env_value GARAGE_METRICS_TOKEN)"
 EOF
@@ -275,6 +288,23 @@ render_daemon_config() {
 }
 EOF
     chmod 600 "$DAEMON_CONFIG"
+}
+
+render_store_manifest() {
+    cat > "$STORE_MANIFEST" <<EOF
+{
+  "schema_version": 1,
+  "store_id": "$STORE_ID",
+  "deployment_profile": "folder",
+  "host_mode": "per_user",
+  "protection": "local_only",
+  "backend": {
+    "kind": "folder",
+    "root_identity": "local-docker:$ROOT_KEY:$PROFILE"
+  }
+}
+EOF
+    chmod 600 "$STORE_MANIFEST"
 }
 
 render_stack_compose() {
@@ -321,6 +351,7 @@ render_profile() {
     validate_profile_name "DASOBJECTSTORE_LOCAL_PROJECT" "$PROJECT"
     validate_profile_name "DASOBJECTSTORE_LOCAL_GARAGE_PROJECT" "$GARAGE_PROJECT"
     validate_port
+    validate_capacity_limit
     ensure_profile_dirs
     require_build_context
     ensure_local_ssd_marker
@@ -328,6 +359,7 @@ render_profile() {
     bin="$(das_bin)"
     render_garage_config
     render_daemon_config
+    render_store_manifest
     "$bin" store create "$STORE_ID" \
         --class generated_data \
         --copies 1 \
@@ -418,6 +450,12 @@ provision() {
     require_docker
     [ -f "$STACK_COMPOSE" ] || render_profile
     wait_for_daemon
+    docker_compose exec -T dasobjectstored \
+        dasobjectstore store profile-binding \
+        --manifest /etc/dasobjectstore/store-manifest.json \
+        --backend-root "/Volumes/Seagate/DASObjectStore/$PROFILE" \
+        --capacity-limit-bytes "$CAPACITY_LIMIT_BYTES" \
+        --operation provision >/dev/null
     start_garage >/dev/null
     wait_for_garage
     docker_compose exec -T dasobjectstored \

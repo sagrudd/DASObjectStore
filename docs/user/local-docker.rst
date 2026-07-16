@@ -48,10 +48,19 @@ From the DASObjectStore checkout:
 image, starts the daemon, provisions the ``alleleanchor_mvp`` store (bucket
 ``alleleanchor-mvp``) and scoped key, and writes a mode-0600 AlleleAnchor
 config plus credential file under the volume profile. Secret values are never
-printed.
+printed. Provisioning also idempotently registers the local folder manifest and
+canonical container-visible backend with the daemon so capacity admission and
+remote completion use the same authority. The default logical capacity is 1
+TiB and can be lowered with ``DASOBJECTSTORE_LOCAL_CAPACITY_LIMIT_BYTES``.
 
 Configuration paths
 -------------------
+
+``DASOBJECTSTORE_LOCAL_API_PORT`` selects the S3 API port and reserves the
+next three consecutive ports for Garage RPC, Web, and administration. The
+profile validates the complete range and configures Garage and Compose with
+the same values, allowing an isolated validation profile to coexist with an
+already-running local authority.
 
 The generated daemon container uses these stable paths:
 

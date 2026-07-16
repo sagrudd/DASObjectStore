@@ -8,6 +8,11 @@ agreement before landing.
 
 ## Unreleased
 
+- Keep local Docker Garage listeners aligned with a non-default
+  ``DASOBJECTSTORE_LOCAL_API_PORT`` and validate its four-port range.
+- Provision the local folder-profile binding before remote uploads so daemon
+  capacity admission resolves the canonical managed backend.
+
 - Package the version-matched remote completion client and digest-pinned AWS
   CLI in the local Docker authority image so macOS consumers can execute next
   to the daemon socket instead of relying on unsupported bind-mounted Unix
