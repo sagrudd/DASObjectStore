@@ -1285,6 +1285,28 @@ mod tests {
             )
             .expect("shared object count");
         assert_eq!(remaining, 0);
+        for request in [
+            DaemonApiRequest::StoreDrain(StoreDrainRequest {
+                store_id: "upload-store".to_string(),
+                dry_run: true,
+                allow_store_drain: false,
+                confirmation_marker: String::new(),
+            }),
+            DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                store_id: "upload-store".to_string(),
+                dry_run: true,
+                allow_store_delete: false,
+                confirmation_marker: String::new(),
+            }),
+        ] {
+            let response = handler
+                .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
+                .expect("profile lifecycle dispatch");
+            let DaemonApiResponse::Error(error) = response else {
+                panic!("profile lifecycle must fail closed: {response:?}");
+            };
+            assert_eq!(error.code, "profile_lifecycle_unsupported");
+        }
         cleanup(&root);
     }
 

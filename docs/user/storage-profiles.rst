@@ -454,6 +454,13 @@ serving requests. Older incomplete journals are removed only after publication
 succeeds. A missing binding, capacity policy, backend root, or shared catalogue
 causes startup to fail closed rather than serving a split authority.
 
+Generic appliance ``store drain`` and ``store delete`` commands are rejected
+for profile-bound stores. Those commands do not own the profile binding,
+capacity ledger, private catalogue, or shared handoff history and therefore
+cannot safely approximate profile retirement. Remove individual objects
+through the profile S3 DELETE workflow; retain the binding until a dedicated
+source-preserving profile retirement transaction is available.
+
 Per-user macOS service plans
 ----------------------------
 

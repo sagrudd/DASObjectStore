@@ -34,6 +34,7 @@ where
         }
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        self.reject_profile_lifecycle_fallback(&store_id, "drain")?;
         let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
             .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
         let report =
@@ -76,6 +77,7 @@ where
 
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        self.reject_profile_lifecycle_fallback(&store_id, "delete")?;
         let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
             .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
         let metadata =
@@ -138,6 +140,23 @@ where
                 portable_subobjects,
             },
         })
+    }
+
+    fn reject_profile_lifecycle_fallback(
+        &self,
+        store_id: &StoreId,
+        operation: &str,
+    ) -> Result<(), (&'static str, String)> {
+        match read_profile_binding_record(&self.profile_binding_registry_path, store_id.as_str()) {
+            Ok(Some(_)) => Err((
+                "profile_lifecycle_unsupported",
+                format!(
+                    "profile store {operation} is unavailable until daemon-owned profile retirement can atomically preserve or remove the binding, quota ledger, private catalogue, shared catalogue, and payload namespace"
+                ),
+            )),
+            Ok(None) => Ok(()),
+            Err(error) => Err(("profile_lifecycle_unavailable", error.to_string())),
+        }
     }
 
     pub(super) fn store_repair_for_actor(

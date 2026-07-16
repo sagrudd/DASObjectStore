@@ -6,6 +6,11 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.107.1 - 2026-07-16
+
+- Fail profile-bound `store drain` and `store delete` closed before appliance
+  metadata or registry mutation, preventing partial lifecycle teardown.
+
 ## 0.107.0 - 2026-07-16
 
 - Expose daemon-owned profile diagnostics through `store profile-diagnostics`
