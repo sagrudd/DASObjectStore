@@ -4,10 +4,10 @@ use dasobjectstore_daemon::runtime::{
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
-    recover_profile_catalogue_publications, AdminJobRegistry, ApplianceTelemetryLoop,
-    ApplianceTelemetryLoopConfig, ApplianceTelemetrySink, ApplianceTelemetrySource,
-    CapacityReservationLeaseReport, DaemonRequestHandler, DaemonRuntimeConfig,
-    FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
+    recover_profile_catalogue_publications, recover_profile_retirements, AdminJobRegistry,
+    ApplianceTelemetryLoop, ApplianceTelemetryLoopConfig, ApplianceTelemetrySink,
+    ApplianceTelemetrySource, CapacityReservationLeaseReport, DaemonRequestHandler,
+    DaemonRuntimeConfig, FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
     FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
     LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
     UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
@@ -64,6 +64,15 @@ fn run() -> Result<(), String> {
         eprintln!("marked {interrupted} interrupted daemon job(s) failed after restart");
     }
     let profile_registry = profile_binding_registry_path(&config.state_dir);
+    let retirement_recovery =
+        recover_profile_retirements(&profile_registry, profile_catalogue_live_sqlite_path())
+            .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
+    if retirement_recovery.retirements_completed > 0 {
+        eprintln!(
+            "completed {} interrupted profile retirement(s)",
+            retirement_recovery.retirements_completed
+        );
+    }
     let recovery = recover_profile_catalogue_publications(
         &profile_registry,
         dasobjectstore_object_service::default_store_registry_path(),

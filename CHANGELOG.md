@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.108.1 - 2026-07-16
+
+- Make profile retirement restart-safe with a durable fail-closed ``retiring``
+  state published before shared-catalogue withdrawal. Daemon startup now
+  completes interrupted withdrawals and final tombstones before active profile
+  catalogue recovery, while retaining all private payload and quota state.
+
 ## 0.108.0 - 2026-07-16
 
 - Add daemon-owned, source-preserving profile retirement through confirmed

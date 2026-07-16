@@ -174,18 +174,20 @@ pub use profile_catalogue::{
     export_profile_catalogue, import_profile_catalogue, import_profile_catalogue_with_metadata,
     profile_catalogue_live_sqlite_path, publish_profile_catalogue_with_metadata,
     read_profile_catalogue_handoff, reconcile_profile_catalogue_handoff,
-    recover_profile_catalogue_publications, ProfileCatalogueHandoffRecord,
-    ProfileCatalogueHandoffState, ProfileCatalogueRecoveryReport,
+    recover_profile_catalogue_publications, recover_profile_retirements,
+    ProfileCatalogueHandoffRecord, ProfileCatalogueHandoffState, ProfileCatalogueRecoveryReport,
+    ProfileRetirementRecoveryReport,
 };
 pub use profile_migration::{
     migrate_registered_folder_store, RegisteredProfileMigrationError,
     RegisteredProfileMigrationReport,
 };
 pub use profile_registry::{
-    default_profile_binding_registry_path, profile_binding_registry_path,
-    profile_binding_retired_at, read_profile_binding, read_profile_binding_record,
-    read_profile_bindings, remove_profile_binding_if_matches, restore_profile_binding_if_matches,
-    retire_profile_binding_if_matches, upsert_profile_binding, validate_profile_binding_claim,
+    begin_profile_binding_retirement, default_profile_binding_registry_path,
+    finish_profile_binding_retirement, profile_binding_registry_path, profile_binding_retired_at,
+    read_profile_binding, read_profile_binding_record, read_profile_bindings,
+    remove_profile_binding_if_matches, restore_profile_binding_if_matches,
+    retiring_profile_store_ids, upsert_profile_binding, validate_profile_binding_claim,
     BackendProfileBinding, PROFILE_BINDING_REGISTRY_ENV, PROFILE_BINDING_REGISTRY_FILE_NAME,
     PROFILE_BINDING_REGISTRY_SCHEMA,
 };

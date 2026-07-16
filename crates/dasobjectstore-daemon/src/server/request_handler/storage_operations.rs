@@ -158,6 +158,14 @@ where
                 .map_err(|error| ("profile_lifecycle_unavailable", error.to_string()))?
                 .is_some();
         let namespace = format!("profile-s3:{}", store_id.as_str());
+        if !request.dry_run && !already_retired {
+            begin_profile_binding_retirement(
+                &self.profile_binding_registry_path,
+                store_id.as_str(),
+                &self.clock.now_utc(),
+            )
+            .map_err(|error| ("profile_retirement_binding_failed", error.to_string()))?;
+        }
         let withdrawal = dasobjectstore_metadata::withdraw_profile_catalogue(
             &self.live_sqlite_path,
             &namespace,
@@ -166,10 +174,9 @@ where
         )
         .map_err(|error| ("profile_retirement_catalogue_failed", error.to_string()))?;
         if !request.dry_run && !already_retired {
-            retire_profile_binding_if_matches(
+            finish_profile_binding_retirement(
                 &self.profile_binding_registry_path,
                 store_id.as_str(),
-                &self.clock.now_utc(),
             )
             .map_err(|error| ("profile_retirement_binding_failed", error.to_string()))?;
         }

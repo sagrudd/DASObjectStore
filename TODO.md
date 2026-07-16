@@ -812,8 +812,10 @@ transaction wiring; those boundaries stay explicit in the child items below.
     source-preserving retirement. Retirement transactionally withdraws shared
     catalogue visibility before tombstoning the binding, retains quota/private
     catalogue/payload/registry state, reserves the original binding claim, and
-    is previewable and idempotent. Physical purge and explicit recovery remain
-    separate lifecycle operations rather than being hidden inside delete.
+    is previewable and idempotent. A durable fail-closed ``retiring`` state now
+    precedes shared withdrawal; daemon startup completes interrupted retirement
+    before active catalogue recovery. Physical purge and explicit recovery
+    remain separate lifecycle operations rather than being hidden inside delete.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

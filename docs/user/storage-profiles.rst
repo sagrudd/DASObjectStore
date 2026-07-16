@@ -465,9 +465,13 @@ Then use the normal delete policy allowance and confirmation marker. The
 daemon first withdraws the profile's shared catalogue namespace and then
 durably tombstones the binding so normal reads and writes stop. It deliberately
 retains the private catalogue, payloads, quota ledger, binding claim, and store
-registry definition. A retry is idempotent. This is retirement, not physical
-purge: do not remove the retained root manually, because a future explicit
-recovery or purge operation needs that evidence.
+registry definition. Before withdrawal it durably marks the binding as
+``retiring``, which already blocks profile data-plane access. If the daemon or
+host stops between phases, startup completes the idempotent shared withdrawal
+and final tombstone before recovering active profile publications. A client
+retry is also idempotent. This is retirement, not physical purge: do not remove
+the retained root manually, because a future explicit recovery or purge
+operation needs that evidence.
 
 Per-user macOS service plans
 ----------------------------

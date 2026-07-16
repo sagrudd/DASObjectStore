@@ -22,6 +22,41 @@ pub struct ProfileCatalogueRecoveryReport {
     pub stale_journals_removed: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProfileRetirementRecoveryReport {
+    pub retirements_completed: u64,
+}
+
+/// Complete crash-interrupted retirements before active catalogue publication
+/// recovery runs. A retiring binding is already unavailable to data-plane
+/// opens; shared visibility is withdrawn idempotently before the durable final
+/// tombstone is published.
+pub fn recover_profile_retirements(
+    binding_registry_path: impl AsRef<Path>,
+    live_sqlite_path: impl AsRef<Path>,
+) -> Result<ProfileRetirementRecoveryReport, BackendError> {
+    let binding_registry_path = binding_registry_path.as_ref();
+    let mut report = ProfileRetirementRecoveryReport::default();
+    for store_id in super::retiring_profile_store_ids(binding_registry_path)
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?
+    {
+        let store_id = StoreId::new(store_id)
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        let namespace = format!("profile-s3:{}", store_id.as_str());
+        dasobjectstore_metadata::withdraw_profile_catalogue(
+            live_sqlite_path.as_ref(),
+            &namespace,
+            &store_id,
+            false,
+        )
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        super::finish_profile_binding_retirement(binding_registry_path, store_id.as_str())
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        report.retirements_completed += 1;
+    }
+    Ok(report)
+}
+
 pub fn profile_catalogue_live_sqlite_path() -> std::path::PathBuf {
     std::env::var_os("DASOBJECTSTORE_LIVE_SQLITE_PATH")
         .map(std::path::PathBuf::from)
@@ -539,7 +574,11 @@ fn digest_value(digest: &ObjectDigest) -> Result<String, BackendError> {
 mod tests {
     use super::*;
     use dasobjectstore_core::backend::{BackendCapabilities, BackendHealth};
-    use dasobjectstore_core::manifest::ObjectStoreManifest;
+    use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
+    use dasobjectstore_core::manifest::{
+        BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+    };
+    use dasobjectstore_core::protection::ProtectionPolicy;
     use rusqlite::Connection;
     use std::io::{Cursor, Read};
 
@@ -559,6 +598,92 @@ mod tests {
         )
         .expect("empty recovery");
         assert_eq!(report, ProfileCatalogueRecoveryReport::default());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn startup_recovery_completes_interrupted_profile_retirement() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-retirement-recovery-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let backend_root = root.join("backend");
+        std::fs::create_dir_all(&backend_root).expect("backend root");
+        let registry = root.join("bindings.json");
+        let store_id = StoreId::new("retiring-store").expect("store id");
+        super::super::upsert_profile_binding(
+            &registry,
+            super::super::BackendProfileBinding {
+                manifest: ObjectStoreManifest {
+                    schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                    store_id: store_id.clone(),
+                    deployment_profile: DeploymentProfile::Folder,
+                    host_mode: HostMode::PerUser,
+                    protection: ProtectionPolicy::LocalOnly,
+                    backend: BackendReference::Folder {
+                        root_identity: "fsid:retiring-store".to_string(),
+                    },
+                },
+                backend_root,
+                ssd_staging_root: None,
+            },
+        )
+        .expect("binding");
+        super::super::begin_profile_binding_retirement(
+            &registry,
+            store_id.as_str(),
+            "2026-07-16T12:00:00Z",
+        )
+        .expect("begin retirement");
+
+        let live_sqlite = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite).expect("live sqlite");
+        connection
+            .execute_batch(dasobjectstore_metadata::LIVE_SCHEMA_SQL)
+            .expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('retiring-store', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        connection
+            .execute(
+                "INSERT INTO profile_catalogue_transactions VALUES (
+                    'retire-tx', 'profile-s3:retiring-store', 'retiring-store', 1, 1, '{}', 'now'
+                )",
+                [],
+            )
+            .expect("shared transaction");
+        drop(connection);
+
+        let report =
+            recover_profile_retirements(&registry, &live_sqlite).expect("startup recovery");
+        assert_eq!(report.retirements_completed, 1);
+        assert!(super::super::retiring_profile_store_ids(&registry)
+            .expect("retiring stores")
+            .is_empty());
+        assert!(
+            super::super::profile_binding_retired_at(&registry, store_id.as_str())
+                .expect("retired timestamp")
+                .is_some()
+        );
+        let connection = Connection::open(live_sqlite).expect("live sqlite");
+        let remaining = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_transactions",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("remaining transactions");
+        assert_eq!(remaining, 0);
         let _ = std::fs::remove_dir_all(root);
     }
 
