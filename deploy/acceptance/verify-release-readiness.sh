@@ -31,6 +31,7 @@ MACOS="$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
 DOCKER="$EVIDENCE_DIR/local-docker-s3-$COMMIT.txt"
 PRODUCT="$EVIDENCE_DIR/product-profile-mvp-$COMMIT.txt"
 APPLICATION_AUTH="$EVIDENCE_DIR/application-auth-mvp-$COMMIT.txt"
+AUTH_SWITCH="$EVIDENCE_DIR/auth-authority-switch-mvp-$COMMIT.txt"
 REMOTE_COMPLETION="$EVIDENCE_DIR/remote-upload-completion-mvp-$COMMIT.txt"
 UBUNTU="$LIMA_DIR/ubuntu-arm64.txt"
 ALMA="$LIMA_DIR/alma-arm64.txt"
@@ -61,6 +62,13 @@ done
 require_field "$APPLICATION_AUTH" source_commit "$COMMIT"
 require_field "$APPLICATION_AUTH" private_key_persisted no
 
+for field in dry_run_non_mutating registry_migration monas_composed_session monas_revocation intrinsic_source_retained rollback_authentication; do
+    require_field "$AUTH_SWITCH" "$field" passed
+done
+require_field "$AUTH_SWITCH" source_commit "$COMMIT"
+require_field "$AUTH_SWITCH" browser_bearer_exported no
+require_field "$AUTH_SWITCH" auth_authority_switch_mvp passed_surrogate
+
 for field in paired_session_scope application_identity_scope one_time_capability_issue forged_capability_rejection provider_verification_before_commit idempotent_exact_replay catalogue_failure_retry credential_response_redaction remote_upload_completion_mvp; do
     require_field "$REMOTE_COMPLETION" "$field" passed
 done
@@ -89,6 +97,7 @@ REPORT="$EVIDENCE_DIR/local-release-readiness-$COMMIT.txt"
     printf 'local_docker_garage_s3=passed\n'
     printf 'product_profile_mvp=passed\n'
     printf 'application_auth_mvp=passed\n'
+    printf 'auth_authority_switch_mvp=passed_surrogate\n'
     printf 'remote_upload_completion_mvp=passed_surrogate\n'
     printf 'local_deployment_readiness=passed\n'
     printf 'physical_das_acceptance=blocked_unavailable_host\n'

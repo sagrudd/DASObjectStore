@@ -6,6 +6,13 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.98.0 - 2026-07-16
+
+- Add same-commit surrogate authority-switch acceptance proving migrated Monas
+  composition, Monas-side revocation, retained-source rollback authentication,
+  and absence of browser-bearer export; require its evidence in local release
+  readiness.
+
 ## 0.97.0 - 2026-07-16
 
 - Add the packaged ``dasobjectstore-auth-migrate`` utility for dry-run-first,

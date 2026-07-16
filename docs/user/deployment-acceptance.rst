@@ -17,6 +17,7 @@ Run each harness from the same committed revision:
    deploy/lima/package-acceptance.sh all
    deploy/acceptance/product-profile-mvp.sh
    deploy/acceptance/application-auth-mvp.sh
+   deploy/acceptance/auth-authority-switch-mvp.sh
    deploy/acceptance/remote-upload-completion-mvp.sh
    DASOBJECTSTORE_LOCAL_ROOT="$HOME/.dasobjectstore-codex-validation" \
      DASOBJECTSTORE_LOCAL_PROFILE=alleleanchor-mvp \
@@ -40,6 +41,14 @@ exchange, overlapping rotation, key and principal revocation, per-request mTLS
 revocation enforcement, and redacted audit persistence. Private keys are never
 written to the evidence or daemon registries. It does not imply production CA
 or physical DAS readiness.
+
+The authentication-authority switch workflow seeds generated intrinsic state,
+runs the packaged migration executable, authenticates the preserved session
+through the real Monas composer, proves Monas-side revocation, and then proves
+the retained intrinsic source still authenticates for rollback. Its evidence
+is explicitly ``surrogate``: it validates the software transition and
+non-exporting cookie boundary, not package service switching on a deployment
+host.
 
 The remote-upload completion workflow uses the real daemon request handler and
 durable session, identity, capability, credential, and replay registries with

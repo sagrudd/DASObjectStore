@@ -1781,6 +1781,13 @@ idempotent replay. Browser sessions deliberately reauthenticate at the cookie
 boundary rather than exporting a bearer. Deployment switching, rollback proof,
 and intrinsic-route removal remain host-gated.
 
+Delivered surrogate authority switch and rollback acceptance (0.98.0): a
+same-commit fixture runs the packaged migration executable, authenticates a
+preserved session through the real Monas composer, verifies Monas-side
+revocation, and confirms the retained intrinsic registry remains a working
+rollback authority. No browser bearer is exported. Package service switching
+and final route removal remain deployment-host gates.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

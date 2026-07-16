@@ -3429,6 +3429,11 @@ browser and appliance acceptance remain external validation gates.
     idempotent interruption recovery. Browser reauthentication is explicit
     because a DAS header/local-storage session cannot become a Monas HttpOnly
     cookie without exposing the bearer.
+  - [x] Prove the coordinated authority transition and rollback against the
+    local Monas surrogate. Same-commit acceptance runs the packaged migration
+    executable, authenticates the preserved session through the real Monas
+    composer, verifies Monas revocation, and confirms the retained intrinsic
+    source still authenticates for rollback without exporting a browser bearer.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
@@ -3439,8 +3444,8 @@ browser and appliance acceptance remain external validation gates.
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe
     release. The offline registry tool and local interruption/rollback contract
-    are complete; package-host execution, coordinated authority switch, and
-    final removal remain gated by the actual deployment hosts.
+    and surrogate authority-switch contracts are complete; package-host
+    execution and final removal remain gated by the actual deployment hosts.
 
 - [x] Keep CLI examples synchronized between `README.md`,
   `docs/requirements.md`, `ROADMAP.md`, and this file.

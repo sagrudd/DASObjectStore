@@ -128,6 +128,14 @@ fn release_readiness_requires_same_commit_surrogate_evidence() {
     assert_contains(RELEASE_READINESS, "local-docker-s3-$COMMIT.txt");
     assert_contains(RELEASE_READINESS, "ubuntu-arm64.txt");
     assert_contains(RELEASE_READINESS, "alma-arm64.txt");
+    assert_contains(
+        RELEASE_READINESS,
+        "auth-authority-switch-mvp-$COMMIT.txt",
+    );
+    assert_contains(
+        RELEASE_READINESS,
+        "auth_authority_switch_mvp=passed_surrogate",
+    );
     assert_contains(RELEASE_READINESS, "source_commit \"$COMMIT\"");
     assert_contains(
         RELEASE_READINESS,
