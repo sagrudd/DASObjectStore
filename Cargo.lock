@@ -742,7 +742,7 @@ dependencies = [
  "dasobjectstore-object-service",
  "flate2",
  "libc",
- "prosopikon-core",
+ "prosopikon-core 0.1.6 (git+https://github.com/sagrudd/prosopikon.git?rev=c1dd477270e3ab34f5444e2c0565af845a930a70)",
  "rcgen",
  "rusqlite",
  "rustls",
@@ -766,7 +766,7 @@ dependencies = [
  "gloo-net",
  "gloo-timers",
  "js-sys",
- "prosopikon-core",
+ "prosopikon-core 0.1.6 (git+https://github.com/sagrudd/prosopikon.git?rev=c1dd477270e3ab34f5444e2c0565af845a930a70)",
  "prosopikon-yew",
  "serde",
  "serde_json",
@@ -799,7 +799,7 @@ dependencies = [
  "dasobjectstore-daemon",
  "dasobjectstore-gui-api",
  "dasobjectstore-object-service",
- "prosopikon-core",
+ "prosopikon-core 0.1.6 (git+https://github.com/sagrudd/prosopikon.git?rev=c1dd477270e3ab34f5444e2c0565af845a930a70)",
  "serde",
  "serde_json",
  "sha2",
@@ -2474,6 +2474,19 @@ dependencies = [
 name = "prosopikon-core"
 version = "0.1.6"
 dependencies = [
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "prosopikon-core"
+version = "0.1.6"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=c1dd477270e3ab34f5444e2c0565af845a930a70#c1dd477270e3ab34f5444e2c0565af845a930a70"
+dependencies = [
  "argon2",
  "chrono",
  "pam-client",
@@ -2490,7 +2503,7 @@ dependencies = [
 name = "prosopikon-yew"
 version = "0.1.4"
 dependencies = [
- "prosopikon-core",
+ "prosopikon-core 0.1.6",
  "web-sys",
  "yew",
 ]
