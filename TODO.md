@@ -244,6 +244,13 @@ completion.
     precedes catalogue commit; exact replay is idempotent; and a failed
     catalogue handoff releases the claim for safe retry. Live Garage and
     shared-SQLite appliance execution remain explicitly environment-gated.
+  - [x] Make the daemon-owned Garage endpoint an explicit, backward-compatible
+    runtime setting instead of advertising the non-routable wildcard bind
+    address. Packaged appliances retain the loopback default; container and VM
+    deployments can now name a provider on their private service network.
+    Canonical local-Docker network wiring and live completion acceptance remain
+    the next integration step and currently overlap an isolated in-progress
+    local-profile change.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable

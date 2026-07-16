@@ -14,7 +14,7 @@ use dasobjectstore_daemon::{
     UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
-use dasobjectstore_object_service::{DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH};
+use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
@@ -246,7 +246,7 @@ fn garage_runtime_config(
         config_path: PathBuf::from(DEFAULT_GARAGE_CONFIG_PATH),
         metadata_path: PathBuf::from("/srv/dasobjectstore/ssd/garage"),
         data_path: PathBuf::from("/srv/dasobjectstore/hdd/garage"),
-        endpoint: format!("http://0.0.0.0:{DEFAULT_GARAGE_API_PORT}"),
+        endpoint: config.object_service.endpoint.clone(),
     })
 }
 
@@ -344,7 +344,7 @@ mod tests {
             garage.metadata_path,
             PathBuf::from("/srv/dasobjectstore/ssd/garage")
         );
-        assert_eq!(garage.endpoint, "http://0.0.0.0:3900");
+        assert_eq!(garage.endpoint, "http://127.0.0.1:3900");
         assert_eq!(garage.compose_project, "dasobjectstore");
     }
 
@@ -356,6 +356,16 @@ mod tests {
         let garage = garage_runtime_config(&config).expect("garage config");
 
         assert_eq!(garage.compose_project, "dasobjectstore-validation-42");
+    }
+
+    #[test]
+    fn derives_garage_endpoint_from_daemon_config() {
+        let mut config = DaemonRuntimeConfig::linux_packaged();
+        config.object_service.endpoint = "http://garage:4900".to_string();
+
+        let garage = garage_runtime_config(&config).expect("garage config");
+
+        assert_eq!(garage.endpoint, "http://garage:4900");
     }
 
     #[test]

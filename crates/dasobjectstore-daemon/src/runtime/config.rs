@@ -114,11 +114,20 @@ impl DaemonRuntimeConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonObjectServiceRuntimeConfig {
     pub compose_project: String,
+    /// Provider URL reachable from the daemon process. Appliance installs use
+    /// loopback; container profiles can name a provider on a private network.
+    #[serde(default = "default_object_service_endpoint")]
+    pub endpoint: String,
+}
+
+fn default_object_service_endpoint() -> String {
+    "http://127.0.0.1:3900".to_string()
 }
 
 impl DaemonObjectServiceRuntimeConfig {
     fn validate(&self) -> Result<(), DaemonRuntimeConfigError> {
-        reject_blank("object_service.compose_project", &self.compose_project)
+        reject_blank("object_service.compose_project", &self.compose_project)?;
+        reject_blank("object_service.endpoint", &self.endpoint)
     }
 }
 
@@ -126,6 +135,7 @@ impl Default for DaemonObjectServiceRuntimeConfig {
     fn default() -> Self {
         Self {
             compose_project: "dasobjectstore".to_string(),
+            endpoint: default_object_service_endpoint(),
         }
     }
 }
@@ -259,6 +269,7 @@ mod tests {
             crate::api::DaemonIngestResourcePolicy::default()
         );
         assert_eq!(config.object_service.compose_project, "dasobjectstore");
+        assert_eq!(config.object_service.endpoint, "http://127.0.0.1:3900");
         config.validate().expect("default config is valid");
     }
 
@@ -281,6 +292,7 @@ mod tests {
             crate::api::DaemonIngestResourcePolicy::default()
         );
         assert_eq!(config.object_service.compose_project, "dasobjectstore");
+        assert_eq!(config.object_service.endpoint, "http://127.0.0.1:3900");
     }
 
     #[test]
