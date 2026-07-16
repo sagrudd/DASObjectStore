@@ -36,6 +36,19 @@ Create the top-level SubObject:
 
    sudo dasobjectstore subobject create Xenognostikon --store ENA
 
+SubObjects can declare their own logical capacity budget while retaining the
+parent store's placement, copy-count, and service policy:
+
+.. code-block:: console
+
+   sudo dasobjectstore subobject create Xenognostikon --store ENA \
+     --capacity-limit-bytes 1099511627776
+
+Omit ``--capacity-limit-bytes`` to inherit the parent capacity boundary. The
+budget is stored in the portable SubObject registry, appears in list and search
+output, and is available to daemon admission and reconciliation code. It does
+not reserve physical space or weaken the parent store's capacity checks.
+
 Create a nested SubObject:
 
 .. code-block:: console
@@ -95,6 +108,10 @@ Search by endpoint name or object prefix:
 .. code-block:: console
 
    dasobjectstore subobject search vervet
+
+Each result reports either ``capacity=<bytes>_bytes`` or
+``capacity=inherited`` so operators can distinguish bounded children from
+children governed only by their parent.
 
 SubObject names must be unique across the system. If an object store and a
 SubObject share the same name, ingest refuses to guess and asks for the

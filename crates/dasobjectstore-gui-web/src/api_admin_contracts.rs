@@ -33,6 +33,7 @@ pub struct GuiActionPlanRequest {
     pub subobject_name: Option<String>,
     pub parent_store_id: Option<String>,
     pub parent_subobject_name: Option<String>,
+    pub subobject_capacity_limit_bytes: Option<u64>,
     pub subobject_object_type: Option<String>,
     pub subobject_inherits_object_type: Option<bool>,
     pub subobject_s3_routing: Option<String>,

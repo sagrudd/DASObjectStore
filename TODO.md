@@ -567,7 +567,12 @@ transaction wiring; those boundaries stay explicit in the child items below.
     schema-versioned parent/child snapshot contract now preserves reservation
     links across restart and rejects inconsistent links. The daemon now has an
     atomic state-file save/load adapter with corruption and link-integrity
-    regressions; registry integration and transport wiring remain open.
+    regressions; daemon admission and transport wiring remain open.
+  - [x] Add a backward-compatible optional capacity policy to portable
+    SubObject definitions and expose it through CLI and Web creation plans.
+    List/search output distinguishes bounded from inherited children; atomic
+    daemon admission wiring between this registry policy and the hierarchical
+    parent/child ledger remains open.
 - [~] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add a read-only daemon ``capacity_status`` transport response backed by

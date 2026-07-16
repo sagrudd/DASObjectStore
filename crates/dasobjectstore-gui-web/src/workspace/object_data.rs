@@ -206,6 +206,7 @@ pub(super) struct SubObjectFormState {
     pub(super) parent_kind: String,
     pub(super) parent_store_id: String,
     pub(super) parent_subobject_name: String,
+    pub(super) capacity_limit_bytes: String,
     pub(super) object_type_mode: String,
     pub(super) object_type: String,
     pub(super) s3_routing: String,
@@ -227,6 +228,7 @@ impl SubObjectFormState {
                 .map(|store| store.store_id.clone())
                 .unwrap_or_default(),
             parent_subobject_name: String::new(),
+            capacity_limit_bytes: String::new(),
             object_type_mode: "inherit".to_string(),
             object_type: "naive".to_string(),
             s3_routing: "inherit_parent".to_string(),

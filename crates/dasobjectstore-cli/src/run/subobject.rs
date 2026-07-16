@@ -2,7 +2,10 @@
 
 use super::*;
 use crate::cli::{SubobjectCommand, SubobjectListArgs, SubobjectSearchArgs};
-use dasobjectstore_object_service::{SubObjectParent, SubObjectRegistryUpdateReport};
+use dasobjectstore_core::store::CapacityPolicy;
+use dasobjectstore_object_service::{
+    create_subobject_definition_with_capacity, SubObjectParent, SubObjectRegistryUpdateReport,
+};
 
 pub(super) fn run_subobject(args: &SubobjectArgs, writer: &mut impl Write) -> Result<(), CliError> {
     match args.command() {
@@ -21,7 +24,11 @@ fn run_subobject_create(
         .map(Path::to_path_buf)
         .unwrap_or_else(default_subobject_registry_path);
     let parent = subobject_parent_from_args(args)?;
-    let report = create_subobject_definition(&registry_path, args.name(), parent)?;
+    let capacity = args
+        .capacity_limit_bytes()
+        .map(|limit| CapacityPolicy::bounded(limit, 0));
+    let report =
+        create_subobject_definition_with_capacity(&registry_path, args.name(), parent, capacity)?;
     let allow_default_ssd = args.registry_path().is_none() || args.ssd_root().is_some();
     let portable_report = mirror_portable_subobject_definition(
         args.ssd_root(),
@@ -119,6 +126,16 @@ fn write_subobject_create_report(
         "Object prefix: {}",
         report.definition.object_prefix()
     )?;
+    match &report.definition.capacity {
+        Some(policy) => writeln!(
+            writer,
+            "Logical capacity limit: {} bytes",
+            policy
+                .logical_limit_bytes
+                .expect("bounded SubObject policy")
+        )?,
+        None => writeln!(writer, "Logical capacity limit: inherited")?,
+    }
     writeln!(
         writer,
         "Registry: {}",
@@ -158,11 +175,17 @@ fn write_subobject_definition_line(
 ) -> Result<(), CliError> {
     writeln!(
         writer,
-        "- {} store={} parent={} prefix={}",
+        "- {} store={} parent={} prefix={} capacity={}",
         definition.name,
         definition.store_id,
         subobject_parent_label(&definition.parent),
-        definition.object_prefix()
+        definition.object_prefix(),
+        definition
+            .capacity
+            .as_ref()
+            .and_then(|policy| policy.logical_limit_bytes)
+            .map(|bytes| format!("{bytes}_bytes"))
+            .unwrap_or_else(|| "inherited".to_string())
     )?;
 
     Ok(())

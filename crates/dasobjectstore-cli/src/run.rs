@@ -214,14 +214,13 @@ use dasobjectstore_mnemosyne::{
     NasNfsEndpointValidationError,
 };
 use dasobjectstore_object_service::{
-    create_subobject_definition, credential_reference_for_store, default_store_registry_path,
-    default_subobject_registry_path, mirror_subobject_definition, plan_remote_s3_upload,
-    plan_store_service_layout, portable_store_registry_path, portable_subobject_registry_path,
-    read_store_registry, read_subobject_registry, render_compose, search_subobjects,
-    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
-    GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
-    RemoteS3UploadPlanRequest, StoreRegistryUpdateReport, StoreServiceDefinition,
-    SubObjectDefinition,
+    credential_reference_for_store, default_store_registry_path, default_subobject_registry_path,
+    mirror_subobject_definition, plan_remote_s3_upload, plan_store_service_layout,
+    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
+    read_subobject_registry, render_compose, search_subobjects, upsert_store_definition,
+    ComposeRenderRequest, ComposeServiceConfig, GarageProvider, GarageProviderConfig,
+    ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId, RemoteS3UploadPlanRequest,
+    StoreRegistryUpdateReport, StoreServiceDefinition, SubObjectDefinition,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -904,10 +903,11 @@ mod tests {
         measure_ssd_stage_payload_with_progress, parse_binary_size,
         performance_report_metadata_json, performance_report_metadata_json_from_artifact,
         performance_report_qr_payload_from_artifact, performance_sync_all_calls,
-        plan_performance_scenario_matrix, plan_ssd_residency_batches, render_performance_json,
-        render_performance_report, render_performance_report_from_json_artifact,
-        render_performance_tui_snapshot, render_simple_pdf, reset_performance_sync_all_calls, run,
-        source_performance_workload, throughput, update_file_read_measurements_from_disk_results,
+        plan_performance_scenario_matrix, plan_ssd_residency_batches, read_subobject_registry,
+        render_performance_json, render_performance_report,
+        render_performance_report_from_json_artifact, render_performance_tui_snapshot,
+        render_simple_pdf, reset_performance_sync_all_calls, run, source_performance_workload,
+        throughput, update_file_read_measurements_from_disk_results,
         validate_managed_hdds_on_supported_das, validate_pdf_report_path, write_health_json,
         write_health_summary, write_health_verbose, write_host_connection_status,
         write_pretty_report, zero_measurement, CliError, DiskHealthSummary, HealthReport,
@@ -4543,6 +4543,8 @@ mod tests {
                 "Xenognostikon",
                 "--store",
                 "ENA",
+                "--capacity-limit-bytes",
+                "1048576",
                 "--registry-path",
                 subobject_registry_path
                     .to_str()
@@ -4600,6 +4602,27 @@ mod tests {
         assert!(output.contains("SubObjects matched: 1"));
         assert!(output.contains("Vervet"));
         assert!(output.contains("prefix=ENA/Xenognostikon/Vervet"));
+        let definitions = read_subobject_registry(&subobject_registry_path)
+            .expect("SubObject registry with budget");
+        let top_level = definitions
+            .iter()
+            .find(|definition| definition.name == "Xenognostikon")
+            .expect("top-level SubObject");
+        assert_eq!(
+            top_level
+                .capacity
+                .as_ref()
+                .and_then(|policy| policy.logical_limit_bytes),
+            Some(1_048_576)
+        );
+        assert_eq!(
+            definitions
+                .iter()
+                .find(|definition| definition.name == "Vervet")
+                .expect("nested SubObject")
+                .capacity,
+            None
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }

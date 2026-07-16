@@ -165,6 +165,7 @@ pub struct GuiActionPlanRequest {
     pub subobject_name: Option<String>,
     pub parent_store_id: Option<String>,
     pub parent_subobject_name: Option<String>,
+    pub subobject_capacity_limit_bytes: Option<u64>,
     pub subobject_object_type: Option<String>,
     pub subobject_inherits_object_type: Option<bool>,
     pub subobject_s3_routing: Option<String>,
@@ -204,6 +205,7 @@ impl Default for GuiActionPlanRequest {
             subobject_name: None,
             parent_store_id: None,
             parent_subobject_name: None,
+            subobject_capacity_limit_bytes: None,
             subobject_object_type: None,
             subobject_inherits_object_type: None,
             subobject_s3_routing: None,
@@ -560,6 +562,16 @@ fn plan_subobject_create(
     } else if let Some(parent) = request.parent_subobject_name {
         argv.push("--parent".to_string());
         argv.push(parent);
+    }
+    if let Some(limit) = request.subobject_capacity_limit_bytes {
+        if limit == 0 {
+            return Err(GuiActionPlanError {
+                action: request.action,
+                missing_fields: vec!["subobject_capacity_limit_bytes".to_string()],
+            });
+        }
+        argv.push("--capacity-limit-bytes".to_string());
+        argv.push(limit.to_string());
     }
     if let Some(ssd_root) = request.ssd_root {
         argv.push("--ssd-root".to_string());
@@ -1110,6 +1122,49 @@ mod tests {
     }
 
     #[test]
+    fn plans_bounded_subobject_create() {
+        let plan = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("Xenognostikon".to_string()),
+            parent_store_id: Some("ENA".to_string()),
+            subobject_capacity_limit_bytes: Some(1_048_576),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect("bounded SubObject create plan");
+
+        assert_eq!(
+            plan.argv,
+            strings([
+                "dasobjectstore",
+                "subobject",
+                "create",
+                "Xenognostikon",
+                "--store",
+                "ENA",
+                "--capacity-limit-bytes",
+                "1048576"
+            ])
+        );
+    }
+
+    #[test]
+    fn rejects_zero_subobject_capacity() {
+        let err = plan_action(GuiActionPlanRequest {
+            action: GuiActionKind::SubobjectCreate,
+            subobject_name: Some("Xenognostikon".to_string()),
+            parent_store_id: Some("ENA".to_string()),
+            subobject_capacity_limit_bytes: Some(0),
+            ..GuiActionPlanRequest::default()
+        })
+        .expect_err("zero capacity must be rejected");
+
+        assert_eq!(
+            err.missing_fields,
+            ["subobject_capacity_limit_bytes".to_string()]
+        );
+    }
+
+    #[test]
     fn plans_subobject_create_with_review_policy_fields() {
         let plan = plan_action(GuiActionPlanRequest {
             action: GuiActionKind::SubobjectCreate,
@@ -1193,6 +1248,7 @@ mod tests {
                 parent: SubObjectParent::Store {
                     store_id: StoreId::new("generated-data").expect("store id"),
                 },
+                capacity: None,
                 path: vec!["pod5-raw".to_string()],
             }
         );

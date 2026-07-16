@@ -28,6 +28,9 @@ pub(crate) struct SubobjectCreateArgs {
     store: Option<StoreId>,
     #[arg(long)]
     parent: Option<String>,
+    /// Optional logical byte budget inherited by nested admission work.
+    #[arg(long, value_name = "BYTES")]
+    capacity_limit_bytes: Option<u64>,
     #[arg(long)]
     ssd_root: Option<PathBuf>,
     #[arg(long, hide = true)]
@@ -45,6 +48,9 @@ impl SubobjectCreateArgs {
     }
     pub(crate) fn parent(&self) -> Option<&str> {
         self.parent.as_deref()
+    }
+    pub(crate) fn capacity_limit_bytes(&self) -> Option<u64> {
+        self.capacity_limit_bytes
     }
     pub(crate) fn ssd_root(&self) -> Option<&Path> {
         self.ssd_root.as_deref()
@@ -111,5 +117,28 @@ mod tests {
         assert_eq!(create.name(), "Xenognostikon");
         assert_eq!(create.store().expect("store").as_str(), "ENA");
         assert_eq!(create.parent(), None);
+        assert_eq!(create.capacity_limit_bytes(), None);
+    }
+
+    #[test]
+    fn parses_create_with_logical_capacity_budget() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "subobject",
+            "create",
+            "Xenognostikon",
+            "--store",
+            "ENA",
+            "--capacity-limit-bytes",
+            "1048576",
+        ])
+        .expect("SubObject budget parses");
+        let Some(Command::Subobject(args)) = cli.command() else {
+            panic!("expected subobject command")
+        };
+        let SubobjectCommand::Create(create) = args.command() else {
+            panic!("expected create command")
+        };
+        assert_eq!(create.capacity_limit_bytes(), Some(1_048_576));
     }
 }

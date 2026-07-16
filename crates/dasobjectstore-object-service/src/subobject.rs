@@ -3,6 +3,7 @@
 use crate::provider::ObjectServiceError;
 use crate::registry::STORE_REGISTRY_ENV;
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::store::CapacityPolicy;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io;
@@ -29,6 +30,8 @@ pub struct SubObjectDefinition {
     pub store_id: StoreId,
     pub parent: SubObjectParent,
     pub path: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<CapacityPolicy>,
 }
 
 impl SubObjectDefinition {
@@ -123,7 +126,21 @@ pub fn create_subobject_definition(
     name: impl Into<String>,
     parent: SubObjectParent,
 ) -> Result<SubObjectRegistryUpdateReport, ObjectServiceError> {
+    create_subobject_definition_with_capacity(path, name, parent, None)
+}
+
+pub fn create_subobject_definition_with_capacity(
+    path: impl AsRef<Path>,
+    name: impl Into<String>,
+    parent: SubObjectParent,
+    capacity: Option<CapacityPolicy>,
+) -> Result<SubObjectRegistryUpdateReport, ObjectServiceError> {
     let name = normalize_name(name.into())?;
+    if let Some(error) = capacity.as_ref().and_then(CapacityPolicy::validation_error) {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "invalid SubObject capacity policy: {error:?}"
+        )));
+    }
     let path = path.as_ref();
     let mut definitions = read_subobject_registry(path)?;
     if definitions.iter().any(|definition| definition.name == name) {
@@ -153,6 +170,7 @@ pub fn create_subobject_definition(
         store_id,
         parent,
         path: object_path,
+        capacity,
     };
     definitions.push(definition.clone());
     definitions.sort_by(|left, right| left.name.cmp(&right.name));
@@ -304,4 +322,63 @@ fn restrict_dir(path: &Path) -> Result<(), ObjectServiceError> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        create_subobject_definition_with_capacity, read_subobject_registry, SubObjectDefinition,
+        SubObjectParent,
+    };
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::store::CapacityPolicy;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn registry_path(label: &str) -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::temp_dir().join("dasobjectstore-codex-validation"));
+        root.join(format!(
+            "subobject-budget-{label}-{}-{}/subobjects.json",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn legacy_definition_without_capacity_remains_compatible() {
+        let definition: SubObjectDefinition = serde_json::from_str(
+            r#"{
+                "name":"raw",
+                "store_id":"ena",
+                "parent":{"store":{"store_id":"ena"}},
+                "path":["raw"]
+            }"#,
+        )
+        .expect("legacy SubObject definition");
+
+        assert_eq!(definition.capacity, None);
+    }
+
+    #[test]
+    fn persists_optional_bounded_capacity_policy() {
+        let path = registry_path("bounded");
+        let policy = CapacityPolicy::bounded(4096, 0);
+        let report = create_subobject_definition_with_capacity(
+            &path,
+            "raw",
+            SubObjectParent::Store {
+                store_id: StoreId::new("ena").expect("store ID"),
+            },
+            Some(policy.clone()),
+        )
+        .expect("SubObject created");
+
+        assert_eq!(report.definition.capacity.as_ref(), Some(&policy));
+        let restored = read_subobject_registry(&path).expect("registry restored");
+        assert_eq!(restored[0].capacity.as_ref(), Some(&policy));
+        std::fs::remove_dir_all(path.parent().expect("registry parent")).expect("fixture cleanup");
+    }
 }

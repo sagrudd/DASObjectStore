@@ -51,9 +51,10 @@ pub use remote_upload::{
     plan_remote_s3_upload, RemoteS3AuthAuthority, RemoteS3UploadPlan, RemoteS3UploadPlanRequest,
 };
 pub use subobject::{
-    create_subobject_definition, default_subobject_registry_path, delete_subobjects_for_store,
-    mirror_subobject_definition, portable_subobject_registry_path, read_subobject_registry,
-    search_subobjects, SubObjectDefinition, SubObjectParent, SubObjectRegistryAction,
+    create_subobject_definition, create_subobject_definition_with_capacity,
+    default_subobject_registry_path, delete_subobjects_for_store, mirror_subobject_definition,
+    portable_subobject_registry_path, read_subobject_registry, search_subobjects,
+    SubObjectDefinition, SubObjectParent, SubObjectRegistryAction,
     SubObjectRegistryStoreDeleteReport, SubObjectRegistryUpdateReport,
     PORTABLE_SUBOBJECT_REGISTRY_RELATIVE_PATH,
 };

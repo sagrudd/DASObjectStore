@@ -630,11 +630,13 @@ a review surface only until the matching daemon execution endpoint is wired.
 The ``Create SubObject`` card provides the Web counterpart to
 ``dasobjectstore subobject create``. Administrators can create a top-level
 SubObject under an ObjectStore or enter an existing parent SubObject name for a
-nested prefix. The form previews the registry path, object prefix,
+nested prefix. The form accepts an optional positive logical-capacity budget
+and previews the registry path, object prefix,
 object-type inheritance or override, S3 routing mode, and SSD-root mirror
 target before calling the ``subobject_create`` action-plan route. Object type
-and S3 routing are validated for review even though the current CLI registry
-persists only the SubObject name, parent, store ID, and derived object prefix.
+and S3 routing are validated for review. The current CLI registry persists the
+SubObject name, parent, store ID, derived object prefix, and optional capacity
+policy; omitting the budget preserves inherited-capacity behavior.
 
 The browser must still not edit store registry files directly. When a creation
 form includes a writer group, the daemon remains responsible for validating the

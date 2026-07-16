@@ -32,6 +32,10 @@ pub(super) fn render_subobject_create_card(
             || (state.parent_kind == "subobject"
                 && !state.parent_subobject_name.trim().is_empty()))
         && (state.object_type_mode == "inherit" || !state.object_type.trim().is_empty());
+    let capacity_limit = state.capacity_limit_bytes.trim();
+    let can_plan = can_plan
+        && (capacity_limit.is_empty()
+            || capacity_limit.parse::<u64>().is_ok_and(|limit| limit > 0));
 
     let open_form = {
         let subobject_state = subobject_state.clone();
@@ -81,6 +85,11 @@ pub(super) fn render_subobject_create_card(
                         .then(|| pending.parent_store_id.trim().to_string()),
                     parent_subobject_name: (pending.parent_kind == "subobject")
                         .then(|| pending.parent_subobject_name.trim().to_string()),
+                    subobject_capacity_limit_bytes: pending
+                        .capacity_limit_bytes
+                        .trim()
+                        .parse::<u64>()
+                        .ok(),
                     subobject_object_type: (pending.object_type_mode == "override")
                         .then(|| pending.object_type.clone()),
                     subobject_inherits_object_type: Some(pending.object_type_mode == "inherit"),
@@ -185,6 +194,16 @@ pub(super) fn render_subobject_create_card(
                                 })
                             }) }
                         }
+                        { object_store_text_field("Logical capacity bytes (optional)", state.capacity_limit_bytes.clone(), {
+                            let subobject_state = subobject_state.clone();
+                            Callback::from(move |event: InputEvent| {
+                                let input: HtmlInputElement = event.target_unchecked_into();
+                                let mut next = (*subobject_state).clone();
+                                next.capacity_limit_bytes = input.value();
+                                next.reset_plan();
+                                subobject_state.set(next);
+                            })
+                        }) }
                         <label class="dos-form-field">
                             <span>{ "Object type policy" }</span>
                             <select onchange={{

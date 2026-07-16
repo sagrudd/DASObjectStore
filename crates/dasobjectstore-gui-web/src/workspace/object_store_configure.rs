@@ -89,6 +89,7 @@ pub(super) fn render_object_store_configure_card(
                     subobject_name: None,
                     parent_store_id: None,
                     parent_subobject_name: None,
+                    subobject_capacity_limit_bytes: None,
                     subobject_object_type: None,
                     subobject_inherits_object_type: None,
                     subobject_s3_routing: None,
