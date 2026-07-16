@@ -40,6 +40,12 @@ impl LocalAuthStore {
         }
     }
 
+    /// Share the host's Prosopikon authority without creating a second
+    /// registry or browser-session issuer.
+    pub fn from_prosopikon(inner: ProsopikonAuthStore) -> Self {
+        Self { inner }
+    }
+
     pub fn root(&self) -> &Path {
         self.inner.root()
     }

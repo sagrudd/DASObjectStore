@@ -46,7 +46,8 @@ pub use auth_guard::{
     STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
-    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    federated_gui_api_router, gui_api_router_for_host_mode,
+    gui_api_router_for_host_mode_with_application_auth,
     standalone_auth_router, standalone_gui_api_router, AssignLocalUserToGroupRequest,
     AuthRouteError, CreateLocalGroupRequest, GuiApiHostMode, LoginRequest, LogoutRequest,
     RegisterRequest, SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,

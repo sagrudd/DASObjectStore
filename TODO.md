@@ -3387,6 +3387,11 @@ browser and appliance acceptance remain external validation gates.
     than exports the bearer, and issues a five-minute context; the Synoptikon
     adapter requires the existing integrated boundary plus a live entitlement/
     revocation verifier and discards its storage binding before GUI extraction.
+  - [x] Provide fail-closed Axum host-router composition. The Monas composer
+    consumes the real ``monas_session`` cookie, verifies Prosopikon, injects
+    the unforgeable actor, and mounts the complete DASObjectStore operational
+    API without intrinsic login/session routes; the Synoptikon composer accepts
+    only structurally validated request context with live revocation approval.
   - [ ] Mount these adapters in the pinned Monas and Synoptikon host routers,
     replacing Monas's legacy ``x-img.host-context.v1`` forwarding contract;
     prove deep-link/login/logout/expiry, CSRF, EasyConnect, and administrator/

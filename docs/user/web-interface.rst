@@ -1229,3 +1229,9 @@ from a browser or translate the legacy Monas ``x-img.host-context.v1`` header
 into a verified context. Until the pinned host routers are migrated and browser
 acceptance passes, keep the deployment in exactly one compatibility authority
 mode and do not expose both login surfaces.
+
+The integration crate also supplies a Monas product API router which deliberately
+omits DASObjectStore's intrinsic browser login/session routes. This is the
+preferred in-process mount because the verified actor cannot be serialized or
+forged as a forwarding header. The legacy header must remain disabled for a
+DASObjectStore mount.

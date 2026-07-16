@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.92.0 - 2026-07-16
+
+- Add fail-closed Axum router composition for Monas and Synoptikon host
+  authentication and a ready-to-mount Monas DASObjectStore operational API.
+- Consume Monas's real HttpOnly Prosopikon cookie in process, inject only the
+  verified actor, deny missing/expired/logged-out sessions, and omit all
+  intrinsic browser login/session issuer routes to prevent dual authority.
+- Keep application mTLS/token endpoints outside the browser-cookie composer so
+  service authentication remains an independent boundary.
+- Require typed, structurally accepted and live-approved Synoptikon request
+  context before its product router dispatches a protected handler.
+
 ## 0.91.0 - 2026-07-16
 
 - Add concrete Monas/Prosopikon and Synoptikon session adapters that produce

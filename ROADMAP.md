@@ -1720,6 +1720,17 @@ drops the storage binding before extraction. Both adapters drive a protected
 GUI route in contract tests and fail after logout/revocation. Host-router and
 real-browser composition remains the next gate before migration and removal.
 
+Delivered router composition (0.92.0): the integration crate now exposes
+fail-closed Axum composers for both hosts plus a ready-to-mount Monas
+DASObjectStore API router. It consumes the actual HttpOnly ``monas_session``
+cookie, reuses the host's Prosopikon registry, injects the unforgeable actor,
+and mounts operational, EasyConnect, browser, group-policy, reporting, and
+administrative routes without the intrinsic login/session issuer. Contract
+tests prove live access, immediate denial after logout, missing-context denial,
+and absence of ``/api/login``. Synoptikon composition likewise rejects a request
+unless the host inserts a structurally valid, live-approved session envelope.
+Pinned host-repository mounting and real-browser evidence remain outstanding.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

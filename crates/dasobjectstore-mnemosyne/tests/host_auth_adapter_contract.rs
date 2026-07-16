@@ -1,20 +1,23 @@
 use axum::{
     body::Body,
     extract::Extension,
-    http::{Request, StatusCode},
+    http::{header::COOKIE, HeaderValue, Request, StatusCode},
     routing::get,
     Router,
 };
 use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
 use dasobjectstore_mnemosyne::{
-    accept_monas_host_session, accept_synoptikon_host_session, HostSessionAdapterError,
-    MonasHostSessionIssue, StorageAuthority, SynoptikonIntegratedAcceptedSession,
-    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
-    SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, REQUEST_CONTEXT_SCHEMA_VERSION,
+    accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
+    monas_federated_router, synoptikon_federated_router, HostSessionAdapterError,
+    MonasHostSessionIssue, StorageAuthority, SynoptikonHostRequestAuthentication,
+    SynoptikonIntegratedAcceptedSession, SynoptikonIntegratedHostBoundaryContext,
+    SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID,
+    REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 
@@ -46,6 +49,9 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     assert!(!serialized.contains(&login.session_token));
     assert!(!serialized.contains("storage_binding"));
     assert_gui_accepts(verified).await;
+    assert_monas_router_accepts(&store, &login.session_token, StatusCode::OK).await;
+    assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::OK).await;
+    assert_monas_product_api_omits_intrinsic_login(&store, &login.session_token).await;
 
     store
         .logout("operator", &login.session_token)
@@ -56,6 +62,8 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
         HostSessionAdapterError::MonasSession(_)
     ));
     assert!(!rejection.to_string().contains(&login.session_token));
+    assert_monas_router_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
+    assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
     cleanup(&root);
 }
 
@@ -75,6 +83,21 @@ async fn live_synoptikon_session_drives_gui_actor_without_storage_grant() {
     assert!(serialized.get("storage_binding_id").is_none());
     assert!(serialized.get("storage_authority").is_none());
     assert_gui_accepts(verified).await;
+
+    let now = unix_now();
+    let router_issue = synoptikon_issue_at(now - 1, now + 300);
+    let app = synoptikon_federated_router(protected_router(), Arc::new(LiveSynoptikon(true)))
+        .layer(Extension(SynoptikonHostRequestAuthentication {
+            issue: router_issue,
+            csrf_binding_sha256: csrf_binding(),
+        }));
+    assert_eq!(request(app, None).await, StatusCode::OK);
+    let missing_context =
+        synoptikon_federated_router(protected_router(), Arc::new(LiveSynoptikon(true)));
+    assert_eq!(
+        request(missing_context, None).await,
+        StatusCode::UNAUTHORIZED
+    );
 
     assert!(matches!(
         accept_synoptikon_host_session(&issue, csrf_binding(), 1_500, &LiveSynoptikon(false)),
@@ -100,22 +123,78 @@ fn synoptikon_adapter_rejects_invalid_boundary_and_overlong_context() {
 }
 
 async fn assert_gui_accepts(verified: dasobjectstore_gui_api::VerifiedHostAuthenticatedContext) {
-    async fn protected(_actor: AuthenticatedGuiActor) -> StatusCode {
-        StatusCode::OK
-    }
-    let app = Router::new()
-        .route("/protected", get(protected))
-        .layer(Extension(verified));
+    let app = protected_router().layer(Extension(verified));
+    assert_eq!(request(app, None).await, StatusCode::OK);
+}
+
+async fn assert_monas_router_accepts(
+    store: &ProsopikonAuthStore,
+    session_token: &str,
+    expected: StatusCode,
+) {
+    let app = monas_federated_router(protected_router(), store.clone());
+    let cookie = HeaderValue::from_str(&format!("monas_session=operator:{session_token}"))
+        .expect("cookie header");
+    assert_eq!(request(app, Some(cookie)).await, expected);
+}
+
+async fn assert_monas_product_api_accepts(
+    store: &ProsopikonAuthStore,
+    session_token: &str,
+    expected: StatusCode,
+) {
+    let app = monas_dasobjectstore_api_router(store.clone());
+    let cookie = HeaderValue::from_str(&format!("monas_session=operator:{session_token}"))
+        .expect("cookie header");
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/protected")
+                .uri("/api/v1/remote/easyconnect/discovery")
+                .header(COOKIE, cookie)
                 .body(Body::empty())
                 .expect("request builds"),
         )
         .await
         .expect("request completes");
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.status(), expected);
+}
+
+async fn assert_monas_product_api_omits_intrinsic_login(
+    store: &ProsopikonAuthStore,
+    session_token: &str,
+) {
+    let app = monas_dasobjectstore_api_router(store.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/login")
+                .header(COOKIE, format!("monas_session=operator:{session_token}"))
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+async fn request(app: Router, cookie: Option<HeaderValue>) -> StatusCode {
+    let mut builder = Request::builder().uri("/protected");
+    if let Some(cookie) = cookie {
+        builder = builder.header(COOKIE, cookie);
+    }
+    let response = app
+        .oneshot(builder.body(Body::empty()).expect("request builds"))
+        .await
+        .expect("request completes");
+    response.status()
+}
+
+fn protected_router() -> Router {
+    async fn protected(_actor: AuthenticatedGuiActor) -> StatusCode {
+        StatusCode::OK
+    }
+    Router::new().route("/protected", get(protected))
 }
 
 struct LiveSynoptikon(bool);
@@ -130,10 +209,17 @@ impl SynoptikonLiveSessionVerifier for LiveSynoptikon {
 }
 
 fn synoptikon_issue() -> SynoptikonIntegratedSessionIssue {
+    synoptikon_issue_at(1_000, 2_000)
+}
+
+fn synoptikon_issue_at(
+    issued_at_unix_seconds: i64,
+    expires_at_unix_seconds: i64,
+) -> SynoptikonIntegratedSessionIssue {
     SynoptikonIntegratedSessionIssue {
         request_id: "request-1".to_string(),
-        issued_at_unix_seconds: 1_000,
-        expires_at_unix_seconds: 2_000,
+        issued_at_unix_seconds,
+        expires_at_unix_seconds,
         context: SynoptikonIntegratedHostBoundaryContext {
             request_context_schema_version: REQUEST_CONTEXT_SCHEMA_VERSION.to_string(),
             product_id: DASOBJECTSTORE_PRODUCT_ID.to_string(),

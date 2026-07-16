@@ -103,10 +103,22 @@ opaque SHA-256-derived session identifier and a context valid for at most five
 minutes and never longer than the host session. Monas caller input cannot mint
 administrator or storage roles; the adapter emits only ``authenticated``.
 
+The ready-to-mount Monas router consumes the host's HttpOnly
+``monas_session`` cookie in process, inserts the verified actor, and serves the
+normal DASObjectStore operational API without mounting ``/api/login``,
+``/api/logout``, registration, or product session-issuer routes. The Monas and
+DASObjectStore routers must share the same ``ProsopikonAuthStore`` instance or
+root. A missing, malformed, expired, or logged-out cookie returns ``401`` before
+the product handler runs.
+Application mTLS/token endpoints are not mounted beneath this browser-cookie
+middleware; they remain on their separately authenticated service boundary.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication
 context and therefore cannot become DASObjectStore storage authority.
+Its router composer requires the host to insert the typed session envelope and
+CSRF binding before dispatch; missing or revoked context returns ``401``.
 
 The intrinsic DASObjectStore login remains a compatibility path during the
 migration. Operators must run exactly one authority mode for a deployment; do

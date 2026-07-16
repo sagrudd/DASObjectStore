@@ -29,18 +29,8 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = crate::routes::gui_api_router_without_redesign_dashboards()
-                .merge(standalone_dashboard_router(auth_store.clone()))
-                .merge(standalone_session_auth_router(auth_store.clone()))
-                .merge(standalone_easyconnect_router(auth_store.clone()))
-                .merge(standalone_users_groups_router(auth_store.clone()))
-                .merge(standalone_enclosure_admin_router(auth_store.clone()))
-                .merge(
-                    crate::object_browser_routes::standalone_object_browser_router(
-                        auth_store.clone(),
-                    ),
-                )
-                .merge(standalone_reporting_router(auth_store));
+            let router = federated_operational_router(auth_store.clone())
+                .merge(standalone_session_auth_router(auth_store));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -49,6 +39,23 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
         }
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
+}
+
+/// Product routes for a host that supplies a verified actor. Login/session
+/// issuance is intentionally omitted so Monas or Synoptikon remains the sole
+/// browser authentication authority.
+pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
+    federated_operational_router(auth_store)
+}
+
+fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
+    crate::routes::gui_api_router_without_redesign_dashboards()
+        .merge(standalone_dashboard_router(auth_store.clone()))
+        .merge(standalone_easyconnect_router(auth_store.clone()))
+        .merge(standalone_users_groups_router(auth_store.clone()))
+        .merge(standalone_enclosure_admin_router(auth_store.clone()))
+        .merge(crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()))
+        .merge(standalone_reporting_router(auth_store))
 }
 
 pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {

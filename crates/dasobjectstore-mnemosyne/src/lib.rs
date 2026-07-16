@@ -5,6 +5,7 @@ pub mod boundary;
 pub mod flounder_telemetry;
 pub mod host_boundary;
 pub mod host_auth_adapter;
+pub mod host_auth_router;
 pub mod host_mode;
 pub mod integrated_session;
 pub mod monas_host_boundary;
@@ -48,6 +49,10 @@ pub use host_boundary::{
 pub use host_auth_adapter::{
     accept_monas_host_session, accept_synoptikon_host_session, HostSessionAdapterError,
     MonasHostSessionIssue, SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
+};
+pub use host_auth_router::{
+    monas_dasobjectstore_api_router, monas_federated_router, synoptikon_federated_router,
+    SynoptikonHostRequestAuthentication, MONAS_SESSION_COOKIE,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

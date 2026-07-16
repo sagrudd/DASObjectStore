@@ -93,7 +93,7 @@ pub fn accept_synoptikon_host_session(
     issue: &SynoptikonIntegratedSessionIssue,
     csrf_binding_sha256: impl Into<String>,
     accepted_at_unix_seconds: i64,
-    verifier: &impl SynoptikonLiveSessionVerifier,
+    verifier: &(impl SynoptikonLiveSessionVerifier + ?Sized),
 ) -> Result<VerifiedHostAuthenticatedContext, HostSessionAdapterError> {
     let session = accept_synoptikon_integrated_session(issue, accepted_at_unix_seconds)
         .map_err(|err| HostSessionAdapterError::SynoptikonSession(err.to_string()))?;
@@ -142,12 +142,12 @@ impl HostAuthenticationContextVerifier for MonasLiveVerifier<'_> {
     }
 }
 
-struct SynoptikonVerifier<'a, V> {
+struct SynoptikonVerifier<'a, V: ?Sized> {
     session: &'a SynoptikonIntegratedAcceptedSession,
     verifier: &'a V,
 }
 
-impl<V: SynoptikonLiveSessionVerifier> HostAuthenticationContextVerifier
+impl<V: SynoptikonLiveSessionVerifier + ?Sized> HostAuthenticationContextVerifier
     for SynoptikonVerifier<'_, V>
 {
     fn verify_live_session(&self, context: &HostAuthenticatedContext) -> Result<(), String> {
