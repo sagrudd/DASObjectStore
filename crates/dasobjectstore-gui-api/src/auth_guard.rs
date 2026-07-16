@@ -14,6 +14,7 @@ pub const STANDALONE_SESSION_TOKEN_HEADER: &str = "x-dasobjectstore-session-toke
 #[serde(rename_all = "snake_case")]
 pub enum AuthenticatedActorAuthority {
     LocalStandalone,
+    MonasStandalone,
     SynoptikonIntegrated,
 }
 
@@ -34,20 +35,6 @@ impl AuthenticatedGuiActor {
             roles: Vec::new(),
             expires_at_unix_seconds: Some(expires_at_unix_seconds),
             correlation_id: None,
-        }
-    }
-
-    pub fn synoptikon_integrated(
-        user_id: impl Into<String>,
-        roles: Vec<String>,
-        correlation_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            subject_id: user_id.into(),
-            authority: AuthenticatedActorAuthority::SynoptikonIntegrated,
-            roles,
-            expires_at_unix_seconds: None,
-            correlation_id: Some(correlation_id.into()),
         }
     }
 }
@@ -77,10 +64,27 @@ where
     type Rejection = AuthGuardRejection;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        if let Some(actor) = parts.extensions.get::<AuthenticatedGuiActor>() {
-            return Ok(actor.clone());
+        if let Some(verified) = parts
+            .extensions
+            .get::<crate::VerifiedHostAuthenticatedContext>()
+        {
+            let context = verified.context();
+            let authority = match context.authority {
+                crate::HostAuthenticationAuthority::MonasStandalone => {
+                    AuthenticatedActorAuthority::MonasStandalone
+                }
+                crate::HostAuthenticationAuthority::SynoptikonIntegrated => {
+                    AuthenticatedActorAuthority::SynoptikonIntegrated
+                }
+            };
+            return Ok(Self {
+                subject_id: context.subject_id.clone(),
+                authority,
+                roles: context.roles.clone(),
+                expires_at_unix_seconds: Some(context.expires_at_unix_seconds),
+                correlation_id: Some(context.correlation_id.clone()),
+            });
         }
-
         let auth_store = parts
             .extensions
             .get::<LocalAuthStore>()
@@ -194,7 +198,11 @@ mod tests {
         AuthenticatedActorAuthority, AuthenticatedGuiActor, STANDALONE_SESSION_TOKEN_HEADER,
         STANDALONE_USERNAME_HEADER,
     };
-    use crate::LocalAuthStore;
+    use crate::{
+        accept_host_authenticated_context, HostAuthenticatedContext, HostAuthenticationAuthority,
+        HostAuthenticationContextVerifier, LocalAuthStore, HOST_AUTH_AUDIENCE,
+        HOST_AUTH_CONTEXT_SCHEMA_VERSION,
+    };
     use axum::{
         body::Body,
         extract::Extension,
@@ -306,13 +314,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extractor_accepts_host_injected_synoptikon_actor() {
-        let actor = AuthenticatedGuiActor::synoptikon_integrated(
-            "user-1",
-            vec!["storage_operator".to_string()],
-            "corr-1",
-        );
-        let app = protected_router().layer(Extension(actor));
+    async fn extractor_accepts_verified_monas_and_synoptikon_contexts() {
+        for authority in [
+            HostAuthenticationAuthority::MonasStandalone,
+            HostAuthenticationAuthority::SynoptikonIntegrated,
+        ] {
+            let context = host_context(authority);
+            let verified = accept_host_authenticated_context(context, 1_500, &LiveVerifier)
+                .expect("live host session accepted");
+            let app = protected_router().layer(Extension(verified));
+
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/protected")
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("request completes");
+
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+    }
+
+    #[tokio::test]
+    async fn extractor_rejects_unverified_host_context() {
+        let app = protected_router().layer(Extension(host_context(
+            HostAuthenticationAuthority::MonasStandalone,
+        )));
 
         let response = app
             .oneshot(
@@ -325,7 +356,7 @@ mod tests {
             .await
             .expect("request completes");
 
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     async fn protected(actor: AuthenticatedGuiActor) -> Json<ProtectedResponse> {
@@ -349,6 +380,30 @@ mod tests {
             .register_with_token("admin", &token, "secret")
             .expect("user registered");
         auth_store
+    }
+
+    struct LiveVerifier;
+
+    impl HostAuthenticationContextVerifier for LiveVerifier {
+        fn verify_live_session(&self, _context: &HostAuthenticatedContext) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn host_context(authority: HostAuthenticationAuthority) -> HostAuthenticatedContext {
+        HostAuthenticatedContext {
+            schema_version: HOST_AUTH_CONTEXT_SCHEMA_VERSION.to_string(),
+            authority,
+            issuer: authority.issuer().to_string(),
+            audience: HOST_AUTH_AUDIENCE.to_string(),
+            subject_id: "user-1".to_string(),
+            session_id: "session-1".to_string(),
+            roles: vec!["storage_operator".to_string()],
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 2_000,
+            correlation_id: "corr-1".to_string(),
+            csrf_binding_sha256: format!("sha256:{}", "a".repeat(64)),
+        }
     }
 
     #[derive(Debug, Deserialize, Serialize)]

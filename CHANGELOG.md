@@ -6,6 +6,18 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.90.0 - 2026-07-16
+
+- Add a strict versioned host-authenticated context for Monas standalone and
+  Synoptikon-integrated Web hosting, with issuer/audience, bounded lifetime,
+  CSRF binding, audit correlation, and live session/revocation verification.
+- Make the GUI actor extractor accept only the verified host-context wrapper;
+  raw host context, stale sessions, issuer mismatch, unknown fields, and an
+  attempted storage-write grant fail closed.
+- Keep daemon-owned storage authorization and the compatibility login intact
+  while concrete host composition, migration, browser, and rollback evidence
+  is completed before intrinsic authentication removal.
+
 ## 0.89.0 - 2026-07-16
 
 - Add a same-commit remote-upload completion MVP acceptance through the real

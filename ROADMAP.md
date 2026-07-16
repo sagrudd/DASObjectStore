@@ -1702,6 +1702,15 @@ password endpoints, session issuer/store, and product-owned login routes are
 removed in one coordinated release without leaving dual authentication
 authorities.
 
+Delivered foundation (0.90.0): the GUI API now accepts a strict versioned
+host-authenticated context for both Monas standalone and Synoptikon-integrated
+authorities only after the embedding host verifies the live session and
+revocation state. The context is audience-bound, short-lived, CSRF-bound,
+correlated, and deliberately contains no storage authorization. An unverified
+context fails closed. The compatibility login remains until concrete host
+composition, migration, browser equivalence, and rollback evidence satisfy the
+exit criteria above; this avoids a partial dual-authority removal.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

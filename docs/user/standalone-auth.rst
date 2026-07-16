@@ -79,5 +79,25 @@ store policy changes may be initiated from Web forms, but the frontend only
 submits requests. ``dasobjectstored`` validates authority and policy, prepares
 the mutation plan, and performs confirmed host or storage changes.
 
-Synoptikon-integrated deployments are different: Synoptikon supplies account,
-entitlement, audit, correlation, and governance-domain context.
+Host-federated Web authentication
+---------------------------------
+
+The target Web authentication authority is Monas for a standalone product host
+and Synoptikon for an integrated deployment. Both hosts pass the same versioned
+authenticated context to DASObjectStore. On every request the host adapter must
+validate its live session and revocation state before constructing the verified
+context accepted by the GUI API. DASObjectStore additionally rejects unknown
+schemas, mismatched issuer or audience, expired or overlong contexts, malformed
+CSRF bindings, and raw contexts that have not crossed that verification
+boundary.
+
+The host context supplies subject, roles, expiry, correlation, and a digest
+binding to the host's CSRF state. It does not contain a storage permission.
+Daemon-owned local group, administrator, ObjectStore, pairing, and action policy
+still decide whether an authenticated actor may read or mutate storage.
+
+The intrinsic DASObjectStore login remains a compatibility path during the
+migration. Operators must run exactly one authority mode for a deployment; do
+not proxy host authentication while also exposing the standalone login routes.
+Removal follows only after the Monas and Synoptikon adapters, identity/session
+migration, browser behavior, package rollback, and recovery evidence pass.

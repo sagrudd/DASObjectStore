@@ -3358,7 +3358,7 @@ browser and appliance acceptance remain external validation gates.
 
 ## Cross-Cutting Tasks
 
-- [ ] **Federate the intrinsic authentication Yew WebUI to Monas or
+- [~] **Federate the intrinsic authentication Yew WebUI to Monas or
   Synoptikon, then remove the internal implementation.** Treat the current
   DASObjectStore login/session UI and product-owned routes as a compatibility
   implementation, not the target architecture. Add a host-neutral
@@ -3377,6 +3377,16 @@ browser and appliance acceptance remain external validation gates.
   recovery evidence pass may the intrinsic Yew login components, password
   submission API, session issuer/store, and product-owned login routes be
   deleted. Document the removal release and reject partial dual authority.
+  - [x] Define the strict versioned host-authenticated context shared by Monas
+    standalone and Synoptikon-integrated modes. Require issuer/audience,
+    bounded freshness, CSRF binding, correlation identity, and live host
+    session/revocation verification before the GUI extractor accepts it; raw
+    host context fails closed and cannot encode storage-write authority.
+  - [ ] Compose concrete Monas and Synoptikon host adapters around the pinned
+    session stores, prove deep-link/login/logout/expiry and policy equivalence,
+    migrate compatible standalone identities/sessions, then remove the
+    intrinsic Yew login, password/session issuer APIs, and product login routes
+    in one rollback-safe release.
 
 - [x] Keep CLI examples synchronized between `README.md`,
   `docs/requirements.md`, `ROADMAP.md`, and this file.

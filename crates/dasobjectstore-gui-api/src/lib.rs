@@ -13,6 +13,7 @@ mod endpoints_aggregator;
 mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
+pub mod host_auth;
 mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
@@ -64,6 +65,12 @@ pub use endpoints::{
     EndpointBindingReadinessView, EndpointBindingView, EndpointInventoryItemView,
     EndpointInventoryView, EndpointKindView, EndpointValidationStateView, EndpointValidationView,
     EndpointWarningSeverityView, EndpointWarningView, ENDPOINT_INVENTORY_SCHEMA_VERSION,
+};
+pub use host_auth::{
+    accept_host_authenticated_context, HostAuthContextError, HostAuthenticatedContext,
+    HostAuthenticationAuthority, HostAuthenticationContextVerifier,
+    VerifiedHostAuthenticatedContext, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
+    MAX_HOST_AUTH_CONTEXT_TTL_SECONDS,
 };
 pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,

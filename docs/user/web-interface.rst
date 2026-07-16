@@ -1214,3 +1214,11 @@ surface under:
 
    /products/dasobjectstore
    /products/dasobjectstore/api
+
+The embedding host must verify its current session and revocation state for
+each request before injecting the versioned DASObjectStore host-authenticated
+context. Merely deserializing or forwarding identity JSON is insufficient: the
+GUI extractor accepts only the verified wrapper produced after schema,
+issuer/audience, lifetime, CSRF-binding, and live-session checks. Monas uses the
+same contract when it hosts DASObjectStore in standalone product mode. Neither
+authority context grants storage access; daemon policy remains decisive.
