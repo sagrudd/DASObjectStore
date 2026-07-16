@@ -77,7 +77,12 @@ where
 
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
-        self.reject_profile_lifecycle_fallback(&store_id, "delete")?;
+        if read_profile_binding_record(&self.profile_binding_registry_path, store_id.as_str())
+            .map_err(|error| ("profile_lifecycle_unavailable", error.to_string()))?
+            .is_some()
+        {
+            return self.retire_profile_store(request, store_id);
+        }
         let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
             .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
         let metadata =
@@ -133,11 +138,59 @@ where
 
         Ok(StoreDeleteResponse {
             report: StoreDeleteCommandReport {
-                metadata,
-                host_registry,
+                profile_retirement: None,
+                metadata: Some(metadata),
+                host_registry: Some(host_registry),
                 portable_registry,
-                host_subobjects,
+                host_subobjects: Some(host_subobjects),
                 portable_subobjects,
+            },
+        })
+    }
+
+    fn retire_profile_store(
+        &self,
+        request: StoreDeleteRequest,
+        store_id: StoreId,
+    ) -> Result<StoreDeleteResponse, (&'static str, String)> {
+        let already_retired =
+            profile_binding_retired_at(&self.profile_binding_registry_path, store_id.as_str())
+                .map_err(|error| ("profile_lifecycle_unavailable", error.to_string()))?
+                .is_some();
+        let namespace = format!("profile-s3:{}", store_id.as_str());
+        let withdrawal = dasobjectstore_metadata::withdraw_profile_catalogue(
+            &self.live_sqlite_path,
+            &namespace,
+            &store_id,
+            request.dry_run,
+        )
+        .map_err(|error| ("profile_retirement_catalogue_failed", error.to_string()))?;
+        if !request.dry_run && !already_retired {
+            retire_profile_binding_if_matches(
+                &self.profile_binding_registry_path,
+                store_id.as_str(),
+                &self.clock.now_utc(),
+            )
+            .map_err(|error| ("profile_retirement_binding_failed", error.to_string()))?;
+        }
+        Ok(StoreDeleteResponse {
+            report: StoreDeleteCommandReport {
+                profile_retirement: Some(crate::api::ProfileRetirementReport {
+                    store_id: store_id.to_string(),
+                    dry_run: request.dry_run,
+                    already_retired,
+                    shared_objects_removed: withdrawal.objects_removed,
+                    shared_transactions_removed: withdrawal.transactions_removed,
+                    private_catalogue_retained: true,
+                    payloads_retained: true,
+                    quota_ledger_retained: true,
+                    registry_definition_retained: true,
+                }),
+                metadata: None,
+                host_registry: None,
+                portable_registry: None,
+                host_subobjects: None,
+                portable_subobjects: None,
             },
         })
     }

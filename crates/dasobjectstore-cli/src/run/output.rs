@@ -19,6 +19,8 @@ use dasobjectstore_object_service::{
 use dasobjectstore_platform::{ObservedDisk, ObservedEnclosure, ProbeReport};
 use std::io::{self, Write};
 
+mod profile_retirement;
+
 pub(super) fn write_ingest_status(
     capacity: &SsdCapacity,
     policy: &SsdCapacityPolicy,
@@ -553,42 +555,54 @@ pub(super) fn write_store_delete_report(
     report: &StoreDeleteCommandReport,
     writer: &mut impl Write,
 ) -> Result<(), io::Error> {
-    if report.metadata.dry_run {
-        writeln!(writer, "Store delete dry run: {}", report.metadata.store_id)?;
+    if let Some(retirement) = &report.profile_retirement {
+        return profile_retirement::write_profile_retirement_report(retirement, writer);
+    }
+    let metadata = report.metadata.as_ref().expect("appliance delete metadata");
+    let host_registry = report
+        .host_registry
+        .as_ref()
+        .expect("appliance host registry report");
+    let host_subobjects = report
+        .host_subobjects
+        .as_ref()
+        .expect("appliance host SubObject report");
+    if metadata.dry_run {
+        writeln!(writer, "Store delete dry run: {}", metadata.store_id)?;
     } else {
-        writeln!(writer, "Store deleted: {}", report.metadata.store_id)?;
+        writeln!(writer, "Store deleted: {}", metadata.store_id)?;
     }
     writeln!(
         writer,
         "Store metadata removed: {}",
-        report.metadata.store_metadata_removed
+        metadata.store_metadata_removed
     )?;
     writeln!(
         writer,
         "Objects removed: {}",
-        report.metadata.drain.objects_removed
+        metadata.drain.objects_removed
     )?;
     writeln!(
         writer,
         "Placements removed: {}",
-        report.metadata.drain.placements_removed
+        metadata.drain.placements_removed
     )?;
     writeln!(
         writer,
         "Payload files removed: {}",
-        report.metadata.drain.payload_files_removed
+        metadata.drain.payload_files_removed
     )?;
     writeln!(
         writer,
         "Host registry removed: {} ({})",
-        report.host_registry.removed,
-        report.host_registry.registry_path.to_string_lossy()
+        host_registry.removed,
+        host_registry.registry_path.to_string_lossy()
     )?;
     writeln!(
         writer,
         "Host SubObjects removed: {} ({})",
-        report.host_subobjects.removed_count,
-        report.host_subobjects.registry_path.to_string_lossy()
+        host_subobjects.removed_count,
+        host_subobjects.registry_path.to_string_lossy()
     )?;
     match &report.portable_registry {
         Some(portable) => writeln!(
@@ -611,7 +625,7 @@ pub(super) fn write_store_delete_report(
     writeln!(
         writer,
         "Live metadata: {}",
-        report.metadata.live_sqlite_path.to_string_lossy()
+        metadata.live_sqlite_path.to_string_lossy()
     )
 }
 

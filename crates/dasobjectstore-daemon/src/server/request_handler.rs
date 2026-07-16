@@ -49,16 +49,18 @@ use crate::runtime::{
     deactivate_application_identity, deactivate_application_key, default_endpoint_registry_path,
     default_hdd_root, default_ssd_root, discover_managed_hdd_roots, head_profile_object,
     issue_application_upload_capability, list_profile_objects_page,
-    migrate_registered_folder_store, profile_diagnostics, profile_health, profile_s3_list_response,
-    provision_garage_store_registry, query_object_browser_metadata, read_application_identity,
-    read_application_key, read_application_upload_capability, read_object_browser_metadata,
-    read_profile_binding, read_profile_binding_record, record_application_audit_event,
+    migrate_registered_folder_store, profile_binding_retired_at, profile_diagnostics,
+    profile_health, profile_s3_list_response, provision_garage_store_registry,
+    query_object_browser_metadata, read_application_identity, read_application_key,
+    read_application_upload_capability, read_object_browser_metadata, read_profile_binding,
+    read_profile_binding_record, record_application_audit_event,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
     remove_profile_binding_if_matches, resolve_mtls_application_identity_by_fingerprint,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
-    restore_profile_binding_if_matches, upsert_application_identity, upsert_application_key,
-    upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
-    verify_profile_object, AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
+    restore_profile_binding_if_matches, retire_profile_binding_if_matches,
+    upsert_application_identity, upsert_application_key, upsert_endpoint_inventory_record,
+    upsert_profile_binding, validate_profile_binding_claim, verify_profile_object,
+    AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
     DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
     FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
     FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
@@ -1275,7 +1277,7 @@ mod tests {
             panic!("expected profile delete response: {delete:?}");
         };
         assert!(delete.deleted);
-        let connection = Connection::open(live_sqlite).expect("open shared catalogue");
+        let connection = Connection::open(&live_sqlite).expect("open shared catalogue");
         let remaining = connection
             .query_row(
                 "SELECT COUNT(*) FROM profile_catalogue_objects
@@ -1285,28 +1287,110 @@ mod tests {
             )
             .expect("shared object count");
         assert_eq!(remaining, 0);
-        for request in [
-            DaemonApiRequest::StoreDrain(StoreDrainRequest {
-                store_id: "upload-store".to_string(),
-                dry_run: true,
-                allow_store_drain: false,
-                confirmation_marker: String::new(),
-            }),
-            DaemonApiRequest::StoreDelete(StoreDeleteRequest {
-                store_id: "upload-store".to_string(),
-                dry_run: true,
-                allow_store_delete: false,
-                confirmation_marker: String::new(),
-            }),
-        ] {
-            let response = handler
-                .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
-                .expect("profile lifecycle dispatch");
-            let DaemonApiResponse::Error(error) = response else {
-                panic!("profile lifecycle must fail closed: {response:?}");
-            };
-            assert_eq!(error.code, "profile_lifecycle_unsupported");
-        }
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreDrain(StoreDrainRequest {
+                    store_id: "upload-store".to_string(),
+                    dry_run: true,
+                    allow_store_drain: false,
+                    confirmation_marker: String::new(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile drain dispatch");
+        let DaemonApiResponse::Error(error) = response else {
+            panic!("profile drain must fail closed: {response:?}");
+        };
+        assert_eq!(error.code, "profile_lifecycle_unsupported");
+
+        let dry_run = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                    store_id: "upload-store".to_string(),
+                    dry_run: true,
+                    allow_store_delete: false,
+                    confirmation_marker: String::new(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile retirement preview");
+        let DaemonApiResponse::StoreDelete(dry_run) = dry_run else {
+            panic!("expected profile retirement preview: {dry_run:?}");
+        };
+        let preview = dry_run
+            .report
+            .profile_retirement
+            .expect("retirement preview");
+        assert!(preview.dry_run);
+        assert!(!preview.already_retired);
+        assert!(read_profile_binding(&profile_registry, "upload-store")
+            .expect("binding after preview")
+            .is_some());
+
+        let retired = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                    store_id: "upload-store".to_string(),
+                    dry_run: false,
+                    allow_store_delete: true,
+                    confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("profile retirement");
+        let DaemonApiResponse::StoreDelete(retired) = retired else {
+            panic!("expected profile retirement: {retired:?}");
+        };
+        let report = retired
+            .report
+            .profile_retirement
+            .expect("retirement report");
+        assert!(!report.dry_run);
+        assert!(!report.already_retired);
+        assert!(report.payloads_retained);
+        assert!(read_profile_binding(&profile_registry, "upload-store")
+            .expect("active binding after retirement")
+            .is_none());
+        assert!(
+            read_profile_binding_record(&profile_registry, "upload-store")
+                .expect("retained binding record")
+                .is_some()
+        );
+        let connection = Connection::open(&live_sqlite).expect("shared catalogue after retirement");
+        let shared_transactions = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_transactions WHERE store_id = 'upload-store'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("shared transaction count");
+        assert_eq!(shared_transactions, 0);
+
+        let retry = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                    store_id: "upload-store".to_string(),
+                    dry_run: false,
+                    allow_store_delete: true,
+                    confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("idempotent profile retirement");
+        let DaemonApiResponse::StoreDelete(retry) = retry else {
+            panic!("expected retirement retry: {retry:?}");
+        };
+        assert!(
+            retry
+                .report
+                .profile_retirement
+                .expect("retry retirement report")
+                .already_retired
+        );
         cleanup(&root);
     }
 

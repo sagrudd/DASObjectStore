@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.108.0 - 2026-07-16
+
+- Add daemon-owned, source-preserving profile retirement through confirmed
+  `store delete`: shared catalogue visibility is withdrawn transactionally,
+  the binding is durably tombstoned, and private payload, catalogue, quota,
+  and registry state remains available for a future recovery or purge flow.
+- Make profile retirement previews read-only and retries idempotent, while
+  continuing to reject appliance-style `store drain` for profile stores.
+
 ## 0.107.1 - 2026-07-16
 
 - Fail profile-bound `store drain` and `store delete` closed before appliance

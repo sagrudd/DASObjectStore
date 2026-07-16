@@ -33,6 +33,53 @@ pub struct ProfileCatalogueCommitReport {
     pub idempotent: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProfileCatalogueWithdrawalReport {
+    pub objects_removed: usize,
+    pub transactions_removed: usize,
+}
+
+/// Atomically withdraw one profile namespace from shared discovery metadata.
+/// Private profile data is deliberately outside this transaction and retained.
+pub fn withdraw_profile_catalogue(
+    live_sqlite_path: impl AsRef<Path>,
+    profile_namespace: &str,
+    store_id: &StoreId,
+    dry_run: bool,
+) -> Result<ProfileCatalogueWithdrawalReport, ProfileCatalogueCommitError> {
+    if profile_namespace.trim().is_empty() {
+        return Err(ProfileCatalogueCommitError::BlankField("profile_namespace"));
+    }
+    let mut connection = Connection::open(live_sqlite_path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let transaction = connection.transaction()?;
+    let objects_removed = transaction.query_row(
+        "SELECT COUNT(*) FROM profile_catalogue_objects WHERE profile_namespace = ?1 AND store_id = ?2",
+        params![profile_namespace, store_id.as_str()],
+        |row| row.get::<_, usize>(0),
+    )?;
+    let transactions_removed = transaction.query_row(
+        "SELECT COUNT(*) FROM profile_catalogue_transactions WHERE profile_namespace = ?1 AND store_id = ?2",
+        params![profile_namespace, store_id.as_str()],
+        |row| row.get::<_, usize>(0),
+    )?;
+    if !dry_run {
+        transaction.execute(
+            "DELETE FROM profile_catalogue_objects WHERE profile_namespace = ?1 AND store_id = ?2",
+            params![profile_namespace, store_id.as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM profile_catalogue_transactions WHERE profile_namespace = ?1 AND store_id = ?2",
+            params![profile_namespace, store_id.as_str()],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(ProfileCatalogueWithdrawalReport {
+        objects_removed,
+        transactions_removed,
+    })
+}
+
 pub fn profile_catalogue_snapshot_matches(
     live_sqlite_path: impl AsRef<Path>,
     profile_namespace: &str,
@@ -527,6 +574,75 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("object ids");
         assert_eq!(rows, vec!["object-a"]);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn withdrawal_previews_then_removes_only_the_selected_profile_namespace() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-withdrawal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let db = root.join("live.sqlite");
+        let connection = Connection::open(&db).expect("db");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('store-a', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        drop(connection);
+        let store_id = StoreId::new("store-a").expect("store id");
+        let catalogue = sample_catalogue();
+        for (transaction_id, namespace) in
+            [("tx-retire", "folder:retire"), ("tx-keep", "folder:keep")]
+        {
+            commit_profile_catalogue(
+                &db,
+                ProfileCatalogueCommitRequest {
+                    transaction_id,
+                    profile_namespace: namespace,
+                    store_id: &store_id,
+                    catalogue: &catalogue,
+                    source_retained: true,
+                    exact_snapshot: true,
+                    committed_at_utc: "2026-07-16T12:00:00Z",
+                },
+            )
+            .expect("catalogue commit");
+        }
+        assert_eq!(
+            withdraw_profile_catalogue(&db, "folder:retire", &store_id, true).expect("preview"),
+            ProfileCatalogueWithdrawalReport {
+                objects_removed: 1,
+                transactions_removed: 1,
+            }
+        );
+        assert_eq!(
+            withdraw_profile_catalogue(&db, "folder:retire", &store_id, false).expect("withdraw"),
+            ProfileCatalogueWithdrawalReport {
+                objects_removed: 1,
+                transactions_removed: 1,
+            }
+        );
+        let connection = Connection::open(&db).expect("db");
+        let remaining = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_objects WHERE profile_namespace = 'folder:keep'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .expect("remaining object count");
+        assert_eq!(remaining, 1);
         let _ = std::fs::remove_dir_all(root);
     }
 

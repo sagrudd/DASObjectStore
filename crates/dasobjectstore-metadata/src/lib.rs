@@ -108,8 +108,9 @@ pub use object::{
 pub use object_commit::{commit_object_put, ObjectMetadataCommitError};
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
 pub use profile_catalogue_commit::{
-    commit_profile_catalogue, profile_catalogue_snapshot_matches, ProfileCatalogueCommitError,
-    ProfileCatalogueCommitReport, ProfileCatalogueCommitRequest, PROFILE_CATALOGUE_SCHEMA_VERSION,
+    commit_profile_catalogue, profile_catalogue_snapshot_matches, withdraw_profile_catalogue,
+    ProfileCatalogueCommitError, ProfileCatalogueCommitReport, ProfileCatalogueCommitRequest,
+    ProfileCatalogueWithdrawalReport, PROFILE_CATALOGUE_SCHEMA_VERSION,
 };
 pub use queue::{
     drain_ingest_queue, read_ingest_queue, read_ingest_queue_for_store, DestagePriorityPolicy,

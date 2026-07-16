@@ -807,12 +807,13 @@ transaction wiring; those boundaries stay explicit in the child items below.
   - [x] Expose the daemon's read-only profile/backend drift diagnostics through
     ``store profile-diagnostics`` so operators have one supported CLI sequence
     for diagnosis, repair preview/apply, and final readiness verification.
-  - [x] Prevent generic appliance ``store drain``/``store delete`` from acting
-    on profile-bound stores. **Remaining lifecycle blocker:** define and
-    implement one atomic, source-preserving retirement transaction covering
-    the binding, quota ledger, private catalogue, shared catalogue history,
-    registry definition, and payload namespace before enabling profile
-    lifecycle teardown.
+  - [x] Prevent generic appliance ``store drain`` from acting on profile-bound
+    stores and route confirmed ``store delete`` through daemon-owned,
+    source-preserving retirement. Retirement transactionally withdraws shared
+    catalogue visibility before tombstoning the binding, retains quota/private
+    catalogue/payload/registry state, reserves the original binding claim, and
+    is previewable and idempotent. Physical purge and explicit recovery remain
+    separate lifecycle operations rather than being hidden inside delete.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

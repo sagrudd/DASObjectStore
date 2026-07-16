@@ -242,9 +242,9 @@ pub use service::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 pub use storage_mutation::{
-    StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDeleteValidationError,
-    StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError, STORE_DELETE_CONFIRMATION,
-    STORE_DRAIN_CONFIRMATION,
+    ProfileRetirementReport, StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDeleteValidationError, StoreDrainRequest, StoreDrainResponse, StoreDrainValidationError,
+    STORE_DELETE_CONFIRMATION, STORE_DRAIN_CONFIRMATION,
 };
 pub use store_deduplicate::{
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,

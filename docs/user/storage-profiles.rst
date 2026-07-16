@@ -454,12 +454,20 @@ serving requests. Older incomplete journals are removed only after publication
 succeeds. A missing binding, capacity policy, backend root, or shared catalogue
 causes startup to fail closed rather than serving a split authority.
 
-Generic appliance ``store drain`` and ``store delete`` commands are rejected
-for profile-bound stores. Those commands do not own the profile binding,
-capacity ledger, private catalogue, or shared handoff history and therefore
-cannot safely approximate profile retirement. Remove individual objects
-through the profile S3 DELETE workflow; retain the binding until a dedicated
-source-preserving profile retirement transaction is available.
+Generic appliance ``store drain`` remains unavailable for profile-bound
+stores because appliance placement evacuation cannot represent a folder or
+drive profile. ``store delete``, however, now performs a source-preserving
+profile retirement. Always preview it first::
+
+   dasobjectstore store delete PROFILE --dry-run
+
+Then use the normal delete policy allowance and confirmation marker. The
+daemon first withdraws the profile's shared catalogue namespace and then
+durably tombstones the binding so normal reads and writes stop. It deliberately
+retains the private catalogue, payloads, quota ledger, binding claim, and store
+registry definition. A retry is idempotent. This is retirement, not physical
+purge: do not remove the retained root manually, because a future explicit
+recovery or purge operation needs that evidence.
 
 Per-user macOS service plans
 ----------------------------

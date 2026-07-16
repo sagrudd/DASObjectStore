@@ -59,11 +59,29 @@ pub struct StoreDeleteResponse {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StoreDeleteCommandReport {
-    pub metadata: MetadataStoreDeleteReport,
-    pub host_registry: StoreRegistryDeleteReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_retirement: Option<ProfileRetirementReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<MetadataStoreDeleteReport>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_registry: Option<StoreRegistryDeleteReport>,
     pub portable_registry: Option<StoreRegistryDeleteReport>,
-    pub host_subobjects: SubObjectRegistryStoreDeleteReport,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_subobjects: Option<SubObjectRegistryStoreDeleteReport>,
     pub portable_subobjects: Option<SubObjectRegistryStoreDeleteReport>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileRetirementReport {
+    pub store_id: String,
+    pub dry_run: bool,
+    pub already_retired: bool,
+    pub shared_objects_removed: usize,
+    pub shared_transactions_removed: usize,
+    pub private_catalogue_retained: bool,
+    pub payloads_retained: bool,
+    pub quota_ledger_retained: bool,
+    pub registry_definition_retained: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

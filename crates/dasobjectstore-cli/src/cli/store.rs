@@ -695,9 +695,9 @@ impl StoreDrainArgs {
 
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct StoreDeleteArgs {
-    /// Store identifier to delete.
+    /// Store identifier to delete, or source-preservingly retire for a profile store.
     store_id: StoreId,
-    /// Show affected metadata, payloads, and registry entries without deleting.
+    /// Preview deletion or profile retirement without changing durable state.
     #[arg(long)]
     dry_run: bool,
     /// Policy allowance for deleting the store and all of its contents.

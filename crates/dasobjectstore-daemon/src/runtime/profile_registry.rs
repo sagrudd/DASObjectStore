@@ -7,7 +7,7 @@
 use super::DaemonServiceRuntimeError;
 use dasobjectstore_core::manifest::{BackendReference, ObjectStoreManifest};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -82,6 +82,8 @@ impl BackendProfileBinding {
 struct ProfileBindingRegistryFile {
     schema_version: String,
     bindings: Vec<BackendProfileBinding>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    retired_at_utc_by_store: BTreeMap<String, String>,
 }
 
 impl Default for ProfileBindingRegistryFile {
@@ -89,6 +91,7 @@ impl Default for ProfileBindingRegistryFile {
         Self {
             schema_version: PROFILE_BINDING_REGISTRY_SCHEMA.to_string(),
             bindings: Vec::new(),
+            retired_at_utc_by_store: BTreeMap::new(),
         }
     }
 }
@@ -98,6 +101,9 @@ pub fn read_profile_binding(
     store_id: &str,
 ) -> Result<Option<BackendProfileBinding>, DaemonServiceRuntimeError> {
     let registry = read_registry(path.as_ref())?;
+    if registry.retired_at_utc_by_store.contains_key(store_id) {
+        return Ok(None);
+    }
     let binding = registry
         .bindings
         .into_iter()
@@ -110,11 +116,51 @@ pub fn read_profile_binding(
 pub fn read_profile_bindings(
     path: impl AsRef<Path>,
 ) -> Result<Vec<BackendProfileBinding>, DaemonServiceRuntimeError> {
-    read_registry(path.as_ref())?
+    let registry = read_registry(path.as_ref())?;
+    registry
         .bindings
         .into_iter()
+        .filter(|binding| {
+            !registry
+                .retired_at_utc_by_store
+                .contains_key(binding.manifest.store_id.as_str())
+        })
         .map(BackendProfileBinding::validate_and_canonicalize)
         .collect()
+}
+
+/// Atomically tombstone an exact active profile binding without removing any
+/// private catalogue, quota ledger, or payload state beneath its roots.
+pub fn retire_profile_binding_if_matches(
+    path: impl AsRef<Path>,
+    store_id: &str,
+    retired_at_utc: &str,
+) -> Result<bool, DaemonServiceRuntimeError> {
+    if retired_at_utc.trim().is_empty() {
+        return Err(invalid_binding("retired_at_utc must not be blank"));
+    }
+    let _guard = PROFILE_BINDING_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile binding registry write lock poisoned".to_string(),
+        })?;
+    let path = path.as_ref();
+    let mut registry = read_registry(path)?;
+    let binding = registry
+        .bindings
+        .iter()
+        .find(|binding| binding.manifest.store_id.as_str() == store_id)
+        .ok_or_else(|| invalid_binding(format!("missing binding for ObjectStore {store_id}")))?;
+    if registry.retired_at_utc_by_store.contains_key(store_id) {
+        return Ok(false);
+    }
+    let store_id = binding.manifest.store_id.to_string();
+    registry
+        .retired_at_utc_by_store
+        .insert(store_id, retired_at_utc.to_string());
+    write_registry(path, &registry)?;
+    Ok(true)
 }
 
 /// Read a persisted binding without requiring local roots to be mounted.
@@ -130,6 +176,16 @@ pub fn read_profile_binding_record(
         .bindings
         .into_iter()
         .find(|binding| binding.manifest.store_id.as_str() == store_id))
+}
+
+pub fn profile_binding_retired_at(
+    path: impl AsRef<Path>,
+    store_id: &str,
+) -> Result<Option<String>, DaemonServiceRuntimeError> {
+    Ok(read_registry(path.as_ref())?
+        .retired_at_utc_by_store
+        .get(store_id)
+        .cloned())
 }
 
 pub fn upsert_profile_binding(
@@ -237,7 +293,13 @@ fn prepare_registry_with_binding(
     binding: BackendProfileBinding,
 ) -> Result<ProfileBindingRegistryFile, DaemonServiceRuntimeError> {
     let binding = binding.validate_and_canonicalize()?;
+    let store_id = binding.manifest.store_id.to_string();
     let mut registry = read_registry(path)?;
+    if registry.retired_at_utc_by_store.contains_key(&store_id) {
+        return Err(invalid_binding(format!(
+            "ObjectStore {store_id} is retired and requires an explicit recovery operation"
+        )));
+    }
     if let Some(existing) = registry
         .bindings
         .iter_mut()
@@ -290,6 +352,18 @@ fn read_registry(path: &Path) -> Result<ProfileBindingRegistryFile, DaemonServic
             return Err(invalid_binding(format!(
                 "duplicate profile binding for store {}",
                 binding.manifest.store_id
+            )));
+        }
+    }
+    for (store_id, retired_at_utc) in &registry.retired_at_utc_by_store {
+        if !store_ids.contains(store_id.as_str()) {
+            return Err(invalid_binding(format!(
+                "retirement tombstone references missing ObjectStore {store_id}"
+            )));
+        }
+        if retired_at_utc.trim().is_empty() {
+            return Err(invalid_binding(format!(
+                "retirement tombstone for ObjectStore {store_id} has a blank timestamp"
             )));
         }
     }
@@ -535,7 +609,7 @@ mod tests {
     use super::{
         default_profile_binding_registry_path, read_profile_binding, read_registry,
         remove_profile_binding_if_matches, restore_profile_binding_if_matches,
-        upsert_profile_binding, BackendProfileBinding,
+        retire_profile_binding_if_matches, upsert_profile_binding, BackendProfileBinding,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::StoreId;
@@ -844,6 +918,37 @@ mod tests {
             .expect("record");
         assert_eq!(record.backend_root, persisted_root);
         assert!(super::read_profile_binding(&path, "store").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn retirement_is_idempotent_and_preserves_the_private_binding_claim() {
+        let root = root("retirement");
+        let path = root.join("bindings.json");
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend");
+        let binding = folder_binding("store", &backend);
+        upsert_profile_binding(&path, binding.clone()).expect("upsert");
+
+        assert!(
+            retire_profile_binding_if_matches(&path, "store", "2026-07-16T12:00:00Z")
+                .expect("first retirement")
+        );
+        assert!(
+            !retire_profile_binding_if_matches(&path, "store", "2026-07-16T12:01:00Z")
+                .expect("retirement replay")
+        );
+        assert!(read_profile_binding(&path, "store")
+            .expect("active read")
+            .is_none());
+        assert!(super::read_profile_binding_record(&path, "store")
+            .expect("record read")
+            .is_some());
+        assert_eq!(
+            super::profile_binding_retired_at(&path, "store").expect("retirement timestamp"),
+            Some("2026-07-16T12:00:00Z".to_string())
+        );
+        assert!(upsert_profile_binding(&path, binding).is_err());
         let _ = fs::remove_dir_all(root);
     }
 }
