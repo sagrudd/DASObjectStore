@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.106.0 - 2026-07-16
+
+- Route targeted bounded-folder `store repair` through daemon-owned catalogue
+  comparison and exact shared-SQLite republication, with read-only dry-run and
+  administrator-confirmed apply behavior.
+- Reject combining profile catalogue repair with Garage reconciliation and
+  keep backend paths out of the repair report.
+
 ## 0.105.0 - 2026-07-16
 
 - Make profile readiness compare the complete authoritative private catalogue

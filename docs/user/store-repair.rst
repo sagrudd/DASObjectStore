@@ -22,13 +22,23 @@ use the explicit administrator confirmation phrase:
    dasobjectstore store repair --apply \
      --confirm "confirm store repair"
 
-An apply rebuilds the complete registered store set. A store identifier may be
-provided for a read-only report, but filtered ``--apply`` is rejected so that
-repair cannot accidentally replace metadata for other stores.
+For appliance metadata, an apply rebuilds the complete registered store set.
+A store identifier may be provided for a read-only appliance report, but
+filtered appliance ``--apply`` is rejected so repair cannot accidentally
+replace metadata for other stores. Registered bounded-folder profiles use the
+targeted semantics below.
 
 The daemon owns this mutation. It creates and integrity-checks a replacement
 SQLite database, preserves the previous database as a timestamped
 ``live.sqlite.pre-repair-*`` backup, and atomically installs the replacement.
+
+For a registered bounded-folder profile, a targeted repair has narrower and
+safer semantics. ``store repair STORE`` compares the authoritative private
+profile catalogue with shared SQLite and reports drift without mutation.
+``store repair STORE --apply --confirm "confirm store repair"`` republishes
+the exact private catalogue through the crash-safe handoff. It does not scan
+user files, rebuild appliance placements, or expose the backend root. Profile
+repair cannot be combined with ``--reconcile-s3``.
 
 Recover uncatalogued Garage uploads
 -----------------------------------

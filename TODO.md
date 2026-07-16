@@ -800,6 +800,10 @@ transaction wiring; those boundaries stay explicit in the child items below.
   - [x] Require ``profile-readiness`` to compare the full authoritative folder
     catalogue with its shared-SQLite namespace. Missing, unreadable, stale, or
     extra shared rows now block readiness without mutating either authority.
+  - [x] Route targeted bounded-folder ``store repair`` through that same exact
+    comparison. Dry-run reports drift; confirmed apply republishes the current
+    private catalogue through the crash-safe handoff without scanning or
+    rebuilding appliance placement metadata.
   - [x] Publish successful single-stream PUT and multipart completion snapshots
     into daemon-owned shared SQLite through the private restart-reconcilable
     handoff journal before acknowledging the client. Publication failures keep

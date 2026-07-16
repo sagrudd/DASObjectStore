@@ -1228,7 +1228,38 @@ mod tests {
         assert_eq!(published.0, "profile-s3:upload-store");
         assert_eq!(published.1, "objects/hello.txt");
         assert_eq!(published.2, 1);
+        connection
+            .execute("DELETE FROM profile_catalogue_objects", [])
+            .expect("simulate shared catalogue drift");
         drop(connection);
+
+        let repair = |dry_run| {
+            handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::StoreRepair(StoreRepairRequest {
+                        store_id: Some(StoreId::new("upload-store").expect("store id")),
+                        dry_run,
+                        confirmation: if dry_run {
+                            String::new()
+                        } else {
+                            crate::api::STORE_REPAIR_CONFIRMATION.to_string()
+                        },
+                        reconcile_s3: false,
+                        s3_prefix: None,
+                    }),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("profile repair dispatch")
+        };
+        let DaemonApiResponse::StoreRepair(preview) = repair(true) else {
+            panic!("expected profile repair preview");
+        };
+        assert!(preview.report.warning.contains("--apply"));
+        let DaemonApiResponse::StoreRepair(applied) = repair(false) else {
+            panic!("expected applied profile repair");
+        };
+        assert_eq!(applied.report.objects_recovered, 1);
 
         let delete = handler
             .handle_with_progress_for_actor(

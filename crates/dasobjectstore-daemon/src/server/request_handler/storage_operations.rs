@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::export_profile_catalogue;
 
 impl<S, C> DaemonRequestHandler<S, C>
 where
@@ -162,6 +163,15 @@ where
                 ));
             }
         }
+        if let Some(store_id) = request.store_id.as_ref() {
+            if let Ok(Some(binding)) =
+                read_profile_binding(&self.profile_binding_registry_path, store_id.as_str())
+            {
+                if binding.manifest.deployment_profile == DeploymentProfile::Folder {
+                    return self.repair_folder_profile_catalogue(&request, binding);
+                }
+            }
+        }
         let reconciliation_job = if request.reconcile_s3 {
             let accepted_at_utc = self.clock.now_utc();
             let job = reconciliation_job_summary(
@@ -287,6 +297,77 @@ where
         self.record_admin_job(job)
             .map_err(|error| ("store_repair_job_registry_failed", error.to_string()))?;
         result
+    }
+
+    fn repair_folder_profile_catalogue(
+        &self,
+        request: &StoreRepairRequest,
+        binding: BackendProfileBinding,
+    ) -> Result<StoreRepairResponse, (&'static str, String)> {
+        if request.reconcile_s3 {
+            return Err((
+                "profile_repair_invalid_request",
+                "profile catalogue repair cannot be combined with Garage reconciliation"
+                    .to_string(),
+            ));
+        }
+        let definition = read_store_registry(&self.store_registry_path)
+            .map_err(|error| ("profile_repair_unavailable", error.to_string()))?
+            .into_iter()
+            .find(|definition| definition.store_id == binding.manifest.store_id)
+            .ok_or_else(|| {
+                (
+                    "profile_repair_unavailable",
+                    "profile capacity policy is unavailable".to_string(),
+                )
+            })?;
+        let backend = FolderBackend::open(
+            &binding.backend_root,
+            binding.manifest.clone(),
+            definition.policy.capacity,
+            0,
+        )
+        .map_err(|error| ("profile_repair_unavailable", error.to_string()))?;
+        let catalogue = export_profile_catalogue(&binding.manifest.store_id, &backend)
+            .map_err(|error| ("profile_repair_failed", error.to_string()))?;
+        let namespace = format!("profile-s3:{}", binding.manifest.store_id.as_str());
+        let matched = dasobjectstore_metadata::profile_catalogue_snapshot_matches(
+            &self.live_sqlite_path,
+            &namespace,
+            &binding.manifest.store_id,
+            &catalogue,
+        )
+        .unwrap_or(false);
+        if !request.dry_run && !matched {
+            self.publish_profile_s3_catalogue(&binding.manifest.store_id, &backend)
+                .map_err(|error| ("profile_repair_failed", error.to_string()))?;
+        }
+        Ok(StoreRepairResponse {
+            report: StoreRepairReport {
+                metadata_path: format!("profile-catalogue:{}", binding.manifest.store_id),
+                backup_path: None,
+                dry_run: request.dry_run,
+                stores_scanned: 1,
+                payload_files: catalogue.objects.len() as u64,
+                objects_recovered: u64::from(!request.dry_run && !matched),
+                placements_recovered: 0,
+                payload_bytes: catalogue
+                    .objects
+                    .iter()
+                    .map(|object| object.size_bytes)
+                    .sum(),
+                partial_duplicates_omitted: 0,
+                hashes_verified: false,
+                warning: if matched {
+                    "profile and shared catalogues already match".to_string()
+                } else if request.dry_run {
+                    "shared catalogue differs; rerun with --apply to republish it".to_string()
+                } else {
+                    "shared catalogue republished from authoritative profile metadata".to_string()
+                },
+            },
+            s3_reconciliation: None,
+        })
     }
 
     pub(super) fn store_verify_for_actor(
