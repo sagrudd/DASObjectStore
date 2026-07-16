@@ -328,6 +328,9 @@ pub struct UploadArgs {
     /// Exact object key; valid only for single-file uploads.
     #[arg(long)]
     key: Option<String>,
+    /// Explicit MIME type for a single-file object (for example image/png).
+    #[arg(long)]
+    content_type: Option<String>,
     /// Print the AWS command without executing it.
     #[arg(long)]
     dry_run: bool,
@@ -357,6 +360,10 @@ impl UploadArgs {
 
     pub fn key(&self) -> Option<&str> {
         self.key.as_deref()
+    }
+
+    pub fn content_type(&self) -> Option<&str> {
+        self.content_type.as_deref()
     }
 
     pub fn dry_run(&self) -> bool {
@@ -472,6 +479,8 @@ mod tests {
             "/data/run-001",
             "--prefix",
             "runs/001",
+            "--content-type",
+            "application/gzip",
         ])
         .expect("cli parses");
 
@@ -486,5 +495,6 @@ mod tests {
         };
         assert_eq!(args.store(), "dos-generated");
         assert_eq!(args.prefix(), Some("runs/001"));
+        assert_eq!(args.content_type(), Some("application/gzip"));
     }
 }

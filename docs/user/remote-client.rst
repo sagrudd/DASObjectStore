@@ -327,7 +327,12 @@ Upload a single file with an exact object key:
 
    dasobjectstore-remote upload zymo_fecal_2025.05 \
      --source ./report.json \
-     --key experiments/run-001/report.json
+     --key experiments/run-001/report.json \
+     --content-type application/json
+
+For a single file, ``--content-type`` preserves an explicit bounded MIME type
+on the stored object. It is rejected for folder uploads and rejects parameters,
+control characters, and malformed values; use a plain ``type/subtype`` token.
 
 Upload a folder recursively:
 

@@ -74,6 +74,7 @@ pub fn plan_upload(
     source: &Path,
     prefix: Option<&str>,
     key: Option<&str>,
+    content_type: Option<&str>,
     dry_run: bool,
     progress: bool,
 ) -> Result<AwsS3CommandPlan, RemoteS3Error> {
@@ -83,6 +84,7 @@ pub fn plan_upload(
         source,
         prefix,
         key,
+        content_type,
         dry_run,
         progress,
         AwsS3CredentialSource::AwsProfile,
@@ -95,6 +97,7 @@ pub fn plan_upload_with_credentials(
     source: &Path,
     prefix: Option<&str>,
     key: Option<&str>,
+    content_type: Option<&str>,
     dry_run: bool,
     progress: bool,
     credential_source: AwsS3CredentialSource,
@@ -102,6 +105,7 @@ pub fn plan_upload_with_credentials(
     let metadata = std::fs::metadata(source)?;
     validate_store_name(store)?;
     if metadata.is_file() {
+        let content_type = content_type.map(validate_content_type).transpose()?;
         let object_key = file_destination_key(source, prefix, key)?;
         let destination = format!("s3://{store}/{object_key}");
         let mut args = aws_base_args(config, credential_source);
@@ -111,6 +115,9 @@ pub fn plan_upload_with_credentials(
         }
         if !progress {
             args.push("--no-progress".to_string());
+        }
+        if let Some(content_type) = content_type {
+            args.extend(["--content-type".to_string(), content_type.to_string()]);
         }
         args.push(source.display().to_string());
         args.push(destination.clone());
@@ -124,6 +131,11 @@ pub fn plan_upload_with_credentials(
             backpressure_policy: RemoteUploadBackpressurePolicy::default(),
         })
     } else if metadata.is_dir() {
+        if content_type.is_some() {
+            return Err(RemoteS3Error::InvalidUpload(
+                "--content-type is only valid when uploading a single file".to_string(),
+            ));
+        }
         if key.is_some() {
             return Err(RemoteS3Error::InvalidUpload(
                 "--key is only valid when uploading a single file".to_string(),
@@ -154,6 +166,32 @@ pub fn plan_upload_with_credentials(
             "{} is neither a regular file nor a directory",
             source.display()
         )))
+    }
+}
+
+fn validate_content_type(content_type: &str) -> Result<&str, RemoteS3Error> {
+    let mut parts = content_type.split('/');
+    let has_exactly_two_nonempty_parts = parts
+        .next()
+        .is_some_and(|part| !part.is_empty())
+        && parts.next().is_some_and(|part| !part.is_empty())
+        && parts.next().is_none();
+    let valid = !content_type.is_empty()
+        && content_type.len() <= 128
+        && has_exactly_two_nonempty_parts
+        && content_type.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-' | b'/'
+                )
+        });
+    if valid {
+        Ok(content_type)
+    } else {
+        Err(RemoteS3Error::InvalidUpload(
+            "content type must be a bounded type/subtype MIME token".to_string(),
+        ))
     }
 }
 
@@ -354,6 +392,7 @@ mod tests {
             &file,
             Some("runs/001"),
             None,
+            Some("application/gzip"),
             false,
             false,
         )
@@ -362,6 +401,10 @@ mod tests {
         assert!(matches!(plan.operation, AwsS3Operation::UploadFile { .. }));
         assert!(plan.args.contains(&"cp".to_string()));
         assert!(plan.args.contains(&"--no-progress".to_string()));
+        assert!(plan
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--content-type", "application/gzip"]));
         assert_eq!(plan.backpressure_policy.max_s3_transfer_concurrency, 2);
         assert_eq!(
             plan.args.last().unwrap(),
@@ -381,6 +424,7 @@ mod tests {
             &root,
             Some("runs/001/"),
             None,
+            None,
             true,
             true,
         )
@@ -397,6 +441,38 @@ mod tests {
     }
 
     #[test]
+    fn rejects_malformed_or_folder_content_types() {
+        let root = temp_root("remote-content-type");
+        fs::create_dir_all(&root).expect("create temp");
+        let file = root.join("sample.bin");
+        fs::write(&file, b"data").expect("write file");
+
+        let malformed = plan_upload(
+            &config(),
+            "dos-generated",
+            &file,
+            None,
+            None,
+            Some("image/png; charset=binary"),
+            false,
+            false,
+        );
+        assert!(malformed.is_err());
+        let folder = plan_upload(
+            &config(),
+            "dos-generated",
+            &root,
+            None,
+            None,
+            Some("application/octet-stream"),
+            false,
+            false,
+        );
+        assert!(folder.is_err());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn session_credential_upload_plan_omits_aws_profile() {
         let root = temp_root("remote-session-credentials");
         let file = root.join("sample.fastq.gz");
@@ -407,6 +483,7 @@ mod tests {
             &config(),
             "dos-generated",
             &file,
+            None,
             None,
             None,
             true,
