@@ -113,6 +113,11 @@ the product handler runs.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 
+Monas ``0.4.0`` commit ``219038a168005f304cabf179b35c8e063fdee5ff``
+mounts this router directly at ``/products/dasobjectstore``. Both projects pin
+Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
+store is type- and schema-identical in a clean checkout.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication

@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.93.0 - 2026-07-16
+
+- Replace the sibling-path Prosopikon dependency with exact Git commit
+  ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so clean host checkouts compile
+  one compatible authentication-store type.
+- Pin Monas ``0.4.0`` commit ``219038a168005f304cabf179b35c8e063fdee5ff``,
+  which mounts the DASObjectStore operational API in process and proves live
+  EasyConnect access, absence of intrinsic DAS login, and logout revocation.
+- Keep actual Synoptikon mounting and real-browser equivalence as explicit
+  remaining release gates; local typed Synoptikon composition is a surrogate.
+
 ## 0.92.0 - 2026-07-16
 
 - Add fail-closed Axum router composition for Monas and Synoptikon host

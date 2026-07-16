@@ -1235,3 +1235,9 @@ omits DASObjectStore's intrinsic browser login/session routes. This is the
 preferred in-process mount because the verified actor cannot be serialized or
 forged as a forwarding header. The legacy header must remain disabled for a
 DASObjectStore mount.
+
+That mount is implemented by Monas ``0.4.0`` commit
+``219038a168005f304cabf179b35c8e063fdee5ff``. HTTP contract tests cover live
+session access, missing intrinsic DAS login, and immediate logout revocation.
+Real-browser accessibility, deep-link, expiry, and CSRF evidence remains a
+release gate rather than being inferred from these router tests.

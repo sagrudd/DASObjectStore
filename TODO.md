@@ -3363,8 +3363,8 @@ browser and appliance acceptance remain external validation gates.
   DASObjectStore login/session UI and product-owned routes as a compatibility
   implementation, not the target architecture. Add a host-neutral
   authentication adapter that consumes Monas standalone or Synoptikon
-  integrated authenticated context, using Monas ``0.3.0`` commit
-  ``a0fabe2d250f2d217765ee59a95cc2a04610bedc`` and the Mnemosyne design
+  integrated authenticated context, using Monas ``0.4.0`` commit
+  ``219038a168005f304cabf179b35c8e063fdee5ff`` and the Mnemosyne design
   language at ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` as current pins.
   Preserve daemon-owned storage authorization, local OS/group/admin policy,
   remote pairing approval, CSRF protection, audit identity, and logout/session
@@ -3392,10 +3392,16 @@ browser and appliance acceptance remain external validation gates.
     the unforgeable actor, and mounts the complete DASObjectStore operational
     API without intrinsic login/session routes; the Synoptikon composer accepts
     only structurally validated request context with live revocation approval.
-  - [ ] Mount these adapters in the pinned Monas and Synoptikon host routers,
-    replacing Monas's legacy ``x-img.host-context.v1`` forwarding contract;
-    prove deep-link/login/logout/expiry, CSRF, EasyConnect, and administrator/
-    ordinary-user policy equivalence in real browsers.
+  - [x] Mount the DASObjectStore operational router in Monas ``0.4.0`` commit
+    ``219038a168005f304cabf179b35c8e063fdee5ff`` using reproducible Git-pinned
+    DASObjectStore and Prosopikon dependencies. Prove the shared cookie reaches
+    EasyConnect, intrinsic DAS login is absent, and logout revokes product
+    access without forwarding the legacy ``x-img.host-context.v1`` header.
+  - [ ] Mount the typed adapter in the actual Synoptikon host when that source
+    and deployment are available; meanwhile keep the fail-closed surrogate
+    router contract in local acceptance. Prove deep-link/login/logout/expiry,
+    CSRF, EasyConnect, and administrator/ordinary-user policy equivalence in
+    real browsers for both host modes.
   - [ ] Migrate compatible standalone identities/sessions, prove package
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe

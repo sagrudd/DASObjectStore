@@ -1687,7 +1687,7 @@ but retaining it permanently would create a competing Mnemosyne identity and
 session authority. The target uses a host-injected, non-secret actor/session
 context while the DAS daemon continues to own storage authorization, local
 OS/group/admin qualification, object policy, pairing approval, and audit.
-Monas ``0.3.0`` commit ``a0fabe2d250f2d217765ee59a95cc2a04610bedc`` and the
+Monas ``0.4.0`` commit ``219038a168005f304cabf179b35c8e063fdee5ff`` and the
 Mnemosyne design language commit
 ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` are the initial compatibility
 pins; Synoptikon must satisfy the same host-neutral contract.
@@ -1729,7 +1729,17 @@ administrative routes without the intrinsic login/session issuer. Contract
 tests prove live access, immediate denial after logout, missing-context denial,
 and absence of ``/api/login``. Synoptikon composition likewise rejects a request
 unless the host inserts a structurally valid, live-approved session envelope.
-Pinned host-repository mounting and real-browser evidence remain outstanding.
+At 0.92.0, pinned host-repository mounting and real-browser evidence remained
+outstanding.
+
+Delivered pinned Monas mount (0.93.0): Monas ``0.4.0`` now consumes
+DASObjectStore and Prosopikon from exact Git revisions and mounts the product
+operational API in process at ``/products/dasobjectstore``. Its host-level test
+proves a live Monas cookie reaches EasyConnect, the intrinsic DAS login route is
+absent, and logout immediately revokes product access. No serialized identity
+header or browser bearer crosses a forwarding boundary. Actual Synoptikon
+source/deployment mounting and browser equivalence evidence remain outstanding;
+the typed fail-closed Synoptikon composer remains the local surrogate meanwhile.
 
 Post-MVP work may include:
 
