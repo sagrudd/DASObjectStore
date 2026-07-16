@@ -258,9 +258,20 @@ completion.
     runtime setting instead of advertising the non-routable wildcard bind
     address. Packaged appliances retain the loopback default; container and VM
     deployments can now name a provider on their private service network.
-    Canonical local-Docker network wiring and live completion acceptance remain
-    the next integration step and currently overlap an isolated in-progress
-    local-profile change.
+    Canonical local-Docker network wiring is delivered. The repeatable
+    ``local.sh completion-smoke`` acceptance now requires remote-client Unix
+    submission, daemon terminal completion, live Garage HEAD verification,
+    exact shared-SQLite publication, a single logical quota charge, and no
+    stranded reservation. Checksum-derived object versions now preserve the
+    signed SQLite integer range, avoiding data-dependent catalogue failures
+    without changing versions that were already representable. Live execution
+    is temporarily blocked by Docker
+    Desktop's recovered content store returning a blob I/O error and its
+    backend exiting during a clean exact-commit rebuild; rerun the command once
+    Docker's engine remains healthy. The same attempt also created the approved
+    Ubuntu ARM64 Lima surrogate, but Lima's user-session readiness check hung
+    after SSH admission, so neither damaged environment is promoted as product
+    evidence. Appliance acceptance remains separately host-gated.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable

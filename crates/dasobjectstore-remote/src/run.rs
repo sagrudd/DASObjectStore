@@ -1,32 +1,31 @@
 use crate::auth::{
-    RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials, request_s3_credentials,
+    request_s3_credentials, RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials,
 };
-use crate::authenticate::{RemoteAuthenticateError, RemoteConnectionContext, authenticate};
+use crate::authenticate::{authenticate, RemoteAuthenticateError, RemoteConnectionContext};
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs,
     StoresCommand, UploadArgs,
 };
 use crate::config::{
-    DEFAULT_PROFILE, DEFAULT_REGION, RemoteConfig, RemoteConfigError, RemoteConfigOverrides,
-    RemoteUploadSession, default_config_path, read_optional_config, write_config,
+    default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
+    RemoteConfigOverrides, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
 };
 use crate::easyconnect::{
-    RemoteEasyconnectContract, RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
+    define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
+    RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
     RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions,
-    RemoteEasyconnectPairingOutcome, SystemBrowserLauncher, define_easyconnect_contract,
-    run_easyconnect_pairing_with_ready,
+    RemoteEasyconnectPairingOutcome, SystemBrowserLauncher,
 };
 use crate::s3::{
-    AwsS3CredentialSource, RemoteS3Error, execute_aws_plan, parse_list_buckets, plan_list_stores,
-    plan_upload_with_credentials,
+    execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
+    AwsS3CredentialSource, RemoteS3Error,
 };
 use dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds as parse_rfc3339_utc_seconds;
 use dasobjectstore_daemon::{
-    DEFAULT_DAEMON_SOCKET_FILE_NAME, DaemonClient, DaemonClientError, DaemonClientTransport,
-    DaemonJobEvent, DaemonJobSummary, LINUX_DAEMON_RUNTIME_DIR,
+    DaemonClient, DaemonClientError, DaemonClientTransport, DaemonJobEvent, DaemonJobSummary,
     RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadProgressTelemetry,
-    UnixSocketDaemonTransport,
+    UnixSocketDaemonTransport, DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
 };
 use std::fmt;
 use std::io::Write;
@@ -431,7 +430,7 @@ fn build_daemon_upload_request(
             .windows(2)
             .find(|args| args[0] == "--endpoint-url")
             .map(|args| args[1].clone())?;
-        let object_version = u64::from_str_radix(&checksum[..16], 16).unwrap_or(1).max(1);
+        let object_version = completion_object_version(checksum);
         Some(dasobjectstore_daemon::RemoteEasyconnectUploadCompletion {
             upload_id: job_id.clone(),
             provider: "garage".to_string(),
@@ -476,6 +475,10 @@ fn build_daemon_upload_request(
         )),
         completion,
     }
+}
+
+fn completion_object_version(checksum: &str) -> u64 {
+    (u64::from_str_radix(&checksum[..16], 16).unwrap_or(1) & i64::MAX as u64).max(1)
 }
 
 fn daemon_upload_environment(
@@ -933,15 +936,17 @@ impl From<RemoteS3Error> for RemoteRunError {
 #[cfg(test)]
 mod tests {
     use super::{
-        daemon_job_progress_line, parse_rfc3339_utc_seconds, plan_upload_with_credentials,
-        remote_upload_session_expired, resolve_upload_route, run, session_renewal_status,
-        source_inventory, submit_upload_plan_to_daemon, write_daemon_upload_response,
+        completion_object_version, daemon_job_progress_line, parse_rfc3339_utc_seconds,
+        plan_upload_with_credentials, remote_upload_session_expired, resolve_upload_route, run,
+        session_renewal_status, source_inventory, submit_upload_plan_to_daemon,
+        write_daemon_upload_response,
     };
     use crate::auth::RemoteAuthAuthority;
     use crate::cli::RemoteCli;
     use crate::config::{
-        RemoteConfig, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionCredentials,
-        RemoteSessionRenewalMetadata, RemoteUploadSession, read_optional_config, write_config,
+        read_optional_config, write_config, RemoteConfig, RemoteObjectStoreGrant,
+        RemotePairedAppliance, RemoteSessionCredentials, RemoteSessionRenewalMetadata,
+        RemoteUploadSession,
     };
     use clap::Parser;
     use dasobjectstore_daemon::{
@@ -951,6 +956,16 @@ mod tests {
     };
     use std::cell::RefCell;
     use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn completion_object_version_preserves_sqlite_integer_range() {
+        assert_eq!(completion_object_version(&format!("{:016x}", 42)), 42);
+        assert_eq!(
+            completion_object_version("ffffffffffffffff"),
+            i64::MAX as u64
+        );
+        assert_eq!(completion_object_version("0000000000000000"), 1);
+    }
 
     #[test]
     fn config_show_json_redacts_paired_session_credentials() {
@@ -1074,10 +1089,9 @@ mod tests {
 
         let err = run(&cli, &mut output).expect_err("bucket name rejected");
 
-        assert!(
-            err.to_string()
-                .contains("choose a writable ObjectStore name")
-        );
+        assert!(err
+            .to_string()
+            .contains("choose a writable ObjectStore name"));
         std::fs::remove_dir_all(root).expect("cleanup source");
         let _ = std::fs::remove_file(path);
     }
@@ -1226,12 +1240,10 @@ mod tests {
                 .and_then(|telemetry| telemetry.session_renewal_status.as_deref()),
             Some("renewal_configured")
         );
-        assert!(
-            request
-                .display_args
-                .iter()
-                .any(|arg| arg == "<source-redacted>")
-        );
+        assert!(request
+            .display_args
+            .iter()
+            .any(|arg| arg == "<source-redacted>"));
         let completion = request.completion.as_ref().expect("completion contract");
         assert_eq!(completion.provider, "garage");
         assert_eq!(completion.bucket, "dos-zymo-fecal-2025-05");
@@ -1250,13 +1262,11 @@ mod tests {
             .environment
             .iter()
             .any(|variable| variable.name == "AWS_DEFAULT_REGION" && variable.value == "garage"));
-        assert!(
-            request
-                .environment
-                .iter()
-                .any(|variable| variable.name == "AWS_SECRET_ACCESS_KEY"
-                    && variable.value == "super-secret")
-        );
+        assert!(request
+            .environment
+            .iter()
+            .any(|variable| variable.name == "AWS_SECRET_ACCESS_KEY"
+                && variable.value == "super-secret"));
         let rendered = String::from_utf8(rendered).expect("utf8 output");
         assert!(rendered.contains("Daemon remote upload job submitted"));
         assert!(rendered.contains("remote-upload-test-1"));

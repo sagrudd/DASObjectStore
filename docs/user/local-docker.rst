@@ -42,6 +42,7 @@ From the DASObjectStore checkout:
    $ ./deploy/local-docker/local.sh up
    $ ./deploy/local-docker/local.sh status
    $ ./deploy/local-docker/local.sh config
+   $ ./deploy/local-docker/local.sh completion-smoke
    $ ./deploy/local-docker/local.sh down
 
 ``up`` renders the daemon and nested Garage Compose files, builds the daemon
@@ -60,6 +61,16 @@ capacity policy, making restart reconciliation deterministic.
 The authoritative live object catalogue is persisted at
 ``/var/lib/dasobjectstore/live.sqlite`` in the mounted daemon state rather than
 using the appliance-only ``/srv`` default.
+
+``completion-smoke`` creates one 4096-byte generated object beneath the
+managed profile root and exercises the version-matched remote client over
+the daemon Unix socket. Success requires terminal daemon completion, Garage
+HEAD verification, an exact shared-SQLite catalogue row, one logical quota
+charge, and no remaining reservation. Its temporary paired-session file stays
+under the private configuration root, is mode 0600, is never printed, and is
+removed with the generated source after the run. The completed provider object
+is retained because deleting it independently would make the authoritative
+catalogue row stale; use a dedicated generated-data profile for this test.
 
 Configuration paths
 -------------------

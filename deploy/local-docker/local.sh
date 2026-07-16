@@ -67,6 +67,8 @@ Commands:
   up           Render, build, start the daemon, start Garage, and provision stores.
   provision    Re-run daemon-owned Garage bucket/key provisioning and export config.
   smoke        Run generated-data S3 put/head/list/get/checksum/delete acceptance.
+  completion-smoke
+               Run remote client -> daemon -> Garage -> catalogue/quota acceptance.
   status       Show daemon and nested Garage Compose status without secrets.
   down         Stop Garage through the daemon, then stop the daemon container.
   config       Print the generated scoped consumer adapter config path.
@@ -613,6 +615,170 @@ smoke() {
     printf 'Local Docker/Garage S3 acceptance passed.\nEvidence: %s\n' "$evidence"
 }
 
+completion_smoke() {
+    require_volume_root
+    require_docker
+    require_command aws
+    require_command python3
+    [ -f "$STACK_COMPOSE" ] || die "profile is not rendered: run '$0 up'"
+    [ -f "$CONSUMER_CONFIG" ] || die "adapter config is unavailable: run '$0 provision'"
+    wait_for_daemon
+    wait_for_garage
+
+    local container_id image_revision credential_path access_key secret_key bucket
+    container_id="$(docker_compose ps -q dasobjectstored)"
+    [ -n "$container_id" ] || die "daemon container is not running"
+    image_revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$container_id")"
+    [ "$image_revision" = "$SOURCE_COMMIT" ] || die \
+        "daemon image revision $image_revision does not match source $SOURCE_COMMIT; run '$0 up'"
+    credential_path="$(awk -F'"' '/^path = / { print $2; exit }' "$CONSUMER_CONFIG")"
+    bucket="$(awk -F'"' '/^bucket = / { print $2; exit }' "$CONSUMER_CONFIG")"
+    [ -f "$credential_path" ] || die "adapter credential file is unavailable"
+    access_key="$(awk -F'"' '/^access_key = / { print $2; exit }' "$credential_path")"
+    secret_key="$(awk -F'"' '/^secret_key = / { print $2; exit }' "$credential_path")"
+    [ -n "$access_key" ] || die "adapter credential has no access key"
+    [ -n "$secret_key" ] || die "adapter credential has no secret key"
+    [ -n "$bucket" ] || die "adapter config has no bucket"
+
+    local run_id smoke_root source key checksum config_host config_container source_container
+    local output evidence_dir evidence object_version used_before
+    run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    smoke_root="$PROFILE_ROOT/completion-smoke-$run_id"
+    source="$smoke_root/source.bin"
+    key="codex-completion/$run_id.bin"
+    config_host="$CONFIG_DIR/remote-completion-$run_id.json"
+    config_container="/etc/dasobjectstore/remote-completion-$run_id.json"
+    source_container="/Volumes/Seagate/DASObjectStore/$PROFILE/completion-smoke-$run_id/source.bin"
+    mkdir -p "$smoke_root"
+    chmod 700 "$smoke_root"
+    dd if=/dev/urandom of="$source" bs=4096 count=1 2>/dev/null
+    checksum="$(shasum -a 256 "$source" | awk '{print $1}')"
+    object_version="$(printf '%s' "${checksum:0:16}" | python3 -c 'import sys; print(max(1, int(sys.stdin.read(), 16) & (2**63 - 1)))')"
+    used_before="$(LEDGER_PATH="$STATE_DIR/capacity-ledgers/$STORE_ID.json" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["LEDGER_PATH"])
+print(json.loads(path.read_text(encoding="utf-8")).get("used_bytes", 0) if path.exists() else 0)
+PY
+)"
+
+    REMOTE_CONFIG_PATH="$config_host" ACCESS_KEY="$access_key" SECRET_KEY="$secret_key" \
+        STORE_ID="$STORE_ID" BUCKET="$bucket" API_PORT="$API_PORT" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["REMOTE_CONFIG_PATH"])
+document = {
+    "endpoint_url": f"http://garage:{os.environ['API_PORT']}",
+    "region": "garage",
+    "profile": "dasobjectstore",
+    "auth_authority": "aws-profile",
+    "default_appliance_id": "local-docker",
+    "paired_appliances": [{
+        "appliance_id": "local-docker",
+        "display_name": "Local Docker generated-data acceptance",
+        "appliance_base_url": "http://127.0.0.1",
+        "discovery_url": "http://127.0.0.1",
+        "auth_authority": "aws-profile",
+        "paired_actor": "codex-generated-data",
+        "default_object_store": os.environ["STORE_ID"],
+        "session": {
+            "session_id": "CODEXLOCALDOCKERSESSION",
+            "issued_at": "2026-01-01T00:00:00Z",
+            "expires_at": "2099-01-01T00:00:00Z",
+            "credentials": {
+                "access_key_id": os.environ["ACCESS_KEY"],
+                "secret_access_key": os.environ["SECRET_KEY"],
+            },
+        },
+        "object_stores": [{
+            "object_store": os.environ["STORE_ID"],
+            "bucket": os.environ["BUCKET"],
+            "can_read": True,
+            "can_write": True,
+            "object_type": "generated_data",
+        }],
+    }],
+}
+path.write_text(json.dumps(document), encoding="utf-8")
+path.chmod(0o600)
+PY
+
+    cleanup_completion_smoke() {
+        rm -rf "$smoke_root"
+        rm -f "$config_host"
+    }
+    trap cleanup_completion_smoke EXIT
+    output="$(docker_compose exec -T dasobjectstored \
+        dasobjectstore-remote --config "$config_container" upload \
+        --store "$STORE_ID" --source "$source_container" --key "$key" \
+        --submit-to-daemon --daemon-socket /run/dasobjectstore/dasobjectstored.sock)"
+    printf '%s\n' "$output" | grep -q 'state=Complete' || die \
+        "remote upload did not reach daemon-owned terminal completion"
+
+    AWS_ACCESS_KEY_ID="$access_key" AWS_SECRET_ACCESS_KEY="$secret_key" AWS_DEFAULT_REGION=garage \
+        aws --endpoint-url "http://127.0.0.1:$API_PORT" s3api head-object \
+        --bucket "$bucket" --key "$key" --query ContentLength --output text | grep -qx 4096 || \
+        die "Garage HEAD did not verify the completed generated object"
+
+    LIVE_SQLITE="$STATE_DIR/live.sqlite" STORE_ID="$STORE_ID" OBJECT_KEY="$key" \
+        OBJECT_VERSION="$object_version" EXPECTED_CHECKSUM="sha256:$checksum" python3 - <<'PY'
+import json
+import os
+import sqlite3
+
+connection = sqlite3.connect(os.environ["LIVE_SQLITE"])
+rows = connection.execute(
+    "SELECT object_id, object_version, object_json FROM profile_catalogue_objects WHERE store_id = ?",
+    (os.environ["STORE_ID"],),
+).fetchall()
+matching = [row for row in rows if row[0] == os.environ["OBJECT_KEY"]]
+if len(matching) != 1:
+    raise SystemExit("shared catalogue does not contain exactly one completed object")
+object_id, version, raw = matching[0]
+if version != int(os.environ["OBJECT_VERSION"]):
+    raise SystemExit("shared catalogue object version does not match completion identity")
+record = json.loads(raw)
+checksum = record.get("checksum", {})
+expected = os.environ["EXPECTED_CHECKSUM"].removeprefix("sha256:")
+if (record.get("size_bytes") != 4096 or checksum.get("algorithm") != "sha256"
+        or checksum.get("value") != expected):
+    raise SystemExit("shared catalogue size/checksum does not match provider verification")
+PY
+
+    LEDGER_PATH="$STATE_DIR/capacity-ledgers/$STORE_ID.json" USED_BEFORE="$used_before" \
+        python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+ledger = json.loads(Path(os.environ["LEDGER_PATH"]).read_text(encoding="utf-8"))
+if ledger.get("used_bytes") != int(os.environ["USED_BEFORE"]) + 4096:
+    raise SystemExit("logical quota was not charged exactly once for the completed object")
+if ledger.get("reservations"):
+    raise SystemExit("completed object left an unsettled capacity reservation")
+PY
+
+    evidence_dir="$VALIDATION_ROOT/deployment-evidence"
+    evidence="$evidence_dir/local-docker-remote-completion-$image_revision.txt"
+    mkdir -p "$evidence_dir"
+    chmod 700 "$evidence_dir"
+    {
+        printf 'source_commit=%s\n' "$image_revision"
+        printf 'profile=%s\nprovider=garage\ngenerated_bytes=4096\n' "$PROFILE"
+        printf 'remote_client_submission=passed\ndaemon_terminal_completion=passed\n'
+        printf 'provider_head_verification=passed\nshared_catalogue_commit=passed\n'
+        printf 'logical_quota_settlement=passed\nreservation_release=passed\n'
+    } > "$evidence"
+    chmod 600 "$evidence"
+    cleanup_completion_smoke
+    trap - EXIT
+    printf 'Local Docker remote-upload completion acceptance passed.\nEvidence: %s\n' "$evidence"
+}
+
 command="${1:-}"
 case "$command" in
     render)
@@ -633,6 +799,9 @@ case "$command" in
         ;;
     smoke)
         smoke
+        ;;
+    completion-smoke)
+        completion_smoke
         ;;
     status)
         status
