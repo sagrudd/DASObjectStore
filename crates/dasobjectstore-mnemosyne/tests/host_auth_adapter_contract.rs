@@ -52,6 +52,7 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     assert_monas_router_accepts(&store, &login.session_token, StatusCode::OK).await;
     assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::OK).await;
     assert_monas_product_api_omits_intrinsic_login(&store, &login.session_token).await;
+    assert_monas_html_navigation_redirects_to_host_login(&store).await;
 
     store
         .logout("operator", &login.session_token)
@@ -196,6 +197,29 @@ async fn assert_monas_product_api_omits_intrinsic_login(
         .await
         .expect("request completes");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+async fn assert_monas_html_navigation_redirects_to_host_login(store: &ProsopikonAuthStore) {
+    let host_routes = Router::new().route("/", get(|| async { "web app" }));
+    let app = dasobjectstore_mnemosyne::monas_dasobjectstore_router(host_routes, store.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header("accept", "text/html,application/xhtml+xml")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok()),
+        Some("/login?return_to=/")
+    );
 }
 
 async fn request(app: Router, cookie: Option<HeaderValue>) -> StatusCode {

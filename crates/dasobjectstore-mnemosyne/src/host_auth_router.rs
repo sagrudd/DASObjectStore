@@ -6,8 +6,11 @@ use crate::{
 };
 use axum::{
     body::Body,
-    extract::{Request, State},
-    http::{header::COOKIE, StatusCode},
+    extract::{OriginalUri, Request, State},
+    http::{
+        header::{ACCEPT, COOKIE},
+        Method, StatusCode,
+    },
     middleware::{self, Next},
     response::{IntoResponse, Response},
     Router,
@@ -76,7 +79,7 @@ async fn authenticate_monas_request(
     next: Next,
 ) -> Response {
     let Some((username, session_token)) = parse_monas_session_cookie(&request) else {
-        return unauthorized();
+        return monas_unauthorized(&request);
     };
     let issue = MonasHostSessionIssue {
         username,
@@ -85,7 +88,7 @@ async fn authenticate_monas_request(
         correlation_id: format!("monas:{}", Uuid::new_v4()),
     };
     let Ok(verified) = accept_monas_host_session(&state.auth_store, &issue, unix_now()) else {
-        return unauthorized();
+        return monas_unauthorized(&request);
     };
     request.extensions_mut().insert(verified);
     next.run(request).await
@@ -148,4 +151,26 @@ fn unix_now() -> i64 {
 
 fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "host_authentication_required").into_response()
+}
+
+fn monas_unauthorized(request: &Request<Body>) -> Response {
+    let accepts_html = request
+        .headers()
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|item| item.trim().starts_with("text/html"))
+        });
+    if request.method() == Method::GET && accepts_html {
+        let return_to = request
+            .extensions()
+            .get::<OriginalUri>()
+            .map(|original| original.0.path())
+            .unwrap_or_else(|| request.uri().path());
+        return axum::response::Redirect::to(&format!("/login?return_to={return_to}"))
+            .into_response();
+    }
+    unauthorized()
 }
