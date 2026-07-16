@@ -16,6 +16,7 @@ Run each harness from the same committed revision:
    deploy/macos/test-user-service.sh
    deploy/lima/package-acceptance.sh all
    deploy/acceptance/product-profile-mvp.sh
+   deploy/acceptance/application-auth-mvp.sh
    DASOBJECTSTORE_LOCAL_ROOT="$HOME/.dasobjectstore-codex-validation" \
      DASOBJECTSTORE_LOCAL_PROFILE=alleleanchor-mvp \
      deploy/local-docker/local.sh up
@@ -32,7 +33,12 @@ workflow provisions and idempotently reprovisions a Synoptikon-owned folder
 profile, writes 64 generated 4 KiB objects, exercises list/get/range/verify/
 delete, rejects an over-quota write, and reopens durable catalogue/accounting
 state. It cleans its fixture and never uses user, customer, or project data.
-It does not imply physical DAS readiness.
+The application-auth workflow uses generated public/private key material only
+in process to prove administrator identity registration, Ed25519 proof
+exchange, overlapping rotation, key and principal revocation, per-request mTLS
+revocation enforcement, and redacted audit persistence. Private keys are never
+written to the evidence or daemon registries. It does not imply production CA
+or physical DAS readiness.
 
 Hardware acceptance after returning home
 ----------------------------------------

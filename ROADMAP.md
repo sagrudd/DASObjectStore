@@ -1662,6 +1662,13 @@ versions, hashes, and provenance; protection policies are explicit; source data
 is retained until confirmed retirement; package, upgrade, quota, S3, recovery,
 security, performance, and real-workload acceptance gates pass.
 
+Delivered locally: same-commit acceptance now covers the complete product
+folder-profile workflow and the daemon-owned application credential lifecycle,
+including cryptographic proof exchange, overlapping rotation, revocation,
+per-request mTLS revalidation, and redacted audit. Production CA, physical
+appliance, x86_64, multi-HDD, and performance/soak evidence remain explicit
+external release gates.
+
 ## Post-Campaign Direction
 
 Post-MVP work may include:

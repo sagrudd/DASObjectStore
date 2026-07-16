@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.88.0 - 2026-07-16
+
+- Add a same-commit application-auth MVP acceptance workflow through the real
+  daemon authority, covering administrator service-principal registration,
+  Ed25519 proof exchange, overlapping rotation, key and identity revocation,
+  and redacted audit persistence.
+- Prove mTLS certificate mappings are revalidated on every request and reject
+  an established client immediately after daemon-owned certificate revocation.
+- Require this secret-free security evidence in local release readiness while
+  keeping production CA and appliance deployment acceptance explicit.
+
 ## 0.87.0 - 2026-07-16
 
 - Add a same-commit product-profile MVP acceptance workflow covering real

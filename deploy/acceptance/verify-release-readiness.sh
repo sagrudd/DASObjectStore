@@ -30,6 +30,7 @@ require_field() {
 MACOS="$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
 DOCKER="$EVIDENCE_DIR/local-docker-s3-$COMMIT.txt"
 PRODUCT="$EVIDENCE_DIR/product-profile-mvp-$COMMIT.txt"
+APPLICATION_AUTH="$EVIDENCE_DIR/application-auth-mvp-$COMMIT.txt"
 UBUNTU="$LIMA_DIR/ubuntu-arm64.txt"
 ALMA="$LIMA_DIR/alma-arm64.txt"
 
@@ -53,6 +54,12 @@ require_field "$PRODUCT" generated_object_count 64
 require_field "$PRODUCT" generated_object_bytes 4096
 require_field "$PRODUCT" customer_or_project_data_used no
 
+for field in administrator_registration ed25519_proof_exchange overlapping_key_rotation key_revocation identity_revocation mtls_request_revalidation redacted_audit application_auth_mvp; do
+    require_field "$APPLICATION_AUTH" "$field" passed
+done
+require_field "$APPLICATION_AUTH" source_commit "$COMMIT"
+require_field "$APPLICATION_AUTH" private_key_persisted no
+
 for evidence in "$UBUNTU" "$ALMA"; do
     for field in install upgrade reboot uninstall; do
         require_field "$evidence" "$field" passed
@@ -74,6 +81,7 @@ REPORT="$EVIDENCE_DIR/local-release-readiness-$COMMIT.txt"
     printf 'almalinux_arm64_package=passed\n'
     printf 'local_docker_garage_s3=passed\n'
     printf 'product_profile_mvp=passed\n'
+    printf 'application_auth_mvp=passed\n'
     printf 'local_deployment_readiness=passed\n'
     printf 'physical_das_acceptance=blocked_unavailable_host\n'
     printf 'x86_64_package_parity=blocked_unavailable_host\n'

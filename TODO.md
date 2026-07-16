@@ -48,9 +48,11 @@ evidence and detailed source tasks.
   dispatch are delivered; provider-native capability verification and appliance
   migration adapters remain.
 - `[~]` Gate 6 — a same-commit generated-data Synoptikon product-profile MVP
-  matrix now covers daemon provisioning, idempotent retry, profile S3, quota,
-  deletion, and restart recovery. Physical DAS, x86_64, multi-HDD, and
-  production security/performance acceptance remain externally blocked.
+  matrix now covers daemon provisioning, profile S3, quota, deletion, and
+  restart recovery. A second same-commit security matrix covers service-
+  principal registration, proof exchange, rotation, revocation, mTLS request
+  revalidation, and redacted audit. Physical DAS, production CA, x86_64,
+  multi-HDD, and performance acceptance remain externally blocked.
 
 ## Current External Blockers (2026-07-13)
 
@@ -1158,6 +1160,11 @@ hardware acceptance.
     daemon-owned listener connection/request authorization and rejection audit
     events are implemented; production CA and appliance deployment acceptance
     remain externally blocked.
+    - [x] Add a same-commit application-auth MVP acceptance workflow through
+      the real daemon handler: administrator registration, two-key Ed25519
+      proof exchange and overlapping rotation, key/principal revocation,
+      per-request mTLS mapping revalidation after certificate revocation, and
+      redacted audit persistence all pass without persisting private material.
   - [~] Add development self-signing only for local workspace/local-Docker
     generated-data tests with bounded rights and expiry. The feature-gated
     workspace helper now enforces loopback, synthetic-prefix, byte-budget, and
