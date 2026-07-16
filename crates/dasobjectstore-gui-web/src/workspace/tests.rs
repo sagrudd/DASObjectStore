@@ -1227,6 +1227,7 @@ fn object_browser_payload_maps_to_dense_view_summaries() {
             checksum: None,
             verified_at_utc: Some("2026-07-09T10:01:00Z".to_string()),
         }],
+        download_source: None,
     }];
 
     let folder_summaries = object_browser_folder_summaries(&folders);
@@ -1253,21 +1254,32 @@ fn object_browser_payload_maps_to_dense_view_summaries() {
         &folder_summaries[0].readiness
     ));
     assert!(!object_browser_file_download_available(
-        &file_summaries[0].readiness,
-        &file_summaries[0].placements,
+        file_summaries[0].download_source.as_deref(),
     ));
     assert!(object_browser_download_disabled_reason(
         &file_summaries[0].readiness,
         &file_summaries[0].placements,
+        file_summaries[0].download_source.as_deref(),
     )
     .contains("verified settled HDD"));
 
     let mut available_file = file_summaries[0].clone();
     available_file.readiness = "Available".to_string();
+    available_file.download_source = Some("hdd_settled".to_string());
     assert!(object_browser_file_download_available(
+        available_file.download_source.as_deref(),
+    ));
+
+    available_file.download_source = Some("provider_stream".to_string());
+    assert!(object_browser_file_download_available(
+        available_file.download_source.as_deref(),
+    ));
+    assert!(object_browser_download_disabled_reason(
         &available_file.readiness,
         &available_file.placements,
-    ));
+        available_file.download_source.as_deref(),
+    )
+    .contains("provider stream"));
 
     let multi_copy = vec![
         ObjectBrowserPlacementResponse {

@@ -77,6 +77,7 @@ use crate::runtime::{
 use dasobjectstore_core::application_auth::{
     UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
 };
+use dasobjectstore_core::backend::ObjectCatalogueAuthority;
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::ExportPolicy;
@@ -824,23 +825,23 @@ mod tests {
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
-        ObjectBrowserDelegatedActor, ObjectBrowserPageRequest, ObjectBrowserPlacementLocation,
-        ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
-        ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
-        ProfileInspectionRequest, ProfileInspectionRootState, ProfileMigrationRequest,
-        ProfileReadinessRequest, ProviderStreamChunkHeader, ProviderStreamOpenRequest,
-        ProviderStreamUploadOpenRequest, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        RemoteEasyconnectUploadBackpressureReason, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource, ObjectBrowserPageRequest,
+        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
+        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
+        ObjectFolderDownloadRequest, ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        PrepareEnclosureResponse, ProfileBindingOperation, ProfileBindingRequest,
+        ProfileBrowserRequest, ProfileInspectionRequest, ProfileInspectionRootState,
+        ProfileMigrationRequest, ProfileReadinessRequest, ProviderStreamChunkHeader,
+        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
+        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
+        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -3021,6 +3022,14 @@ mod tests {
         let root = temp_root("browser-auth-allowed");
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        store_definitions[0].policy.capacity =
+            dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&store_definitions).expect("bounded registry JSON"),
+        )
+        .expect("bounded store registry written");
         let live_sqlite = create_live_sqlite(&root, "ena");
         insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
         insert_browser_object(
@@ -3029,10 +3038,41 @@ mod tests {
             "RedownloadRequired",
             false,
         );
+        let backend_root = root.join("profile-backend");
+        fs::create_dir_all(&backend_root).expect("backend root");
+        let profile_registry = root.join("profile-bindings.json");
         let handler =
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
-                .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_registry_paths(&store_registry, &subobject_registry)
+                .with_live_sqlite_path(live_sqlite)
+                .with_profile_binding_registry_path(&profile_registry);
+        let binding_request = profile_binding_request_for_auth_test("ena", backend_root.clone());
+        handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
+                Some(&DaemonLocalActor::new(0).with_username("root")),
+                |_| Ok(()),
+            )
+            .expect("profile binding");
+        let mut backend = FolderBackend::open(
+            backend_root,
+            binding_request.manifest,
+            binding_request.capacity,
+            0,
+        )
+        .expect("folder backend");
+        let provider_key = BackendObjectKey {
+            object_id: "ena/raw/redownload.fastq.gz".to_string(),
+            version: 1,
+        };
+        backend.reserve("provider-object", 128).expect("reserve");
+        let staged = backend
+            .stage("provider-object", &provider_key, &mut &[7_u8; 128][..])
+            .expect("stage");
+        let finalized = backend.finalize(staged).expect("finalize");
+        backend
+            .commit_batch(std::slice::from_ref(&finalized))
+            .expect("catalogue commit");
         let actor = DaemonLocalActor::new(1000)
             .with_username("stephen")
             .with_groups(["mnemosyne"]);
@@ -3058,12 +3098,20 @@ mod tests {
             response.files[0].readiness,
             ObjectBrowserReadinessState::RedownloadRequired
         );
+        assert_eq!(
+            response.files[0].download_source,
+            Some(ObjectBrowserDownloadSource::ProviderStream)
+        );
         assert_eq!(response.files[1].name, "sample.fastq.gz");
         assert_eq!(
             response.files[1].readiness,
             ObjectBrowserReadinessState::Available
         );
         assert_eq!(response.files[1].copy_count, 1);
+        assert_eq!(
+            response.files[1].download_source,
+            Some(ObjectBrowserDownloadSource::HddSettled)
+        );
         assert_eq!(
             response.files[1].placements[0].location,
             ObjectBrowserPlacementLocation::HddSettled

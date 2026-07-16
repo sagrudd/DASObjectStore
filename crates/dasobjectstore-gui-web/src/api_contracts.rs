@@ -827,6 +827,7 @@ pub struct ObjectBrowserFileNodeResponse {
     pub lifecycle_state: String,
     pub copy_count: u16,
     pub placements: Vec<ObjectBrowserPlacementResponse>,
+    pub download_source: Option<String>,
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

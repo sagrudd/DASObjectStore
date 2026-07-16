@@ -1796,6 +1796,14 @@ delegated OS actor before opening the stream, preserves range and checksum
 conditions, and propagates cancellation through bounded backpressure.
 Provider-native readers and appliance acceptance remain deployment gates.
 
+Delivered provider-backed browser workflow (0.100.0): ObjectBrowser metadata
+now publishes the daemon-authoritative source for each downloadable file as a
+verified settled HDD copy or bounded provider stream. The supported Web console
+uses that explicit capability instead of inferring availability from placement
+badges, so folder-profile objects without an HDD copy are downloadable through
+the same authenticated operator workflow. Unsupported and unavailable profiles
+remain fail-closed.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

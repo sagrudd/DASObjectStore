@@ -151,6 +151,11 @@ credential. Folder ``tar.gz`` downloads still require every archive member to
 have a usable settled copy. Missing objects, unsupported providers, failed
 verification, and permission denials return explicit failures.
 
+The daemon reports the selected file download source in ObjectBrowser metadata.
+The Web console enables its Download action for either a verified settled HDD
+source or a bounded provider stream. If the daemon reports no source, the action
+remains disabled even when a placement label appears healthy.
+
 Very large stores are returned to the browser in bounded pages. Use folder
 navigation or search to narrow large public and reproducible datasets before
 starting downloads or archive requests.

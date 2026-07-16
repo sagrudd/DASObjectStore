@@ -90,6 +90,11 @@ process. Missing objects, unsupported providers, failed verification, and
 permission denials return explicit errors rather than serving an arbitrary
 filesystem path.
 
+ObjectBrowser file metadata includes the daemon-selected ``download_source``:
+``hdd_settled`` for a verified managed placement or ``provider_stream`` for a
+catalogue-backed bounded folder profile. The Web console uses this field to
+enable its Download action; it does not infer download safety from a disk badge.
+
 Inspect Profile Catalogue Diagnostics
 -------------------------------------
 

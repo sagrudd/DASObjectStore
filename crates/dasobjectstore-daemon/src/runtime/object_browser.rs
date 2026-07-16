@@ -2,9 +2,9 @@
 
 use crate::api::{
     DaemonRequestValidationError, ObjectBrowserBreadcrumb, ObjectBrowserChecksum,
-    ObjectBrowserFileNode, ObjectBrowserFolderNode, ObjectBrowserPlacement,
-    ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
-    ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
+    ObjectBrowserDownloadSource, ObjectBrowserFileNode, ObjectBrowserFolderNode,
+    ObjectBrowserPlacement, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
+    ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
 };
 use dasobjectstore_core::ids::{InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::ObjectState;
@@ -346,6 +346,7 @@ fn file_node(
         placements: include_placement
             .then(|| entry.placements.clone())
             .unwrap_or_default(),
+        download_source: (copy_count > 0).then_some(ObjectBrowserDownloadSource::HddSettled),
     }
 }
 

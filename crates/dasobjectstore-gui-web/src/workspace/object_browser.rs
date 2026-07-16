@@ -324,8 +324,8 @@ pub(super) fn render_object_browser_files(
                 </thead>
                 <tbody>
                     { for files.into_iter().map(|file| {
-                        let download_enabled = object_browser_file_download_available(&file.readiness, &file.placements);
-                        let download_title = object_browser_download_disabled_reason(&file.readiness, &file.placements);
+                        let download_enabled = object_browser_file_download_available(file.download_source.as_deref());
+                        let download_title = object_browser_download_disabled_reason(&file.readiness, &file.placements, file.download_source.as_deref());
                         let object_id = file.object_id.clone();
                         let label = file.name.clone();
                         let fallback_filename = file.name.clone();
@@ -442,14 +442,8 @@ pub(super) fn object_browser_placement_summary_state(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(super) fn object_browser_file_download_available(
-    readiness: &str,
-    placements: &[ObjectBrowserPlacementResponse],
-) -> bool {
-    readiness.eq_ignore_ascii_case("Available")
-        && placements
-            .iter()
-            .any(|placement| placement.location == "hdd_settled" && placement.state == "verified")
+pub(super) fn object_browser_file_download_available(download_source: Option<&str>) -> bool {
+    matches!(download_source, Some("hdd_settled" | "provider_stream"))
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -461,7 +455,14 @@ pub(super) fn object_browser_folder_download_available(readiness: &str) -> bool 
 pub(super) fn object_browser_download_disabled_reason(
     readiness: &str,
     placements: &[ObjectBrowserPlacementResponse],
+    download_source: Option<&str>,
 ) -> String {
+    if download_source == Some("provider_stream") {
+        return "Download through the daemon-authorized provider stream.".to_string();
+    }
+    if download_source == Some("hdd_settled") {
+        return "Download through the daemon-authorized verified HDD copy.".to_string();
+    }
     let readiness_key = object_browser_state_key(readiness);
     if readiness_key == "redownload_required" {
         return "Download disabled: daemon metadata marks this object redownload-required."

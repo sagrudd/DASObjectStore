@@ -144,11 +144,12 @@ pub use local_admin::{
 };
 pub use object_browser::{
     ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserDelegatedActor,
-    ObjectBrowserFileNode, ObjectBrowserFolderNode, ObjectBrowserPageRequest,
-    ObjectBrowserPlacement, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
-    ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
-    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+    ObjectBrowserDownloadSource, ObjectBrowserFileNode, ObjectBrowserFolderNode,
+    ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
+    ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
+    ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
+    OBJECT_BROWSER_MAX_PAGE_LIMIT,
 };
 pub use object_mutation::{ObjectPutRequest, ObjectPutResponse, ObjectPutValidationError};
 pub use object_store::{

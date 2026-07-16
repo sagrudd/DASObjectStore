@@ -6,6 +6,14 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.100.0 - 2026-07-16
+
+- Publish daemon-authoritative ObjectBrowser download sources so clients know
+  whether a file can be read from a verified settled HDD copy or the bounded
+  provider stream without inferring capability from placement badges.
+- Enable provider-backed downloads in the supported Web console while keeping
+  unavailable, unregistered, and unsupported profile objects fail-closed.
+
 ## 0.99.0 - 2026-07-16
 
 - Extend authenticated ObjectStore file downloads to fall back to the bounded,

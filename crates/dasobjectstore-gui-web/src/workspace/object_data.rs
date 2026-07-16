@@ -591,6 +591,7 @@ pub fn object_browser_file_summaries(
             copies: format!("{} copy/copies", file.copy_count),
             placement_summary: object_browser_placement_summary(&file.placements),
             placements: file.placements.clone(),
+            download_source: file.download_source.clone(),
         })
         .collect()
 }

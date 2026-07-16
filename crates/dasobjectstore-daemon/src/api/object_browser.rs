@@ -197,6 +197,15 @@ pub struct ObjectBrowserFileNode {
     pub lifecycle_state: ObjectState,
     pub copy_count: u16,
     pub placements: Vec<ObjectBrowserPlacement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_source: Option<ObjectBrowserDownloadSource>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ObjectBrowserDownloadSource {
+    HddSettled,
+    ProviderStream,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -292,12 +301,12 @@ fn validate_delegated_actor(
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserFileNode,
-        ObjectBrowserFolderNode, ObjectBrowserPageRequest, ObjectBrowserPlacement,
-        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
-        ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+        ObjectBrowserBreadcrumb, ObjectBrowserChecksum, ObjectBrowserDownloadSource,
+        ObjectBrowserFileNode, ObjectBrowserFolderNode, ObjectBrowserPageRequest,
+        ObjectBrowserPlacement, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
+        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
+        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
     };
     use crate::api::DaemonRequestValidationError;
     use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -431,6 +440,7 @@ mod tests {
                     checksum: None,
                     verified_at_utc: Some("2026-07-09T09:38:00Z".to_string()),
                 }],
+                download_source: Some(ObjectBrowserDownloadSource::HddSettled),
             }],
             next_cursor: None,
             total_entries: Some(2),
@@ -439,6 +449,7 @@ mod tests {
         let encoded = serde_json::to_value(response).expect("response serializes");
 
         assert_eq!(encoded["files"][0]["readiness"], "available");
+        assert_eq!(encoded["files"][0]["download_source"], "hdd_settled");
         assert_eq!(
             encoded["files"][0]["placements"][0]["location"],
             "hdd_settled"

@@ -524,9 +524,9 @@ and ``unavailable`` readiness states are highlighted so operators can tell
 whether an object is still settling, needs repair/redownload, or has no usable
 local copy.
 
-File download buttons are enabled only when the browser metadata reports an
-available object with a verified settled HDD placement. Folder archive buttons
-are enabled only for available folders. Large folder archives prompt for
+File download buttons are enabled only when daemon browser metadata reports an
+explicit ``hdd_settled`` or ``provider_stream`` download source. Folder archive
+buttons are enabled only for available folders. Large folder archives prompt for
 confirmation using the browser's current object-count and size summary before
 requesting the daemon-backed archive route. Downloads use the authenticated Web
 session headers, so permission failures are shown in the panel rather than
@@ -559,9 +559,10 @@ path-free provider stream for a catalogue-authoritative folder-profile object.
 The daemon reauthorizes the delegated OS actor before opening that stream and
 does not expose a managed path or provider credential. Missing objects,
 unsupported providers, failed verification, permission denials, and objects
-outside the selected store fail explicitly. The current browser button remains
-conservative and is enabled from settled-placement metadata; callers can use
-the same authenticated endpoint for provider-backed fallback.
+outside the selected store fail explicitly. The browser enables the Download
+button only from the daemon's explicit source field, so a provider-backed object
+uses the same authenticated workflow without treating a placement badge as
+authority.
 
 Folder downloads use
 ``/api/v1/object-stores/<endpoint>/folders/download/<folder-prefix>``. Before

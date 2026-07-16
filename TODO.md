@@ -2689,6 +2689,11 @@ list until every temporary size-budget exception has been removed.
     denials never trigger fallback. The verifier exposes a cooperative
     cancellation token that aborts before the next frame. Provider-native
     readers and appliance acceptance remain deployment/provider gated.
+  - [x] Publish a daemon-authoritative per-file download source in ObjectBrowser
+    metadata and consume it in the Web console. Verified HDD placements remain
+    preferred; catalogue-backed folder-profile objects advertise the bounded
+    provider stream, while missing bindings, unsupported profiles, and failed
+    catalogue opens advertise no download capability.
   - [x] Define the bounded client-to-daemon upload half of the provider-stream
     transport: upload envelopes carry an opaque single-use capability identity,
     expected size/checksum, and bounded chunk size; the Unix listener dispatches

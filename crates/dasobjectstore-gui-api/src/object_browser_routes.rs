@@ -1506,6 +1506,9 @@ mod tests {
                     lifecycle_state: ObjectState::Protected,
                     copy_count: 1,
                     placements: Vec::new(),
+                    download_source: Some(
+                        dasobjectstore_daemon::ObjectBrowserDownloadSource::HddSettled,
+                    ),
                 }],
                 next_cursor: None,
                 total_entries: Some(1),

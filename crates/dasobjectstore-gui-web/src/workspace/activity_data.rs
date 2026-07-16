@@ -212,6 +212,7 @@ pub struct ObjectBrowserFileSummary {
     pub copies: String,
     pub placement_summary: String,
     pub placements: Vec<ObjectBrowserPlacementResponse>,
+    pub download_source: Option<String>,
 }
 
 #[cfg(any(target_arch = "wasm32", test))]

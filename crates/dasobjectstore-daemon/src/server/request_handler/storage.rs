@@ -242,18 +242,19 @@ where
                     )));
                 }
             };
-            let entries = match read_object_browser_metadata(&handler.live_sqlite_path, store_id) {
-                Ok(entries) => entries,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "object_browser_metadata_failed",
-                        error.to_string(),
-                    )));
-                }
-            };
-            query_object_browser_metadata(&request, &entries)
-                .map(DaemonApiResponse::ObjectBrowser)
-                .map_err(Into::into)
+            let entries =
+                match read_object_browser_metadata(&handler.live_sqlite_path, store_id.clone()) {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "object_browser_metadata_failed",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let mut response = query_object_browser_metadata(&request, &entries)?;
+            advertise_provider_stream_downloads(handler, &store_id, &mut response);
+            Ok(DaemonApiResponse::ObjectBrowser(response))
         }
         DaemonApiRequest::ProfileBrowser(request) => {
             storage_profiles::profile_browser(handler, request, actor)
@@ -944,5 +945,53 @@ where
             }
         }
         _ => unreachable!("storage dispatcher received an unrelated request"),
+    }
+}
+
+fn advertise_provider_stream_downloads<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    store_id: &StoreId,
+    response: &mut crate::api::ObjectBrowserResponse,
+) where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    let Ok(Some(binding)) =
+        read_profile_binding(&handler.profile_binding_registry_path, store_id.as_str())
+    else {
+        return;
+    };
+    if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+        return;
+    }
+    let Ok(definitions) = read_store_registry(&handler.store_registry_path) else {
+        return;
+    };
+    let Some(capacity) = definitions
+        .into_iter()
+        .find(|definition| definition.store_id == *store_id)
+        .map(|definition| definition.policy.capacity)
+    else {
+        return;
+    };
+    let Ok(backend) = FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0)
+    else {
+        return;
+    };
+    let Ok(records) = backend.records() else {
+        return;
+    };
+
+    for file in &mut response.files {
+        if file.download_source.is_some() {
+            continue;
+        }
+        let key = dasobjectstore_core::backend::BackendObjectKey {
+            object_id: file.object_id.as_str().to_string(),
+            version: 1,
+        };
+        if records.iter().any(|record| record.key == key) {
+            file.download_source = Some(crate::api::ObjectBrowserDownloadSource::ProviderStream);
+        }
     }
 }

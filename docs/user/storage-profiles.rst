@@ -85,12 +85,16 @@ stream as a fallback when daemon location resolution finds no settled HDD copy;
 the delegated OS actor is carried in the open request and reauthorized by the
 daemon before any provider byte is sent. Multipart part streaming remains
 daemon-owned and bounded. The authenticated part POST supplies reservation and
-part identity and
-streams bounded binary frames through the daemon Unix transport; the
+part identity and streams bounded binary frames through the daemon Unix
+transport; the
 completion POST submits only the reservation-bound logical manifest. The
 daemon reopens its private journal, verifies staged parts, and returns typed
 acknowledgements. Backend paths and unbounded base64 JSON responses are not
 acceptable substitutes.
+ObjectBrowser metadata advertises ``provider_stream`` only when the daemon can
+open the registered folder binding and find the versioned key in its
+authoritative catalogue. This lets the supported Web console expose the same
+path-free download without guessing from physical placement metadata.
 Profile-backed PUT uses the matching provider-neutral write adapter: callers
 must provide the S3 content length, which is reserved before streaming and
 checked against the in-flight SHA-256 stage. The backend then performs its
