@@ -113,7 +113,7 @@ the product handler runs.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 
-Monas ``0.4.0`` commit ``219038a168005f304cabf179b35c8e063fdee5ff``
+Monas ``0.5.0`` commit ``8dd7bda1007f74975e9000756ccf85acba72ce4d``
 mounts this router directly at ``/products/dasobjectstore``. Both projects pin
 Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
 store is type- and schema-identical in a clean checkout.
@@ -124,6 +124,11 @@ The Yew client then checks ``/api/v1/host-session`` with the HttpOnly host
 cookie, never creates a DAS token in browser storage, returns an invalid session
 to the host login, and sends logout to the host. Standalone pages without this
 marker retain the compatibility DAS login during migration.
+
+Monas serves the Trunk bundle from ``DASOBJECTSTORE_WEB_ROOT`` and injects the
+marker itself; browsers cannot opt into trusted host mode through a request
+header or query parameter. Its local browser acceptance uses generated data
+only and covers login return, logout/revocation, and the 390 px layout.
 
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.

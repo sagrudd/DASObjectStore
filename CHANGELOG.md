@@ -15,6 +15,9 @@ agreement before landing.
   pages without a host marker.
 - Allow Monas-owned Web routes and the DASObjectStore operational API to share
   one fail-closed in-process Prosopikon middleware boundary.
+- Pin Monas ``0.5.0`` commit ``8dd7bda1007f74975e9000756ccf85acba72ce4d``,
+  which serves the real federated Yew bundle and passes browser deep-link,
+  login-return, logout/revocation, and 390 px no-overflow acceptance.
 
 ## 0.93.0 - 2026-07-16
 

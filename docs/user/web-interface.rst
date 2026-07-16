@@ -1236,8 +1236,14 @@ preferred in-process mount because the verified actor cannot be serialized or
 forged as a forwarding header. The legacy header must remain disabled for a
 DASObjectStore mount.
 
-That mount is implemented by Monas ``0.4.0`` commit
-``219038a168005f304cabf179b35c8e063fdee5ff``. HTTP contract tests cover live
+That mount is implemented by Monas ``0.5.0`` commit
+``8dd7bda1007f74975e9000756ccf85acba72ce4d``. HTTP contract tests cover live
 session access, missing intrinsic DAS login, and immediate logout revocation.
-Real-browser accessibility, deep-link, expiry, and CSRF evidence remains a
-release gate rather than being inferred from these router tests.
+Real-browser expiry and CSRF evidence remains a release gate rather than being
+inferred from these router tests.
+
+The real Trunk bundle has also passed local in-app browser acceptance through
+Monas: unauthenticated deep links return through host login, the authenticated
+Home workspace identifies the Monas user, logout revokes the product session,
+and the 390 px viewport has no horizontal overflow. Actual appliance and
+Synoptikon browser runs remain separate release gates.

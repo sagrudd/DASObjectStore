@@ -1687,7 +1687,7 @@ but retaining it permanently would create a competing Mnemosyne identity and
 session authority. The target uses a host-injected, non-secret actor/session
 context while the DAS daemon continues to own storage authorization, local
 OS/group/admin qualification, object policy, pairing approval, and audit.
-Monas ``0.4.0`` commit ``219038a168005f304cabf179b35c8e063fdee5ff`` and the
+Monas ``0.5.0`` commit ``8dd7bda1007f74975e9000756ccf85acba72ce4d`` and the
 Mnemosyne design language commit
 ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` are the initial compatibility
 pins; Synoptikon must satisfy the same host-neutral contract.
@@ -1749,6 +1749,14 @@ the host. No DAS browser token is created or stored in federated mode. The
 Monas composer can wrap host-owned Web routes and the operational API in one
 session boundary. Pinned Monas asset serving and browser evidence are the next
 local acceptance step.
+
+Delivered Monas browser mount (0.94.0): Monas ``0.5.0`` serves the real Trunk
+bundle from a configured root, injects the authoritative host marker, and
+protects both HTML and traversal-safe assets. In-app browser acceptance proves
+unauthenticated deep-link redirection, login return to the federated Home
+workspace as the Monas user, logout and immediate access revocation, and a
+390-pixel viewport with no horizontal overflow. The page reports host ``monas``
+and never renders the intrinsic DAS login after session validation.
 
 Post-MVP work may include:
 

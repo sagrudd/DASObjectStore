@@ -3363,8 +3363,8 @@ browser and appliance acceptance remain external validation gates.
   DASObjectStore login/session UI and product-owned routes as a compatibility
   implementation, not the target architecture. Add a host-neutral
   authentication adapter that consumes Monas standalone or Synoptikon
-  integrated authenticated context, using Monas ``0.4.0`` commit
-  ``219038a168005f304cabf179b35c8e063fdee5ff`` and the Mnemosyne design
+  integrated authenticated context, using Monas ``0.5.0`` commit
+  ``8dd7bda1007f74975e9000756ccf85acba72ce4d`` and the Mnemosyne design
   language at ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` as current pins.
   Preserve daemon-owned storage authorization, local OS/group/admin policy,
   remote pairing approval, CSRF protection, audit identity, and logout/session
@@ -3402,11 +3402,17 @@ browser and appliance acceptance remain external validation gates.
     DAS token in browser storage, redirects stale sessions to the host login,
     delegates logout to the host, and permits host Web routes to share the same
     fail-closed Monas middleware as the operational API.
+  - [x] Serve the real Trunk/WebAssembly application from Monas ``0.5.0`` commit
+    ``8dd7bda1007f74975e9000756ccf85acba72ce4d`` with a host-injected marker and
+    protected, traversal-safe assets. Real-browser acceptance proves deep-link
+    login return, authenticated Home loading without intrinsic DAS login,
+    logout/revocation, and 390 px layout without horizontal overflow.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
     CSRF, EasyConnect, and administrator/ordinary-user policy equivalence in
-    real browsers for both host modes.
+    a real browser for Synoptikon; retain expiry and policy-role browser checks
+    as final Monas evidence.
   - [ ] Migrate compatible standalone identities/sessions, prove package
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe
