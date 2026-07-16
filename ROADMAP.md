@@ -1788,6 +1788,14 @@ revocation, and confirms the retained intrinsic registry remains a working
 rollback authority. No browser bearer is exported. Package service switching
 and final route removal remain deployment-host gates.
 
+Delivered provider-backed ObjectStore Web download (0.99.0): authenticated
+file downloads still prefer a daemon-selected verified HDD placement, but now
+fall back to the bounded, path-free Unix provider stream when no such placement
+exists. Folder profiles are supported end to end. The daemon reauthorizes the
+delegated OS actor before opening the stream, preserves range and checksum
+conditions, and propagates cancellation through bounded backpressure.
+Provider-native readers and appliance acceptance remain deployment gates.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

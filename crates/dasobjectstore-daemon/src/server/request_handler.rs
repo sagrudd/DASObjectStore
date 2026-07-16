@@ -953,8 +953,13 @@ mod tests {
         cleanup(&root);
         let backend_root = root.join("backend");
         fs::create_dir_all(&backend_root).expect("backend root");
-        let (store_registry, subobject_registry) =
-            write_test_store_registry_with_read_policy(&root, "stream-store", None, None, true);
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "stream-store",
+            Some("readers"),
+            None,
+            false,
+        );
         let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
         store_definitions[0].policy.capacity =
             dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
@@ -1006,6 +1011,12 @@ mod tests {
             request_id: "open-test".to_string(),
             store_id: StoreId::new("stream-store").expect("store id"),
             object: key,
+            delegated_actor: Some(ObjectBrowserDelegatedActor {
+                username: "reader".to_string(),
+                uid: None,
+                primary_gid: None,
+                groups: vec!["readers".to_string()],
+            }),
             range: None,
             condition: Default::default(),
             chunk_size_bytes: 1024,

@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.99.0 - 2026-07-16
+
+- Extend authenticated ObjectStore file downloads to fall back to the bounded,
+  path-free daemon provider stream when an object has no verified settled HDD
+  placement, with folder profiles as the first supported backend.
+- Carry and reauthorize the delegated OS actor at the provider-stream boundary,
+  preserve range and checksum conditions, propagate cancellation through
+  bounded backpressure, and keep permission denials and unsafe paths fail-closed.
+
 ## 0.98.0 - 2026-07-16
 
 - Add same-commit surrogate authority-switch acceptance proving migrated Monas

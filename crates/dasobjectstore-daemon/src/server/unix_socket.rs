@@ -1072,6 +1072,7 @@ mod tests {
                     object_id: "objects/hello.txt".to_string(),
                     version: 1,
                 },
+                delegated_actor: None,
                 range: None,
                 condition: Default::default(),
                 chunk_size_bytes: 1024,

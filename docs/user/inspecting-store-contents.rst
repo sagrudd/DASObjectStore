@@ -81,12 +81,14 @@ same read policy as ObjectBrowser metadata: store administrators, the writer
 group, the optional reader group, or authenticated users of a public store may
 download.
 
-Downloads stream from an existing verified settled HDD copy selected by the
-daemon. The Web API does not accept a disk path from the caller and does not
-read managed HDD roots directly. If the object is missing, redownload-required,
-SSD-only, or otherwise lacks a verified managed HDD placement, the API returns a
-clear unavailable/not-found error instead of serving an arbitrary filesystem
-path.
+Downloads prefer an existing verified settled HDD copy selected by the daemon.
+When no settled HDD payload exists, a bounded folder profile may instead stream
+the catalogue-authoritative object through the path-free daemon provider
+transport. The daemon reauthorizes the browser's delegated OS actor before it
+opens that stream; neither backend paths nor provider credentials reach the Web
+process. Missing objects, unsupported providers, failed verification, and
+permission denials return explicit errors rather than serving an arbitrary
+filesystem path.
 
 Inspect Profile Catalogue Diagnostics
 -------------------------------------

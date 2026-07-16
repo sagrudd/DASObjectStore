@@ -14,12 +14,13 @@ use axum::{
     Json,
 };
 use dasobjectstore_daemon::{
-    DaemonClientError, DaemonRuntimeConfig, ProviderStreamCondition, ProviderStreamOpenRequest,
-    ProviderStreamRange, UnixSocketDaemonTransport, PROVIDER_STREAM_MAX_CHUNK_BYTES,
-    PROVIDER_STREAM_SCHEMA_VERSION,
+    DaemonClientError, DaemonRuntimeConfig, ObjectBrowserDelegatedActor, ProviderStreamCondition,
+    ProviderStreamOpenRequest, ProviderStreamRange, UnixSocketDaemonTransport,
+    PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
 };
 use serde::Deserialize;
 use std::io;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
@@ -55,16 +56,33 @@ pub(super) async fn standalone_profile_s3_get(
                 error.to_string(),
             )
         })?;
+    provider_stream_download(
+        store_id,
+        object_id,
+        query.version.unwrap_or(1),
+        None,
+        headers,
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    )
+    .await
+}
+
+pub(crate) async fn provider_stream_download(
+    store_id: dasobjectstore_core::ids::StoreId,
+    object_id: String,
+    version: u64,
+    delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    headers: HeaderMap,
+    socket_path: PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let range = parse_range(&headers)?;
     let condition = parse_condition(&headers)?;
     let request = ProviderStreamOpenRequest {
         schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
         request_id: uuid::Uuid::new_v4().to_string(),
         store_id,
-        object: dasobjectstore_core::backend::BackendObjectKey {
-            object_id,
-            version: query.version.unwrap_or(1),
-        },
+        object: dasobjectstore_core::backend::BackendObjectKey { object_id, version },
+        delegated_actor,
         range,
         condition,
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
@@ -79,7 +97,12 @@ pub(super) async fn standalone_profile_s3_get(
 
     let (sender, receiver) = mpsc::channel(DOWNLOAD_CHANNEL_CAPACITY);
     let (ready_sender, ready_receiver) = oneshot::channel::<Result<(), DownloadStartError>>();
-    tokio::spawn(stream_from_daemon(request, sender, ready_sender));
+    tokio::spawn(stream_from_daemon(
+        request,
+        sender,
+        ready_sender,
+        socket_path,
+    ));
     match tokio::time::timeout(DOWNLOAD_START_DEADLINE, ready_receiver).await {
         Ok(Ok(Ok(()))) => {}
         Ok(Ok(Err(error))) => {
@@ -126,9 +149,9 @@ async fn stream_from_daemon(
     request: ProviderStreamOpenRequest,
     sender: mpsc::Sender<Result<Bytes, io::Error>>,
     ready_sender: oneshot::Sender<Result<(), DownloadStartError>>,
+    socket_path: PathBuf,
 ) {
     let bridge = crate::daemon_bridge::DaemonBridge::shared_packaged();
-    let socket_path = DaemonRuntimeConfig::default_packaged().socket_path;
     let stream_sender = sender.clone();
     let result = bridge
         .call_message_with_deadline(DOWNLOAD_DAEMON_DEADLINE, move || {

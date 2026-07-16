@@ -223,7 +223,18 @@ where
         request: &ProviderStreamOpenRequest,
         actor: Option<&DaemonLocalActor>,
     ) -> Result<ProviderStreamSource, DaemonApiResponse> {
-        let store_id = match self.authorize_endpoint_read(actor, &request.store_id) {
+        let delegated_actor =
+            match self.delegated_object_browser_actor(actor, request.delegated_actor.as_ref()) {
+                Ok(actor) => actor,
+                Err(error) => {
+                    return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )))
+                }
+            };
+        let effective_actor = delegated_actor.as_ref().or(actor);
+        let store_id = match self.authorize_endpoint_read(effective_actor, &request.store_id) {
             Ok(store_id) => store_id,
             Err(error) => {
                 return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

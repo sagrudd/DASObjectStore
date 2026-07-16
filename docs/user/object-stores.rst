@@ -143,12 +143,13 @@ a member of the optional reader group, or an authenticated user of a public
 store. These permissions do not grant direct filesystem access to the DAS SSD
 or HDD roots.
 
-File downloads are available only for objects with an available readiness state
-and at least one verified settled HDD copy. Folder downloads create a streamed
-``tar.gz`` archive after the daemon verifies that every object under the prefix
-has a usable settled copy. SSD-only, redownload-required, degraded, missing, or
-unsettled objects produce explicit unavailable or not-found failures instead of
-falling back to a disk path.
+File downloads prefer an available object with a verified settled HDD copy. If
+that placement is absent, the authenticated file API can fall back to the
+bounded, catalogue-authoritative stream for a folder-profile object. The daemon
+reauthorizes the delegated OS actor and never returns a managed path or provider
+credential. Folder ``tar.gz`` downloads still require every archive member to
+have a usable settled copy. Missing objects, unsupported providers, failed
+verification, and permission denials return explicit failures.
 
 Very large stores are returned to the browser in bounded pages. Use folder
 navigation or search to narrow large public and reproducible datasets before

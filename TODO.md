@@ -2661,15 +2661,15 @@ list until every temporary size-budget exception has been removed.
   - [x] Extract manifest-plan execution into the same provider-neutral helper;
     per-key checkpointing, partial-range validation, progress, and cancellation
     now run independently of Garage command orchestration.
-- [~] Extend daemon-authorized Web download to stream a verified
+- [x] Extend daemon-authorized Web download to stream a verified
   provider-backed object when no settled managed-HDD payload is available,
   preserving existing public/read/write authorization and safe disposition
   headers.
   - [x] Make the provider-neutral GET reader verify declared size and SHA-256
     while the caller consumes the stream, rejecting payload drift instead of
-    returning an unchecked provider reader; HTTP/provider-backed route wiring
-    remains separate.
-  - [~] **Remaining provider/appliance execution:** the daemon Unix-socket
+    returning an unchecked provider reader; the authenticated HTTP fallback now
+    consumes this verified stream.
+  - [x] The daemon Unix-socket
     protocol now carries bounded provider bytes without returning backend paths
     or base64-embedding an unbounded object in JSON. A versioned, path-free open request,
     range/conditional contract, metadata-only bounded chunk header, and
@@ -2683,9 +2683,12 @@ list until every temporary size-budget exception has been removed.
     frame, and verifies request identity, contiguous offsets, final size, and
     SHA-256 before delivering payloads to callers. The daemon now wires
     catalogue-authoritative bounded folder-profile reads, including range and
-    checksum conditions; appliance/provider-native readers and the HTTP route
-    remain separate. The verifier exposes a cooperative cancellation token
-    that aborts before the next frame.
+    checksum conditions. Authenticated ObjectStore file downloads now fall back
+    to that stream when daemon location resolution reports no settled HDD copy;
+    the delegated OS actor is reauthorized at stream open, and permission
+    denials never trigger fallback. The verifier exposes a cooperative
+    cancellation token that aborts before the next frame. Provider-native
+    readers and appliance acceptance remain deployment/provider gated.
   - [x] Define the bounded client-to-daemon upload half of the provider-stream
     transport: upload envelopes carry an opaque single-use capability identity,
     expected size/checksum, and bounded chunk size; the Unix listener dispatches

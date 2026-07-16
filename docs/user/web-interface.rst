@@ -553,11 +553,15 @@ than expecting the browser to materialize an entire tree at once.
 
 File downloads use
 ``/api/v1/object-stores/<endpoint>/objects/download/<object-id>``. The daemon
-must resolve the object to an existing verified settled copy on a managed HDD
-root before the Web API opens the source file. SSD-only objects, unsettled
-objects, redownload-required cache objects, degraded or missing placements, and
-objects outside the selected store fail with an explicit not-found or
-unavailable message.
+first tries to resolve the object to an existing verified settled copy on a
+managed HDD root. If none exists, the route may fall back to the bounded,
+path-free provider stream for a catalogue-authoritative folder-profile object.
+The daemon reauthorizes the delegated OS actor before opening that stream and
+does not expose a managed path or provider credential. Missing objects,
+unsupported providers, failed verification, permission denials, and objects
+outside the selected store fail explicitly. The current browser button remains
+conservative and is enabled from settled-placement metadata; callers can use
+the same authenticated endpoint for provider-backed fallback.
 
 Folder downloads use
 ``/api/v1/object-stores/<endpoint>/folders/download/<folder-prefix>``. Before

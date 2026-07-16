@@ -5,6 +5,7 @@
 //! payload bytes travel in length-prefixed frames and never as base64 or
 //! backend paths.
 
+use super::ObjectBrowserDelegatedActor;
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,8 @@ pub struct ProviderStreamOpenRequest {
     pub request_id: String,
     pub store_id: StoreId,
     pub object: BackendObjectKey,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
     #[serde(default)]
     pub range: Option<ProviderStreamRange>,
     #[serde(default)]
@@ -197,6 +200,11 @@ impl ProviderStreamOpenRequest {
         }
         validate_non_blank(&self.request_id, "request_id")?;
         validate_object_key(&self.object)?;
+        if let Some(actor) = &self.delegated_actor {
+            actor.validate().map_err(|error| {
+                ProviderStreamValidationError::InvalidDelegatedActor(error.to_string())
+            })?;
+        }
         if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
             return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
                 chunk_size_bytes: self.chunk_size_bytes,
@@ -610,6 +618,7 @@ pub enum ProviderStreamValidationError {
         field: &'static str,
     },
     InvalidObjectKey,
+    InvalidDelegatedActor(String),
     InvalidMultipartPartNumber,
     InvalidMultipartPartSize,
     InvalidRange {
@@ -639,6 +648,12 @@ impl Display for ProviderStreamValidationError {
             }
             Self::InvalidField { field } => write!(formatter, "{field} must not be blank"),
             Self::InvalidObjectKey => formatter.write_str("provider stream object key is invalid"),
+            Self::InvalidDelegatedActor(error) => {
+                write!(
+                    formatter,
+                    "provider stream delegated actor is invalid: {error}"
+                )
+            }
             Self::InvalidMultipartPartNumber => {
                 formatter.write_str("multipart part number must be greater than zero")
             }
@@ -720,6 +735,7 @@ mod tests {
                 object_id: "folder/file.bin".to_string(),
                 version: 1,
             },
+            delegated_actor: None,
             range: Some(ProviderStreamRange {
                 start: 0,
                 end_exclusive: Some(4096),
@@ -757,6 +773,18 @@ mod tests {
         let encoded = serde_json::to_string(&request).expect("encode");
         let decoded: ProviderStreamOpenRequest = serde_json::from_str(&encoded).expect("decode");
         assert_eq!(decoded, request);
+
+        let mut invalid_actor = request.clone();
+        invalid_actor.delegated_actor = Some(ObjectBrowserDelegatedActor {
+            username: "../forged".to_string(),
+            uid: None,
+            primary_gid: None,
+            groups: vec!["readers".to_string()],
+        });
+        assert!(matches!(
+            invalid_actor.validate(),
+            Err(ProviderStreamValidationError::InvalidDelegatedActor(_))
+        ));
     }
 
     #[test]

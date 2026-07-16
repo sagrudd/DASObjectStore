@@ -80,8 +80,12 @@ content length, request/upload identity, and SHA-256 header, and uses bounded
 channel backpressure so cancellation closes the daemon stream. Web GET/range
 now uses the same path-free daemon stream, supports one bounded byte range and
 SHA-256 conditional headers, and waits for daemon stream-open acceptance before
-returning the response. Multipart part streaming remains daemon-owned and
-bounded. The authenticated part POST supplies reservation/part identity and
+returning the response. The authenticated ObjectStore file API also uses this
+stream as a fallback when daemon location resolution finds no settled HDD copy;
+the delegated OS actor is carried in the open request and reauthorized by the
+daemon before any provider byte is sent. Multipart part streaming remains
+daemon-owned and bounded. The authenticated part POST supplies reservation and
+part identity and
 streams bounded binary frames through the daemon Unix transport; the
 completion POST submits only the reservation-bound logical manifest. The
 daemon reopens its private journal, verifies staged parts, and returns typed
