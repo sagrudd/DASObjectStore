@@ -1671,6 +1671,33 @@ external release gates.
 
 ## Post-Campaign Direction
 
+## Milestone 32: Host-Federated Authentication and Intrinsic Login Removal
+
+Goal: move the DASObjectStore Web authentication experience and session
+authority to Monas for standalone products or Synoptikon for integrated
+deployments, then remove the intrinsic authentication Yew implementation once
+equivalence and migration are proven.
+
+The current DASObjectStore login is a useful visual and behavioral reference,
+but retaining it permanently would create a competing Mnemosyne identity and
+session authority. The target uses a host-injected, non-secret actor/session
+context while the DAS daemon continues to own storage authorization, local
+OS/group/admin qualification, object policy, pairing approval, and audit.
+Monas ``0.3.0`` commit ``a0fabe2d250f2d217765ee59a95cc2a04610bedc`` and the
+Mnemosyne design language commit
+``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` are the initial compatibility
+pins; Synoptikon must satisfy the same host-neutral contract.
+
+Exit criteria: Monas and Synoptikon login, safe deep-link return, refresh,
+expiry, logout/revocation, administrator and ordinary-user policy, CSRF,
+EasyConnect/pairing, audit correlation, package upgrade/rollback, unavailable-
+host recovery, responsive WCAG 2.2 AA browser behavior, and secret-redaction
+tests pass; existing standalone identities have a documented migration; no
+host session alone grants storage mutation; and the intrinsic Yew login form,
+password endpoints, session issuer/store, and product-owned login routes are
+removed in one coordinated release without leaving dual authentication
+authorities.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;
