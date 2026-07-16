@@ -3407,12 +3407,18 @@ browser and appliance acceptance remain external validation gates.
     protected, traversal-safe assets. Real-browser acceptance proves deep-link
     login return, authenticated Home loading without intrinsic DAS login,
     logout/revocation, and 390 px layout without horizontal overflow.
+  - [x] Enforce the host-session CSRF binding on every federated mutation for
+    both Monas and Synoptikon composition. The authenticated host-session
+    endpoint returns a non-authorizing same-origin token, Yew retains it only
+    in process memory and attaches it to mutations, and mounted-router tests
+    reject missing or mismatched values before dispatch.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
     CSRF, EasyConnect, and administrator/ordinary-user policy equivalence in
     a real browser for Synoptikon; retain expiry and policy-role browser checks
-    as final Monas evidence.
+    as final Monas evidence. CSRF enforcement is now accepted at the shared
+    router and Yew request boundary; a browser run still proves host wiring.
   - [ ] Migrate compatible standalone identities/sessions, prove package
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe

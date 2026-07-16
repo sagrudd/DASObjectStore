@@ -90,15 +90,18 @@ pub async fn verify_session(
 pub async fn verify_host_session(
     api_base_path: &str,
 ) -> Result<FederatedHostSessionResponse, ApiError> {
-    get_json_without_session(&format!(
+    let response: FederatedHostSessionResponse = get_json_without_session(&format!(
         "{}/host-session",
         api_base_path.trim_end_matches('/')
     ))
-    .await
+    .await?;
+    crate::storage::store_federated_csrf_token(response.csrf_token.clone());
+    Ok(response)
 }
 
 #[cfg(target_arch = "wasm32")]
 pub async fn host_logout() {
+    crate::storage::clear_federated_csrf_token();
     let _ = Request::post("/logout").send().await;
 }
 
@@ -321,6 +324,9 @@ pub async fn upload_performance_report_json(
     let mut request = Request::post(path)
         .header("content-type", "application/json")
         .header("x-dasobjectstore-filename", &file_name);
+    if let Some(csrf_token) = crate::storage::federated_csrf_token() {
+        request = request.header("x-dasobjectstore-csrf", &csrf_token);
+    }
     if let Some((username, session_token)) = crate::storage::stored_session() {
         request = request
             .header("x-dasobjectstore-username", &username)
@@ -587,6 +593,9 @@ where
         status: None,
     })?;
     let mut request = Request::post(path).header("content-type", "application/json");
+    if let Some(csrf_token) = crate::storage::federated_csrf_token() {
+        request = request.header("x-dasobjectstore-csrf", &csrf_token);
+    }
     if let Some((username, session_token)) = crate::storage::stored_session() {
         request = request
             .header("x-dasobjectstore-username", &username)

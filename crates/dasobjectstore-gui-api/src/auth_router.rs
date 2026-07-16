@@ -1,7 +1,7 @@
 //! Router composition for standalone authentication and administration.
 
 use super::*;
-use crate::FederatedHostSessionResponse;
+use crate::{FederatedHostSessionResponse, VerifiedHostAuthenticatedContext};
 use axum::{
     extract::DefaultBodyLimit,
     routing::{get, post},
@@ -53,8 +53,12 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
 
 async fn federated_host_session(
     actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
 ) -> Json<FederatedHostSessionResponse> {
-    Json(actor.into())
+    Json(FederatedHostSessionResponse::from_host_actor(
+        actor,
+        verified.context().csrf_binding_sha256.clone(),
+    ))
 }
 
 fn federated_operational_router(auth_store: LocalAuthStore) -> Router {

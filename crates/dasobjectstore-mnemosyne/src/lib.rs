@@ -52,7 +52,8 @@ pub use host_auth_adapter::{
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
-    synoptikon_federated_router, SynoptikonHostRequestAuthentication, MONAS_SESSION_COOKIE,
+    synoptikon_federated_router, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
+    MONAS_SESSION_COOKIE,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

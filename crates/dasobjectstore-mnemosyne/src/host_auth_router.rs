@@ -9,7 +9,7 @@ use axum::{
     extract::{OriginalUri, Request, State},
     http::{
         header::{ACCEPT, COOKIE},
-        Method, StatusCode,
+        HeaderName, Method, StatusCode,
     },
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -23,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub const MONAS_SESSION_COOKIE: &str = "monas_session";
+pub const FEDERATED_CSRF_HEADER: HeaderName = HeaderName::from_static("x-dasobjectstore-csrf");
 
 #[derive(Clone, Debug)]
 pub struct SynoptikonHostRequestAuthentication {
@@ -90,6 +91,9 @@ async fn authenticate_monas_request(
     let Ok(verified) = accept_monas_host_session(&state.auth_store, &issue, unix_now()) else {
         return monas_unauthorized(&request);
     };
+    if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {
+        return csrf_rejected();
+    }
     request.extensions_mut().insert(verified);
     next.run(request).await
 }
@@ -114,6 +118,9 @@ async fn authenticate_synoptikon_request(
     ) else {
         return unauthorized();
     };
+    if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {
+        return csrf_rejected();
+    }
     request.extensions_mut().insert(verified);
     next.run(request).await
 }
@@ -151,6 +158,24 @@ fn unix_now() -> i64 {
 
 fn unauthorized() -> Response {
     (StatusCode::UNAUTHORIZED, "host_authentication_required").into_response()
+}
+
+fn csrf_is_valid(request: &Request<Body>, expected: &str) -> bool {
+    if matches!(
+        *request.method(),
+        Method::GET | Method::HEAD | Method::OPTIONS
+    ) {
+        return true;
+    }
+    request
+        .headers()
+        .get(&FEDERATED_CSRF_HEADER)
+        .and_then(|value| value.to_str().ok())
+        == Some(expected)
+}
+
+fn csrf_rejected() -> Response {
+    (StatusCode::FORBIDDEN, "host_csrf_validation_failed").into_response()
 }
 
 fn monas_unauthorized(request: &Request<Body>) -> Response {

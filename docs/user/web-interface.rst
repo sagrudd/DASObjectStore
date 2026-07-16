@@ -1247,3 +1247,10 @@ Monas: unauthenticated deep links return through host login, the authenticated
 Home workspace identifies the Monas user, logout revokes the product session,
 and the 390 px viewport has no horizontal overflow. Actual appliance and
 Synoptikon browser runs remain separate release gates.
+
+For host-federated pages, the authenticated host-session response supplies a
+same-origin CSRF token bound to the live host session. The Web application
+keeps it in memory and sends it as ``x-dasobjectstore-csrf`` on mutations.
+Monas and Synoptikon composition reject absent or incorrect tokens with HTTP
+403 before product code runs. The token cannot authorize storage operations by
+itself and is cleared when the session becomes invalid or logs out.

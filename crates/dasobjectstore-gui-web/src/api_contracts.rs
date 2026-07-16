@@ -934,4 +934,5 @@ pub struct FederatedHostSessionResponse {
     pub roles: Vec<String>,
     pub expires_at_unix_seconds: Option<i64>,
     pub correlation_id: Option<String>,
+    pub csrf_token: String,
 }

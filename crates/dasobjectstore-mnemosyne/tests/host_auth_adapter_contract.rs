@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     extract::Extension,
     http::{header::COOKIE, HeaderValue, Request, StatusCode},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
@@ -12,9 +12,10 @@ use dasobjectstore_mnemosyne::{
     MonasHostSessionIssue, StorageAuthority, SynoptikonHostRequestAuthentication,
     SynoptikonIntegratedAcceptedSession, SynoptikonIntegratedHostBoundaryContext,
     SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID,
-    REQUEST_CONTEXT_SCHEMA_VERSION,
+    FEDERATED_CSRF_HEADER, REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -51,6 +52,7 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     assert_gui_accepts(verified).await;
     assert_monas_router_accepts(&store, &login.session_token, StatusCode::OK).await;
     assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::OK).await;
+    assert_monas_mutation_requires_session_bound_csrf(&store, &login.session_token).await;
     assert_monas_product_api_omits_intrinsic_login(&store, &login.session_token).await;
     assert_monas_html_navigation_redirects_to_host_login(&store).await;
 
@@ -89,10 +91,11 @@ async fn live_synoptikon_session_drives_gui_actor_without_storage_grant() {
     let router_issue = synoptikon_issue_at(now - 1, now + 300);
     let app = synoptikon_federated_router(protected_router(), Arc::new(LiveSynoptikon(true)))
         .layer(Extension(SynoptikonHostRequestAuthentication {
-            issue: router_issue,
+            issue: router_issue.clone(),
             csrf_binding_sha256: csrf_binding(),
         }));
     assert_eq!(request(app, None).await, StatusCode::OK);
+    assert_synoptikon_mutation_requires_bound_csrf(router_issue).await;
     let missing_context =
         synoptikon_federated_router(protected_router(), Arc::new(LiveSynoptikon(true)));
     assert_eq!(
@@ -104,6 +107,41 @@ async fn live_synoptikon_session_drives_gui_actor_without_storage_grant() {
         accept_synoptikon_host_session(&issue, csrf_binding(), 1_500, &LiveSynoptikon(false)),
         Err(HostSessionAdapterError::HostContext(_))
     ));
+}
+
+async fn assert_synoptikon_mutation_requires_bound_csrf(
+    issue: SynoptikonIntegratedSessionIssue,
+) {
+    async fn mutate(_actor: AuthenticatedGuiActor) -> StatusCode {
+        StatusCode::NO_CONTENT
+    }
+    async fn status(issue: SynoptikonIntegratedSessionIssue, csrf: Option<String>) -> StatusCode {
+        let app = synoptikon_federated_router(
+            Router::new().route("/mutate", post(mutate)),
+            Arc::new(LiveSynoptikon(true)),
+        )
+        .layer(Extension(SynoptikonHostRequestAuthentication {
+            issue,
+            csrf_binding_sha256: csrf_binding(),
+        }));
+        let mut request = Request::builder().method("POST").uri("/mutate");
+        if let Some(csrf) = csrf {
+            request = request.header(FEDERATED_CSRF_HEADER, csrf);
+        }
+        app.oneshot(request.body(Body::empty()).expect("request builds"))
+            .await
+            .expect("request completes")
+            .status()
+    }
+    assert_eq!(status(issue.clone(), None).await, StatusCode::FORBIDDEN);
+    assert_eq!(
+        status(issue.clone(), Some("sha256:wrong".to_string())).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(issue, Some(csrf_binding())).await,
+        StatusCode::NO_CONTENT
+    );
 }
 
 #[test]
@@ -176,6 +214,7 @@ async fn assert_monas_product_api_accepts(
         let session: serde_json::Value = serde_json::from_slice(&body).expect("session JSON");
         assert_eq!(session["subject_id"], "operator");
         assert_eq!(session["authority"], "monas_standalone");
+        assert_eq!(session["csrf_token"], monas_csrf_binding(session_token));
         assert!(session.get("session_token").is_none());
     }
 }
@@ -191,12 +230,63 @@ async fn assert_monas_product_api_omits_intrinsic_login(
                 .method("POST")
                 .uri("/api/login")
                 .header(COOKIE, format!("monas_session=operator:{session_token}"))
+                .header(FEDERATED_CSRF_HEADER, monas_csrf_binding(session_token))
                 .body(Body::empty())
                 .expect("request builds"),
         )
         .await
         .expect("request completes");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+async fn assert_monas_mutation_requires_session_bound_csrf(
+    store: &ProsopikonAuthStore,
+    session_token: &str,
+) {
+    async fn mutate(_actor: AuthenticatedGuiActor) -> StatusCode {
+        StatusCode::NO_CONTENT
+    }
+    let cookie = format!("monas_session=operator:{session_token}");
+    async fn status(
+        store: ProsopikonAuthStore,
+        cookie: String,
+        csrf: Option<String>,
+    ) -> StatusCode {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/mutate")
+            .header(COOKIE, cookie);
+        if let Some(csrf) = csrf {
+            request = request.header(FEDERATED_CSRF_HEADER, csrf);
+        }
+        monas_federated_router(Router::new().route("/mutate", post(mutate)), store)
+            .oneshot(request.body(Body::empty()).expect("request builds"))
+            .await
+            .expect("request completes")
+            .status()
+    }
+    assert_eq!(
+        status(store.clone(), cookie.clone(), None).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(
+            store.clone(),
+            cookie.clone(),
+            Some("sha256:wrong".to_string())
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        status(
+            store.clone(),
+            cookie,
+            Some(monas_csrf_binding(session_token))
+        )
+        .await,
+        StatusCode::NO_CONTENT
+    );
 }
 
 async fn assert_monas_html_navigation_redirects_to_host_login(store: &ProsopikonAuthStore) {
@@ -295,6 +385,13 @@ fn registered_store(root: &Path) -> ProsopikonAuthStore {
 
 fn csrf_binding() -> String {
     format!("sha256:{}", "a".repeat(64))
+}
+
+fn monas_csrf_binding(session_token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dasobjectstore:monas:csrf-binding:v1\0");
+    hasher.update(session_token.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 fn temp_root(label: &str) -> PathBuf {

@@ -6,6 +6,19 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.95.0 - 2026-07-16
+
+- Enforce a synchronizer-token CSRF boundary on every federated host mutation
+  for both Monas and Synoptikon composition. The token is bound to the live
+  host session, never grants storage authority, and missing or mismatched
+  values fail with HTTP 403.
+- Return the same-origin CSRF token from the authenticated host-session
+  endpoint and keep it only in Yew process memory; federated JSON and report
+  mutation requests attach it automatically and clear it on invalidation or
+  logout.
+- Add mounted-router regression coverage for missing, incorrect, and valid
+  Monas and Synoptikon CSRF tokens while preserving live-session verification.
+
 ## 0.94.0 - 2026-07-16
 
 - Add a typed federated host-session endpoint and Yew host mode selected by a

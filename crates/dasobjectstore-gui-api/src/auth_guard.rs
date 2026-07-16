@@ -34,16 +34,20 @@ pub struct FederatedHostSessionResponse {
     pub roles: Vec<String>,
     pub expires_at_unix_seconds: Option<i64>,
     pub correlation_id: Option<String>,
+    /// Same-origin mutation token bound to the live host session. This is not
+    /// a bearer credential and grants no storage authority on its own.
+    pub csrf_token: String,
 }
 
-impl From<AuthenticatedGuiActor> for FederatedHostSessionResponse {
-    fn from(actor: AuthenticatedGuiActor) -> Self {
+impl FederatedHostSessionResponse {
+    pub fn from_host_actor(actor: AuthenticatedGuiActor, csrf_token: String) -> Self {
         Self {
             subject_id: actor.subject_id,
             authority: actor.authority,
             roles: actor.roles,
             expires_at_unix_seconds: actor.expires_at_unix_seconds,
             correlation_id: actor.correlation_id,
+            csrf_token,
         }
     }
 }

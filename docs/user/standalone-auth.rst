@@ -130,6 +130,13 @@ marker itself; browsers cannot opt into trusted host mode through a request
 header or query parameter. Its local browser acceptance uses generated data
 only and covers login return, logout/revocation, and the 390 px layout.
 
+Federated mutation requests also require ``x-dasobjectstore-csrf``. The value
+is derived from and checked against the live host session, returned only by the
+authenticated host-session endpoint, and retained by the Web application only
+in process memory. It is not a storage credential. Missing or mismatched
+values fail before a mutation handler runs; session invalidation and logout
+clear the browser copy.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication

@@ -1758,6 +1758,13 @@ workspace as the Monas user, logout and immediate access revocation, and a
 390-pixel viewport with no horizontal overflow. The page reports host ``monas``
 and never renders the intrinsic DAS login after session validation.
 
+Delivered federated mutation protection (0.95.0): every non-safe request
+through either host composer must present the same-origin CSRF token bound to
+the live host session. The host-session response exposes that non-authorizing
+digest only after authentication; Yew keeps it in process memory, attaches it
+to mutations, and clears it on invalidation or logout. Missing and mismatched
+tokens fail before product dispatch for both Monas and Synoptikon.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;
