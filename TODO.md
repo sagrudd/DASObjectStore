@@ -442,9 +442,10 @@ completion.
     daemon-owned follow-up.
   - [x] Carry the universal ``CapacityPolicy`` through profile binding and
     initialize its daemon ledger before atomic binding persistence; folder and
-    drive registrations now reject unbounded capacity, while cross-file rollback
-    between binding, ledger, and store-definition persistence remains a separate
-    ordered orchestration step.
+    drive registrations now reject unbounded capacity. A late store-definition
+    publication failure now restores the exact prior binding (or removes the
+    exact inserted binding) and removes only the pristine ledger created by the
+    same request; concurrent binding changes and non-empty ledgers fail closed.
   - [x] Allow an explicit daemon-local store definition in the profile
     binding request; after binding and ledger preparation succeed, the daemon
     publishes that definition atomically to its store registry. Omitted
@@ -453,8 +454,9 @@ completion.
     closed when no daemon capacity provider is configured.
   - [x] Preflight profile-binding claims before capacity-ledger initialization;
     root/identity collisions now fail without leaving an orphaned ledger. The
-    binding and optional store-definition registries are still separate durable
-    files, so cross-file rollback remains an explicit follow-up.
+    binding and optional store-definition registries remain separate durable
+    files, but the daemon now compensates a late publication failure across the
+    binding and newly created capacity authority with compare-and-match rollback.
   - [x] Require an authenticated local administrator for non-dry-run profile
     create/adopt requests, derive audit identity from the authenticated actor,
     and redact daemon-owned backend paths from profile-binding responses and

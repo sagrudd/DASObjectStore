@@ -19,10 +19,17 @@ pub trait DaemonServiceOrchestrator {
         &self,
         _store_id: &StoreId,
         _policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<(), DaemonServiceRuntimeError> {
+    ) -> Result<bool, DaemonServiceRuntimeError> {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation: "profile capacity provider is not configured".to_string(),
         })
+    }
+
+    fn rollback_initialized_profile_capacity(
+        &self,
+        _store_id: &StoreId,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Ok(())
     }
 
     fn reconcile_profile_capacity(

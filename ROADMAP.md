@@ -1804,6 +1804,14 @@ badges, so folder-profile objects without an HDD copy are downloadable through
 the same authenticated operator workflow. Unsupported and unavailable profiles
 remain fail-closed.
 
+Delivered rollback-safe profile provisioning (0.101.0): daemon provisioning now
+compensates a late ObjectStore-definition publication failure across its
+profile-binding and capacity authorities. It restores only the exact prior
+binding, removes only a pristine ledger created by the same request, refuses to
+overwrite concurrent binding changes, and rejects policy drift on idempotent
+ledger initialization. Partial authoritative registration is no longer left by
+this failure seam.
+
 Post-MVP work may include:
 
 - long-duration soak testing for production claims;

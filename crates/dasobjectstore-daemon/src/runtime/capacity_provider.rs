@@ -20,6 +20,7 @@ use dasobjectstore_core::store::CapacityReservationLedger;
 use dasobjectstore_object_service::{default_store_registry_path, read_store_registry};
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
+use std::fs;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -63,6 +64,15 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         &self,
         _store_id: &StoreId,
         _policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<bool, DaemonServiceRuntimeError> {
+        Ok(false)
+    }
+
+    /// Remove a ledger created by a failed multi-authority provisioning
+    /// transaction. Implementations must reject non-empty ledgers.
+    fn rollback_initialized_store(
+        &self,
+        _store_id: &StoreId,
     ) -> Result<(), DaemonServiceRuntimeError> {
         Ok(())
     }
@@ -235,19 +245,25 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         &self,
         store_id: &StoreId,
         policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<(), DaemonServiceRuntimeError> {
+    ) -> Result<bool, DaemonServiceRuntimeError> {
         let path = self.ledger_path(store_id.as_str());
         if path.exists() {
-            let _existing = load_capacity_ledger(&path)
+            let existing = load_capacity_ledger(&path)
                 .map_err(|error| unavailable(format!("capacity ledger load failed: {error}")))?;
-            return Ok(());
+            if existing.policy() != &policy {
+                return Err(unavailable(format!(
+                    "capacity ledger policy conflicts with requested policy for {store_id}"
+                )));
+            }
+            return Ok(false);
         }
 
         let ledger = CapacityReservationLedger::new(policy, 0).map_err(|error| {
             unavailable(format!("capacity ledger initialization failed: {error:?}"))
         })?;
         save_capacity_ledger(path, &ledger)
-            .map_err(|error| unavailable(format!("capacity ledger persistence failed: {error}")))
+            .map_err(|error| unavailable(format!("capacity ledger persistence failed: {error}")))?;
+        Ok(true)
     }
 
     fn policy_for_store(
@@ -507,8 +523,44 @@ where
         &self,
         store_id: &StoreId,
         policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<(), DaemonServiceRuntimeError> {
+    ) -> Result<bool, DaemonServiceRuntimeError> {
         self.initialize_ledger(store_id, policy)
+    }
+
+    fn rollback_initialized_store(
+        &self,
+        store_id: &StoreId,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let path = self.ledger_path(store_id.as_str());
+        let ledger = load_capacity_ledger(&path).map_err(|error| {
+            unavailable(format!("capacity ledger rollback load failed: {error}"))
+        })?;
+        if ledger.used_bytes() != 0 || ledger.reserved_bytes() != 0 {
+            return Err(unavailable(format!(
+                "refusing to roll back non-empty capacity ledger for {store_id}"
+            )));
+        }
+        if state
+            .active_reservations
+            .get(store_id.as_str())
+            .is_some_and(|reservations| !reservations.is_empty())
+        {
+            return Err(unavailable(format!(
+                "refusing to roll back active capacity ledger for {store_id}"
+            )));
+        }
+        fs::remove_file(&path).map_err(|error| {
+            unavailable(format!(
+                "capacity ledger rollback failed for {store_id}: {error}"
+            ))
+        })?;
+        state.ledgers.remove(store_id.as_str());
+        state.active_reservations.remove(store_id.as_str());
+        Ok(())
     }
 
     fn status(
@@ -968,12 +1020,15 @@ mod tests {
         let store_id = StoreId::new("codex").expect("store id");
         let policy = CapacityPolicy::bounded(1_000, 100);
 
-        provider
+        assert!(provider
             .initialize_store(&store_id, policy.clone())
-            .expect("ledger initializes");
-        provider
+            .expect("ledger initializes"));
+        assert!(!provider
             .initialize_store(&store_id, policy)
-            .expect("second initialization is idempotent");
+            .expect("second initialization is idempotent"));
+        assert!(provider
+            .initialize_store(&store_id, CapacityPolicy::bounded(2_000, 200))
+            .is_err());
         assert_eq!(
             load_capacity_ledger(ledger_dir.join("codex.json"))
                 .expect("ledger reload")
@@ -993,6 +1048,41 @@ mod tests {
                 .reserved_bytes(),
             100
         );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rollback_removes_only_a_pristine_initialized_ledger() {
+        let root = root("initialize-rollback");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir.clone(),
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        );
+        let store_id = StoreId::new("codex").expect("store id");
+        assert!(provider
+            .initialize_store(&store_id, CapacityPolicy::bounded(1_000, 100))
+            .expect("ledger initializes"));
+        provider
+            .rollback_initialized_store(&store_id)
+            .expect("pristine ledger rolls back");
+        assert!(!ledger_dir.join("codex.json").exists());
+
+        assert!(provider
+            .initialize_store(&store_id, CapacityPolicy::bounded(1_000, 100))
+            .expect("ledger reinitializes"));
+        provider
+            .admit(request(DaemonIngressOrigin::RemoteS3, "active"))
+            .expect("reservation admits");
+        assert!(provider.rollback_initialized_store(&store_id).is_err());
+        assert!(ledger_dir.join("codex.json").exists());
         let _ = std::fs::remove_dir_all(root);
     }
 

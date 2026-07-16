@@ -6,6 +6,15 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.101.0 - 2026-07-16
+
+- Make daemon profile provisioning rollback-safe across the profile-binding
+  registry, newly initialized quota ledger, and optional ObjectStore definition
+  when late publication fails.
+- Refuse rollback of non-empty ledgers or bindings changed by another request,
+  and reject idempotent capacity initialization when the persisted policy does
+  not match the requested policy.
+
 ## 0.100.0 - 2026-07-16
 
 - Publish daemon-authoritative ObjectBrowser download sources so clients know

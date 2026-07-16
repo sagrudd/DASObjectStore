@@ -58,6 +58,14 @@ reported without recreating ``.dasobjectstore`` or its catalogue. Mutating
 profile operations remain administrator-authorized and require their separate
 confirmation contract.
 
+Profile provisioning is compensating-transaction safe across the daemon's
+binding registry, quota ledger, and optional ObjectStore definition. If final
+definition publication fails, the daemon restores the exact previous binding
+or removes the exact new binding and deletes only a pristine ledger created by
+that request. It refuses to roll back a binding changed concurrently or a
+ledger containing usage or reservations; those states fail closed for operator
+inspection instead of discarding authority.
+
 Profile-backed S3 reads and deletion use a provider-neutral daemon adapter.
 List, HEAD, and GET derive from the authoritative profile catalogue and backend
 read contract; list pages are stably ordered and capped at 1,000 keys; DELETE

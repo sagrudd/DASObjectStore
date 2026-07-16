@@ -459,6 +459,8 @@ where
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
             let mut reused = false;
+            let mut previous_binding = None;
+            let mut capacity_initialized = false;
             let inspection = if !request.dry_run {
                 request.validate().map_err(|error| {
                     DaemonRequestHandlerError::ServiceRuntime(
@@ -469,6 +471,11 @@ where
                 })?;
                 let provision_root_created = prepare_profile_provision_root(&request)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                previous_binding = read_profile_binding_record(
+                    &handler.profile_binding_registry_path,
+                    request.manifest.store_id.as_str(),
+                )
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 if let Err(error) = validate_profile_binding_claim(
                     &handler.profile_binding_registry_path,
                     BackendProfileBinding {
@@ -496,7 +503,7 @@ where
                 let inspection =
                     ensure_profile_backend(&request, &handler.profile_binding_registry_path)
                         .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
-                handler
+                capacity_initialized = handler
                     .service_orchestrator
                     .initialize_profile_capacity(
                         &request.manifest.store_id,
@@ -507,9 +514,25 @@ where
             } else {
                 None
             };
-            let mut response =
-                register_profile_binding(request, &handler.profile_binding_registry_path, &now)
-                    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            let rollback_request = request.clone();
+            let mut response = match register_profile_binding(
+                request,
+                &handler.profile_binding_registry_path,
+                &now,
+            ) {
+                Ok(response) => response,
+                Err(error) => {
+                    if capacity_initialized {
+                        handler
+                            .service_orchestrator
+                            .rollback_initialized_profile_capacity(
+                                &rollback_request.manifest.store_id,
+                            )
+                            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+                    }
+                    return Err(DaemonRequestHandlerError::ServiceRuntime(error));
+                }
+            };
             if let Some(inspection) = inspection {
                 response.unmanaged_path_count = inspection.inspection.unmanaged_paths.len();
                 response.unsafe_path_count = inspection.inspection.unsafe_paths.len();
@@ -519,13 +542,19 @@ where
             response.reused = reused;
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {
-                    upsert_store_definition(&handler.store_registry_path, definition).map_err(
-                        |error| {
-                            DaemonRequestHandlerError::ServiceRuntime(
-                                DaemonServiceRuntimeError::ObjectService(error),
-                            )
-                        },
-                    )?;
+                    if let Err(error) =
+                        upsert_store_definition(&handler.store_registry_path, definition)
+                    {
+                        rollback_profile_registration(
+                            handler,
+                            &rollback_request,
+                            previous_binding,
+                            capacity_initialized,
+                        )?;
+                        return Err(DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::ObjectService(error),
+                        ));
+                    }
                 }
                 response.store_definition_published = !response.accepted.dry_run;
             }
@@ -846,4 +875,40 @@ where
             .map_err(DaemonRequestHandlerError::ServiceRuntime),
         _ => unreachable!("service dispatcher received a non-service request"),
     }
+}
+
+fn rollback_profile_registration<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    request: &ProfileBindingRequest,
+    previous_binding: Option<BackendProfileBinding>,
+    capacity_initialized: bool,
+) -> Result<(), DaemonRequestHandlerError>
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    let inserted = BackendProfileBinding {
+        manifest: request.manifest.clone(),
+        backend_root: request.backend_root.clone(),
+        ssd_staging_root: request.ssd_staging_root.clone(),
+    };
+    if let Some(previous) = previous_binding {
+        restore_profile_binding_if_matches(
+            &handler.profile_binding_registry_path,
+            &inserted,
+            previous,
+        )
+        .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    } else {
+        remove_profile_binding_if_matches(&handler.profile_binding_registry_path, &inserted)
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    }
+    if capacity_initialized {
+        handler
+            .service_orchestrator
+            .rollback_initialized_profile_capacity(&request.manifest.store_id)
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    }
+    rollback_empty_profile_provision_root(request);
+    Ok(())
 }

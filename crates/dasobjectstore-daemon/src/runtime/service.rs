@@ -165,9 +165,19 @@ where
         &self,
         store_id: &StoreId,
         policy: dasobjectstore_core::store::CapacityPolicy,
+    ) -> Result<bool, DaemonServiceRuntimeError> {
+        if let Some(provider) = &self.capacity_admission_provider {
+            return provider.initialize_store(store_id, policy);
+        }
+        Ok(false)
+    }
+
+    pub fn rollback_initialized_store_capacity(
+        &self,
+        store_id: &StoreId,
     ) -> Result<(), DaemonServiceRuntimeError> {
         if let Some(provider) = &self.capacity_admission_provider {
-            provider.initialize_store(store_id, policy)?;
+            provider.rollback_initialized_store(store_id)?;
         }
         Ok(())
     }
@@ -182,6 +192,7 @@ where
             ))
         })?;
         self.initialize_store_capacity(&definition.store_id, definition.policy.capacity)
+            .map(|_| ())
     }
 
     pub fn submit_ingest_files_with_capacity_provider(

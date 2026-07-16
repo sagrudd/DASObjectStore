@@ -226,8 +226,8 @@ impl DaemonServiceOrchestrator for AcceptanceOrchestrator {
         &self,
         _store_id: &StoreId,
         _policy: CapacityPolicy,
-    ) -> Result<(), DaemonServiceRuntimeError> {
-        Ok(())
+    ) -> Result<bool, DaemonServiceRuntimeError> {
+        Ok(true)
     }
 
     fn status(

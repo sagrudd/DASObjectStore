@@ -137,6 +137,79 @@ pub fn upsert_profile_binding(
     write_registry(path, &registry)
 }
 
+/// Roll back only the exact binding inserted by a failed provisioning
+/// transaction. A changed binding is never removed by stale rollback work.
+pub fn remove_profile_binding_if_matches(
+    path: impl AsRef<Path>,
+    expected: &BackendProfileBinding,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = PROFILE_BINDING_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile binding registry write lock poisoned".to_string(),
+        })?;
+    let path = path.as_ref();
+    let expected = expected.clone().validate_and_canonicalize()?;
+    let mut registry = read_registry(path)?;
+    let Some(index) = registry
+        .bindings
+        .iter()
+        .position(|binding| binding.manifest.store_id == expected.manifest.store_id)
+    else {
+        return Ok(());
+    };
+    let existing = registry.bindings[index]
+        .clone()
+        .validate_and_canonicalize()?;
+    if existing != expected {
+        return Err(invalid_binding(format!(
+            "refusing to roll back changed binding for ObjectStore {}",
+            expected.manifest.store_id
+        )));
+    }
+    registry.bindings.remove(index);
+    write_registry(path, &registry)
+}
+
+/// Restore a prior binding only while the transaction's exact replacement is
+/// still current. This prevents rollback from overwriting a concurrent update.
+pub fn restore_profile_binding_if_matches(
+    path: impl AsRef<Path>,
+    expected_current: &BackendProfileBinding,
+    previous: BackendProfileBinding,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = PROFILE_BINDING_WRITE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "profile binding registry write lock poisoned".to_string(),
+        })?;
+    let path = path.as_ref();
+    let expected_current = expected_current.clone().validate_and_canonicalize()?;
+    let previous = previous.validate_and_canonicalize()?;
+    let mut registry = read_registry(path)?;
+    let Some(existing) = registry
+        .bindings
+        .iter_mut()
+        .find(|binding| binding.manifest.store_id == expected_current.manifest.store_id)
+    else {
+        return Err(invalid_binding(format!(
+            "cannot restore missing binding for ObjectStore {}",
+            expected_current.manifest.store_id
+        )));
+    };
+    if existing.clone().validate_and_canonicalize()? != expected_current {
+        return Err(invalid_binding(format!(
+            "refusing to overwrite changed binding for ObjectStore {}",
+            expected_current.manifest.store_id
+        )));
+    }
+    *existing = previous;
+    validate_binding_claims(&registry.bindings)?;
+    write_registry(path, &registry)
+}
+
 /// Validate a binding against the current registry without mutating it.
 ///
 /// Profile registration uses this preflight before initializing a capacity
@@ -451,6 +524,7 @@ fn registry_io(path: &Path, error: io::Error) -> DaemonServiceRuntimeError {
 mod tests {
     use super::{
         default_profile_binding_registry_path, read_profile_binding, read_registry,
+        remove_profile_binding_if_matches, restore_profile_binding_if_matches,
         upsert_profile_binding, BackendProfileBinding,
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
@@ -670,6 +744,44 @@ mod tests {
                 .expect("binding")
                 .backend_root,
             fs::canonicalize(second).expect("canonical")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rollback_requires_exact_current_binding_and_restores_previous() {
+        let root = root("rollback-exact");
+        let path = root.join("bindings.json");
+        let first = root.join("first");
+        let second = root.join("second");
+        let third = root.join("third");
+        fs::create_dir_all(&first).expect("first");
+        fs::create_dir_all(&second).expect("second");
+        fs::create_dir_all(&third).expect("third");
+        let previous = folder_binding("store", &first);
+        let inserted = folder_binding("store", &second);
+        upsert_profile_binding(&path, previous.clone()).expect("previous binding");
+        upsert_profile_binding(&path, inserted.clone()).expect("transaction binding");
+        restore_profile_binding_if_matches(&path, &inserted, previous.clone())
+            .expect("exact rollback restores previous");
+        assert_eq!(
+            read_profile_binding(&path, "store")
+                .expect("read")
+                .expect("binding")
+                .backend_root,
+            fs::canonicalize(&first).expect("canonical first")
+        );
+
+        let changed = folder_binding("store", &third);
+        upsert_profile_binding(&path, changed).expect("concurrent change");
+        assert!(restore_profile_binding_if_matches(&path, &inserted, previous).is_err());
+        assert!(remove_profile_binding_if_matches(&path, &inserted).is_err());
+        assert_eq!(
+            read_profile_binding(&path, "store")
+                .expect("read")
+                .expect("binding")
+                .backend_root,
+            fs::canonicalize(third).expect("canonical third")
         );
         let _ = fs::remove_dir_all(root);
     }

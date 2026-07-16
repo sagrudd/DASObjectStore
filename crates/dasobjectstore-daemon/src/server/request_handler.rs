@@ -54,25 +54,25 @@ use crate::runtime::{
     read_application_key, read_application_upload_capability, read_object_browser_metadata,
     read_profile_binding, read_profile_binding_record, record_application_audit_event,
     remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
-    resolve_mtls_application_identity_by_fingerprint, resolve_object_download_with_hdd_root,
-    resolve_object_folder_download_with_hdd_root, upsert_application_identity,
-    upsert_application_key, upsert_endpoint_inventory_record, upsert_profile_binding,
-    validate_profile_binding_claim, verify_profile_object, AdminJobRegistry,
-    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
-    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
-    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
-    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
-    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
-    LocalGroupAdministrationRequest, ObjectBrowserQueryError, PendingApplicationUploadCapability,
-    ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
-    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
-    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
-    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
-    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadCompletionMetadata,
-    RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry, RemoteUploadProviderCompletion,
-    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
-    DEFAULT_DAEMON_STATE_DIR,
+    remove_profile_binding_if_matches, resolve_mtls_application_identity_by_fingerprint,
+    resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+    restore_profile_binding_if_matches, upsert_application_identity, upsert_application_key,
+    upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
+    verify_profile_object, AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
+    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
+    FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
+    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
+    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
+    PendingApplicationUploadCapability, ReconciliationManifest,
+    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
+    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
+    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
+    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry,
+    RemoteUploadProviderCompletion, ServiceCommandRunner, SystemLocalAdminCommandRunner,
+    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::application_auth::{
     UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
@@ -422,8 +422,15 @@ where
         &self,
         store_id: &StoreId,
         policy: dasobjectstore_core::store::CapacityPolicy,
-    ) -> Result<(), DaemonServiceRuntimeError> {
+    ) -> Result<bool, DaemonServiceRuntimeError> {
         GarageServiceController::initialize_store_capacity(self, store_id, policy)
+    }
+
+    fn rollback_initialized_profile_capacity(
+        &self,
+        store_id: &StoreId,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        GarageServiceController::rollback_initialized_store_capacity(self, store_id)
     }
 
     fn status(
@@ -851,14 +858,14 @@ mod tests {
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
         admin_job_registry_path, deactivate_application_key, read_application_audit_events,
-        read_application_identity, read_profile_binding, remote_easyconnect_pairing_store_path,
-        remote_easyconnect_session_store_path, upsert_application_identity, upsert_application_key,
-        upsert_profile_binding, BackendProfileBinding, DaemonIngestFilesRuntimeError,
-        DaemonServiceRuntimeError, FileBackedAdminJobRegistry,
-        FileBackedRemoteEasyconnectPairedSessionStore, FolderBackend, LocalAdminRuntimeError,
-        LocalGroupAdministrationOperation, RemoteEasyconnectAwsCliUploadJobRequest,
-        RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionStore,
-        RemoteUploadAdmissionGate,
+        read_application_identity, read_profile_binding, read_profile_binding_record,
+        remote_easyconnect_pairing_store_path, remote_easyconnect_session_store_path,
+        upsert_application_identity, upsert_application_key, upsert_profile_binding,
+        BackendProfileBinding, DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
+        FileBackedAdminJobRegistry, FileBackedRemoteEasyconnectPairedSessionStore, FolderBackend,
+        LocalAdminRuntimeError, LocalGroupAdministrationOperation,
+        RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
+        RemoteEasyconnectPairedSessionStore, RemoteUploadAdmissionGate,
     };
     use crate::AdminJobRegistry;
     use base64::engine::general_purpose::STANDARD as BASE64;
@@ -1274,6 +1281,80 @@ mod tests {
             .profile_capacity_calls
             .borrow()
             .is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn profile_publication_failure_rolls_back_binding_and_new_capacity() {
+        let root = temp_root("profile-publication-rollback");
+        let backend_root = root.join("backend");
+        fs::create_dir_all(&backend_root).expect("backend root");
+        let profile_registry = root.join("profile-bindings.json");
+        let broken_store_registry = root.join("stores-as-directory");
+        fs::create_dir_all(&broken_store_registry).expect("blocking registry directory");
+        let subobject_registry = root.join("subobjects.json");
+        fs::write(&subobject_registry, "[]").expect("subobject registry");
+        let store_id = StoreId::new("rollback-store").expect("store id");
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.capacity = dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        let request = ProfileBindingRequest {
+            operation: ProfileBindingOperation::Create,
+            manifest: ObjectStoreManifest {
+                schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                store_id: store_id.clone(),
+                deployment_profile: DeploymentProfile::Folder,
+                host_mode: HostMode::PerUser,
+                protection: ProtectionPolicy::LocalOnly,
+                backend: BackendReference::Folder {
+                    root_identity: "fsid:rollback-store".to_string(),
+                },
+            },
+            capacity: policy.capacity.clone(),
+            store_definition: Some(StoreServiceDefinition {
+                store_id: store_id.clone(),
+                policy,
+                bucket_name: None,
+                reader_group: None,
+                writer_group: Some("writers".to_string()),
+                public: false,
+            }),
+            backend_root,
+            ssd_staging_root: None,
+            dry_run: false,
+            client_request_id: Some("rollback-publication".to_string()),
+            administrator_actor: None,
+            confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
+        };
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-16T12:00:00Z"),
+        )
+        .with_registry_paths(&broken_store_registry, &subobject_registry)
+        .with_profile_binding_registry_path(&profile_registry);
+
+        let error = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(request),
+                Some(&DaemonLocalActor::new(0).with_username("root")),
+                |_| Ok(()),
+            )
+            .expect_err("store publication must fail");
+
+        assert!(!error.to_string().is_empty());
+        assert!(
+            read_profile_binding_record(&profile_registry, store_id.as_str())
+                .expect("binding registry remains readable")
+                .is_none()
+        );
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .profile_capacity_rollback_calls
+                .borrow()
+                .as_slice(),
+            std::slice::from_ref(&store_id),
+            "unexpected failure before capacity initialization: {error}"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -4826,6 +4907,7 @@ mod tests {
         prepare_enclosure_calls: RefCell<Vec<(String, String, bool)>>,
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
         profile_capacity_calls: RefCell<Vec<(StoreId, dasobjectstore_core::store::CapacityPolicy)>>,
+        profile_capacity_rollback_calls: RefCell<Vec<StoreId>>,
         remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
         reconciliation_calls: RefCell<Vec<(String, Option<String>, bool, String)>>,
         job_status_calls: RefCell<Vec<String>>,
@@ -4840,10 +4922,20 @@ mod tests {
             &self,
             store_id: &StoreId,
             policy: dasobjectstore_core::store::CapacityPolicy,
-        ) -> Result<(), DaemonServiceRuntimeError> {
+        ) -> Result<bool, DaemonServiceRuntimeError> {
             self.profile_capacity_calls
                 .borrow_mut()
                 .push((store_id.clone(), policy));
+            Ok(true)
+        }
+
+        fn rollback_initialized_profile_capacity(
+            &self,
+            store_id: &StoreId,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.profile_capacity_rollback_calls
+                .borrow_mut()
+                .push(store_id.clone());
             Ok(())
         }
 
