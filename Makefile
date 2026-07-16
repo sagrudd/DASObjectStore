@@ -10,7 +10,7 @@ FLOUNDER_DIR ?= $(MNEMOSYNE_WORKSPACE)/floundeR
 REPORT_PROVIDER_IMAGE ?= grammateus/report:0.8.1
 GRAMMATEUS_REPORT_PROVIDER ?= grammateus_report_provider
 
-.PHONY: help pull build web web-screenshots report-provider package-auth-guard deployment-readiness product-profile-acceptance application-auth-acceptance test fmt check check-lockfile module-size deb rpm remote remote-deb remote-rpm package clean distclean
+.PHONY: help pull build web web-screenshots report-provider package-auth-guard deployment-readiness product-profile-acceptance application-auth-acceptance remote-upload-completion-acceptance test fmt check check-lockfile module-size deb rpm remote remote-deb remote-rpm package clean distclean
 
 help:
 	@printf 'DASObjectStore build targets:\n'
@@ -106,6 +106,9 @@ product-profile-acceptance:
 
 application-auth-acceptance:
 	bash deploy/acceptance/application-auth-mvp.sh
+
+remote-upload-completion-acceptance:
+	bash deploy/acceptance/remote-upload-completion-mvp.sh
 
 test: package-auth-guard
 	cargo test --workspace

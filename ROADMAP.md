@@ -1668,6 +1668,10 @@ including cryptographic proof exchange, overlapping rotation, revocation,
 per-request mTLS revalidation, and redacted audit. Production CA, physical
 appliance, x86_64, multi-HDD, and performance/soak evidence remain explicit
 external release gates.
+Remote upload completion now also has a same-commit surrogate acceptance over
+the real daemon and durable authority registries, proving scoped capability
+issuance, verify-before-commit, replay safety, and catalogue-failure recovery.
+It is deliberately not labelled live Garage/shared-SQLite acceptance.
 
 ## Post-Campaign Direction
 

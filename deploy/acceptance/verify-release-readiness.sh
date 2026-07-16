@@ -31,6 +31,7 @@ MACOS="$EVIDENCE_DIR/macos-launchd-$COMMIT.txt"
 DOCKER="$EVIDENCE_DIR/local-docker-s3-$COMMIT.txt"
 PRODUCT="$EVIDENCE_DIR/product-profile-mvp-$COMMIT.txt"
 APPLICATION_AUTH="$EVIDENCE_DIR/application-auth-mvp-$COMMIT.txt"
+REMOTE_COMPLETION="$EVIDENCE_DIR/remote-upload-completion-mvp-$COMMIT.txt"
 UBUNTU="$LIMA_DIR/ubuntu-arm64.txt"
 ALMA="$LIMA_DIR/alma-arm64.txt"
 
@@ -60,6 +61,12 @@ done
 require_field "$APPLICATION_AUTH" source_commit "$COMMIT"
 require_field "$APPLICATION_AUTH" private_key_persisted no
 
+for field in paired_session_scope application_identity_scope one_time_capability_issue forged_capability_rejection provider_verification_before_commit idempotent_exact_replay catalogue_failure_retry credential_response_redaction remote_upload_completion_mvp; do
+    require_field "$REMOTE_COMPLETION" "$field" passed
+done
+require_field "$REMOTE_COMPLETION" source_commit "$COMMIT"
+require_field "$REMOTE_COMPLETION" garage_appliance_execution surrogate_only
+
 for evidence in "$UBUNTU" "$ALMA"; do
     for field in install upgrade reboot uninstall; do
         require_field "$evidence" "$field" passed
@@ -82,6 +89,7 @@ REPORT="$EVIDENCE_DIR/local-release-readiness-$COMMIT.txt"
     printf 'local_docker_garage_s3=passed\n'
     printf 'product_profile_mvp=passed\n'
     printf 'application_auth_mvp=passed\n'
+    printf 'remote_upload_completion_mvp=passed_surrogate\n'
     printf 'local_deployment_readiness=passed\n'
     printf 'physical_das_acceptance=blocked_unavailable_host\n'
     printf 'x86_64_package_parity=blocked_unavailable_host\n'

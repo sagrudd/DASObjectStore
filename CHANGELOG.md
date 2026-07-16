@@ -6,6 +6,17 @@ This project follows semantic versioning. Patch and minor version bumps may be
 made automatically for compatible work; major version bumps require explicit
 agreement before landing.
 
+## 0.89.0 - 2026-07-16
+
+- Add a same-commit remote-upload completion MVP acceptance through the real
+  daemon handler and durable session, identity, capability, credential, and
+  replay registries.
+- Prove scoped one-time issuance, forged-capability rejection, provider
+  verification before catalogue commit, idempotent exact replay, and safe retry
+  after catalogue handoff failure without exposing renewal/provider secrets.
+- Require the explicitly surrogate-labelled evidence for local release
+  readiness; live Garage/shared-SQLite appliance execution remains blocked.
+
 ## 0.88.0 - 2026-07-16
 
 - Add a same-commit application-auth MVP acceptance workflow through the real

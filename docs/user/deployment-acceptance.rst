@@ -17,6 +17,7 @@ Run each harness from the same committed revision:
    deploy/lima/package-acceptance.sh all
    deploy/acceptance/product-profile-mvp.sh
    deploy/acceptance/application-auth-mvp.sh
+   deploy/acceptance/remote-upload-completion-mvp.sh
    DASOBJECTSTORE_LOCAL_ROOT="$HOME/.dasobjectstore-codex-validation" \
      DASOBJECTSTORE_LOCAL_PROFILE=alleleanchor-mvp \
      deploy/local-docker/local.sh up
@@ -39,6 +40,14 @@ exchange, overlapping rotation, key and principal revocation, per-request mTLS
 revocation enforcement, and redacted audit persistence. Private keys are never
 written to the evidence or daemon registries. It does not imply production CA
 or physical DAS readiness.
+
+The remote-upload completion workflow uses the real daemon request handler and
+durable session, identity, capability, credential, and replay registries with
+an injected provider/catalogue authority. It proves scope intersection,
+bounded capability issuance, forged-capability rejection, verify-before-
+commit ordering, exact-replay idempotency, and retry after catalogue failure.
+The evidence labels provider execution as ``surrogate_only``: it does not
+replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 
 Hardware acceptance after returning home
 ----------------------------------------

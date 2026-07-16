@@ -51,8 +51,10 @@ evidence and detailed source tasks.
   matrix now covers daemon provisioning, profile S3, quota, deletion, and
   restart recovery. A second same-commit security matrix covers service-
   principal registration, proof exchange, rotation, revocation, mTLS request
-  revalidation, and redacted audit. Physical DAS, production CA, x86_64,
-  multi-HDD, and performance acceptance remain externally blocked.
+  revalidation, and redacted audit. A third surrogate matrix covers remote
+  upload capability issuance, verify-before-commit ordering, replay, and
+  catalogue-failure recovery. Physical DAS, live Garage/shared-SQLite,
+  production CA, x86_64, multi-HDD, and performance acceptance remain blocked.
 
 ## Current External Blockers (2026-07-13)
 
@@ -236,6 +238,12 @@ completion.
   checksum before catalogue commit; failures remain fail-closed. Local Docker
   Garage and appliance acceptance remain environment-gated, but the runtime
   implementation no longer requires a provider-SDK decision.
+  - [x] Add a same-commit surrogate acceptance through the real daemon handler
+    and durable registries. Paired-session plus application scope gate one-time
+    issuance; forged capabilities fail before provider work; verification
+    precedes catalogue commit; exact replay is idempotent; and a failed
+    catalogue handoff releases the claim for safe retry. Live Garage and
+    shared-SQLite appliance execution remain explicitly environment-gated.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable
