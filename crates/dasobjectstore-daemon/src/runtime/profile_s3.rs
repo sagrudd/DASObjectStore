@@ -6,7 +6,7 @@
 
 use crate::api::CapacityAdmissionDecision;
 use crate::runtime::capacity_provider::CapacityAdmissionProvider;
-use crate::runtime::{DriveBackend, FolderBackend};
+use crate::runtime::{DaemonServiceRuntimeError, DriveBackend, FolderBackend};
 use dasobjectstore_core::backend::{
     catalogue_logical_used_bytes, BackendError, BackendHealth, BackendObjectKey,
     BackendObjectRecord, ObjectCatalogueAuthority, ObjectStoreBackend,
@@ -241,10 +241,29 @@ pub fn complete_profile_s3_multipart_with_admitted_capacity_provider<'a>(
     completion: &ProfileS3MultipartCompletion,
     sources: Vec<ProfileS3MultipartPartSource<'a>>,
 ) -> Result<BackendObjectRecord, BackendError> {
-    let mut reader = assemble_profile_s3_multipart(completion, sources)?;
-    put_profile_object_with_admitted_capacity_provider(
+    complete_profile_s3_multipart_with_admitted_capacity_scope(
         capacity_provider,
         store_id,
+        None,
+        backend,
+        completion,
+        sources,
+    )
+}
+
+pub fn complete_profile_s3_multipart_with_admitted_capacity_scope<'a>(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    subobject: Option<&str>,
+    backend: &mut dyn ProfileS3WriteBackend,
+    completion: &ProfileS3MultipartCompletion,
+    sources: Vec<ProfileS3MultipartPartSource<'a>>,
+) -> Result<BackendObjectRecord, BackendError> {
+    let mut reader = assemble_profile_s3_multipart(completion, sources)?;
+    put_profile_object_with_admitted_capacity_scope(
+        capacity_provider,
+        store_id,
+        subobject,
         backend,
         &completion.reservation_id,
         &completion.key,
@@ -756,15 +775,48 @@ pub fn put_profile_object_with_capacity_provider(
     source: &mut dyn Read,
     size_bytes: u64,
 ) -> Result<BackendObjectRecord, BackendError> {
+    put_profile_object_with_capacity_scope(
+        capacity_provider,
+        store_id,
+        None,
+        backend,
+        reservation_id,
+        key,
+        source,
+        size_bytes,
+    )
+}
+
+pub fn put_profile_object_with_capacity_scope(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    subobject: Option<&str>,
+    backend: &mut dyn ProfileS3WriteBackend,
+    reservation_id: &str,
+    key: &BackendObjectKey,
+    source: &mut dyn Read,
+    size_bytes: u64,
+) -> Result<BackendObjectRecord, BackendError> {
     validate_runtime_key(key)?;
     let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
         BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
     })?;
-    let admission = capacity_provider
-        .admit_remote_upload(store_id.as_str(), size_bytes, reservation_id)
-        .map_err(|error| {
-            BackendError::InvalidRequest(format!("profile S3 capacity admission failed: {error}"))
-        })?;
+    let admission = match subobject {
+        Some(subobject) => capacity_provider.admit_subobject_ingest(
+            store_id.as_str(),
+            subobject,
+            size_bytes,
+            1,
+            crate::api::DaemonIngressOrigin::RemoteS3,
+            reservation_id,
+        ),
+        None => {
+            capacity_provider.admit_remote_upload(store_id.as_str(), size_bytes, reservation_id)
+        }
+    }
+    .map_err(|error| {
+        BackendError::InvalidRequest(format!("profile S3 capacity admission failed: {error}"))
+    })?;
     if admission.decision != CapacityAdmissionDecision::Admitted {
         return Err(BackendError::InvalidRequest(
             admission
@@ -774,18 +826,18 @@ pub fn put_profile_object_with_capacity_provider(
     }
 
     if let Err(error) = backend.reserve(reservation_id, size_bytes) {
-        let cleanup = capacity_provider
-            .release(&store_id, reservation_id)
-            .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+        let cleanup =
+            release_capacity_scope(capacity_provider, &store_id, subobject, reservation_id)
+                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
         return Err(with_cleanup_error(error, cleanup));
     }
     let staged = match backend.stage(reservation_id, key, source) {
         Ok(staged) => staged,
         Err(error) => {
             let backend_cleanup = backend.abort_profile_s3_object(reservation_id, None);
-            let provider_cleanup = capacity_provider
-                .release(&store_id, reservation_id)
-                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            let provider_cleanup =
+                release_capacity_scope(capacity_provider, &store_id, subobject, reservation_id)
+                    .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
             return Err(with_cleanup_error(
                 error,
                 combine_cleanup(backend_cleanup, provider_cleanup),
@@ -796,9 +848,9 @@ pub fn put_profile_object_with_capacity_provider(
         Ok(finalized) => finalized,
         Err(error) => {
             let backend_cleanup = backend.abort_profile_s3_object(reservation_id, Some(&staged));
-            let provider_cleanup = capacity_provider
-                .release(&store_id, reservation_id)
-                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            let provider_cleanup =
+                release_capacity_scope(capacity_provider, &store_id, subobject, reservation_id)
+                    .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
             return Err(with_cleanup_error(
                 error,
                 combine_cleanup(backend_cleanup, provider_cleanup),
@@ -808,19 +860,20 @@ pub fn put_profile_object_with_capacity_provider(
     // Do not release either reservation here: the payload is durable even if
     // catalogue persistence or logical admission commit subsequently fails.
     backend.commit_batch(std::slice::from_ref(&finalized))?;
-    capacity_provider
-        .commit(&store_id, reservation_id)
-        .map_err(|error| {
+    commit_capacity_scope(capacity_provider, &store_id, subobject, reservation_id).map_err(
+        |error| {
             BackendError::InvalidRequest(format!(
                 "profile S3 capacity commit failed after durable finalization: {error}"
             ))
-        })?;
+        },
+    )?;
     Ok(finalized)
 }
 
-fn put_profile_object_with_admitted_capacity_provider(
+fn put_profile_object_with_admitted_capacity_scope(
     capacity_provider: &dyn CapacityAdmissionProvider,
     store_id: &str,
+    subobject: Option<&str>,
     backend: &mut dyn ProfileS3WriteBackend,
     reservation_id: &str,
     key: &BackendObjectKey,
@@ -836,9 +889,9 @@ fn put_profile_object_with_admitted_capacity_provider(
         Ok(staged) => staged,
         Err(error) => {
             let backend_cleanup = backend.abort_profile_s3_object(reservation_id, None);
-            let provider_cleanup = capacity_provider
-                .release(&store_id, reservation_id)
-                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            let provider_cleanup =
+                release_capacity_scope(capacity_provider, &store_id, subobject, reservation_id)
+                    .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
             return Err(with_cleanup_error(
                 error,
                 combine_cleanup(backend_cleanup, provider_cleanup),
@@ -849,9 +902,9 @@ fn put_profile_object_with_admitted_capacity_provider(
         Ok(finalized) => finalized,
         Err(error) => {
             let backend_cleanup = backend.abort_profile_s3_object(reservation_id, Some(&staged));
-            let provider_cleanup = capacity_provider
-                .release(&store_id, reservation_id)
-                .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
+            let provider_cleanup =
+                release_capacity_scope(capacity_provider, &store_id, subobject, reservation_id)
+                    .map_err(|cleanup| BackendError::InvalidRequest(cleanup.to_string()));
             return Err(with_cleanup_error(
                 error,
                 combine_cleanup(backend_cleanup, provider_cleanup),
@@ -859,14 +912,38 @@ fn put_profile_object_with_admitted_capacity_provider(
         }
     };
     backend.commit_batch(std::slice::from_ref(&finalized))?;
-    capacity_provider
-        .commit(&store_id, reservation_id)
-        .map_err(|error| {
+    commit_capacity_scope(capacity_provider, &store_id, subobject, reservation_id).map_err(
+        |error| {
             BackendError::InvalidRequest(format!(
                 "profile S3 capacity commit failed after durable finalization: {error}"
             ))
-        })?;
+        },
+    )?;
     Ok(finalized)
+}
+
+fn release_capacity_scope(
+    provider: &dyn CapacityAdmissionProvider,
+    store_id: &StoreId,
+    subobject: Option<&str>,
+    reservation_id: &str,
+) -> Result<(), DaemonServiceRuntimeError> {
+    match subobject {
+        Some(subobject) => provider.release_subobject(store_id, subobject, reservation_id),
+        None => provider.release(store_id, reservation_id),
+    }
+}
+
+fn commit_capacity_scope(
+    provider: &dyn CapacityAdmissionProvider,
+    store_id: &StoreId,
+    subobject: Option<&str>,
+    reservation_id: &str,
+) -> Result<(), DaemonServiceRuntimeError> {
+    match subobject {
+        Some(subobject) => provider.commit_subobject(store_id, subobject, reservation_id),
+        None => provider.commit(store_id, reservation_id),
+    }
 }
 
 fn validate_runtime_key(key: &BackendObjectKey) -> Result<(), BackendError> {
@@ -941,13 +1018,14 @@ fn with_cleanup_error(error: BackendError, cleanup: Result<(), BackendError>) ->
 mod tests {
     use super::{
         assemble_profile_s3_multipart, checksum_string, complete_profile_s3_multipart,
+        complete_profile_s3_multipart_with_admitted_capacity_scope,
         complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
         delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
         head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,
         profile_health, profile_s3_list_response, put_profile_object,
-        put_profile_object_with_capacity_provider, stream_profile_object, verify_profile_object,
-        ProfileS3MultipartCompletion, ProfileS3MultipartPart, ProfileS3MultipartPartSource,
-        PROFILE_S3_MAX_KEYS,
+        put_profile_object_with_capacity_provider, put_profile_object_with_capacity_scope,
+        stream_profile_object, verify_profile_object, ProfileS3MultipartCompletion,
+        ProfileS3MultipartPart, ProfileS3MultipartPartSource, PROFILE_S3_MAX_KEYS,
     };
     use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
@@ -1103,6 +1181,66 @@ mod tests {
             Ok(())
         }
 
+        fn admit_subobject_ingest(
+            &self,
+            object_store: &str,
+            subobject: &str,
+            requested_bytes: u64,
+            copy_count: u8,
+            ingress_origin: crate::api::DaemonIngressOrigin,
+            reservation_id: &str,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            self.events.lock().expect("events lock").push(format!(
+                "admit-subobject:{object_store}:{subobject}:{requested_bytes}:{reservation_id}"
+            ));
+            CapacityAdmissionResponse::evaluate(
+                &CapacityAdmissionRequest {
+                    store_id: object_store.to_string(),
+                    requested_bytes,
+                    copy_count,
+                    ingress_origin,
+                    client_request_id: Some(reservation_id.to_string()),
+                },
+                &CapacityPolicy::bounded(self.logical_limit_bytes, 0),
+                dasobjectstore_core::store::CapacityAdmissionInput {
+                    requested_bytes,
+                    copy_count,
+                    requires_ssd_staging: ingress_origin.requires_ssd_staging(),
+                    used_bytes: 0,
+                    reserved_bytes: 0,
+                    backend_free_bytes: self.backend_free_bytes,
+                    ssd_free_bytes: self.ssd_free_bytes,
+                },
+            )
+            .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: error.to_string(),
+            })
+        }
+
+        fn commit_subobject(
+            &self,
+            store_id: &StoreId,
+            subobject: &str,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events.lock().expect("events lock").push(format!(
+                "commit-subobject:{store_id}:{subobject}:{reservation_id}"
+            ));
+            Ok(())
+        }
+
+        fn release_subobject(
+            &self,
+            store_id: &StoreId,
+            subobject: &str,
+            reservation_id: &str,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.events.lock().expect("events lock").push(format!(
+                "release-subobject:{store_id}:{subobject}:{reservation_id}"
+            ));
+            Ok(())
+        }
+
         fn release(
             &self,
             store_id: &StoreId,
@@ -1126,6 +1264,37 @@ mod tests {
                 .push(format!("reconcile:{store_id}:{used_bytes}"));
             Ok(())
         }
+    }
+
+    #[test]
+    fn profile_put_settles_explicit_subobject_capacity_scope() {
+        let provider = RecordingCapacityProvider::default();
+        let (mut backend, root) = backend();
+        let key = BackendObjectKey {
+            object_id: "experiment-a/sample.fastq".to_string(),
+            version: 1,
+        };
+
+        put_profile_object_with_capacity_scope(
+            &provider,
+            "profile-s3",
+            Some("experiment-a"),
+            &mut backend,
+            "subobject-profile-put",
+            &key,
+            &mut &b"reads"[..],
+            5,
+        )
+        .expect("SubObject-scoped profile PUT");
+
+        assert_eq!(
+            provider.events.lock().expect("events lock").as_slice(),
+            [
+                "admit-subobject:profile-s3:experiment-a:5:subobject-profile-put",
+                "commit-subobject:profile-s3:experiment-a:subobject-profile-put"
+            ]
+        );
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -1500,6 +1669,45 @@ mod tests {
                 "admit:profile-s3:8:multipart-provider",
                 "commit:profile-s3:multipart-provider"
             ]
+        );
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn admitted_multipart_completion_commits_explicit_subobject_scope() {
+        let (mut backend, root) = backend();
+        let provider = RecordingCapacityProvider::default();
+        let body = b"provider";
+        let completion = ProfileS3MultipartCompletion {
+            reservation_id: "multipart-child".to_string(),
+            key: BackendObjectKey {
+                object_id: "project-a/writes/provider.fastq".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: body.len() as u64,
+            parts: vec![ProfileS3MultipartPart {
+                part_number: 1,
+                size_bytes: body.len() as u64,
+                checksum: checksum_string(&Sha256::digest(body)),
+            }],
+        };
+        complete_profile_s3_multipart_with_admitted_capacity_scope(
+            &provider,
+            "profile-s3",
+            Some("project-a"),
+            &mut backend,
+            &completion,
+            vec![ProfileS3MultipartPartSource {
+                part: completion.parts[0].clone(),
+                reader: Box::new(Cursor::new(body)),
+            }],
+        )
+        .expect("SubObject multipart commit");
+
+        assert_eq!(backend.capacity().reserved_bytes, 0);
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec!["commit-subobject:profile-s3:project-a:multipart-child"]
         );
         std::fs::remove_dir_all(root).ok();
     }

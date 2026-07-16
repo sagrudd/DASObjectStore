@@ -46,10 +46,14 @@ parent store's placement, copy-count, and service policy:
 
 Omit ``--capacity-limit-bytes`` to inherit the parent capacity boundary. The
 budget is stored in the portable SubObject registry, appears in list and search
-output, and is enforced by daemon-owned file-ingest admission. A reservation
-against a bounded SubObject updates the child and parent allocation together;
-commit and release do the same. It does not reserve physical space or weaken
-the parent store's capacity checks.
+output, and is enforced by daemon-owned file-ingest and profile-S3 admission.
+Profile PUT and multipart requests retain the explicitly authorized SubObject
+scope through reservation, restart-safe staging, completion, and cleanup. Their
+backend object keys are rooted below the SubObject path, so quota identity and
+physical namespace cannot diverge. A reservation against a bounded SubObject
+updates the child and parent allocation together; commit and release do the
+same. It does not reserve physical space or weaken the parent store's capacity
+checks.
 
 The daemon upgrades an empty legacy store ledger to the hierarchical format on
 the first top-level bounded-SubObject admission. If a store already has

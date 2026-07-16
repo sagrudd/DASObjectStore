@@ -199,15 +199,16 @@ pub use profile_registry::{
 pub use profile_s3::{
     assemble_profile_s3_multipart, complete_profile_s3_multipart,
     complete_profile_s3_multipart_with_admitted_capacity_provider,
+    complete_profile_s3_multipart_with_admitted_capacity_scope,
     complete_profile_s3_multipart_with_capacity_provider, delete_profile_object,
     delete_profile_object_with_capacity_provider, get_profile_object, get_profile_object_range,
     head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,
     profile_health, profile_s3_list_response, put_profile_object,
-    put_profile_object_with_capacity_provider, stream_profile_object, verify_profile_object,
-    ProfileDiagnosticsSummary, ProfileS3ListPage, ProfileS3MultipartCompletion,
-    ProfileS3MultipartPart, ProfileS3MultipartPartSource, ProfileS3MultipartReader,
-    ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend, PROFILE_S3_MAX_KEYS,
-    PROFILE_S3_MAX_MULTIPART_PARTS,
+    put_profile_object_with_capacity_provider, put_profile_object_with_capacity_scope,
+    stream_profile_object, verify_profile_object, ProfileDiagnosticsSummary, ProfileS3ListPage,
+    ProfileS3MultipartCompletion, ProfileS3MultipartPart, ProfileS3MultipartPartSource,
+    ProfileS3MultipartReader, ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend,
+    PROFILE_S3_MAX_KEYS, PROFILE_S3_MAX_MULTIPART_PARTS,
 };
 pub use profile_s3_multipart::{
     discover_multipart_reservation_ids, MultipartPartJournal, MultipartPartJournalError,

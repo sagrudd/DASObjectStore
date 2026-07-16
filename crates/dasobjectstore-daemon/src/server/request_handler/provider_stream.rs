@@ -49,8 +49,9 @@ where
         >,
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
-        let store_id = match self.authorize_endpoint_write(actor, &request.store_id) {
-            Ok(store_id) => store_id,
+        let mut request = request;
+        let authorized = match self.authorize_endpoint_write_scope(actor, &request.store_id) {
+            Ok(authorized) => authorized,
             Err(error) => {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     error.code(),
@@ -58,6 +59,8 @@ where
                 )))
             }
         };
+        request.object = authorized.qualify_object(&request.object);
+        let store_id = authorized.store_id.clone();
         let binding =
             match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
                 Ok(Some(binding)) => binding,
@@ -92,11 +95,21 @@ where
                     "multipart part staging requires daemon capacity admission",
                 )));
             };
-            let admission = provider.admit_remote_upload(
-                store_id.as_str(),
-                request.reservation_size_bytes,
-                &request.reservation_id,
-            );
+            let admission = match authorized.subobject.as_deref() {
+                Some(subobject) => provider.admit_subobject_ingest(
+                    store_id.as_str(),
+                    subobject,
+                    request.reservation_size_bytes,
+                    1,
+                    crate::api::DaemonIngressOrigin::RemoteS3,
+                    &request.reservation_id,
+                ),
+                None => provider.admit_remote_upload(
+                    store_id.as_str(),
+                    request.reservation_size_bytes,
+                    &request.reservation_id,
+                ),
+            };
             let admission = match admission {
                 Ok(admission) => admission,
                 Err(error) => {
@@ -123,7 +136,14 @@ where
             Err(error) => {
                 if !admitted {
                     if let Some(provider) = self.service_orchestrator.capacity_provider() {
-                        let _ = provider.release(&store_id, &request.reservation_id);
+                        let _ = match authorized.subobject.as_deref() {
+                            Some(subobject) => provider.release_subobject(
+                                &store_id,
+                                subobject,
+                                &request.reservation_id,
+                            ),
+                            None => provider.release(&store_id, &request.reservation_id),
+                        };
                     }
                 }
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -156,8 +176,9 @@ where
         >,
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
-        let store_id = match self.authorize_endpoint_write(actor, &request.store_id) {
-            Ok(store_id) => store_id,
+        let mut request = request;
+        let authorized = match self.authorize_endpoint_write_scope(actor, &request.store_id) {
+            Ok(authorized) => authorized,
             Err(error) => {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     error.code(),
@@ -165,6 +186,8 @@ where
                 )))
             }
         };
+        request.object = authorized.qualify_object(&request.object);
+        let store_id = authorized.store_id.clone();
         let binding =
             match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
                 Ok(Some(binding)) => binding,
@@ -211,9 +234,10 @@ where
             )));
         };
         let mut source = ProviderUploadReader::new(&request, read_frame);
-        let record = crate::runtime::put_profile_object_with_capacity_provider(
+        let record = crate::runtime::put_profile_object_with_capacity_scope(
             provider.as_ref(),
             store_id.as_str(),
+            authorized.subobject.as_deref(),
             &mut backend,
             &request.upload_id,
             &request.object,

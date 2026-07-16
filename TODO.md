@@ -576,8 +576,11 @@ transaction wiring; those boundaries stay explicit in the child items below.
     ledger upgrades atomically from the flat format, persists root and child
     reservations in one snapshot, and preserves shared-parent enforcement
     across restart. Existing non-empty stores fail closed until child usage is
-    reconciled. Nested-budget ancestor reconciliation, S3, and remote-upload
-    endpoint resolution remain open.
+    reconciled. Profile-S3 PUT and multipart now preserve the explicitly
+    authorized SubObject scope through admission, cleanup, durable journal
+    completion, and commit without inferring identity from reservation IDs.
+    Nested-budget ancestor reconciliation and EasyConnect/remote-upload scope
+    transport remain open.
 - [~] Expose used, reserved, available, backend free, amplification, thresholds,
   and admission-block reason through daemon API, CLI, TUI, Web, and adapters.
   - [x] Add a read-only daemon ``capacity_status`` transport response backed by

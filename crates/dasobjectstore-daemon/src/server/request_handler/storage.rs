@@ -505,8 +505,9 @@ where
             ))
         }
         DaemonApiRequest::ProfileS3MultipartComplete(request) => {
-            let store_id = match handler.authorize_endpoint_write(actor, &request.store_id) {
-                Ok(store_id) => store_id,
+            let authorized = match handler.authorize_endpoint_write_scope(actor, &request.store_id)
+            {
+                Ok(authorized) => authorized,
                 Err(error) => {
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         error.code(),
@@ -514,6 +515,8 @@ where
                     )));
                 }
             };
+            let store_id = authorized.store_id.clone();
+            let qualified_key = authorized.qualify_object(&request.key);
             let binding = match read_profile_binding(
                 &handler.profile_binding_registry_path,
                 store_id.as_str(),
@@ -548,9 +551,9 @@ where
             let backend_root = binding.backend_root.clone();
             let journal = match crate::runtime::MultipartPartJournal::open_for_completion(
                 &backend_root,
-                store_id.as_str(),
+                request.store_id.as_str(),
                 &request.reservation_id,
-                request.key.clone(),
+                qualified_key.clone(),
                 request.expected_size_bytes,
             ) {
                 Ok(journal) => journal,
@@ -617,7 +620,7 @@ where
             };
             let completion = crate::runtime::ProfileS3MultipartCompletion {
                 reservation_id: request.reservation_id.clone(),
-                key: request.key.clone(),
+                key: qualified_key,
                 expected_size_bytes: request.expected_size_bytes,
                 parts: request
                     .parts
@@ -630,9 +633,10 @@ where
                     .collect(),
             };
             let record =
-                match crate::runtime::complete_profile_s3_multipart_with_admitted_capacity_provider(
+                match crate::runtime::complete_profile_s3_multipart_with_admitted_capacity_scope(
                     provider.as_ref(),
                     store_id.as_str(),
+                    authorized.subobject.as_deref(),
                     &mut backend,
                     &completion,
                     sources,

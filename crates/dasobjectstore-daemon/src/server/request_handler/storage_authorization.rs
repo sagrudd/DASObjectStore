@@ -1,4 +1,66 @@
 use super::*;
+use dasobjectstore_core::backend::BackendObjectKey;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AuthorizedEndpointWrite {
+    pub store_id: StoreId,
+    pub subobject: Option<String>,
+    object_prefix: Option<String>,
+}
+
+impl AuthorizedEndpointWrite {
+    pub fn qualify_object(&self, object: &BackendObjectKey) -> BackendObjectKey {
+        let Some(prefix) = &self.object_prefix else {
+            return object.clone();
+        };
+        BackendObjectKey {
+            object_id: format!("{prefix}/{}", object.object_id),
+            version: object.version,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthorizedEndpointWrite;
+    use dasobjectstore_core::{backend::BackendObjectKey, ids::StoreId};
+
+    #[test]
+    fn subobject_write_qualifies_the_backend_namespace() {
+        let authorized = AuthorizedEndpointWrite {
+            store_id: StoreId::new("store-main").expect("store id"),
+            subobject: Some("project-media".to_string()),
+            object_prefix: Some("projects/alpha/media".to_string()),
+        };
+        let key = BackendObjectKey {
+            object_id: "frames/0001.raw".to_string(),
+            version: 7,
+        };
+
+        assert_eq!(
+            authorized.qualify_object(&key),
+            BackendObjectKey {
+                object_id: "projects/alpha/media/frames/0001.raw".to_string(),
+                version: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn root_write_preserves_the_backend_namespace() {
+        let authorized = AuthorizedEndpointWrite {
+            store_id: StoreId::new("store-main").expect("store id"),
+            subobject: None,
+            object_prefix: None,
+        };
+        let key = BackendObjectKey {
+            object_id: "frames/0001.raw".to_string(),
+            version: 7,
+        };
+
+        assert_eq!(authorized.qualify_object(&key), key);
+    }
+}
 
 impl<S, C> DaemonRequestHandler<S, C>
 where
@@ -126,6 +188,15 @@ where
         actor: Option<&DaemonLocalActor>,
         endpoint: &StoreId,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        self.authorize_endpoint_write_scope(actor, endpoint)
+            .map(|authorized| authorized.store_id)
+    }
+
+    pub(super) fn authorize_endpoint_write_scope(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        endpoint: &StoreId,
+    ) -> Result<AuthorizedEndpointWrite, ObjectBrowserAccessFailure> {
         let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
         let store_id = resolve_authorization_store_id(
             endpoint,
@@ -151,7 +222,15 @@ where
         }
         policy = policy.with_public_read(store.public);
         authorize_store_write(actor, &policy)?;
-        Ok(store_id)
+        let subobject = read_subobject_registry(&self.subobject_registry_path)?
+            .into_iter()
+            .find(|definition| definition.name == endpoint.as_str())
+            .map(|definition| (definition.name, definition.path.join("/")));
+        Ok(AuthorizedEndpointWrite {
+            store_id,
+            subobject: subobject.as_ref().map(|(name, _)| name.clone()),
+            object_prefix: subobject.map(|(_, prefix)| prefix),
+        })
     }
 
     pub(super) fn authorize_object_download(
