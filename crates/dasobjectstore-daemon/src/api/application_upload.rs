@@ -1,4 +1,5 @@
 use dasobjectstore_core::application_auth::UploadCompletionCapability;
+use dasobjectstore_core::ids::ObjectId;
 use serde::{Deserialize, Serialize};
 
 pub const APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE: &str =
@@ -54,6 +55,10 @@ impl ApplicationUploadCapabilityIssueRequest {
         {
             return Err("expected_checksum must be a sha256 digest".to_string());
         }
+        ObjectId::new(self.object_id.clone()).map_err(|error| error.to_string())?;
+        if self.object_version == 0 {
+            return Err("object_version must be greater than zero".to_string());
+        }
         Ok(())
     }
 }
@@ -90,4 +95,39 @@ pub enum ApplicationUploadCompletionOutcome {
 pub struct ApplicationUploadCompletionResponse {
     pub capability_id: String,
     pub outcome: ApplicationUploadCompletionOutcome,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> ApplicationUploadCapabilityIssueRequest {
+        ApplicationUploadCapabilityIssueRequest {
+            session_id: "session-1".to_string(),
+            renewal_token: "renewal".to_string(),
+            application_id: "synoptikon".to_string(),
+            upload_id: "upload-1".to_string(),
+            object_store: "science".to_string(),
+            object_id: "object-1".to_string(),
+            object_version: 1,
+            object_key: "analysis/object-1".to_string(),
+            expected_size_bytes: 5,
+            expected_checksum: format!("sha256:{}", "a".repeat(64)),
+            audience: "dasobjectstored".to_string(),
+            provider: "garage".to_string(),
+            bucket: "science".to_string(),
+            endpoint_url: "http://127.0.0.1:3900".to_string(),
+            requested_ttl_seconds: Some(600),
+        }
+    }
+
+    #[test]
+    fn rejects_provider_identity_that_cannot_be_catalogued_before_admission() {
+        let mut request = request();
+        request.object_version = 0;
+        assert_eq!(
+            request.validate().unwrap_err(),
+            "object_version must be greater than zero"
+        );
+    }
 }

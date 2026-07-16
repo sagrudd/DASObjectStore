@@ -1,4 +1,5 @@
 use super::*;
+use crate::api::CapacityAdmissionDecision;
 use ring::rand::{SecureRandom, SystemRandom};
 use std::sync::Arc;
 
@@ -261,7 +262,24 @@ where
         capability
             .validate()
             .map_err(|error| upload_error(error.to_string()))?;
-        issue_application_upload_capability(
+        let reservation_id = format!("application-upload-{}", capability.capability_id);
+        let capacity_provider = self
+            .service_orchestrator
+            .capacity_provider()
+            .ok_or_else(|| {
+                upload_error("capacity admission is unavailable for application upload completion")
+            })?;
+        let admission = capacity_provider.admit_remote_upload(
+            capability.store_id.as_str(),
+            capability.expected_size_bytes,
+            &reservation_id,
+        )?;
+        if admission.decision != CapacityAdmissionDecision::Admitted {
+            return Err(upload_error(admission.message.unwrap_or_else(|| {
+                "application upload exceeds available capacity".to_string()
+            })));
+        }
+        let issue_result = issue_application_upload_capability(
             &self.application_upload_capability_path,
             PendingApplicationUploadCapability {
                 capability: capability.clone(),
@@ -275,9 +293,14 @@ where
                     expected_checksum: request.expected_checksum,
                     endpoint_url: request.endpoint_url,
                 },
+                capacity_reservation_id: Some(reservation_id.clone()),
             },
             now,
-        )?;
+        );
+        if let Err(error) = issue_result {
+            capacity_provider.release(&capability.store_id, &reservation_id)?;
+            return Err(error);
+        }
         Ok(ApplicationUploadCapabilityIssueResponse { capability })
     }
 
@@ -295,6 +318,15 @@ where
             &request.capability,
             now,
         )?;
+        let reservation_id = pending.capacity_reservation_id.clone().ok_or_else(|| {
+            upload_error("upload capability has no daemon-owned capacity reservation")
+        })?;
+        let capacity_provider = self
+            .service_orchestrator
+            .capacity_provider()
+            .ok_or_else(|| {
+                upload_error("capacity settlement is unavailable for application upload completion")
+            })?;
         let credentials =
             read_managed_credential_registry(&self.credential_registry_path, now_utc)?
                 .credentials
@@ -351,6 +383,9 @@ where
                         self.live_sqlite_path.clone(),
                         now_utc,
                     )
+                    .map_err(|error| error.to_string())?;
+                capacity_provider
+                    .commit(&pending.capability.store_id, &reservation_id)
                     .map_err(|error| error.to_string())
             },
         )?;

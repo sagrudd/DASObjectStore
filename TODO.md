@@ -244,6 +244,11 @@ completion.
     precedes catalogue commit; exact replay is idempotent; and a failed
     catalogue handoff releases the claim for safe retry. Live Garage and
     shared-SQLite appliance execution remain explicitly environment-gated.
+  - [x] Bind application upload-completion capability issuance to a
+    daemon-owned logical-capacity reservation. Rejection prevents issuance,
+    failed capability persistence releases admission, catalogue failure keeps
+    the reservation retryable, and successful verified catalogue publication
+    settles quota before the single-use capability is reported committed.
   - [x] Make the daemon-owned Garage endpoint an explicit, backward-compatible
     runtime setting instead of advertising the non-routable wildcard bind
     address. Packaged appliances retain the loopback default; container and VM

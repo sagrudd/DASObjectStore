@@ -53,8 +53,11 @@ host.
 The remote-upload completion workflow uses the real daemon request handler and
 durable session, identity, capability, credential, and replay registries with
 an injected provider/catalogue authority. It proves scope intersection,
-bounded capability issuance, forged-capability rejection, verify-before-
-commit ordering, exact-replay idempotency, and retry after catalogue failure.
+bounded capability issuance, daemon-owned logical-capacity reservation,
+forged-capability rejection, verify-before-commit ordering, quota settlement
+only after catalogue publication, exact-replay idempotency, and retry after
+catalogue failure. A capability without its persisted capacity reservation
+fails closed rather than publishing an uncharged object version.
 The evidence labels provider execution as ``surrogate_only``: it does not
 replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 

@@ -11,10 +11,11 @@ use dasobjectstore_core::{
 use dasobjectstore_daemon::{
     api::{
         ApplicationUploadCapabilityIssueRequest, ApplicationUploadCompletionOutcome,
-        ApplicationUploadCompletionRequest,
+        ApplicationUploadCompletionRequest, CapacityAdmissionDecision,
+        CapacityAdmissionRejectionReason, CapacityAdmissionRequest, CapacityAdmissionResponse,
     },
     runtime::{
-        upsert_application_identity, DaemonServiceRuntimeError,
+        upsert_application_identity, CapacityAdmissionProvider, DaemonServiceRuntimeError,
         FileBackedRemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionRecord,
         RemoteEasyconnectPairedSessionStore, RemoteUploadCompletionRecord,
         RemoteUploadProviderCompletion,
@@ -65,6 +66,12 @@ fn capability_completion_verifies_commits_replays_and_recovers_from_commit_failu
         .issue_application_upload_capability(issue_request("upload-1", "analysis/hello.txt"))
         .expect("capability issuance succeeds");
     assert_eq!(issued.capability.application_id, APPLICATION);
+    assert!(state
+        .capacity_events
+        .lock()
+        .expect("capacity")
+        .iter()
+        .any(|event| event.starts_with("admit:application-upload-upload-cap-")));
     assert_eq!(issued.capability.expected_size_bytes, 5);
     assert!(
         issued.capability.expires_at_unix_seconds - issued.capability.issued_at_unix_seconds <= 900
@@ -88,6 +95,12 @@ fn capability_completion_verifies_commits_replays_and_recovers_from_commit_failu
     assert_eq!(first.outcome, ApplicationUploadCompletionOutcome::Committed);
     assert_eq!(state.verifications.load(Ordering::SeqCst), 1);
     assert_eq!(state.commits.load(Ordering::SeqCst), 1);
+    assert!(state
+        .capacity_events
+        .lock()
+        .expect("capacity")
+        .iter()
+        .any(|event| event.starts_with("commit:application-upload-upload-cap-")));
 
     let replay = client
         .complete_application_upload(ApplicationUploadCompletionRequest {
@@ -114,6 +127,17 @@ fn capability_completion_verifies_commits_replays_and_recovers_from_commit_failu
             capability: retryable.capability.clone(),
         })
         .is_err());
+    assert_eq!(
+        state
+            .capacity_events
+            .lock()
+            .expect("capacity")
+            .iter()
+            .filter(|event| event.starts_with("commit:"))
+            .count(),
+        1,
+        "catalogue failure must leave logical capacity reserved for retry"
+    );
     let recovered = client
         .complete_application_upload(ApplicationUploadCompletionRequest {
             capability: retryable.capability,
@@ -129,6 +153,19 @@ fn capability_completion_verifies_commits_replays_and_recovers_from_commit_failu
         &["upload-1", "upload-2"]
     );
     assert!(state.saw_managed_credentials.load(Ordering::SeqCst));
+
+    state.reject_next_admission.store(true, Ordering::SeqCst);
+    assert!(client
+        .issue_application_upload_capability(issue_request(
+            "upload-over-quota",
+            "analysis/rejected.txt",
+        ))
+        .is_err());
+    assert_eq!(
+        state.committed_uploads.lock().expect("uploads").as_slice(),
+        &["upload-1", "upload-2"],
+        "capacity rejection must not publish or complete an upload"
+    );
 
     cleanup(&root);
 }
@@ -251,8 +288,10 @@ struct CompletionState {
     verifications: AtomicUsize,
     commits: AtomicUsize,
     fail_next_commit: AtomicBool,
+    reject_next_admission: AtomicBool,
     saw_managed_credentials: AtomicBool,
     committed_uploads: Mutex<Vec<&'static str>>,
+    capacity_events: Mutex<Vec<String>>,
 }
 
 struct AcceptanceOrchestrator {
@@ -262,6 +301,12 @@ struct AcceptanceOrchestrator {
 impl DaemonServiceOrchestrator for AcceptanceOrchestrator {
     fn application_upload_endpoint(&self) -> Option<String> {
         Some(ENDPOINT.to_string())
+    }
+
+    fn capacity_provider(&self) -> Option<Arc<dyn CapacityAdmissionProvider>> {
+        Some(Arc::new(AcceptanceCapacityProvider {
+            state: Arc::clone(&self.state),
+        }))
     }
 
     fn verify_application_upload_completion(
@@ -339,6 +384,82 @@ impl DaemonServiceOrchestrator for AcceptanceOrchestrator {
         _accepted_at_utc: &str,
     ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError> {
         Err(unsupported("provision"))
+    }
+}
+
+struct AcceptanceCapacityProvider {
+    state: Arc<CompletionState>,
+}
+
+impl CapacityAdmissionProvider for AcceptanceCapacityProvider {
+    fn admit(
+        &self,
+        request: CapacityAdmissionRequest,
+    ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+        let reservation_id = request
+            .client_request_id
+            .as_deref()
+            .expect("capacity reservation identity");
+        self.state
+            .capacity_events
+            .lock()
+            .expect("capacity")
+            .push(format!("admit:{reservation_id}"));
+        let rejected = self
+            .state
+            .reject_next_admission
+            .swap(false, Ordering::SeqCst);
+        Ok(CapacityAdmissionResponse {
+            store_id: StoreId::new(request.store_id).expect("store"),
+            decision: if rejected {
+                CapacityAdmissionDecision::Rejected
+            } else {
+                CapacityAdmissionDecision::Admitted
+            },
+            reason: rejected.then_some(CapacityAdmissionRejectionReason::LogicalQuota),
+            requested_bytes: request.requested_bytes,
+            copy_count: request.copy_count,
+            requires_ssd_staging: true,
+            logical_limit_bytes: Some(4096),
+            used_bytes: 0,
+            reserved_bytes: request.requested_bytes,
+            logical_available_bytes: Some(4096 - request.requested_bytes),
+            backend_free_bytes: 4096,
+            backend_available_bytes: 4096 - request.requested_bytes,
+            ssd_available_bytes: Some(4096),
+            required_backend_bytes: request.requested_bytes,
+            required_ssd_bytes: request.requested_bytes,
+            copy_amplification_basis_points: 10_000,
+            warning_threshold_basis_points: 8_000,
+            critical_threshold_basis_points: 9_500,
+            message: rejected.then(|| "logical quota exhausted".to_string()),
+        })
+    }
+
+    fn commit(
+        &self,
+        _store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.state
+            .capacity_events
+            .lock()
+            .expect("capacity")
+            .push(format!("commit:{reservation_id}"));
+        Ok(())
+    }
+
+    fn release(
+        &self,
+        _store_id: &StoreId,
+        reservation_id: &str,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        self.state
+            .capacity_events
+            .lock()
+            .expect("capacity")
+            .push(format!("release:{reservation_id}"));
+        Ok(())
     }
 }
 

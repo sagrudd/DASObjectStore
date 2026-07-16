@@ -8,6 +8,14 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.111.0 - 2026-07-16
+
+- Reserve daemon-owned logical capacity before issuing an application upload
+  completion capability, persist the reservation binding without credentials,
+  and settle it only after provider verification and catalogue publication.
+- Reject completion capabilities without capacity authority and keep a
+  catalogue-failed reservation available for the existing safe retry path.
+
 - Keep local Docker Garage listeners aligned with a non-default
   ``DASOBJECTSTORE_LOCAL_API_PORT`` and validate its four-port range.
 - Provision the local folder-profile binding before remote uploads so daemon

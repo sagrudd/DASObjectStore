@@ -18,6 +18,11 @@ static REGISTRY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub struct PendingApplicationUploadCapability {
     pub capability: UploadCompletionCapability,
     pub completion: RemoteUploadProviderCompletion,
+    /// Daemon-owned logical-capacity reservation. Older transient records may
+    /// omit it, but completion must fail closed rather than publish uncharged
+    /// data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity_reservation_id: Option<String>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -192,6 +197,7 @@ mod tests {
                 expected_checksum: format!("sha256:{}", "a".repeat(64)),
                 endpoint_url: "https://object.example".to_string(),
             },
+            capacity_reservation_id: Some(format!("application-upload-{id}")),
         }
     }
 
