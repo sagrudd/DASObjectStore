@@ -3363,8 +3363,8 @@ browser and appliance acceptance remain external validation gates.
   DASObjectStore login/session UI and product-owned routes as a compatibility
   implementation, not the target architecture. Add a host-neutral
   authentication adapter that consumes Monas standalone or Synoptikon
-  integrated authenticated context, using Monas ``0.5.0`` commit
-  ``8dd7bda1007f74975e9000756ccf85acba72ce4d`` and the Mnemosyne design
+  integrated authenticated context, using Monas ``0.6.0`` commit
+  ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020`` and the Mnemosyne design
   language at ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` as current pins.
   Preserve daemon-owned storage authorization, local OS/group/admin policy,
   remote pairing approval, CSRF protection, audit identity, and logout/session
@@ -3417,13 +3417,16 @@ browser and appliance acceptance remain external validation gates.
     administration, EasyConnect, and ObjectStore browsing; host roles never
     grant storage authority. Synoptikon remains fail-closed pending an explicit
     central-to-local identity mapping.
+  - [x] Complete the remaining Monas host evidence against ``0.6.0`` commit
+    ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. Mounted-router tests prove
+    CSRF wiring, and the real browser proves ordinary/admin OS-policy access,
+    current product provenance, and expired-session return to Monas login.
   - [ ] Mount the typed adapter in the actual Synoptikon host when that source
     and deployment are available; meanwhile keep the fail-closed surrogate
     router contract in local acceptance. Prove deep-link/login/logout/expiry,
     CSRF, EasyConnect, and administrator/ordinary-user policy equivalence in
-    a real browser for Synoptikon; retain expiry and policy-role browser checks
-    as final Monas evidence. CSRF enforcement is now accepted at the shared
-    router and Yew request boundary; a browser run still proves host wiring.
+    a real browser for Synoptikon. The corresponding Monas expiry, CSRF, and
+    policy-role evidence is complete.
   - [ ] Migrate compatible standalone identities/sessions, prove package
     upgrade/rollback and recovery, then remove the intrinsic Yew login,
     password/session issuer APIs, and product login routes in one rollback-safe

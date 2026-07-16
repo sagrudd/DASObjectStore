@@ -14,6 +14,9 @@ agreement before landing.
 - Derive groups and sudo-administrator status afresh from the OS and ignore
   host roles for storage authorization. Synoptikon identities continue to fail
   closed until an explicit central-to-local identity mapping is configured.
+- Pin Monas ``0.6.0`` commit ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``;
+  mounted-router and browser acceptance cover CSRF wiring, ordinary/admin OS
+  policy, current version provenance, and expired-session login return.
 
 ## 0.95.0 - 2026-07-16
 

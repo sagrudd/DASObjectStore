@@ -1236,11 +1236,11 @@ preferred in-process mount because the verified actor cannot be serialized or
 forged as a forwarding header. The legacy header must remain disabled for a
 DASObjectStore mount.
 
-That mount is implemented by Monas ``0.5.0`` commit
-``8dd7bda1007f74975e9000756ccf85acba72ce4d``. HTTP contract tests cover live
-session access, missing intrinsic DAS login, and immediate logout revocation.
-Real-browser expiry and CSRF evidence remains a release gate rather than being
-inferred from these router tests.
+That mount is implemented by Monas ``0.6.0`` commit
+``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. HTTP contract tests cover live
+session access, missing intrinsic DAS login, immediate logout revocation, and
+CSRF rejection/acceptance. Real-browser evidence covers ordinary and
+sudo-administrator OS policy plus expired-session return to Monas login.
 
 The real Trunk bundle has also passed local in-app browser acceptance through
 Monas: unauthenticated deep links return through host login, the authenticated

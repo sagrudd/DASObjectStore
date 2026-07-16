@@ -113,7 +113,7 @@ the product handler runs.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 
-Monas ``0.5.0`` commit ``8dd7bda1007f74975e9000756ccf85acba72ce4d``
+Monas ``0.6.0`` commit ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``
 mounts this router directly at ``/products/dasobjectstore``. Both projects pin
 Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
 store is type- and schema-identical in a clean checkout.

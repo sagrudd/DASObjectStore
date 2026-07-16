@@ -1687,7 +1687,7 @@ but retaining it permanently would create a competing Mnemosyne identity and
 session authority. The target uses a host-injected, non-secret actor/session
 context while the DAS daemon continues to own storage authorization, local
 OS/group/admin qualification, object policy, pairing approval, and audit.
-Monas ``0.5.0`` commit ``8dd7bda1007f74975e9000756ccf85acba72ce4d`` and the
+Monas ``0.6.0`` commit ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020`` and the
 Mnemosyne design language commit
 ``5539df8f662a78ebdf7cf4c868d71831380c8cfd`` are the initial compatibility
 pins; Synoptikon must satisfy the same host-neutral contract.
@@ -1770,6 +1770,8 @@ subject is resolved in the appliance-local OS namespace across dashboards,
 administrator actions, EasyConnect, and ObjectStore browsing. Authorization is
 derived only from current local groups and sudo status, never host roles.
 Synoptikon identities remain fail-closed until an explicit mapping exists.
+The pinned Monas host additionally passes mounted CSRF wiring and real-browser
+ordinary/admin OS-policy and expired-session return checks.
 
 Post-MVP work may include:
 
