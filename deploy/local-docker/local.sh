@@ -713,8 +713,8 @@ PY
     }
     trap cleanup_completion_smoke EXIT
     output="$(docker_compose exec -T dasobjectstored \
-        dasobjectstore-remote --config "$config_container" upload \
-        --store "$STORE_ID" --source "$source_container" --key "$key" \
+        dasobjectstore-remote --config "$config_container" upload "$STORE_ID" \
+        --source "$source_container" --key "$key" \
         --submit-to-daemon --daemon-socket /run/dasobjectstore/dasobjectstored.sock)"
     printf '%s\n' "$output" | grep -q 'state=Complete' || die \
         "remote upload did not reach daemon-owned terminal completion"
