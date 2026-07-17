@@ -44,7 +44,7 @@ flate2 = "1.1.5"
 js-sys = "0.3.83"
 plist = "1"
 prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "c1dd477270e3ab34f5444e2c0565af845a930a70" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "c1dd477270e3ab34f5444e2c0565af845a930a70" }
+prosopikon-yew = { path = "../prosopikon/crates/prosopikon-yew" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
