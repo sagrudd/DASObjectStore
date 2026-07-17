@@ -132,6 +132,7 @@ pub(super) fn slot_is_hdd(slot: &EnclosureDriveSlotResponse) -> bool {
         .is_some_and(|role| role.to_ascii_lowercase().starts_with("hdd"))
 }
 
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn enclosure_card_summaries(view: &EnclosuresPageResponse) -> Vec<EnclosureCardSummary> {
     view.enclosures
         .iter()
@@ -180,14 +181,56 @@ pub struct ObjectStoreCardSummary {
     pub access: String,
     pub policy: String,
     pub capacity: String,
+    pub capacity_used_tib: Option<String>,
     pub capacity_status: String,
     pub objects: String,
+    pub object_count: usize,
     pub writer_group: String,
     pub endpoint: String,
     pub upload_allowed: bool,
     pub warning_count: usize,
     pub last_ingested: String,
+    pub last_ingested_at_utc: Option<String>,
     pub writer_policy: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObjectStoreSortColumn {
+    ObjectStore,
+    Capacity,
+    Objects,
+    LastActivity,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObjectStoreSort {
+    pub column: ObjectStoreSortColumn,
+    pub descending: bool,
+}
+
+impl Default for ObjectStoreSort {
+    fn default() -> Self {
+        Self {
+            column: ObjectStoreSortColumn::ObjectStore,
+            descending: false,
+        }
+    }
+}
+
+impl ObjectStoreSort {
+    pub fn select(self, column: ObjectStoreSortColumn) -> Self {
+        if self.column == column {
+            Self {
+                column,
+                descending: !self.descending,
+            }
+        } else {
+            Self {
+                column,
+                descending: !matches!(column, ObjectStoreSortColumn::ObjectStore),
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

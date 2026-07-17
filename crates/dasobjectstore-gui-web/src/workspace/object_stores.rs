@@ -12,6 +12,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
     let configure_state = use_state(|| ObjectStoreConfigureFormState::from_view(None));
     let subobject_state = use_state(|| SubObjectFormState::from_view(None));
     let pane_mode = use_state(|| TaskPaneMode::Closed);
+    let registry_sort = use_state(ObjectStoreSort::default);
     let create_trigger_ref = use_node_ref();
     let refresh_nonce = use_state(|| 0_u64);
     let browser_endpoint = use_state(String::new);
@@ -90,6 +91,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 configure_state,
                 subobject_state,
                 pane_mode,
+                registry_sort,
                 create_trigger_ref,
                 refresh_nonce,
                 props.api_base_path.clone(),
@@ -112,6 +114,7 @@ pub(super) fn render_object_stores_state(
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
     subobject_state: UseStateHandle<SubObjectFormState>,
     pane_mode: UseStateHandle<TaskPaneMode>,
+    registry_sort: UseStateHandle<ObjectStoreSort>,
     create_trigger_ref: NodeRef,
     refresh_nonce: UseStateHandle<u64>,
     api_base_path: String,
@@ -140,6 +143,7 @@ pub(super) fn render_object_stores_state(
                 configure_state,
                 subobject_state,
                 pane_mode,
+                registry_sort,
                 create_trigger_ref,
                 refresh_nonce,
                 api_base_path,
@@ -177,6 +181,7 @@ pub(super) fn render_object_store_inventory(
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
     subobject_state: UseStateHandle<SubObjectFormState>,
     pane_mode: UseStateHandle<TaskPaneMode>,
+    registry_sort: UseStateHandle<ObjectStoreSort>,
     create_trigger_ref: NodeRef,
     refresh_nonce: UseStateHandle<u64>,
     api_base_path: String,
@@ -200,12 +205,13 @@ pub(super) fn render_object_store_inventory(
             pane_mode.set(TaskPaneMode::Create);
         })
     };
-    let summaries = object_store_card_summaries(view);
+    let mut summaries = object_store_card_summaries(view);
+    sort_object_store_summaries(&mut summaries, *registry_sort);
     html! {
         <div class="dos-objectstores-registry">
             <div class="dos-objectstores-toolbar" aria-label="ObjectStore registry actions">
                 <div>
-                    <strong>{ format!("{} ObjectStores", summaries.len()) }</strong>
+                    <strong>{ format!("{} {}", summaries.len(), if summaries.len() == 1 { "ObjectStore" } else { "ObjectStores" }) }</strong>
                     <span>{ "Select a store to inspect evidence or begin a scoped action." }</span>
                 </div>
                 <button
@@ -218,7 +224,13 @@ pub(super) fn render_object_store_inventory(
                     { "Create ObjectStore" }
                 </button>
             </div>
-            { render_object_store_registry_table(&summaries, &*pane_mode, pane_mode.clone()) }
+            { render_object_store_registry_table(
+                &summaries,
+                &*pane_mode,
+                pane_mode.clone(),
+                *registry_sort,
+                registry_sort,
+            ) }
             { render_object_store_task_surface(
                 view,
                 &summaries,
@@ -254,18 +266,20 @@ fn render_object_store_registry_table(
     stores: &[ObjectStoreCardSummary],
     pane_mode: &TaskPaneMode,
     set_pane_mode: UseStateHandle<TaskPaneMode>,
+    sort: ObjectStoreSort,
+    set_sort: UseStateHandle<ObjectStoreSort>,
 ) -> Html {
     html! {
         <div class="dos-objectstores-table-wrap">
             <table class="dos-objectstores-table">
                 <thead>
                     <tr>
-                        <th scope="col">{ "ObjectStore" }</th>
+                        { object_store_sort_header("ObjectStore", ObjectStoreSortColumn::ObjectStore, sort, set_sort.clone()) }
                         <th scope="col">{ "Purpose" }</th>
                         <th scope="col">{ "State" }</th>
-                        <th scope="col">{ "Capacity" }</th>
-                        <th scope="col">{ "Objects" }</th>
-                        <th scope="col">{ "Last activity" }</th>
+                        { object_store_sort_header("Capacity", ObjectStoreSortColumn::Capacity, sort, set_sort.clone()) }
+                        { object_store_sort_header("Objects", ObjectStoreSortColumn::Objects, sort, set_sort.clone()) }
+                        { object_store_sort_header("Last activity", ObjectStoreSortColumn::LastActivity, sort, set_sort) }
                         <th scope="col"><span class="dos-visually-hidden">{ "Open" }</span></th>
                     </tr>
                 </thead>
@@ -312,6 +326,45 @@ fn render_object_store_registry_table(
                 </tbody>
             </table>
         </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn object_store_sort_header(
+    label: &'static str,
+    column: ObjectStoreSortColumn,
+    sort: ObjectStoreSort,
+    set_sort: UseStateHandle<ObjectStoreSort>,
+) -> Html {
+    let active = sort.column == column;
+    let aria_sort = active.then_some(if sort.descending {
+        "descending"
+    } else {
+        "ascending"
+    });
+    let next = sort.select(column);
+    let direction = if next.descending {
+        "descending"
+    } else {
+        "ascending"
+    };
+    html! {
+        <th scope="col" aria-sort={aria_sort}>
+            <button
+                type="button"
+                class="dos-objectstores-sort"
+                aria-label={format!("Sort by {label}, {direction}")}
+                title={format!("Sort by {label}, {direction}")}
+                onclick={Callback::from(move |_| set_sort.set(next))}
+            >
+                <span>{ label }</span>
+                if active {
+                    <span aria-hidden="true" class="dos-objectstores-sort-indicator">
+                        { if sort.descending { "↓" } else { "↑" } }
+                    </span>
+                }
+            </button>
+        </th>
     }
 }
 

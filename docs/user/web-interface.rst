@@ -377,9 +377,10 @@ The redesigned Enclosures page loads its inventory from
 session issued at login. It shows explicit loading, empty-inventory,
 permission-denied, and transport-error states instead of presenting fixture
 hardware as though it were live. When enclosure data is present, the page
-renders cards with connection topology, mount path, drive counts, capacity,
-warning count, and health, plus a selected detail panel for enclosure identity
-and bay membership when the daemon provides it.
+leads with a compact resource-index table showing identity, health, mounted
+drive count, free/total capacity, connection, and last-seen evidence. Selecting
+the name or ``Open`` opens a keyboard-accessible detail pane with hardware
+identity, connection and capacity evidence, bay membership, and warnings.
 
 The current Enclosures API aggregator reads the same managed SSD and HDD roots
 as the Home dashboard. HDD roots are included only when their
@@ -389,21 +390,21 @@ slots from those root markers; managed disk IDs beginning with ``qnap-`` are
 presented as a QNAP TL-D800C enclosure until the deeper physical bay probe is
 available from the daemon.
 
-Selected enclosure detail panels render each SSD and HDD member as a drive card
+Selected enclosure detail panes render each SSD and HDD member as a drive card
 with bay label, role assignment, capacity, mount path, device path, filesystem,
 health, SMART warning count, and the daemon-managed actions currently available
 for that member. These controls are informational until the administrator
 workflow routes submit confirmed daemon jobs.
 
-The ``Add enclosure`` card is exposed only when the dashboard payload advertises
+The toolbar's ``Add enclosure`` action is enabled only when the dashboard payload advertises
 a valid unprepared DAS enclosure candidate for the authenticated administrator
 session. Existing managed DAS roots are inventory, not preparation candidates:
 if DASObjectStore already knows the enclosure, the Web UI must not show a
 preparation workflow for it. Deliberate destructive re-preparation, removal, or
 replacement of an existing enclosure is a CLI-only administrative workflow.
 
-When the affordance is ready, the browser presents a preparation wizard for the
-selected enclosure. The wizard derives candidate SSD and HDD devices from the
+When the affordance is ready, the browser presents the preparation wizard in a
+transient task pane over the inventory. The wizard derives candidate SSD and HDD devices from the
 live enclosure detail payload, asks the administrator to choose SSD landing
 media and HDD settlement media, records mount-root, filesystem, and optional
 owner inputs, and shows a destructive data-loss review before any plan is
@@ -477,6 +478,15 @@ count, and last activity. Selecting a row opens a keyboard-accessible detail
 pane with storage evidence, copy and placement policy, access and writer-group
 readiness, endpoint state, warnings, and contextual actions. Technical detail
 is retained without forcing every operator to scan it in every row.
+
+``ObjectStore``, ``Capacity``, ``Objects``, and ``Last activity`` column
+headings are keyboard-operable sort controls. ObjectStore order starts
+alphabetically; the evidence columns start with highest capacity/count or most
+recent activity. Repeated activation reverses the order. Capacity and object
+count are sorted from raw numeric evidence rather than their formatted labels,
+and unavailable capacity or unrecorded activity remains after known values in
+both directions. The active heading exposes its ascending/descending state to
+assistive technology.
 
 Registry fields come from the daemon-owned
 ``/var/lib/dasobjectstore/stores.json`` on Linux unless the packaged environment

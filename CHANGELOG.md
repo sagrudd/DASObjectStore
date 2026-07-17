@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.113.0 - 2026-07-17
+
+- Add accessible client-side sorting to the ObjectStore resource index for
+  identity, numeric capacity, object count, and last activity, keeping missing
+  evidence after measured values in both directions.
+- Recast Enclosures as a compact inventory-first resource index with transient
+  hardware-detail and daemon-owned preparation panes while preserving every
+  destructive-format safeguard and job control.
+
 ## 0.112.0 - 2026-07-17
 
 - Recast the ObjectStores Web workspace as a compact inventory-first resource

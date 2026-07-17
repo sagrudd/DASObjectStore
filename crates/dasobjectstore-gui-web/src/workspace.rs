@@ -10,14 +10,14 @@ use crate::api::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
-    AddEnclosureAffordanceResponse, AdminJobCancelRequest, AdminJobCancelResponse,
-    AdminJobStatusResponse, AdminJobSummary, AssignLocalUserToGroupRequest,
-    CreateLocalGroupRequest, CreateObjectStoreRequest, CreateObjectStoreResponse,
-    DasEnclosureCardResponse, DasEnclosureDetailResponse, EnclosurePrepareHddDevice,
-    EnclosurePrepareRequest, EnclosurePrepareResponse, GuiActionPlanRequest, GuiActionPlanResponse,
-    LocalGroupAdminResponse, ObjectStoreCardResponse, ObjectStoreIngestPolicyRequest,
-    ObjectStoreIngestPolicyResponse, RemoteUploadIngressPolicyResponse,
-    RemoteUploadObjectStoreResponse, RemoteUploadWorkspaceResponse,
+    AdminJobCancelRequest, AdminJobCancelResponse, AdminJobStatusResponse, AdminJobSummary,
+    AssignLocalUserToGroupRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+    CreateObjectStoreResponse, DasEnclosureCardResponse, DasEnclosureDetailResponse,
+    EnclosurePrepareHddDevice, EnclosurePrepareRequest, EnclosurePrepareResponse,
+    GuiActionPlanRequest, GuiActionPlanResponse, LocalGroupAdminResponse, ObjectStoreCardResponse,
+    ObjectStoreIngestPolicyRequest, ObjectStoreIngestPolicyResponse,
+    RemoteUploadIngressPolicyResponse, RemoteUploadObjectStoreResponse,
+    RemoteUploadWorkspaceResponse,
 };
 #[cfg(all(test, not(target_arch = "wasm32")))]
 use crate::api::{

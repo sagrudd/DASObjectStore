@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(target_arch = "wasm32")]
+use crate::components::{TaskPane, TaskPaneMode};
+
 #[cfg(any(target_arch = "wasm32", test))]
 mod jobs;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -12,6 +15,8 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
     let selected_id = use_state(String::new);
     let enclosures_state = use_state(|| ApiLoadState::<EnclosuresPageResponse>::Loading);
     let wizard_state = use_state(EnclosureWizardState::default);
+    let pane_mode = use_state(|| TaskPaneMode::Closed);
+    let prepare_trigger_ref = use_node_ref();
 
     {
         let api_path = api_path.clone();
@@ -21,16 +26,7 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
             wasm_bindgen_futures::spawn_local(async move {
                 enclosures_state.set(page_load_state_from_result(
                     crate::api::get_enclosures_dashboard(&path).await,
-                    |view| {
-                        view.enclosures.is_empty().then(|| {
-                            view.warnings
-                                .first()
-                                .map(|warning| warning.message.clone())
-                                .unwrap_or_else(|| {
-                                    "No supported DAS enclosures reported.".to_string()
-                                })
-                        })
-                    },
+                    |_| None,
                 ));
             });
             || ()
@@ -44,7 +40,14 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
                 title="Enclosures"
                 summary="Physical shelves and landing media grouped for operator review."
             />
-            { render_enclosures_state(&*enclosures_state, selected_id, wizard_state, props.api_base_path.clone()) }
+            { render_enclosures_state(
+                &*enclosures_state,
+                selected_id,
+                wizard_state,
+                pane_mode,
+                prepare_trigger_ref,
+                props.api_base_path.clone(),
+            ) }
         </section>
     }
 }
@@ -54,33 +57,27 @@ pub(super) fn render_enclosures_state(
     state: &ApiLoadState<EnclosuresPageResponse>,
     selected_id: UseStateHandle<String>,
     wizard_state: UseStateHandle<EnclosureWizardState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    prepare_trigger_ref: NodeRef,
     api_base_path: String,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
-            <div class="dos-two-column">
-                <div class="dos-card-list">
-                    { render_add_enclosure_card(
-                        &AddEnclosureAffordanceResponse::checking(),
-                        None,
-                        wizard_state,
-                        api_base_path,
-                    ) }
-                    { render_enclosures_state_message(
-                        "Loading",
-                        "Loading enclosure inventory",
-                        "The Web console is requesting daemon-backed DAS enclosure, drive, mount, capacity, and warning state.",
-                    ) }
-                </div>
-                <section class="dos-card dos-detail-panel">
-                    <span class="dos-card-label">{ "Enclosure detail" }</span>
-                    <h2>{ "Waiting for daemon inventory" }</h2>
-                    <p>{ "Drive cards, SMART warnings, bay mapping, mount state, and administrator actions will appear here once a supported enclosure is detected." }</p>
-                </section>
-            </div>
+            { render_enclosures_state_message(
+                "Loading",
+                "Loading enclosure inventory",
+                "The Web console is requesting daemon-backed DAS enclosure, drive, mount, capacity, and warning state.",
+            ) }
         },
         ApiLoadState::Success(view) | ApiLoadState::StaleData { value: view, .. } => {
-            render_enclosure_inventory(view, selected_id, wizard_state, api_base_path)
+            render_enclosure_inventory(
+                view,
+                selected_id,
+                wizard_state,
+                pane_mode,
+                prepare_trigger_ref,
+                api_base_path,
+            )
         }
         ApiLoadState::Empty(message) => {
             render_enclosures_state_message("Inventory", "No live enclosures reported yet", message)
@@ -101,9 +98,11 @@ pub(super) fn render_enclosure_inventory(
     view: &EnclosuresPageResponse,
     selected_id: UseStateHandle<String>,
     wizard_state: UseStateHandle<EnclosureWizardState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    prepare_trigger_ref: NodeRef,
     api_base_path: String,
 ) -> Html {
-    let active_id = if selected_id.is_empty() {
+    let candidate_id = if selected_id.is_empty() {
         view.selected_enclosure_id
             .as_deref()
             .or_else(|| {
@@ -117,23 +116,213 @@ pub(super) fn render_enclosure_inventory(
         (*selected_id).clone()
     };
 
+    let candidate = enclosure_prepare_candidate(view, &candidate_id);
+    let can_prepare = view.add_enclosure.enabled
+        && candidate
+            .as_ref()
+            .is_some_and(EnclosurePrepareCandidate::ready);
+    let open_prepare = {
+        let wizard_state = wizard_state.clone();
+        let pane_mode = pane_mode.clone();
+        Callback::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            next.open = true;
+            next.error = None;
+            clear_enclosure_job_monitor(&mut next);
+            wizard_state.set(next);
+            pane_mode.set(TaskPaneMode::Create);
+        })
+    };
+
     html! {
-        <div class="dos-two-column">
-            <div class="dos-card-list">
-                if view.add_enclosure.enabled {
-                    { render_add_enclosure_card(
-                        &view.add_enclosure,
-                        enclosure_prepare_candidate(view, &active_id),
-                        wizard_state,
-                        api_base_path,
-                    ) }
-                }
-                { for enclosure_card_summaries(view).into_iter().map(|summary| {
-                    render_enclosure_card(summary, &active_id, selected_id.clone())
-                }) }
+        <div class="dos-enclosures-registry">
+            <div class="dos-enclosures-toolbar" aria-label="Enclosure registry actions">
+                <div>
+                    <strong>{ format!("{} {}", view.enclosures.len(), if view.enclosures.len() == 1 { "enclosure" } else { "enclosures" }) }</strong>
+                    <span>{ "Select an enclosure to inspect hardware evidence and bay state." }</span>
+                </div>
+                <button
+                    ref={prepare_trigger_ref.clone()}
+                    type="button"
+                    class="dos-enclosures-primary-action"
+                    disabled={!can_prepare}
+                    onclick={open_prepare}
+                >
+                    { view.add_enclosure.label.clone() }
+                </button>
             </div>
-            { render_enclosure_detail_panel(view, &active_id) }
+            { render_enclosure_registry_table(view, &*pane_mode, pane_mode.clone(), selected_id.clone()) }
+            { render_enclosure_task_surface(
+                view,
+                &candidate_id,
+                candidate,
+                wizard_state,
+                pane_mode,
+                prepare_trigger_ref,
+                api_base_path,
+            ) }
         </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_registry_table(
+    view: &EnclosuresPageResponse,
+    pane_mode: &TaskPaneMode,
+    set_pane_mode: UseStateHandle<TaskPaneMode>,
+    selected_id: UseStateHandle<String>,
+) -> Html {
+    html! {
+        <div class="dos-enclosures-table-wrap">
+            <table class="dos-enclosures-table">
+                <thead>
+                    <tr>
+                        <th scope="col">{ "Enclosure" }</th>
+                        <th scope="col">{ "State" }</th>
+                        <th scope="col">{ "Drives" }</th>
+                        <th scope="col">{ "Capacity" }</th>
+                        <th scope="col">{ "Connection" }</th>
+                        <th scope="col">{ "Last seen" }</th>
+                        <th scope="col"><span class="dos-visually-hidden">{ "Open" }</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    if view.enclosures.is_empty() {
+                        <tr class="dos-enclosures-empty">
+                            <td colspan="7">
+                                <strong>{ "No enclosures detected" }</strong>
+                                <span>{ "Supported hardware will appear here when the daemon reports it." }</span>
+                            </td>
+                        </tr>
+                    }
+                    { for view.enclosures.iter().map(|enclosure| {
+                        let enclosure_id = enclosure.enclosure_id.clone();
+                        let open = matches!(pane_mode, TaskPaneMode::Edit(context) if context == &format!("inspect:{enclosure_id}"));
+                        let open_enclosure = {
+                            let set_pane_mode = set_pane_mode.clone();
+                            let selected_id = selected_id.clone();
+                            let enclosure_id = enclosure_id.clone();
+                            Callback::from(move |_| {
+                                selected_id.set(enclosure_id.clone());
+                                set_pane_mode.set(TaskPaneMode::Edit(format!("inspect:{enclosure_id}")));
+                            })
+                        };
+                        html! {
+                            <tr data-selected={open.to_string()} data-enclosure-id={enclosure.enclosure_id.clone()}>
+                                <th scope="row">
+                                    <button
+                                        type="button"
+                                        class="dos-enclosures-name"
+                                        aria-expanded={open.to_string()}
+                                        aria-controls="dos-task-pane-title"
+                                        onclick={open_enclosure.clone()}
+                                    >
+                                        <strong>{ enclosure.display_name.clone() }</strong>
+                                        <span>{ enclosure.enclosure_id.clone() }</span>
+                                    </button>
+                                </th>
+                                <td><span class="dos-enclosures-state" data-state={enclosure.health.clone()}>{ labelize_state(&enclosure.health) }</span></td>
+                                <td>{ format!("{} / {} mounted", enclosure.drive_count.mounted, enclosure.drive_count.total) }</td>
+                                <td>{ format!("{} TiB free / {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</td>
+                                <td>{ format!("{} · {} · {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</td>
+                                <td>{ enclosure.last_seen_at_utc.clone() }</td>
+                                <td><button type="button" class="dos-enclosures-open" onclick={open_enclosure}>{ "Open" }</button></td>
+                            </tr>
+                        }
+                    }) }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
+fn render_enclosure_task_surface(
+    view: &EnclosuresPageResponse,
+    candidate_id: &str,
+    candidate: Option<EnclosurePrepareCandidate>,
+    wizard_state: UseStateHandle<EnclosureWizardState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+    prepare_trigger_ref: NodeRef,
+    api_base_path: String,
+) -> Html {
+    let close = {
+        let wizard_state = wizard_state.clone();
+        let pane_mode = pane_mode.clone();
+        Callback::<()>::from(move |_| {
+            let mut next = (*wizard_state).clone();
+            next.open = false;
+            wizard_state.set(next);
+            pane_mode.set(TaskPaneMode::Closed);
+        })
+    };
+
+    match &*pane_mode {
+        TaskPaneMode::Closed | TaskPaneMode::Review => Html::default(),
+        TaskPaneMode::Create => html! {
+            <TaskPane
+                mode={TaskPaneMode::Create}
+                title={view.add_enclosure.label.clone()}
+                selected_context={Some(format!("Daemon-planned preparation · {candidate_id}"))}
+                return_focus_to={Some(prepare_trigger_ref)}
+                on_close={close}
+            >
+                { render_enclosure_wizard(candidate, wizard_state, api_base_path) }
+            </TaskPane>
+        },
+        TaskPaneMode::Edit(context) => {
+            let enclosure_id = context.trim_start_matches("inspect:");
+            let Some(enclosure) = view
+                .enclosures
+                .iter()
+                .find(|enclosure| enclosure.enclosure_id == enclosure_id)
+            else {
+                return Html::default();
+            };
+            let detail = view
+                .details
+                .as_ref()
+                .filter(|detail| detail.enclosure_id == enclosure_id);
+            let can_prepare = view.add_enclosure.enabled
+                && candidate
+                    .as_ref()
+                    .is_some_and(EnclosurePrepareCandidate::ready);
+            let open_prepare = {
+                let wizard_state = wizard_state.clone();
+                let pane_mode = pane_mode.clone();
+                Callback::from(move |_| {
+                    let mut next = (*wizard_state).clone();
+                    next.open = true;
+                    next.error = None;
+                    clear_enclosure_job_monitor(&mut next);
+                    wizard_state.set(next);
+                    pane_mode.set(TaskPaneMode::Create);
+                })
+            };
+            html! {
+                <TaskPane
+                    mode={TaskPaneMode::Edit(enclosure_id.to_string())}
+                    title={enclosure.display_name.clone()}
+                    selected_context={Some(enclosure.enclosure_id.clone())}
+                    return_focus_to={Some(prepare_trigger_ref)}
+                    on_close={close}
+                >
+                    <div class="dos-enclosures-detail">
+                        { if let Some(detail) = detail {
+                            render_enclosure_detail(enclosure, detail)
+                        } else {
+                            render_enclosure_summary_detail(enclosure)
+                        } }
+                        <div class="dos-enclosures-pane-actions">
+                            <button type="button" disabled={!can_prepare} onclick={open_prepare}>
+                                { view.add_enclosure.label.clone() }
+                            </button>
+                        </div>
+                    </div>
+                </TaskPane>
+            }
+        }
     }
 }
 
@@ -183,76 +372,6 @@ impl Default for EnclosureWizardState {
             cancel_error: None,
             error: None,
         }
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn render_add_enclosure_card(
-    affordance: &AddEnclosureAffordanceResponse,
-    candidate: Option<EnclosurePrepareCandidate>,
-    wizard_state: UseStateHandle<EnclosureWizardState>,
-    api_base_path: String,
-) -> Html {
-    let state_label = match affordance.state.as_str() {
-        "ready" => "Ready",
-        "already_managed" => "Already managed",
-        "admin_required" => "Admin required",
-        "unsupported_or_absent" => "No supported DAS",
-        "daemon_unavailable" => "Daemon not ready",
-        "checking" => "Checking",
-        _ => "Unavailable",
-    };
-    let body = affordance
-        .blocked_reason
-        .as_deref()
-        .unwrap_or("Administrator workflow: detect supported DAS hardware, identify SSD/HDD media, review format risk, then submit the daemon preparation job.");
-    let candidate_ready = candidate
-        .as_ref()
-        .is_some_and(EnclosurePrepareCandidate::ready);
-    let can_open = affordance.enabled && candidate_ready;
-    let open_wizard = {
-        let wizard_state = wizard_state.clone();
-        Callback::from(move |_| {
-            let mut next = (*wizard_state).clone();
-            next.open = true;
-            next.error = None;
-            clear_enclosure_job_monitor(&mut next);
-            wizard_state.set(next);
-        })
-    };
-
-    html! {
-        <section
-            class={classes!(
-                "dos-card",
-                "dos-create-card",
-                affordance.enabled.then_some("is-enabled"),
-                (!affordance.enabled).then_some("is-disabled"),
-            )}
-            data-action={affordance.action_kind.clone()}
-            data-state={affordance.state.clone()}
-            aria-disabled={(!affordance.enabled).to_string()}
-        >
-            <span class="dos-create-mark">{ "+" }</span>
-            <h2>{ affordance.label.clone() }</h2>
-            <p>{ body }</p>
-            <p class="dos-create-next-step">{ affordance.next_step.clone() }</p>
-            <button
-                class="dos-secondary-action"
-                type="button"
-                disabled={!can_open}
-                onclick={open_wizard}
-            >
-                { "Plan preparation" }
-            </button>
-            <div class="dos-card-row dos-create-gates">
-                <span class="dos-status-pill">{ state_label }</span>
-                <span>{ if affordance.administrator { "admin verified" } else { "admin pending" } }</span>
-                <span>{ if affordance.supported_enclosure_detected { "supported DAS visible" } else { "DAS not detected" } }</span>
-                <span>{ if affordance.daemon_ready { "daemon ready" } else { "daemon pending" } }</span>
-            </div>
-            { render_enclosure_wizard(candidate, wizard_state, api_base_path) }
-        </section>
     }
 }
 
@@ -312,14 +431,6 @@ pub(super) fn render_enclosure_wizard(
         && !selected_hdds.is_empty()
         && confirmed;
 
-    let close = {
-        let wizard_state = wizard_state.clone();
-        Callback::from(move |_| {
-            let mut next = (*wizard_state).clone();
-            next.open = false;
-            wizard_state.set(next);
-        })
-    };
     let on_ssd = {
         let wizard_state = wizard_state.clone();
         Callback::from(move |event: Event| {
@@ -435,7 +546,6 @@ pub(super) fn render_enclosure_wizard(
             <header class="dos-wizard-header">
                 <span class="dos-card-label">{ "Preparation wizard" }</span>
                 <h3>{ format!("Prepare {}", candidate.display_name) }</h3>
-                <button type="button" onclick={close}>{ "Close" }</button>
             </header>
             <ol class="dos-wizard-steps">
                 <li>{ "Supported DAS detected from daemon inventory." }</li>
@@ -746,87 +856,56 @@ where
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn render_enclosure_card(
-    summary: EnclosureCardSummary,
-    active_id: &str,
-    selected_id: UseStateHandle<String>,
-) -> Html {
-    let is_selected = summary.id == active_id;
-    let enclosure_id = summary.id.clone();
-    html! {
-        <button
-            type="button"
-            class={classes!("dos-card", "dos-enclosure-card", is_selected.then_some("is-selected"))}
-            data-enclosure-id={summary.id.clone()}
-            aria-pressed={is_selected.to_string()}
-            onclick={Callback::from(move |_| selected_id.set(enclosure_id.clone()))}
-        >
-            <div class="dos-card-row">
-                <span class="dos-card-label">{ summary.label }</span>
-                <span class="dos-status-pill">{ summary.health }</span>
-            </div>
-            <strong>{ summary.name }</strong>
-            <p>{ summary.drives }</p>
-            <p>{ summary.capacity }</p>
-            <p>{ format!("{} warning(s) · {}", summary.warning_count, summary.mount_path) }</p>
-        </button>
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn render_enclosure_detail_panel(
-    view: &EnclosuresPageResponse,
-    active_id: &str,
-) -> Html {
-    let enclosure = view
-        .enclosures
-        .iter()
-        .find(|enclosure| enclosure.enclosure_id == active_id);
-    let detail = view
-        .details
-        .as_ref()
-        .filter(|detail| detail.enclosure_id == active_id);
-
-    html! {
-        <section class="dos-card dos-detail-panel">
-            { match (enclosure, detail) {
-                (Some(enclosure), Some(detail)) => render_enclosure_detail(enclosure, detail),
-                (Some(enclosure), None) => render_enclosure_summary_detail(enclosure),
-                _ => html! {
-                    <>
-                        <span class="dos-card-label">{ "Enclosure detail" }</span>
-                        <h2>{ "Select an enclosure" }</h2>
-                        <p>{ "Drive cards, SMART warnings, bay mapping, mount state, and administrator actions will appear here once a supported enclosure is detected." }</p>
-                    </>
-                },
-            } }
-        </section>
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 pub(super) fn render_enclosure_detail(
     enclosure: &DasEnclosureCardResponse,
     detail: &DasEnclosureDetailResponse,
 ) -> Html {
     html! {
         <>
-            <span class="dos-card-label">{ "Enclosure detail" }</span>
-            <h2>{ &enclosure.display_name }</h2>
-            <dl class="dos-detail-list">
-                <div><dt>{ "Vendor" }</dt><dd>{ &detail.vendor }</dd></div>
-                <div><dt>{ "Model" }</dt><dd>{ &detail.model }</dd></div>
-                <div><dt>{ "Serial" }</dt><dd>{ &detail.serial }</dd></div>
-                <div><dt>{ "Firmware" }</dt><dd>{ detail.firmware.as_deref().unwrap_or("unknown") }</dd></div>
-                <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
-                <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
-                <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
-                <div><dt>{ "Warnings" }</dt><dd>{ enclosure.warnings.len().to_string() }</dd></div>
-            </dl>
-            <div class="dos-slot-list">
-                { for detail.slots.iter().map(render_drive_slot_card) }
-            </div>
+            <section>
+                <h3>{ "Hardware" }</h3>
+                <dl class="dos-detail-list">
+                    <div><dt>{ "Vendor" }</dt><dd>{ &detail.vendor }</dd></div>
+                    <div><dt>{ "Model" }</dt><dd>{ &detail.model }</dd></div>
+                    <div><dt>{ "Serial" }</dt><dd>{ &detail.serial }</dd></div>
+                    <div><dt>{ "Firmware" }</dt><dd>{ detail.firmware.as_deref().unwrap_or("unknown") }</dd></div>
+                </dl>
+            </section>
+            <section>
+                <h3>{ "Connection and capacity" }</h3>
+                <dl class="dos-detail-list">
+                    <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
+                    <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
+                    <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
+                    <div><dt>{ "Last seen" }</dt><dd>{ &enclosure.last_seen_at_utc }</dd></div>
+                </dl>
+            </section>
+            <section>
+                <h3>{ format!("Drive bays · {}", detail.slots.len()) }</h3>
+                <div class="dos-slot-list">
+                    { for detail.slots.iter().map(render_drive_slot_card) }
+                </div>
+            </section>
+            { render_enclosure_warnings(enclosure) }
         </>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_enclosure_warnings(enclosure: &DasEnclosureCardResponse) -> Html {
+    html! {
+        <section>
+            <h3>{ format!("Warnings · {}", enclosure.warnings.len()) }</h3>
+            if enclosure.warnings.is_empty() {
+                <p class="dos-enclosures-clear-state">{ "No enclosure warnings are currently reported." }</p>
+            } else {
+                <ul class="dos-enclosures-warning-list">
+                    { for enclosure.warnings.iter().map(|warning| html! {
+                        <li><strong>{ labelize_state(&warning.code) }</strong><span>{ warning.message.clone() }</span></li>
+                    }) }
+                </ul>
+            }
+        </section>
     }
 }
 
@@ -877,17 +956,18 @@ pub(super) fn render_drive_slot_card(slot: &EnclosureDriveSlotResponse) -> Html 
 pub(super) fn render_enclosure_summary_detail(enclosure: &DasEnclosureCardResponse) -> Html {
     html! {
         <>
-            <span class="dos-card-label">{ "Enclosure detail" }</span>
-            <h2>{ &enclosure.display_name }</h2>
-            <dl class="dos-detail-list">
-                <div><dt>{ "Health" }</dt><dd>{ &enclosure.health }</dd></div>
-                <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
-                <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
-                <div><dt>{ "Drives" }</dt><dd>{ format!("{} mounted of {}", enclosure.drive_count.mounted, enclosure.drive_count.total) }</dd></div>
-                <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
-                <div><dt>{ "Last seen" }</dt><dd>{ &enclosure.last_seen_at_utc }</dd></div>
-            </dl>
-            <p>{ format!("{} warning(s) reported for this enclosure.", enclosure.warnings.len()) }</p>
+            <section>
+                <h3>{ "Overview" }</h3>
+                <dl class="dos-detail-list">
+                    <div><dt>{ "Health" }</dt><dd>{ labelize_state(&enclosure.health) }</dd></div>
+                    <div><dt>{ "Mount" }</dt><dd>{ &enclosure.mount_path }</dd></div>
+                    <div><dt>{ "Connection" }</dt><dd>{ format!("{} / {} / {}", enclosure.connection.bus, enclosure.connection.protocol, enclosure.connection.link_speed) }</dd></div>
+                    <div><dt>{ "Drives" }</dt><dd>{ format!("{} mounted of {}", enclosure.drive_count.mounted, enclosure.drive_count.total) }</dd></div>
+                    <div><dt>{ "Capacity" }</dt><dd>{ format!("{} TiB free of {} TiB", enclosure.capacity.free_tib, enclosure.capacity.total_tib) }</dd></div>
+                    <div><dt>{ "Last seen" }</dt><dd>{ &enclosure.last_seen_at_utc }</dd></div>
+                </dl>
+            </section>
+            { render_enclosure_warnings(enclosure) }
         </>
     }
 }

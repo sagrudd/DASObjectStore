@@ -145,6 +145,8 @@ fn objectstores_is_an_inventory_first_resource_index_with_transient_workflows() 
         "subobject:",
         "aria-expanded",
         "aria-controls",
+        "aria-sort",
+        "dos-objectstores-sort",
         "Overview",
         "Storage",
         "Access & service",
@@ -172,6 +174,8 @@ fn objectstores_feature_css_uses_design_tokens_and_responsive_disclosure() {
         ".dos-objectstores-toolbar",
         ".dos-objectstores-table",
         ".dos-objectstores-name",
+        ".dos-objectstores-sort",
+        ".dos-objectstores-sort:focus-visible",
         ".dos-objectstores-detail",
         ".dos-objectstores-pane-actions",
         "@media (max-width: 960px)",
@@ -219,12 +223,13 @@ use super::{
     object_store_create_review_from_values, object_store_creation_fields_ready,
     objectstores_workspace_api_path, page_load_state_from_result_with_stale,
     primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
-    subobject_registry_preview_from_values, users_groups_summary_cards,
-    users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, RemoteUploadSelectedFile,
-    RemoteUploadSelectionSummary, ThroughputDayResponse, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
-    BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE, ENDPOINTS_WORKSPACE_ROUTE,
-    HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE, PRIMARY_NAVIGATION,
-    REMOTE_UPLOAD_WORKSPACE_ROUTE,
+    sort_object_store_summaries, subobject_registry_preview_from_values,
+    users_groups_summary_cards, users_groups_workspace_api_path, ApiLoadState,
+    EnclosureWizardState, ObjectStoreCardSummary, ObjectStoreSort, ObjectStoreSortColumn,
+    RemoteUploadSelectedFile, RemoteUploadSelectionSummary, ThroughputDayResponse, WorkspacePage,
+    ACTIVITY_WORKSPACE_ROUTE, BIOINFORMATICS_WORKSPACE_ROUTE, ENCLOSURES_WORKSPACE_ROUTE,
+    ENDPOINTS_WORKSPACE_ROUTE, HOME_WORKSPACE_ROUTE, OBJECTSTORES_WORKSPACE_ROUTE,
+    PRIMARY_NAVIGATION, REMOTE_UPLOAD_WORKSPACE_ROUTE,
 };
 
 #[test]
@@ -1223,6 +1228,128 @@ fn object_stores_live_payload_maps_to_card_summaries() {
     assert_eq!(summaries[0].endpoint, "s3_bucket");
     assert!(summaries[0].upload_allowed);
     assert_eq!(summaries[0].warning_count, 1);
+}
+
+#[test]
+fn object_store_registry_sort_uses_raw_numeric_and_activity_evidence() {
+    let mut stores = vec![
+        sortable_store("unknown", "Cold archive", None, 100, None),
+        sortable_store(
+            "large",
+            "Epic collection",
+            Some("12.5"),
+            9,
+            Some("2026-07-12T09:30:00Z"),
+        ),
+        sortable_store(
+            "small",
+            "Zymo fecal",
+            Some("2.3"),
+            245,
+            Some("2026-07-08T18:50:00Z"),
+        ),
+    ];
+
+    sort_object_store_summaries(
+        &mut stores,
+        ObjectStoreSort {
+            column: ObjectStoreSortColumn::Capacity,
+            descending: false,
+        },
+    );
+    assert_eq!(store_ids(&stores), vec!["small", "large", "unknown"]);
+
+    sort_object_store_summaries(
+        &mut stores,
+        ObjectStoreSort {
+            column: ObjectStoreSortColumn::Capacity,
+            descending: true,
+        },
+    );
+    assert_eq!(store_ids(&stores), vec!["large", "small", "unknown"]);
+
+    sort_object_store_summaries(
+        &mut stores,
+        ObjectStoreSort {
+            column: ObjectStoreSortColumn::Objects,
+            descending: true,
+        },
+    );
+    assert_eq!(store_ids(&stores), vec!["small", "unknown", "large"]);
+
+    sort_object_store_summaries(
+        &mut stores,
+        ObjectStoreSort {
+            column: ObjectStoreSortColumn::LastActivity,
+            descending: true,
+        },
+    );
+    assert_eq!(store_ids(&stores), vec!["large", "small", "unknown"]);
+}
+
+#[test]
+fn object_store_registry_sort_toggle_uses_useful_initial_directions() {
+    let default = ObjectStoreSort::default();
+    assert_eq!(default.column, ObjectStoreSortColumn::ObjectStore);
+    assert!(!default.descending);
+    assert!(default.select(ObjectStoreSortColumn::Capacity).descending);
+    assert!(
+        default
+            .select(ObjectStoreSortColumn::ObjectStore)
+            .descending
+    );
+    assert!(
+        !ObjectStoreSort {
+            column: ObjectStoreSortColumn::Capacity,
+            descending: true,
+        }
+        .select(ObjectStoreSortColumn::ObjectStore)
+        .descending
+    );
+    assert!(
+        !ObjectStoreSort {
+            column: ObjectStoreSortColumn::Capacity,
+            descending: true,
+        }
+        .select(ObjectStoreSortColumn::Capacity)
+        .descending
+    );
+}
+
+fn sortable_store(
+    id: &str,
+    name: &str,
+    capacity_used_tib: Option<&str>,
+    object_count: usize,
+    last_ingested_at_utc: Option<&str>,
+) -> ObjectStoreCardSummary {
+    ObjectStoreCardSummary {
+        id: id.to_string(),
+        label: "generated_data".to_string(),
+        name: name.to_string(),
+        health: "ready".to_string(),
+        object_type: "naive".to_string(),
+        access: "private / writeable".to_string(),
+        policy: "1 required copy".to_string(),
+        capacity: "fixture".to_string(),
+        capacity_used_tib: capacity_used_tib.map(str::to_string),
+        capacity_status: "fixture".to_string(),
+        objects: format!("{object_count} object(s)"),
+        object_count,
+        writer_group: "mnemosyne".to_string(),
+        endpoint: "s3_bucket".to_string(),
+        upload_allowed: true,
+        warning_count: 0,
+        last_ingested: last_ingested_at_utc
+            .unwrap_or("no ingest recorded")
+            .to_string(),
+        last_ingested_at_utc: last_ingested_at_utc.map(str::to_string),
+        writer_policy: "ready".to_string(),
+    }
+}
+
+fn store_ids(stores: &[ObjectStoreCardSummary]) -> Vec<&str> {
+    stores.iter().map(|store| store.id.as_str()).collect()
 }
 
 #[test]
@@ -2250,8 +2377,11 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
 
     let css = include_str!("../../styles/enclosures.css");
     for selector in [
-        ".dos-two-column",
-        ".dos-enclosure-card",
+        ".dos-enclosures-toolbar",
+        ".dos-enclosures-table",
+        ".dos-enclosures-name",
+        ".dos-enclosures-detail",
+        ".dos-enclosures-pane-actions",
         ".dos-detail-list",
         ".dos-drive-card",
         ".dos-slot-list",
@@ -2266,8 +2396,11 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
     }
     let base = include_str!("../../styles.css");
     for selector in [
-        ".dos-two-column",
-        ".dos-enclosure-card",
+        ".dos-enclosures-toolbar",
+        ".dos-enclosures-table",
+        ".dos-enclosures-name",
+        ".dos-enclosures-detail",
+        ".dos-enclosures-pane-actions",
         ".dos-detail-list",
         ".dos-drive-card",
         ".dos-slot-list",
@@ -2280,6 +2413,33 @@ fn enclosures_css_is_feature_owned_and_registered_before_base_styles() {
             "enclosure selector leaked into base CSS: {selector}"
         );
     }
+}
+
+#[test]
+fn enclosures_is_an_inventory_first_resource_index_with_transient_workflows() {
+    let source = include_str!("enclosures.rs");
+    for marker in [
+        "dos-enclosures-toolbar",
+        "dos-enclosures-table",
+        "TaskPaneMode::Closed",
+        "TaskPaneMode::Create",
+        "inspect:",
+        "aria-expanded",
+        "aria-controls",
+        "Hardware",
+        "Connection and capacity",
+        "Drive bays",
+        "Warnings",
+        "render_enclosure_wizard",
+        "confirm prepare das",
+    ] {
+        assert!(
+            source.contains(marker),
+            "missing Enclosures marker {marker}"
+        );
+    }
+    assert!(!source.contains("dos-two-column"));
+    assert!(!source.contains("render_add_enclosure_card"));
 }
 
 #[test]

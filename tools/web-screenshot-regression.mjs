@@ -236,38 +236,59 @@ async function assertWorkflowContract(page, pageName, role) {
 }
 
 async function assertEnclosureWorkflow(page, role) {
-  const card = page.locator("[data-action='enclosure_add']");
-  const cardCount = await card.count();
-  if (cardCount === 0) {
-    await page.getByText("QNAP TL-D800C").first().waitFor();
-    return;
-  }
+  const registry = page.locator(".dos-enclosures-table");
+  await registry.waitFor();
+  const addButton = page.getByRole("button", { name: "Add enclosure", exact: true });
 
   if (!role.administrator) {
-    throw new Error("non-admin enclosure preparation action must not be exposed");
-  }
-
-  await card.first().waitFor();
-  const planButton = card.first().getByRole("button", { name: "Plan preparation" });
-  if (!(await planButton.isEnabled())) {
-    await card.first().getByText("Already managed").waitFor();
+    await expectDisabled(addButton, "non-admin enclosure preparation must be disabled");
+    await registry.getByRole("button", { name: "Open" }).first().click();
+    const detailPane = page.locator(".dos-task-pane[role='dialog']");
+    await detailPane.getByText("Hardware").waitFor();
+    await page.waitForTimeout(100);
+    await page.screenshot({
+      path: join(artifactDir, "desktop-viewer-enclosures-detail.png"),
+      fullPage: false,
+    });
+    await detailPane.getByRole("button", { name: "Close task pane" }).click();
     return;
   }
 
-  await expectEnabled(planButton, "admin enclosure preparation must be enabled");
-  await planButton.click();
-  await page.locator("[data-workflow='enclosure_add']").waitFor();
-  await page.getByText("SSD landing device").waitFor();
-  await page.getByLabel("I allow formatting of the selected devices.").check();
-  await page.getByLabel("I acknowledge existing data on selected devices may be destroyed.").check();
-  await page.getByPlaceholder("confirm prepare das").fill("confirm prepare das");
-  await page.getByRole("button", { name: "Submit preparation job" }).click();
-  await page.getByText("Job enclosure-prepare-visual").waitFor();
+  await expectEnabled(addButton, "admin enclosure preparation must be enabled");
+  await addButton.click();
+  const pane = page.locator(".dos-task-pane[role='dialog']");
+  await pane.locator("[data-workflow='enclosure_add']").waitFor();
+  await pane.getByText("SSD landing device").waitFor();
+  await page.screenshot({
+    path: join(artifactDir, "desktop-admin-enclosures-prepare.png"),
+    fullPage: false,
+  });
+  await pane.getByLabel("I allow formatting of the selected devices.").check();
+  await pane.getByLabel("I acknowledge existing data on selected devices may be destroyed.").check();
+  await pane.getByPlaceholder("confirm prepare das").fill("confirm prepare das");
+  await pane.getByRole("button", { name: "Submit preparation job" }).click();
+  await pane.getByText("Job enclosure-prepare-visual").waitFor();
+  await pane.getByRole("button", { name: "Close task pane" }).click();
+  await page.locator(".dos-task-pane").waitFor({ state: "detached" });
+  await page.waitForTimeout(100);
 }
 
 async function assertObjectStoreWorkflow(page, role) {
   const registry = page.locator(".dos-objectstores-table");
   await registry.waitFor();
+  const capacitySort = registry.getByRole("button", { name: "Sort by Capacity, descending" });
+  await capacitySort.click();
+  const capacityHeader = registry.getByRole("columnheader", { name: /Capacity/ });
+  if ((await capacityHeader.getAttribute("aria-sort")) !== "descending") {
+    throw new Error("Capacity sort must expose descending aria-sort state");
+  }
+  const descendingRows = await registry.locator("tbody tr[data-store-id]").evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-store-id")),
+  );
+  if (descendingRows.join(",") !== "epic-collection,zymo-fecal-2025-05,cold-archive") {
+    throw new Error(`unexpected descending capacity order: ${descendingRows.join(",")}`);
+  }
+  await registry.getByRole("button", { name: "Sort by Capacity, ascending" }).click();
   const createButton = page.getByRole("button", { name: "Create ObjectStore", exact: true });
 
   if (!role.administrator) {
@@ -680,18 +701,16 @@ function enclosuresDashboard(role = roles[1]) {
     schema_version: "dasobjectstore.enclosures_page.v1",
     generated_at_utc: "2026-07-08T19:00:00Z",
     add_enclosure: {
-      enabled: false,
+      enabled: canAdmin,
       action_kind: "enclosure_add",
       label: "Add enclosure",
-      state: "already_managed",
+      state: canAdmin ? "ready" : "admin_required",
       administrator: canAdmin,
-      supported_enclosure_detected: false,
+      supported_enclosure_detected: true,
       daemon_ready: true,
       confirmation_required: true,
-      blocked_reason:
-        "A managed DAS enclosure is already known to DASObjectStore.",
-      next_step:
-        "Use the CLI for deliberate destructive enclosure re-preparation or removal workflow.",
+      blocked_reason: canAdmin ? null : "Requires sudo-derived administrator authority.",
+      next_step: "Review the selected SSD/HDD format plan before daemon execution.",
     },
     enclosures: [enclosureCard()],
     selected_enclosure_id: "qnap-tl-d800c-visual",
@@ -744,32 +763,27 @@ function objectStoresDashboard(role = roles[1]) {
       },
     ],
     stores: [
-      {
-        store_id: "zymo-fecal-2025-05",
-        display_name: "zymo_fecal_2025.05",
-        store_class: "research",
-        object_type: "POD5",
-        health: "ready",
-        required_copies: 1,
-        object_count: 245,
-        capacity: capacity("42.0", "2.3", "39.7", 548),
-        placement_policy: "fractional free-space placement",
-        endpoint_export_mode: "s3",
-        writer_group: "bioinformatics",
-        public: false,
-        writeable: true,
-        created_at_utc: "2026-07-08T12:00:00Z",
-        last_ingested_at_utc: "2026-07-08T18:50:00Z",
-        writer_policy: {
-          writer_group: "bioinformatics",
-          group_defined: true,
-          current_user_member: true,
-          writeable_by_current_user: true,
-          state: "ready",
-          message: "Current user can write through the bioinformatics group.",
-        },
-        warnings: [],
-      },
+      visualObjectStore({
+        storeId: "zymo-fecal-2025-05",
+        displayName: "zymo_fecal_2025.05",
+        objectCount: 245,
+        usedTib: "2.3",
+        lastIngested: "2026-07-08T18:50:00Z",
+      }),
+      visualObjectStore({
+        storeId: "epic-collection",
+        displayName: "epic_collection",
+        objectCount: 9,
+        usedTib: "12.5",
+        lastIngested: "2026-07-12T09:30:00Z",
+      }),
+      visualObjectStore({
+        storeId: "cold-archive",
+        displayName: "cold_archive",
+        objectCount: 100,
+        usedTib: null,
+        lastIngested: null,
+      }),
     ],
     selected_store_id: "zymo-fecal-2025-05",
     create_object_store: {
@@ -790,6 +804,35 @@ function objectStoresDashboard(role = roles[1]) {
       blocked_reason: canAdmin
         ? null
         : "Administrator rights are required to create an ObjectStore.",
+    },
+    warnings: [],
+  };
+}
+
+function visualObjectStore({ storeId, displayName, objectCount, usedTib, lastIngested }) {
+  return {
+    store_id: storeId,
+    display_name: displayName,
+    store_class: "research",
+    object_type: "POD5",
+    health: "ready",
+    required_copies: 1,
+    object_count: objectCount,
+    capacity: usedTib === null ? null : capacity("42.0", usedTib, "29.5", 2976),
+    placement_policy: "fractional free-space placement",
+    endpoint_export_mode: "s3",
+    writer_group: "bioinformatics",
+    public: false,
+    writeable: true,
+    created_at_utc: "2026-07-08T12:00:00Z",
+    last_ingested_at_utc: lastIngested,
+    writer_policy: {
+      writer_group: "bioinformatics",
+      group_defined: true,
+      current_user_member: true,
+      writeable_by_current_user: true,
+      state: "ready",
+      message: "Current user can write through the bioinformatics group.",
     },
     warnings: [],
   };

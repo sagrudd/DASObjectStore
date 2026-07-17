@@ -1,40 +1,246 @@
-/* Enclosure inventory, drive detail, and slot layout. Shared cards and form
- * primitives remain in styles.css for other workspaces. */
-.dos-two-column {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.78fr) minmax(320px, 1.22fr);
-  gap: 14px;
-  align-items: start;
+/* Enclosure resource index, disclosure pane, drive detail, and preparation. */
+.dos-page[data-page="enclosures"] {
+  --mn-color-text-primary: #111111;
+  --mn-color-surface-raised: #ffffff;
+  --mn-color-border-subtle: #d9e0e3;
+  --mn-color-action-primary-default: #0f6b78;
+  --mn-color-action-primary-hover: #0b5964;
+  --mn-color-status-success: #28622b;
+  --mn-color-status-warning: #6f5410;
+  --mn-color-status-danger: #8a3c25;
+  --mn-space-1: 0.25rem;
+  --mn-space-2: 0.5rem;
+  --mn-space-3: 0.75rem;
+  --mn-space-4: 1rem;
+  --mn-space-6: 1.5rem;
+  --mn-space-8: 2rem;
+  --mn-radius-sm: 0.25rem;
+  --mn-radius-md: 0.5rem;
+  --mn-radius-lg: 0.75rem;
+  color: var(--mn-color-text-primary);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
 }
 
-.dos-card-list {
+.dos-enclosures-registry {
   display: grid;
-  gap: 10px;
+  gap: var(--mn-space-4);
 }
 
-.dos-enclosure-card {
+.dos-enclosures-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mn-space-4);
+  padding: var(--mn-space-3) 0;
+}
+
+.dos-enclosures-toolbar > div {
+  display: grid;
+  gap: var(--mn-space-1);
+}
+
+.dos-enclosures-toolbar strong {
+  color: var(--mn-color-text-primary);
+  font-size: 1rem;
+}
+
+.dos-enclosures-toolbar span {
+  color: #5d6a72;
+  font-size: 0.88rem;
+}
+
+.dos-enclosures-primary-action,
+.dos-enclosures-open,
+.dos-enclosures-pane-actions button {
+  min-height: 38px;
+  border: 1px solid var(--mn-color-border-subtle);
+  border-radius: var(--mn-radius-md);
+  padding: 0 var(--mn-space-4);
+  color: var(--mn-color-action-primary-default);
+  background: var(--mn-color-surface-raised);
+  font-weight: 720;
+}
+
+.dos-enclosures-primary-action {
+  border-color: var(--mn-color-action-primary-default);
+  color: #ffffff;
+  background: var(--mn-color-action-primary-default);
+}
+
+.dos-enclosures-primary-action:hover:not(:disabled) {
+  border-color: var(--mn-color-action-primary-hover);
+  background: var(--mn-color-action-primary-hover);
+}
+
+.dos-enclosures-primary-action:disabled,
+.dos-enclosures-pane-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dos-enclosures-table-wrap {
+  overflow: hidden;
+  border: 1px solid var(--mn-color-border-subtle);
+  border-radius: var(--mn-radius-lg);
+  background: var(--mn-color-surface-raised);
+}
+
+.dos-enclosures-table {
   width: 100%;
+  border-collapse: collapse;
+  color: #33424b;
+  font-size: 0.87rem;
+}
+
+.dos-enclosures-table th,
+.dos-enclosures-table td {
+  padding: 0.82rem var(--mn-space-4);
+  border-bottom: 1px solid #e6ecef;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.dos-enclosures-table thead th {
+  color: #5d6a72;
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dos-enclosures-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.dos-enclosures-table tbody tr[data-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--mn-color-action-primary-default);
+  background: #f4fafb;
+}
+
+.dos-enclosures-name {
+  display: grid;
+  gap: 0.12rem;
+  border: 0;
+  padding: 0;
   color: inherit;
+  background: transparent;
   text-align: left;
 }
 
-.dos-enclosure-card.is-selected {
-  border-color: #0f6b78;
-  box-shadow: 0 0 0 2px rgba(15, 107, 120, 0.15);
+.dos-enclosures-name strong {
+  color: var(--mn-color-text-primary);
+  font-size: 0.93rem;
 }
 
-.dos-enclosure-card strong {
-  font-size: 1.05rem;
+.dos-enclosures-name span {
+  color: #68757d;
+  font-size: 0.75rem;
 }
 
-.dos-detail-panel {
-  min-height: 320px;
+.dos-enclosures-name:hover strong,
+.dos-enclosures-name:focus-visible strong {
+  color: var(--mn-color-action-primary-default);
 }
 
-.dos-detail-panel h2 {
-  margin-top: 6px;
-  color: #182128;
-  font-size: 1.06rem;
+.dos-enclosures-state {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.23rem 0.55rem;
+  color: #435159;
+  background: #eef2f3;
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+.dos-enclosures-state[data-state="healthy"],
+.dos-enclosures-state[data-state="ready"] {
+  color: var(--mn-color-status-success);
+  background: #edf6ed;
+}
+
+.dos-enclosures-state[data-state="watch"],
+.dos-enclosures-state[data-state="degraded"],
+.dos-enclosures-state[data-state="warning"] {
+  color: var(--mn-color-status-warning);
+  background: #fff7dd;
+}
+
+.dos-enclosures-state[data-state="failed"],
+.dos-enclosures-state[data-state="critical"] {
+  color: var(--mn-color-status-danger);
+  background: #fff0eb;
+}
+
+.dos-enclosures-open {
+  min-height: 32px;
+  padding-inline: var(--mn-space-3);
+}
+
+.dos-enclosures-empty td {
+  padding-block: var(--mn-space-8);
+  color: #68757d;
+  text-align: center;
+}
+
+.dos-enclosures-empty strong,
+.dos-enclosures-empty span {
+  display: block;
+}
+
+.dos-enclosures-empty strong {
+  margin-bottom: var(--mn-space-2);
+  color: var(--mn-color-text-primary);
+}
+
+.dos-enclosures-detail {
+  display: grid;
+  gap: var(--mn-space-6);
+}
+
+.dos-enclosures-detail section {
+  display: grid;
+  gap: var(--mn-space-3);
+}
+
+.dos-enclosures-detail h3 {
+  margin: 0;
+  padding-bottom: var(--mn-space-2);
+  border-bottom: 1px solid var(--mn-color-border-subtle);
+  color: var(--mn-color-text-primary);
+  font-size: 0.9rem;
+}
+
+.dos-enclosures-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mn-space-2);
+  padding-top: var(--mn-space-4);
+  border-top: 1px solid var(--mn-color-border-subtle);
+}
+
+.dos-enclosures-clear-state {
+  margin: 0;
+  color: #68757d;
+}
+
+.dos-enclosures-warning-list {
+  display: grid;
+  gap: var(--mn-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dos-enclosures-warning-list li {
+  display: grid;
+  gap: var(--mn-space-1);
+  border-left: 3px solid #d7b33d;
+  padding: var(--mn-space-2) var(--mn-space-3);
+  background: #fffaf0;
+}
+
+.dos-enclosures-warning-list span {
+  color: #5d6a72;
 }
 
 .dos-detail-list {
@@ -121,7 +327,6 @@
 
 .dos-wizard-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 12px;
   align-items: start;
 }
@@ -136,17 +341,6 @@
   font-size: 1rem;
 }
 
-.dos-wizard-header button {
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid #cdd8dd;
-  border-radius: 6px;
-  color: #41515a;
-  background: #ffffff;
-  font-size: 0.78rem;
-  font-weight: 720;
-}
-
 .dos-wizard-steps {
   display: grid;
   gap: 6px;
@@ -157,12 +351,32 @@
 }
 
 @media (max-width: 980px) {
-  .dos-two-column {
-    grid-template-columns: 1fr;
+  .dos-enclosures-table th:nth-child(5),
+  .dos-enclosures-table td:nth-child(5),
+  .dos-enclosures-table th:nth-child(6),
+  .dos-enclosures-table td:nth-child(6) {
+    display: none;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 700px) {
+  .dos-enclosures-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dos-enclosures-table th:nth-child(3),
+  .dos-enclosures-table td:nth-child(3),
+  .dos-enclosures-table th:nth-child(4),
+  .dos-enclosures-table td:nth-child(4) {
+    display: none;
+  }
+
+  .dos-enclosures-table th,
+  .dos-enclosures-table td {
+    padding-inline: var(--mn-space-3);
+  }
+
   .dos-detail-list div {
     grid-template-columns: 1fr;
     gap: 2px;

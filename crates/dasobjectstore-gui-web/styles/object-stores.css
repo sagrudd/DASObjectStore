@@ -109,6 +109,35 @@
   text-transform: uppercase;
 }
 
+.dos-objectstores-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mn-space-1);
+  min-height: 30px;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.dos-objectstores-sort:hover {
+  color: var(--mn-color-action-primary-default);
+}
+
+.dos-objectstores-sort:focus-visible {
+  border-radius: var(--mn-radius-sm);
+  outline: 2px solid var(--mn-color-action-primary-default);
+  outline-offset: 3px;
+}
+
+.dos-objectstores-sort-indicator {
+  color: var(--mn-color-action-primary-default);
+  font-size: 0.9rem;
+}
+
 .dos-objectstores-table tbody tr:last-child > * {
   border-bottom: 0;
 }

@@ -507,8 +507,10 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                         .unwrap_or("placement pending")
                 ),
                 capacity,
+                capacity_used_tib: store.capacity.as_ref().map(|capacity| capacity.used_tib.clone()),
                 capacity_status,
                 objects: format!("{} object(s)", store.object_count),
+                object_count: store.object_count,
                 writer_group: store
                     .writer_group
                     .as_deref()
@@ -535,9 +537,77 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
                     .as_deref()
                     .unwrap_or("no ingest recorded")
                     .to_string(),
+                last_ingested_at_utc: store.last_ingested_at_utc.clone(),
             }
         })
         .collect()
+}
+
+pub fn sort_object_store_summaries(stores: &mut [ObjectStoreCardSummary], sort: ObjectStoreSort) {
+    stores.sort_by(|left, right| {
+        let primary = match sort.column {
+            ObjectStoreSortColumn::ObjectStore => {
+                let order = left.name.to_lowercase().cmp(&right.name.to_lowercase());
+                if sort.descending {
+                    order.reverse()
+                } else {
+                    order
+                }
+            }
+            ObjectStoreSortColumn::Capacity => compare_available(
+                left.capacity_used_tib
+                    .as_deref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite()),
+                right
+                    .capacity_used_tib
+                    .as_deref()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite()),
+                sort.descending,
+                f64::total_cmp,
+            ),
+            ObjectStoreSortColumn::Objects => compare_available(
+                Some(left.object_count),
+                Some(right.object_count),
+                sort.descending,
+                usize::cmp,
+            ),
+            ObjectStoreSortColumn::LastActivity => compare_available(
+                left.last_ingested_at_utc.as_deref(),
+                right.last_ingested_at_utc.as_deref(),
+                sort.descending,
+                |left, right| left.cmp(right),
+            ),
+        };
+        primary
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+fn compare_available<T, F>(
+    left: Option<T>,
+    right: Option<T>,
+    descending: bool,
+    compare: F,
+) -> std::cmp::Ordering
+where
+    F: Fn(&T, &T) -> std::cmp::Ordering,
+{
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            let order = compare(&left, &right);
+            if descending {
+                order.reverse()
+            } else {
+                order
+            }
+        }
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
