@@ -107,7 +107,7 @@ use self::ingest_client::{run_ingest_direct_import_with_client, run_ingest_files
 #[cfg(test)]
 use self::ingest_local_direct::{collect_ingest_files, progress_stage_key, progress_stage_label};
 use self::ingest_source_access::prepare_source_access_for_packaged_daemon;
-#[cfg(target_os = "linux")]
+#[cfg(all(test, target_os = "linux"))]
 use self::ingest_source_access::{plan_source_acl_actions, SourceAclAction, SourceAclPermission};
 use self::managed_roots::*;
 use self::output::{
