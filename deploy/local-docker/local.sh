@@ -81,13 +81,30 @@ EOF
 }
 
 require_volume_root() {
+    case "/$ROOT/" in
+        */../*|*/./*) die "DASOBJECTSTORE_LOCAL_ROOT must not contain '.' or '..' path components (got $ROOT)" ;;
+    esac
     case "$ROOT" in
         /Volumes/*) ;;
-        "$VALIDATION_ROOT"|"$PINAKOTHEKE_ROOT") ;;
-        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes, $VALIDATION_ROOT, or the exact Pinakotheke managed root $PINAKOTHEKE_ROOT (got $ROOT)" ;;
+        "$VALIDATION_ROOT"|"$VALIDATION_ROOT"/*|"$PINAKOTHEKE_ROOT") ;;
+        *) die "DASOBJECTSTORE_LOCAL_ROOT must be under /Volumes or $VALIDATION_ROOT, or be the exact Pinakotheke managed root $PINAKOTHEKE_ROOT (got $ROOT)" ;;
     esac
-    if [ "$ROOT" = "$VALIDATION_ROOT" ]; then
+    case "$ROOT" in
+      "$VALIDATION_ROOT"|"$VALIDATION_ROOT"/*)
+        mkdir -p "$VALIDATION_ROOT"
+        local authority_marker="$VALIDATION_ROOT/.codex-validation-root"
+        if [ ! -e "$authority_marker" ]; then
+            printf 'DASObjectStore Codex generated-data validation root\n' > "$authority_marker"
+            chmod 600 "$authority_marker"
+        fi
         mkdir -p "$ROOT"
+        local resolved_validation_root resolved_root
+        resolved_validation_root="$(cd "$VALIDATION_ROOT" && pwd -P)"
+        resolved_root="$(cd "$ROOT" && pwd -P)"
+        case "$resolved_root" in
+            "$resolved_validation_root"|"$resolved_validation_root"/*) ;;
+            *) die "validation root resolves outside $VALIDATION_ROOT: $ROOT" ;;
+        esac
         local marker="$ROOT/.codex-validation-root"
         if [ ! -e "$marker" ]; then
             if find "$ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
@@ -97,11 +114,12 @@ require_volume_root() {
             chmod 600 "$marker"
         fi
         local used_kib
-        used_kib="$(du -sk "$ROOT" | awk '{print $1}')"
+        used_kib="$(du -sk "$VALIDATION_ROOT" | awk '{print $1}')"
         [ "${used_kib:-0}" -le 1073741824 ] || \
-            die "validation root exceeds the 1 TiB generated-data safety limit: $ROOT"
+            die "validation root exceeds the 1 TiB generated-data safety limit: $VALIDATION_ROOT"
         return
-    fi
+        ;;
+    esac
     if [ "$ROOT" = "$PINAKOTHEKE_ROOT" ]; then
         mkdir -p "$ROOT"
         local marker="$ROOT/.pinakotheke-dasobjectstore-root"
@@ -445,6 +463,30 @@ connect_daemon_to_garage_network() {
     fi
 }
 
+disconnect_daemon_from_garage_network() {
+    local daemon_container daemon_name garage_network
+    daemon_container="$(docker_compose ps -q dasobjectstored)"
+    garage_network="${GARAGE_PROJECT}_default"
+    [ -n "$daemon_container" ] || return 0
+    docker network inspect "$garage_network" >/dev/null 2>&1 || return 0
+    daemon_name="$(docker inspect --format '{{.Name}}' "$daemon_container" | sed 's#^/##')"
+    if docker network inspect --format '{{range .Containers}}{{.Name}}{{"\n"}}{{end}}' \
+        "$garage_network" | grep -Fxq "$daemon_name"; then
+        docker network disconnect "$garage_network" "$daemon_container"
+    fi
+}
+
+restore_host_bind_ownership() {
+    local host_uid host_gid
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
+    docker_compose exec -T --user 0 dasobjectstored \
+        chown -R "$host_uid:$host_gid" \
+        /var/lib/dasobjectstore \
+        /var/log/dasobjectstore \
+        "/Volumes/Seagate/DASObjectStore/$PROFILE"
+}
+
 wait_for_garage() {
     local attempt code
     for attempt in $(seq 1 60); do
@@ -478,6 +520,10 @@ provision() {
     wait_for_garage
     docker_compose exec -T dasobjectstored \
         dasobjectstore service provision --provider garage >/dev/null
+    # The local profile uses bind mounts so host-side adapters and subsequent
+    # validation runs must be able to traverse daemon-created state. The
+    # container remains root and can continue updating these generated paths.
+    restore_host_bind_ownership
     require_command python3
     python3 "$SCRIPT_DIR/export-alleleanchor-config.py" \
         --registry "$GARAGE_CREDENTIAL_REGISTRY" \
@@ -510,6 +556,7 @@ down() {
     require_docker
     [ -f "$STACK_COMPOSE" ] || exit 0
     if docker_compose exec -T dasobjectstored test -S /run/dasobjectstore/dasobjectstored.sock >/dev/null 2>&1; then
+        disconnect_daemon_from_garage_network
         docker_compose exec -T dasobjectstored \
             dasobjectstore service down \
             --compose-file /etc/dasobjectstore/garage.compose.yml \

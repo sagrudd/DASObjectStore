@@ -10,11 +10,13 @@ Persistent state is placed on an attached volume such as
 ``/Volumes/Seagate/DASObjectStore``. Docker Desktop must be granted file-sharing
 access to that volume before starting the profile.
 
-When an attached volume is unavailable, macOS contract tests may use only the
-dedicated generated-data root ``$HOME/.dasobjectstore-codex-validation``. The
-helper rejects arbitrary home folders, creates a marker in that root, and
-enforces a 1 TiB generated-data ceiling. This validation mode is a bounded
-folder substitute; it is not evidence that the host has a dedicated SSD.
+When an attached volume is unavailable, macOS or Linux contract tests may use
+only the dedicated generated-data root
+``$HOME/.dasobjectstore-codex-validation`` or a child beneath it. The helper
+rejects arbitrary home folders and path traversal, creates authority markers,
+and enforces a 1 TiB ceiling across the complete validation root. This mode is
+a bounded folder substitute; it is not evidence that the host has a dedicated
+SSD.
 
 The profile is intentionally single-node and single-volume. It is suitable for
 S3-compatible adapter and contract validation, not for appliance throughput,
@@ -61,6 +63,13 @@ capacity policy, making restart reconciliation deterministic.
 The authoritative live object catalogue is persisted at
 ``/var/lib/dasobjectstore/live.sqlite`` in the mounted daemon state rather than
 using the appliance-only ``/srv`` default.
+
+On Linux, the root-running daemon normalizes ownership of its generated bind
+mounts back to the invoking host user after provisioning. This allows the
+host-side scoped-config exporter and later safety checks to read only the
+validation profile without requiring ``sudo``. ``down`` disconnects the daemon
+from the nested Garage network before Garage removes that network, then stops
+the daemon stack; it does not prune unrelated Docker resources.
 
 ``completion-smoke`` creates one 4096-byte generated object beneath the
 managed profile root and exercises the version-matched remote client over
