@@ -61,9 +61,9 @@ main[data-host] {
   position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  overflow: hidden;
+  justify-content: flex-start;
+  gap: clamp(24px, 4vw, 56px);
+  overflow: visible;
   flex: 0 0 auto;
   min-height: 76px;
   padding: 14px 24px;
@@ -75,26 +75,21 @@ main[data-host] {
   isolation: isolate;
 }
 
-.dos-product-footer__brand,
-.dos-product-footer__provenance {
+.dos-product-footer__version,
+.dos-product-footer__wordmark {
   position: relative;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .dos-product-footer__wordmark {
-  width: clamp(154px, 20vw, 220px);
-  max-height: 34px;
-  object-fit: contain;
-  object-position: left center;
-  filter: invert(1) brightness(1.8);
-}
-
-.dos-product-footer__provenance {
-  justify-content: flex-end;
-  text-align: right;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 184px;
+  color: #ffffff;
+  line-height: 1;
+  text-decoration: none;
 }
 
 .dos-product-footer a {
@@ -109,17 +104,33 @@ main[data-host] {
 }
 
 .dos-product-footer__version {
-  color: var(--dos-mnemosyne-footer-link);
+  color: #ffffff;
   font-weight: 800;
+}
+
+.dos-product-footer__wordmark-name {
+  font-family: "Crimson Pro", ui-serif, Georgia, serif;
+  font-size: 1.55rem;
+  letter-spacing: 0.025em;
+}
+
+.dos-product-footer__wordmark-subtitle {
+  margin-top: 3px;
+  margin-left: 2.2rem;
+  color: #adada8;
+  font-family: "Crimson Pro", ui-serif, Georgia, serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
 }
 
 .dos-product-footer__partial {
   position: absolute;
   z-index: 0;
-  right: -18px;
-  bottom: -56px;
-  width: 190px;
-  opacity: 0.2;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: 152px;
+  opacity: 0.5;
   pointer-events: none;
 }
 
@@ -1111,15 +1122,23 @@ h2 {
   }
 
   .dos-product-footer {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    min-height: 72px;
     padding: 10px 14px 12px;
   }
 
-  .dos-product-footer__provenance {
-    justify-content: flex-start;
-    text-align: left;
+  .dos-product-footer__version {
+    display: none;
+  }
+
+  .dos-product-footer__wordmark {
+    min-width: 144px;
+    transform: scale(0.84);
+    transform-origin: left center;
+  }
+
+  .dos-product-footer__partial {
+    height: 144px;
   }
 
   .dos-task-pane {
