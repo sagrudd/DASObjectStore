@@ -20,6 +20,7 @@ LogsDirectory=dasobjectstore
 LogsDirectoryMode=0750
 ConfigurationDirectory=dasobjectstore
 ConfigurationDirectoryMode=0750
+Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.json
 ExecStart=/usr/bin/dasobjectstored --config /etc/dasobjectstore/daemon.json
 Restart=on-failure
 RestartSec=5s

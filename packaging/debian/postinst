@@ -161,6 +161,15 @@ install -d -o root -g "$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
   -exec chgrp "$service_group" {} + \
   -exec chmod 0640 {} +
+store_registry_state=/var/lib/dasobjectstore/stores.json
+store_registry_config=/etc/dasobjectstore/stores.json
+if [[ ! -e "$store_registry_state" && -f "$store_registry_config" ]]; then
+  install -o "$service_user" -g "$service_group" -m 0640 \
+    "$store_registry_config" "$store_registry_state"
+elif [[ -f "$store_registry_state" ]]; then
+  chown "$service_user:$service_group" "$store_registry_state"
+  chmod 0640 "$store_registry_state"
+fi
 if [[ -f "$product_root/config.json" ]]; then
   chown root:"$service_group" "$product_root/config.json"
   chmod 0640 "$product_root/config.json"

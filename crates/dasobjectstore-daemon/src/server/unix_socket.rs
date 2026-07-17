@@ -719,12 +719,24 @@ fn handle_pending_stream(
 ) -> Result<(), UnixSocketDaemonServerError> {
     match pending.request {
         PendingRequest::Api(request) => {
-            let mut emit_response = |response| write_response_frame(&mut pending.stream, &response);
-            handler.handle_api_request_streaming_for_actor(
-                request,
-                pending.actor.as_ref(),
-                &mut emit_response,
-            )?;
+            let result = {
+                let mut emit_response =
+                    |response| write_response_frame(&mut pending.stream, &response);
+                handler.handle_api_request_streaming_for_actor(
+                    request,
+                    pending.actor.as_ref(),
+                    &mut emit_response,
+                )
+            };
+            if let Err(error) = result {
+                write_response_frame(
+                    &mut pending.stream,
+                    &DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "daemon_request_failed",
+                        error.to_string(),
+                    )),
+                )?;
+            }
         }
         PendingRequest::ProviderStream(request) => {
             let mut response_stream = pending
@@ -958,6 +970,35 @@ mod tests {
                 state: ServiceState::Running,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn returns_a_typed_final_response_when_control_handler_fails() {
+        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
+        let server = UnixSocketDaemonServer::new("/tmp/dasobjectstored-test.sock", |_request| {
+            Err(super::UnixSocketDaemonServerError::RequestLineInvalidUtf8)
+        });
+
+        serde_json::to_writer(
+            &mut client,
+            &DaemonApiRequest::StoreInventory(StoreInventoryRequest::default()),
+        )
+        .expect("request encoded");
+        client.write_all(b"\n").expect("request newline");
+
+        server.handle_stream(server_stream).expect("stream handled");
+
+        let mut line = String::new();
+        BufReader::new(client)
+            .read_line(&mut line)
+            .expect("response line");
+        let response: DaemonApiResponse = serde_json::from_str(&line).expect("response decoded");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "daemon_request_failed"
+                    && error.message.contains("not valid UTF-8")
         ));
     }
 
