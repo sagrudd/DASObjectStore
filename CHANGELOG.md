@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.4 - 2026-07-17
+
+- Make live Home throughput visible in sub-day windows by aggregating the
+  retained disk-IO samples into five-minute or hourly chart intervals instead
+  of collapsing a whole day into one non-rendering point. Scale low-volume
+  intervals to their observed range and label the evidence as physical writes.
+
 ## 0.114.3 - 2026-07-17
 
 - Allow daemon-submitted remote uploads to carry a reviewed logical

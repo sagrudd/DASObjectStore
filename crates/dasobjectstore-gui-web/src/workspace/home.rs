@@ -152,7 +152,7 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
             <div class="dos-card-row">
                 <div>
                     <span class="dos-card-label">{ "Telemetry chart" }</span>
-                    <h2>{ "Throughput" }</h2>
+                    <h2>{ "Disk write volume" }</h2>
                 </div>
                 <div class="dos-home-chart-badges">
                     <span class="dos-status-pill">{ &view.telemetry_window.selected_label }</span>
@@ -178,7 +178,7 @@ pub(super) fn render_home_throughput_chart(view: &HomeDashboardResponse) -> Html
                         HOME_THROUGHPUT_CHART_HEIGHT
                     )}
                     role="img"
-                    aria-label="Ingest throughput over selected telemetry window"
+                    aria-label="Physical disk write volume over selected telemetry window"
                 >
                     <line
                         class="dos-chart-axis"

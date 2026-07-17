@@ -2100,7 +2100,7 @@ fn home_dashboard_telemetry_cards_cover_full_data_and_per_disk_identity() {
 
     assert_eq!(capacity.value, "64.0 TiB free");
     assert_eq!(capacity.state, "50.0% used");
-    assert_eq!(throughput.value, "18.0 TiB ingest");
+    assert_eq!(throughput.value, "13.5 TiB written");
     assert_eq!(throughput.state, "3 months");
     assert_eq!(disk_io.value, "384 MiB/s write");
     assert_eq!(
@@ -2280,8 +2280,30 @@ fn home_dashboard_telemetry_tests_sparse_missing_and_invalid_chart_samples() {
     assert_eq!(home_throughput_chart_max_tib(&chart_points), "0.2 TiB");
     assert_eq!(
         home_throughput_chart_polyline(&chart_points),
-        "426.7,144.0 616.0,114.0"
+        "426.7,144.0 616.0,24.0"
     );
+}
+
+#[test]
+fn home_throughput_chart_scales_visible_sub_tib_activity() {
+    let days = vec![
+        ThroughputDayResponse {
+            date: "15:00".to_string(),
+            read_tib: "0".to_string(),
+            written_tib: "0.02".to_string(),
+            ingest_tib: "0.02".to_string(),
+        },
+        ThroughputDayResponse {
+            date: "15:05".to_string(),
+            read_tib: "0".to_string(),
+            written_tib: "0.04".to_string(),
+            ingest_tib: "0.04".to_string(),
+        },
+    ];
+    let points = super::throughput_chart_points(&days);
+    assert_eq!(points[0].y, Some(84.0));
+    assert_eq!(points[1].y, Some(24.0));
+    assert_eq!(home_throughput_chart_max_tib(&points), "41 GiB");
 }
 
 #[test]

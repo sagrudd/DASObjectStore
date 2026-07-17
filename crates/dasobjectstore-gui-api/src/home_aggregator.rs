@@ -554,10 +554,10 @@ fn telemetry_throughput(
 
     let mut read_rates = Vec::new();
     let mut write_rates = Vec::new();
-    let mut daily: std::collections::BTreeMap<String, (u64, u64)> =
+    let mut intervals: std::collections::BTreeMap<String, (u64, u64)> =
         std::collections::BTreeMap::new();
     for (_, sample) in samples {
-        let day = sample.timestamp_utc.chars().take(10).collect::<String>();
+        let interval = throughput_interval_label(&sample.timestamp_utc, window);
         let seconds = sample_set.cadence_seconds.max(0.0);
         let mut sample_read = None::<f64>;
         let mut sample_write = None::<f64>;
@@ -569,7 +569,7 @@ fn telemetry_throughput(
                 let read = read.max(0.0);
                 sample_read = Some(sample_read.unwrap_or(0.0) + read);
                 if seconds > 0.0 {
-                    let entry = daily.entry(day.clone()).or_default();
+                    let entry = intervals.entry(interval.clone()).or_default();
                     entry.0 = entry.0.saturating_add((read * seconds).round() as u64);
                 }
             }
@@ -580,7 +580,7 @@ fn telemetry_throughput(
                 let write = write.max(0.0);
                 sample_write = Some(sample_write.unwrap_or(0.0) + write);
                 if seconds > 0.0 {
-                    let entry = daily.entry(day.clone()).or_default();
+                    let entry = intervals.entry(interval.clone()).or_default();
                     entry.1 = entry.1.saturating_add((write * seconds).round() as u64);
                 }
             }
@@ -596,8 +596,8 @@ fn telemetry_throughput(
         return None;
     }
 
-    let read_bytes = daily.values().map(|(read, _)| *read).sum::<u64>();
-    let written_bytes = daily.values().map(|(_, written)| *written).sum::<u64>();
+    let read_bytes = intervals.values().map(|(read, _)| *read).sum::<u64>();
+    let written_bytes = intervals.values().map(|(_, written)| *written).sum::<u64>();
     Some(ThroughputSummaryView {
         window_days: telemetry_window_days(window),
         read_tib: format_tib(read_bytes),
@@ -607,7 +607,7 @@ fn telemetry_throughput(
         avg_write_mib_s: mib_per_second(mean_rate(&write_rates)),
         source: "daemon_disk_io".to_string(),
         message: None,
-        daily: daily
+        daily: intervals
             .into_iter()
             .map(|(date, (read_bytes, written_bytes))| ThroughputDayView {
                 date,
@@ -617,6 +617,24 @@ fn telemetry_throughput(
             })
             .collect(),
     })
+}
+
+fn throughput_interval_label(timestamp_utc: &str, window: ApplianceTelemetryWindow) -> String {
+    let date = timestamp_utc.get(..10).unwrap_or(timestamp_utc);
+    let hour = timestamp_utc.get(11..13).unwrap_or("00");
+    match window {
+        ApplianceTelemetryWindow::OneHour => {
+            let minute = timestamp_utc
+                .get(14..16)
+                .and_then(|value| value.parse::<u8>().ok())
+                .unwrap_or(0);
+            format!("{hour}:{:02}", minute / 5 * 5)
+        }
+        ApplianceTelemetryWindow::OneDay => format!("{hour}:00"),
+        ApplianceTelemetryWindow::TenDays | ApplianceTelemetryWindow::ThreeMonths => {
+            date.to_string()
+        }
+    }
 }
 
 fn telemetry_disk_io_summary(
@@ -990,7 +1008,10 @@ pub(crate) fn now_utc_string() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_home_dashboard, HomeDashboardAggregatorConfig};
+    use super::{
+        build_home_dashboard, telemetry_throughput, throughput_interval_label,
+        HomeDashboardAggregatorConfig,
+    };
     use crate::dashboard::ObjectServiceStatusView;
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
@@ -1331,5 +1352,58 @@ mod tests {
             }
           ]
         }"#
+    }
+
+    #[test]
+    fn subday_throughput_uses_multiple_chart_intervals() {
+        let mut encoded = serde_json::from_str::<serde_json::Value>(appliance_telemetry_json())
+            .expect("telemetry fixture JSON");
+        let template = encoded["samples"][0].clone();
+        encoded["samples"] = serde_json::json!([
+            sample_at(&template, "2026-07-09T18:01:00Z"),
+            sample_at(&template, "2026-07-09T18:06:00Z"),
+            sample_at(&template, "2026-07-09T18:11:00Z")
+        ]);
+        encoded["generated_at_utc"] = serde_json::json!("2026-07-09T18:11:00Z");
+        let samples = serde_json::from_value(encoded).expect("telemetry sample set");
+
+        let one_hour = telemetry_throughput(&samples, ApplianceTelemetryWindow::OneHour)
+            .expect("one-hour throughput");
+        assert_eq!(
+            one_hour
+                .daily
+                .iter()
+                .map(|sample| sample.date.as_str())
+                .collect::<Vec<_>>(),
+            vec!["18:00", "18:05", "18:10"]
+        );
+
+        let one_day = telemetry_throughput(&samples, ApplianceTelemetryWindow::OneDay)
+            .expect("one-day throughput");
+        assert_eq!(one_day.daily.len(), 1);
+        assert_eq!(one_day.daily[0].date, "18:00");
+    }
+
+    #[test]
+    fn throughput_interval_labels_match_selected_window() {
+        let timestamp = "2026-07-09T18:29:30Z";
+        assert_eq!(
+            throughput_interval_label(timestamp, ApplianceTelemetryWindow::OneHour),
+            "18:25"
+        );
+        assert_eq!(
+            throughput_interval_label(timestamp, ApplianceTelemetryWindow::OneDay),
+            "18:00"
+        );
+        assert_eq!(
+            throughput_interval_label(timestamp, ApplianceTelemetryWindow::TenDays),
+            "2026-07-09"
+        );
+    }
+
+    fn sample_at(template: &serde_json::Value, timestamp: &str) -> serde_json::Value {
+        let mut sample = template.clone();
+        sample["timestamp_utc"] = serde_json::json!(timestamp);
+        sample
     }
 }

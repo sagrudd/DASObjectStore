@@ -59,9 +59,9 @@ pub fn home_dashboard_metrics(view: &HomeDashboardResponse) -> Vec<DashboardMetr
         ),
         DashboardMetric::new(
             "Throughput",
-            format!("{} TiB ingest", view.throughput_7d.ingest_tib),
+            format!("{} TiB written", view.throughput_7d.written_tib),
             format!(
-                "{} MiB/s write avg; {} MiB/s read avg",
+                "Physical disk IO: {} MiB/s write avg; {} MiB/s read avg",
                 view.throughput_7d.avg_write_mib_s, view.throughput_7d.avg_read_mib_s
             ),
             &view.telemetry_window.selected_label,
@@ -253,7 +253,9 @@ pub fn home_throughput_chart_max_tib(points: &[HomeThroughputChartPoint]) -> Str
         .iter()
         .filter_map(|point| point.ingest_tib)
         .fold(0.0_f64, f64::max);
-    if max_tib < 10.0 {
+    if max_tib > 0.0 && max_tib < 0.1 {
+        format!("{:.0} GiB", max_tib * 1024.0)
+    } else if max_tib < 10.0 {
         format!("{max_tib:.1} TiB")
     } else {
         format!("{max_tib:.0} TiB")
@@ -267,11 +269,15 @@ pub(super) fn throughput_chart_points(
         return Vec::new();
     }
 
-    let max_tib = days
+    let observed_max_tib = days
         .iter()
         .filter_map(|day| parse_tib_value(&day.ingest_tib))
-        .fold(0.0_f64, f64::max)
-        .max(1.0);
+        .fold(0.0_f64, f64::max);
+    let chart_scale_tib = if observed_max_tib > 0.0 {
+        observed_max_tib
+    } else {
+        1.0
+    };
     let span = days.len().saturating_sub(1).max(1) as f64;
     days.into_iter()
         .enumerate()
@@ -283,7 +289,7 @@ pub(super) fn throughput_chart_points(
             let y = ingest_tib.map(|ingest_tib| {
                 HOME_THROUGHPUT_CHART_BOTTOM
                     - ((HOME_THROUGHPUT_CHART_BOTTOM - HOME_THROUGHPUT_CHART_TOP)
-                        * (ingest_tib / max_tib))
+                        * (ingest_tib / chart_scale_tib))
             });
             HomeThroughputChartPoint {
                 date: day.date.clone(),

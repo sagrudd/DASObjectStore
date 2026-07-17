@@ -3120,6 +3120,11 @@ list until every temporary size-budget exception has been removed.
   - [x] Preserve invalid daily samples as fixed-position chart gaps, split SVG
     lines at missing intervals, and show a non-interpolating gap diagnostic;
     the broader appliance integration fixture matrix remains open.
+  - [x] Preserve meaningful sub-day resolution: five-minute points for the
+    one-hour view and hourly points for the one-day view. Scale sub-TiB write
+    intervals to their observed range and identify the chart as physical disk
+    IO so active appliance writes remain visible without implying source-byte
+    accounting.
 - [~] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device

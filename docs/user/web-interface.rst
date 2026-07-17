@@ -332,6 +332,13 @@ The Home page refreshes its selected-window telemetry payload every 30 seconds
 while the page is open. The throughput telemetry chart uses a stable SVG view
 box, fixed axes, bounded labels, and an explicit empty-sample state so updates
 do not resize cards or interpolate missing data into the visible line. The
+``1 hour`` view groups physical disk writes into five-minute intervals, the
+``1 day`` view uses hourly intervals, and longer windows use daily intervals.
+This prevents current-day activity from being collapsed into a single point
+that cannot form a visible line. The values are physical disk IO and can include
+replication, settlement, and object-service writes rather than only source
+payload bytes. Small intervals scale to their observed range and use GiB labels.
+The
 throughput summary identifies whether its samples came from daemon disk-IO
 retention, the legacy throughput file, or an unavailable source, and carries a
 diagnostic message for the latter two cases.
