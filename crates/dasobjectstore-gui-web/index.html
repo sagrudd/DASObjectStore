@@ -33,6 +33,18 @@
     <link data-trunk rel="rust" data-bin="dasobjectstore-gui-web" />
   </head>
   <body>
-    <div id="dasobjectstore-root"></div>
+    <style>
+      .dos-startup-shell {
+        display: grid;
+        min-height: 100vh;
+        place-items: center;
+        color: #111111;
+        background: #f6f7f5;
+        font: 600 0.875rem "Source Sans 3", system-ui, sans-serif;
+      }
+    </style>
+    <div id="dasobjectstore-root" class="dos-startup-shell" role="status">
+      Loading DASObjectStore…
+    </div>
   </body>
 </html>

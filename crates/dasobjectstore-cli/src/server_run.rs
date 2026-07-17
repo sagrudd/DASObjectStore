@@ -162,7 +162,7 @@ async fn root_redirect() -> Redirect {
 }
 
 async fn serve_asset(path: PathBuf, content_type: &'static str) -> Response {
-    let _permit = match static_asset_read_permits().clone().try_acquire_owned() {
+    let _permit = match static_asset_read_permits().clone().acquire_owned().await {
         Ok(permit) => permit,
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     };
@@ -537,7 +537,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn static_asset_lane_fails_fast_when_all_read_permits_are_busy() {
+    async fn static_asset_lane_queues_when_all_read_permits_are_busy() {
         let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-web-saturated");
         let auth_root = temp_root("server-run-web-saturated-auth");
@@ -548,26 +548,23 @@ mod tests {
             .acquire_many_owned(STATIC_ASSET_READ_PERMITS as u32)
             .await
             .expect("all static asset permits acquired");
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
-            .oneshot(
+        let queued = tokio::spawn(
+            standalone_router(root.clone(), Default::default(), auth_root.clone()).oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
                     .body(Body::empty())
                     .expect("request builds"),
-            )
-            .await
-            .expect("saturated response");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            ),
+        );
+        tokio::task::yield_now().await;
+        assert!(
+            !queued.is_finished(),
+            "asset request must wait for a read permit"
+        );
         drop(permits);
-
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
-            .oneshot(
-                Request::builder()
-                    .uri("/products/dasobjectstore/")
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
+        let response = queued
             .await
+            .expect("queued task joins")
             .expect("released response");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");

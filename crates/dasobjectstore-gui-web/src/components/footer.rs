@@ -1,5 +1,7 @@
 pub const MNEMOSYNE_HOME_URL: &str = "https://mnemosyne.co.uk";
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub const MNEMOSYNE_FOOTER_WORDMARK_SRC: &str = "mnemosyne-biosciences-logo-master-mono.png";
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub const MNEMOSYNE_FOOTER_PARTIAL_SRC: &str = "mnemosyne-biosciences-partial.png";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,15 +45,15 @@ pub struct DasObjectStoreFooterProps {
 #[function_component(DasObjectStoreFooter)]
 pub fn das_object_store_footer(props: &DasObjectStoreFooterProps) -> Html {
     let content = DasObjectStoreFooterContent::for_version(&props.product_version);
+    let partial_style = format!("--dos-mnemosyne-partial: url(\"{MNEMOSYNE_FOOTER_PARTIAL_SRC}\")");
 
     html! {
         <footer class="dos-product-footer" aria-label="Mnemosyne Biosciences product footer">
-            <span class="dos-product-footer__version">{ content.product_label }</span>
             <a class="dos-product-footer__wordmark" href={content.mnemosyne_url} aria-label="Mnemosyne Biosciences">
-                <span class="dos-product-footer__wordmark-name">{ "Mnemosyne" }</span>
-                <span class="dos-product-footer__wordmark-subtitle">{ "Biosciences" }</span>
+                <img src={MNEMOSYNE_FOOTER_WORDMARK_SRC} alt="" aria-hidden="true" />
             </a>
-            <img class="dos-product-footer__partial" src={MNEMOSYNE_FOOTER_PARTIAL_SRC} alt="" aria-hidden="true" />
+            <span class="dos-product-footer__version">{ content.product_label }</span>
+            <span class="dos-product-footer__partial" style={partial_style} aria-hidden="true"></span>
         </footer>
     }
 }
@@ -60,7 +62,7 @@ pub fn das_object_store_footer(props: &DasObjectStoreFooterProps) -> Html {
 mod tests {
     use super::{
         DasObjectStoreFooterContent, FooterAvailabilityState, MNEMOSYNE_FOOTER_PARTIAL_SRC,
-        MNEMOSYNE_HOME_URL, footer_required_for_state,
+        MNEMOSYNE_FOOTER_WORDMARK_SRC, MNEMOSYNE_HOME_URL, footer_required_for_state,
     };
 
     #[test]
@@ -87,7 +89,12 @@ mod tests {
     #[test]
     fn footer_assets_are_registered_as_local_trunk_files() {
         let index = include_str!("../../index.html");
+        assert!(index.contains("Loading DASObjectStore…"));
+        assert!(index.contains(MNEMOSYNE_FOOTER_WORDMARK_SRC));
         assert!(index.contains(MNEMOSYNE_FOOTER_PARTIAL_SRC));
+        assert!(
+            !include_bytes!("../../assets/mnemosyne-biosciences-logo-master-mono.png").is_empty()
+        );
         assert!(!include_bytes!("../../assets/mnemosyne-biosciences-partial.png").is_empty());
     }
 
@@ -101,15 +108,15 @@ mod tests {
         assert!(styles.contains("overflow: visible"));
         assert!(styles.contains("bottom: 0"));
         assert!(styles.contains("height: 152px"));
-        assert!(source.contains("dos-product-footer__wordmark-name"));
-        assert!(source.contains("dos-product-footer__wordmark-subtitle"));
-        let forbidden_lockup_asset = ["logo-master", "-mono.png"].concat();
-        assert!(!source.contains(&forbidden_lockup_asset));
+        assert!(source.contains("MNEMOSYNE_FOOTER_WORDMARK_SRC"));
+        assert!(styles.contains("transform: translateY(-61.4%)"));
+        assert!(styles.contains("background: var(--dos-mnemosyne-mark-light)"));
+        assert!(styles.contains("background: var(--dos-mnemosyne-mark-dark)"));
         let forbidden_orphan_label = ["content.mnemosyne", "_label"].concat();
         assert!(!source.contains(&forbidden_orphan_label));
         assert!(
-            source.find("dos-product-footer__version").unwrap()
-                < source.find("dos-product-footer__wordmark").unwrap()
+            source.find("dos-product-footer__wordmark").unwrap()
+                < source.find("dos-product-footer__version").unwrap()
         );
         assert!(styles.contains("--dos-interaction-primary: #0f6b78"));
         assert!(styles.contains("--dos-status-danger-fg: #8a3d24"));

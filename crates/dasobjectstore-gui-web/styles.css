@@ -3,6 +3,8 @@
   --dos-mnemosyne-footer-border: rgba(238, 246, 230, 0.2);
   --dos-mnemosyne-footer-text: rgba(238, 246, 230, 0.72);
   --dos-mnemosyne-footer-link: #eaf6d8;
+  --dos-mnemosyne-mark-light: #c7bfa8;
+  --dos-mnemosyne-mark-dark: #4f5c29;
   --dos-interaction-primary: #0f6b78;
   --dos-interaction-primary-hover: #0b5964;
   --dos-interaction-focus-ring: rgba(15, 107, 120, 0.18);
@@ -82,14 +84,20 @@ main[data-host] {
 }
 
 .dos-product-footer__wordmark {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  min-width: 184px;
-  color: #ffffff;
-  line-height: 1;
+  display: block;
+  overflow: hidden;
+  flex: 0 0 auto;
+  width: 184px;
+  aspect-ratio: 720 / 183;
   text-decoration: none;
+}
+
+.dos-product-footer__wordmark img {
+  display: block;
+  width: 100%;
+  height: auto;
+  transform: translateY(-61.4%);
+  filter: invert(1) brightness(1.08);
 }
 
 .dos-product-footer a {
@@ -108,30 +116,34 @@ main[data-host] {
   font-weight: 800;
 }
 
-.dos-product-footer__wordmark-name {
-  font-family: "Crimson Pro", ui-serif, Georgia, serif;
-  font-size: 1.55rem;
-  letter-spacing: 0.025em;
-}
-
-.dos-product-footer__wordmark-subtitle {
-  margin-top: 3px;
-  margin-left: 2.2rem;
-  color: #adada8;
-  font-family: "Crimson Pro", ui-serif, Georgia, serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
-}
-
 .dos-product-footer__partial {
   position: absolute;
   z-index: 0;
   right: 0;
   bottom: 0;
-  width: auto;
+  width: 192px;
   height: 152px;
-  opacity: 0.5;
   pointer-events: none;
+}
+
+.dos-product-footer__partial::before,
+.dos-product-footer__partial::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  opacity: 0.5;
+  -webkit-mask: var(--dos-mnemosyne-partial) center / contain no-repeat;
+  mask: var(--dos-mnemosyne-partial) center / contain no-repeat;
+}
+
+.dos-product-footer__partial::before {
+  clip-path: inset(0 0 50% 0);
+  background: var(--dos-mnemosyne-mark-light);
+}
+
+.dos-product-footer__partial::after {
+  clip-path: inset(50% 0 0 0);
+  background: var(--dos-mnemosyne-mark-dark);
 }
 
 .dos-task-pane {
@@ -1132,12 +1144,11 @@ h2 {
   }
 
   .dos-product-footer__wordmark {
-    min-width: 144px;
-    transform: scale(0.84);
-    transform-origin: left center;
+    width: 144px;
   }
 
   .dos-product-footer__partial {
+    width: 182px;
     height: 144px;
   }
 
