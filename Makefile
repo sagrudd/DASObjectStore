@@ -124,7 +124,7 @@ module-size:
 	bash tools/check-rust-module-size.sh
 
 check-lockfile:
-	@if rg -n '^(<<<<<<<|=======|>>>>>>>)' Cargo.lock; then \
+	@if grep -En '^(<<<<<<<|=======|>>>>>>>)' Cargo.lock; then \
 		printf 'Cargo.lock contains merge-conflict markers; resolve the conflict and regenerate it with cargo generate-lockfile.\n' >&2; \
 		exit 1; \
 	fi
