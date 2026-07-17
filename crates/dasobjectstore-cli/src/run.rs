@@ -919,6 +919,8 @@ mod tests {
         PerformanceTuiSnapshot, PerformanceWorkload, PerformanceWorkloadKind,
         SsdPipelineBenchmarkOptions, PERFORMANCE_SSD_SETTLE_QUEUE_CAPACITY,
     };
+    #[cfg(target_os = "linux")]
+    use super::{parse_proc_diskstats, DiskIoCounters};
     use crate::cli::{Cli, PerformanceFileOrder, PerformanceFileSelection};
     use clap::Parser;
     use dasobjectstore_core::health::{HealthScore, HealthSignals};
