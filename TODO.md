@@ -3059,7 +3059,7 @@ list until every temporary size-budget exception has been removed.
 
 ### Live Disk IO and throughput-card production follow-up
 
-- [~] Verify the packaged daemon telemetry loop is running on the appliance,
+- [x] Verify the packaged daemon telemetry loop is running on the appliance,
   writes samples at its configured cadence, and uses the active managed-HDD
   root rather than a development/default path; expose its last successful
   collection time and failure reason to operators.
@@ -3078,8 +3078,9 @@ list until every temporary size-budget exception has been removed.
   - [x] Enable sysfs resolution in the production Linux collector and resolve
     real-host stable aliases from `/dev/disk/by-*` rather than incorrectly
     looking beneath `/sys/dev/disk`; focused constructor and fixture regression
-    tests pass. Live packaged verification is pending a safe daemon restart
-    after the operator's active write completes.
+    tests pass. Live packaged x86_64 verification on 2026-07-17 mapped all
+    seven QNAP stable aliases to kernel disk names and produced valid
+    second-cadence IO rates with no missing-device reason.
 - [~] Validate managed-HDD device markers during enclosure preparation and
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or
