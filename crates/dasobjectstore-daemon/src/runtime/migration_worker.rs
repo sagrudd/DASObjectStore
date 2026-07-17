@@ -312,12 +312,12 @@ fn migrate_store(
                 checkpoint_path,
                 provenance_root,
                 verified_at_utc,
-            )
+            );
         }
         state => {
             return Err(FolderMigrationError::InvalidRequest(format!(
                 "cannot execute migration while it is {state:?}"
-            )))
+            )));
         }
     }
 

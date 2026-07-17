@@ -69,8 +69,8 @@ fn packaged_web_config_declares_disabled_production_mtls_listener() {
 
 #[test]
 fn local_docker_private_state_and_projects_are_storage_root_scoped() {
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../deploy/local-docker/local.sh");
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/local-docker/local.sh");
     let paths = |root: &str| {
         let output = std::process::Command::new("bash")
             .arg(&script)
@@ -100,7 +100,10 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
             .expect("second projection field");
         assert_ne!(first_value, second_value, "{field} must be root-scoped");
     }
-    assert_contains(LOCAL_DOCKER, "private config is bound to a different storage root");
+    assert_contains(
+        LOCAL_DOCKER,
+        "private config is bound to a different storage root",
+    );
     assert_contains(LOCAL_DOCKER, "put-object");
     assert_contains(LOCAL_DOCKER, "head-object");
     assert_contains(LOCAL_DOCKER, "list-objects-v2");
@@ -128,10 +131,7 @@ fn release_readiness_requires_same_commit_surrogate_evidence() {
     assert_contains(RELEASE_READINESS, "local-docker-s3-$COMMIT.txt");
     assert_contains(RELEASE_READINESS, "ubuntu-arm64.txt");
     assert_contains(RELEASE_READINESS, "alma-arm64.txt");
-    assert_contains(
-        RELEASE_READINESS,
-        "auth-authority-switch-mvp-$COMMIT.txt",
-    );
+    assert_contains(RELEASE_READINESS, "auth-authority-switch-mvp-$COMMIT.txt");
     assert_contains(
         RELEASE_READINESS,
         "auth_authority_switch_mvp=passed_surrogate",

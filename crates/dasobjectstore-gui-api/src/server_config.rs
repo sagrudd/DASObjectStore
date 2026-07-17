@@ -83,7 +83,10 @@ pub struct StandaloneMutualTlsConfig {
     #[serde(default)]
     pub client_ca_path: PathBuf,
     /// Backward-compatible decode-only field. Registry custody belongs to the daemon.
-    #[serde(default = "default_application_identity_registry_path", skip_serializing)]
+    #[serde(
+        default = "default_application_identity_registry_path",
+        skip_serializing
+    )]
     pub application_identity_registry_path: PathBuf,
     /// Backward-compatible decode-only field. Registry custody belongs to the daemon.
     #[serde(default = "default_application_key_registry_path", skip_serializing)]

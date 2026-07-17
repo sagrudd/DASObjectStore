@@ -103,7 +103,9 @@ mod tests {
             "claims": sample_claims(),
             "unexpected": true
         });
-        assert!(serde_json::from_value::<ApplicationAccessTokenExchangeResponse>(response).is_err());
+        assert!(
+            serde_json::from_value::<ApplicationAccessTokenExchangeResponse>(response).is_err()
+        );
     }
 
     fn sample_claims() -> dasobjectstore_core::application_auth::AccessTokenClaims {

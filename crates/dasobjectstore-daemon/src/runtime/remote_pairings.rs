@@ -250,16 +250,27 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io { path, source } => {
-                write!(formatter, "remote easyconnect pairing store IO failed at {}: {source}", path.display())
+                write!(
+                    formatter,
+                    "remote easyconnect pairing store IO failed at {}: {source}",
+                    path.display()
+                )
             }
             Self::Json { path, message } => {
-                write!(formatter, "remote easyconnect pairing store JSON failed at {}: {message}", path.display())
+                write!(
+                    formatter,
+                    "remote easyconnect pairing store JSON failed at {}: {message}",
+                    path.display()
+                )
             }
             Self::BlankField { field } => write!(formatter, "{field} must not be blank"),
             Self::InvalidGrant {
                 pairing_id,
                 message,
-            } => write!(formatter, "pairing {pairing_id} has invalid object store grant: {message}"),
+            } => write!(
+                formatter,
+                "pairing {pairing_id} has invalid object store grant: {message}"
+            ),
             Self::ApprovalPairingMismatch {
                 pairing_id,
                 approval_pairing_id,
@@ -268,10 +279,16 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
                 "pairing {pairing_id} cannot store approval for {approval_pairing_id}"
             ),
             Self::PairingNotFound { pairing_id } => {
-                write!(formatter, "remote easyconnect pairing {pairing_id} was not found")
+                write!(
+                    formatter,
+                    "remote easyconnect pairing {pairing_id} was not found"
+                )
             }
             Self::PairingNotApproved { pairing_id } => {
-                write!(formatter, "remote easyconnect pairing {pairing_id} has not been approved")
+                write!(
+                    formatter,
+                    "remote easyconnect pairing {pairing_id} has not been approved"
+                )
             }
             Self::PairingExpired {
                 pairing_id,

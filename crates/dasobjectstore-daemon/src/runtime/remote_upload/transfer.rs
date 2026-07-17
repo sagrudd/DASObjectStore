@@ -498,7 +498,7 @@ fn release_capacity_on_error(
         Err(store_error) => {
             return DaemonServiceRuntimeError::UnsupportedOperation {
                 operation: format!("{error}; capacity release unavailable: {store_error}"),
-            }
+            };
         }
     };
     match provider.release(&store_id, reservation_id) {

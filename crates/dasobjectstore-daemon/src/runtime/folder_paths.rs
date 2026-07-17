@@ -90,7 +90,7 @@ fn validate_user_service_state_owner_with_uid(
             return Err(FolderHostPathError::StateDirectoryUnreadable {
                 path: path.to_path_buf(),
                 message: error.to_string(),
-            })
+            });
         }
     };
     if !metadata.is_dir() {

@@ -438,7 +438,9 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::BlankField { field } => write!(formatter, "{field} must not be blank"),
-            Self::InvalidGrant { message } => write!(formatter, "invalid object store grant: {message}"),
+            Self::InvalidGrant { message } => {
+                write!(formatter, "invalid object store grant: {message}")
+            }
             Self::Io { path, message } => {
                 write!(formatter, "{} IO failed: {message}", path.display())
             }
@@ -446,7 +448,10 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
                 write!(formatter, "{} JSON is invalid: {message}", path.display())
             }
             Self::SessionNotFound { session_id } => {
-                write!(formatter, "paired easyconnect session {session_id} was not found")
+                write!(
+                    formatter,
+                    "paired easyconnect session {session_id} was not found"
+                )
             }
             Self::SessionRevoked {
                 session_id,

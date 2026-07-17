@@ -209,7 +209,7 @@ fn read_registry(path: &Path) -> Result<ReplayRegistryFile, DaemonServiceRuntime
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ReplayRegistryFile::default())
+            return Ok(ReplayRegistryFile::default());
         }
         Err(error) => return Err(registry_io(path, error)),
     };

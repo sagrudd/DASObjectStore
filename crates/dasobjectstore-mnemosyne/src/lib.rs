@@ -3,9 +3,9 @@
 pub mod binding;
 pub mod boundary;
 pub mod flounder_telemetry;
-pub mod host_boundary;
 pub mod host_auth_adapter;
 pub mod host_auth_router;
+pub mod host_boundary;
 pub mod host_mode;
 pub mod integrated_session;
 pub mod monas_host_boundary;
@@ -41,11 +41,6 @@ pub use flounder_telemetry::{
     FlounderTelemetrySmallMultiple, FlounderTelemetryUnit, FlounderTelemetryWindow,
     FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION, FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION,
 };
-pub use host_boundary::{
-    validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
-    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedHostBoundaryError,
-    REQUEST_CONTEXT_SCHEMA_VERSION,
-};
 pub use host_auth_adapter::{
     accept_monas_host_session, accept_synoptikon_host_session, HostSessionAdapterError,
     MonasHostSessionIssue, SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
@@ -54,6 +49,11 @@ pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
     synoptikon_federated_router, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
     MONAS_SESSION_COOKIE,
+};
+pub use host_boundary::{
+    validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
+    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedHostBoundaryError,
+    REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 pub use host_mode::{
     host_mode_profile, standalone_host_mode_profile, synoptikon_integrated_host_mode_profile,

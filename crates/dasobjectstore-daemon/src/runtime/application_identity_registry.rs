@@ -137,7 +137,7 @@ fn read_registry(
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ApplicationIdentityRegistryFile::default())
+            return Ok(ApplicationIdentityRegistryFile::default());
         }
         Err(error) => return Err(registry_io(path, error)),
     };

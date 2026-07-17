@@ -340,7 +340,7 @@ impl MigrationProvenanceRecord {
             _ => {
                 return Err(MigrationProvenanceError::InvalidState(
                     "verification state and time are inconsistent".to_string(),
-                ))
+                ));
             }
         }
         if self

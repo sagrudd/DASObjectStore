@@ -197,7 +197,7 @@ fn read_registry(path: &Path) -> Result<ApplicationKeyRegistryFile, DaemonServic
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ApplicationKeyRegistryFile::default())
+            return Ok(ApplicationKeyRegistryFile::default());
         }
         Err(error) => return Err(registry_io(path, error)),
     };

@@ -678,10 +678,8 @@ fn resolve_diskstats_device_name(
             let Ok(target) = fs::canonicalize(&alias) else {
                 continue;
             };
-            if let Some(name) = resolve_diskstats_name_from_sysfs_target(
-                &target,
-                current_diskstats,
-            ) {
+            if let Some(name) = resolve_diskstats_name_from_sysfs_target(&target, current_diskstats)
+            {
                 return Some(name);
             }
         }

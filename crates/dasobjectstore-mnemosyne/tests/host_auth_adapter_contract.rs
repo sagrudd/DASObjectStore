@@ -109,9 +109,7 @@ async fn live_synoptikon_session_drives_gui_actor_without_storage_grant() {
     ));
 }
 
-async fn assert_synoptikon_mutation_requires_bound_csrf(
-    issue: SynoptikonIntegratedSessionIssue,
-) {
+async fn assert_synoptikon_mutation_requires_bound_csrf(issue: SynoptikonIntegratedSessionIssue) {
     async fn mutate(_actor: AuthenticatedGuiActor) -> StatusCode {
         StatusCode::NO_CONTENT
     }

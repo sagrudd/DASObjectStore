@@ -156,7 +156,7 @@ fn read_file(path: &Path) -> Result<ApplicationAuditFile, DaemonServiceRuntimeEr
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(ApplicationAuditFile::default())
+            return Ok(ApplicationAuditFile::default());
         }
         Err(error) => return Err(audit_io(path, error)),
     };

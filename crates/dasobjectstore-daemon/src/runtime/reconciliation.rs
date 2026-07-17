@@ -154,7 +154,7 @@ pub fn discover_incomplete_reconciliation_manifest(
             return Err(ReconciliationManifestError::Io {
                 path: reconciliation_root.to_path_buf(),
                 message: error.to_string(),
-            })
+            });
         }
     };
     let mut candidates = Vec::new();
@@ -183,7 +183,7 @@ pub fn discover_incomplete_reconciliation_manifest(
                 return Err(ReconciliationManifestError::Io {
                     path: manifest_path,
                     message: error.to_string(),
-                })
+                });
             }
         };
         if !manifest_type.is_file() || manifest_type.file_type().is_symlink() {

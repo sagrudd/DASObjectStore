@@ -27,6 +27,19 @@ agreement before landing.
   ``DASOBJECTSTORE_LOCAL_API_PORT`` and validate its four-port range.
 - Provision the local folder-profile binding before remote uploads so daemon
   capacity admission resolves the canonical managed backend.
+- Join the local daemon to its Garage network and preserve the signing region
+  for provider completion verification.
+- Carry the configured S3 region in daemon-submitted remote upload jobs so
+  upload and authoritative ``head-object`` verification sign consistently.
+- Allow store creation to set a finite logical capacity and backend reserve;
+  local Docker uses the same policy for its store definition and binding.
+- Persist the local Docker live object catalogue in the mounted daemon state
+  instead of the unavailable appliance SSD default.
+- Reconcile an accepted profile binding into the live metadata catalogue from
+  the daemon-owned store definition before the first remote completion.
+- Derive remote-upload provenance and placement identity from immutable object
+  and checksum data so identical retries converge instead of conflicting on a
+  transient upload job ID.
 
 - Package the version-matched remote completion client and digest-pinned AWS
   CLI in the local Docker authority image so macOS consumers can execute next
