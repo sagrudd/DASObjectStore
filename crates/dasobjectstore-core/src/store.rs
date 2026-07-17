@@ -230,10 +230,11 @@ pub fn evaluate_capacity_admission(
         backend_available_bytes,
         ssd_available_bytes: input.ssd_free_bytes,
         required_backend_bytes,
-        required_ssd_bytes: input
-            .requires_ssd_staging
-            .then_some(input.requested_bytes)
-            .unwrap_or(0),
+        required_ssd_bytes: if input.requires_ssd_staging {
+            input.requested_bytes
+        } else {
+            0
+        },
     };
     if logical_available_bytes.is_some_and(|available| input.requested_bytes > available) {
         return Err(CapacityAdmissionError::LogicalQuota {
