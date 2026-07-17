@@ -254,7 +254,8 @@ pub(super) fn render_object_browser_folders(
                 let prefix = folder.prefix.clone();
                 let download_prefix = folder.prefix.clone();
                 let download_enabled = object_browser_folder_download_available(&readiness);
-                let download_title = object_browser_download_disabled_reason(&readiness, &[]);
+                let download_title =
+                    object_browser_download_disabled_reason(&readiness, &[], None);
                 let browser_prefix = browser_prefix.clone();
                 let endpoint = endpoint.clone();
                 let api_base_path = api_base_path.clone();
