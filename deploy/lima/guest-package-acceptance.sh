@@ -151,7 +151,7 @@ assert_packaged_folder_profile() {
 reinstall_package() {
   source "$state_file"
   case "$distro" in
-    ubuntu) dpkg -i "$PACKAGE" ;;
+    ubuntu) apt-get install -y --reinstall "$PACKAGE" ;;
     alma) rpm -Uvh --replacepkgs "$PACKAGE" ;;
   esac
 }

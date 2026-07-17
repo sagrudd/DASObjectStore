@@ -58,8 +58,10 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - The active deployment checkout on the DAS host is usually
   `/home/stephen/src/DASObjectStore`.
 - Build Linux packages on the DAS host when working from a non-Linux
-  development machine, then install the generated Debian package with `dpkg`
-  and restart `dasobjectstored`.
+  development machine, then install the generated Debian package through APT
+  with `sudo apt-get install --reinstall ./dasobjectstore_<version>_amd64.deb`
+  and restart `dasobjectstored`. Do not use a raw `dpkg -i` deployment because
+  installations and reinstalls must remain formally managed through APT.
 - Coding agents are authorized to compile on the DAS host, install the
   resulting DASObjectStore package, and restart `dasobjectstored` for
   validation.
