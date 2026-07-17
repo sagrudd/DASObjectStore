@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.6 - 2026-07-17
+
+- Always grant the packaged daemon recursive read-only ACL access to the
+  explicitly selected ingest source tree, including private payload files
+  beneath an already traversable directory.
+
 ## 0.114.5 - 2026-07-17
 
 - Honour the requested Home telemetry window on the authenticated appliance

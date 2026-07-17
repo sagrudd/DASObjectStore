@@ -97,7 +97,9 @@ The packaged daemon reads the path supplied with ``--source``. On Linux, the CLI
 prepares source ACLs before submitting the job so the ``dasobjectstore`` service
 can traverse private home directories and read the selected import tree without
 requiring ``sudo`` or broad home-directory mode changes. The daemon does not
-need write access to the source path.
+need write access to the source path. The read-only ACL is applied recursively
+to the explicitly selected tree even when its root directory is already
+traversable, because individual payload files may still have private modes.
 
 If a removable-media parent is root-owned, the CLI retries the read-only ACL
 grant with ``sudo -n`` when the invoking user is already authorized for

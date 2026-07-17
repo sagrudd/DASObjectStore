@@ -4459,18 +4459,21 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn source_acl_plan_skips_recursive_acl_for_public_source_root() {
+    fn source_acl_plan_reads_private_file_beneath_public_source_root() {
         let root = temp_root("source-acl-public");
         let mount = root.join("mnt");
         let source = mount.join("external");
+        let private_file = source.join("private.bam");
         fs::create_dir_all(&source).expect("create public source");
+        fs::write(&private_file, b"private fixture").expect("write private file");
         set_mode(&root, 0o755);
         set_mode(&mount, 0o755);
         set_mode(&source, 0o755);
+        set_mode(&private_file, 0o600);
 
         let actions = super::plan_source_acl_actions(&source).expect("source acl plan");
 
-        assert!(!actions.contains(&super::SourceAclAction {
+        assert!(actions.contains(&super::SourceAclAction {
             path: source.clone(),
             permission: super::SourceAclPermission::ReadTree,
         }));

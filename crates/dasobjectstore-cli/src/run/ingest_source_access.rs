@@ -72,12 +72,10 @@ pub(super) fn plan_source_acl_actions(source: &Path) -> Result<Vec<SourceAclActi
             permission: SourceAclPermission::Traverse,
         })
         .collect::<Vec<_>>();
-    if source_requires_read_acl(source)? {
-        actions.push(SourceAclAction {
-            path: source.to_path_buf(),
-            permission: SourceAclPermission::ReadTree,
-        });
-    }
+    actions.push(SourceAclAction {
+        path: source.to_path_buf(),
+        permission: SourceAclPermission::ReadTree,
+    });
     Ok(actions)
 }
 
@@ -101,18 +99,6 @@ fn acl_ancestors_requiring_execute(source: &Path) -> Result<Vec<PathBuf>, CliErr
         }
     }
     Ok(required)
-}
-
-#[cfg(target_os = "linux")]
-fn source_requires_read_acl(source: &Path) -> Result<bool, CliError> {
-    let metadata = fs::metadata(source).map_err(|err| {
-        CliError::CommandFailed(format!(
-            "failed to inspect ingest source {}: {err}",
-            source.display()
-        ))
-    })?;
-    let required_bits = if metadata.is_dir() { 0o005 } else { 0o004 };
-    Ok(metadata.permissions().mode() & required_bits != required_bits)
 }
 
 #[cfg(target_os = "linux")]

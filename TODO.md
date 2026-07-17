@@ -2043,6 +2043,10 @@ list until every temporary size-budget exception has been removed.
   udev mount policy that gives FAT/exFAT/NTFS volumes read-only
   `dasobjectstore` group access at mount time. Unsupported filesystems remain
   explicit CLI diagnostics rather than receiving unsafe broad permissions.
+- [x] Make packaged-daemon source ACL preparation recursively read the selected
+  ingest tree even when its root mode is already traversable. This closes the
+  private-file-under-readable-directory failure without granting source write
+  access or broadening permissions outside the operator-selected tree.
 - [~] Add an appliance performance acceptance run using a server-local NVMe source and a policy-approved direct-HDD store. Verify that no SSD ingest stage is entered, a bounded one-read fan-out uses distinct HDDs, and the preflight/TUI route explanation matches the daemon decision. Acceptance is gated on a quiescent appliance: do not overlap production ingest, repair/drain, or another performance run. The repeatable sequence is a small `performance-test --scenario direct-hdd --hdd-concurrency 1,2,3,4` run for per-disk/SSD-stage evidence, followed by a `ingest direct-import --dry-run --tui` against the same server-local source to capture the daemon preflight route; only then run the bounded non-dry-run fixture and archive its JSON/TUI evidence.
 - [x] Document the supported operator workflow for inspecting a store's ingest policy, requesting a policy-allowed direct local ingest, and interpreting an SSD-first fallback. Keep external/removable-source staging and data-loss safeguards explicit in `docs/user/ingesting-files.rst`.
 
