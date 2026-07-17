@@ -294,12 +294,8 @@ pub(super) fn render_object_browser_files(
                 <thead>
                     <tr>
                         <th>{ "Name" }</th>
-                        <th>{ "Type" }</th>
                         <th>{ "Size" }</th>
-                        <th>{ "Readiness" }</th>
-                        <th>{ "Lifecycle" }</th>
-                        <th>{ "Copies" }</th>
-                        <th>{ "Placement" }</th>
+                        <th>{ "State" }</th>
                         <th>{ "Modified" }</th>
                         <th>{ "Actions" }</th>
                     </tr>
@@ -316,15 +312,11 @@ pub(super) fn render_object_browser_files(
                         let browser_download_state = browser_download_state.clone();
                         html! {
                             <tr title={file.path.clone()}>
-                                <td><strong>{ file.name }</strong><span>{ file.object_id }</span></td>
-                                <td>{ file.object_type }</td>
-                                <td>{ file.size }</td>
-                                <td><span class="dos-status-pill" data-state={object_browser_state_key(&file.readiness)}>{ file.readiness }</span></td>
-                                <td>{ file.lifecycle }</td>
-                                <td>{ file.copies }</td>
-                                <td>{ render_object_browser_placements(&file.placement_summary, &file.placements) }</td>
-                                <td>{ file.modified }</td>
-                                <td>
+                                <td><strong>{ file.name.clone() }</strong><span>{ file.object_type.clone() }</span></td>
+                                <td>{ file.size.clone() }</td>
+                                <td><span class="dos-status-pill" data-state={object_browser_state_key(&file.readiness)}>{ file.readiness.clone() }</span></td>
+                                <td>{ file.modified.clone() }</td>
+                                <td><div class="dos-object-browser-actions">
                                     <button
                                         type="button"
                                         class="dos-object-browser-download"
@@ -344,13 +336,39 @@ pub(super) fn render_object_browser_files(
                                     >
                                         { "Download" }
                                     </button>
-                                </td>
+                                    { render_object_browser_file_details(&file) }
+                                </div></td>
                             </tr>
                         }
                     }) }
                 </tbody>
             </table>
         </div>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_object_browser_file_details(file: &ObjectBrowserFileSummary) -> Html {
+    html! {
+        <details class="dos-object-browser-object-details">
+            <summary>{ "Details" }</summary>
+            <div class="dos-object-browser-object-details__body">
+                <dl>
+                    <dt>{ "Lifecycle" }</dt><dd>{ file.lifecycle.clone() }</dd>
+                    <dt>{ "Copies" }</dt><dd>{ file.copies.clone() }</dd>
+                    <dt>{ "Placement" }</dt><dd>{ file.placement_summary.clone() }</dd>
+                    <dt>{ "Object ID" }</dt><dd>{ file.object_id.clone() }</dd>
+                </dl>
+                if file.placements.is_empty() {
+                    <p>{ "Placement evidence pending." }</p>
+                } else {
+                    <ul>{ for file.placements.iter().map(|placement| {
+                        let disk = placement.disk_label.as_deref().or(placement.disk_id.as_deref()).unwrap_or("External service");
+                        html! { <li><strong>{ disk }</strong><span>{ format!("{} · {}", labelize_state(&placement.location), labelize_state(&placement.state)) }</span></li> }
+                    }) }</ul>
+                }
+            </div>
+        </details>
     }
 }
 

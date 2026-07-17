@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.2 - 2026-07-17
+
+- Simplify ObjectStore file rows to name/type, size, state, modified time, and
+  actions. Move lifecycle, copy, object identity, and disk-placement evidence
+  into an on-demand Details disclosure and remove oversized placement capsules
+  from the default browsing view.
+
 ## 0.114.1 - 2026-07-17
 
 - Put a compact disk-and-label Browse capsule directly on every ObjectStore

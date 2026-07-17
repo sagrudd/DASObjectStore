@@ -127,11 +127,109 @@
 }
 
 .dos-object-browser-table {
-  min-width: 1040px;
+  min-width: 720px;
+}
+
+.dos-object-browser-table-wrap {
+  overflow: visible;
+}
+
+.dos-object-browser-table-wrap:has(.dos-object-browser-object-details[open]) {
+  padding-bottom: 190px;
 }
 
 .dos-object-browser-table td:first-child {
-  max-width: 280px;
+  width: 48%;
+  max-width: 520px;
+}
+
+.dos-object-browser-table td:nth-child(2),
+.dos-object-browser-table td:nth-child(3),
+.dos-object-browser-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
+.dos-object-browser-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dos-object-browser-object-details {
+  position: relative;
+}
+
+.dos-object-browser-object-details summary {
+  min-height: 32px;
+  border: 1px solid #c7d1d5;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #0f6b78;
+  background: #fff;
+  font-size: 0.78rem;
+  font-weight: 720;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.dos-object-browser-object-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.dos-object-browser-object-details__body {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(390px, 72vw);
+  border: 1px solid #d3dde1;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+  box-shadow: 0 14px 36px rgba(23, 32, 39, 0.16);
+  white-space: normal;
+}
+
+.dos-object-browser-object-details__body dl {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 0;
+}
+
+.dos-object-browser-object-details__body dt {
+  color: #69767d;
+  font-size: 0.72rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.dos-object-browser-object-details__body dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.dos-object-browser-object-details__body ul {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid #e3e9ec;
+  list-style: none;
+}
+
+.dos-object-browser-object-details__body li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dos-object-browser-object-details__body li span {
+  color: #69767d;
+  text-align: right;
 }
 
 .dos-object-browser-table td:first-child span {
@@ -220,5 +318,15 @@
   .dos-object-browser-controls,
   .dos-object-browser-folders {
     grid-template-columns: 1fr;
+  }
+
+  .dos-object-browser-table-wrap {
+    overflow-x: auto;
+  }
+
+  .dos-object-browser-object-details__body {
+    position: static;
+    width: 320px;
+    margin-top: 6px;
   }
 }

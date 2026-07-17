@@ -1546,8 +1546,12 @@ fn object_browser_component_contract_covers_rows_downloads_and_empty_states() {
 
     assert!(source.contains("dos-object-browser-table"));
     assert!(source.contains("<th>{ \"Name\" }</th>"));
-    assert!(source.contains("<th>{ \"Placement\" }</th>"));
+    assert!(source.contains("<th>{ \"State\" }</th>"));
     assert!(source.contains("<th>{ \"Actions\" }</th>"));
+    assert!(!source.contains("<th>{ \"Placement\" }</th>"));
+    assert!(!source.contains("<th>{ \"Lifecycle\" }</th>"));
+    assert!(source.contains("dos-object-browser-object-details"));
+    assert!(source.contains("render_object_browser_file_details(&file)"));
     assert!(source.contains("dos-object-browser-folder"));
     assert!(source.contains("dos-object-browser-download"));
     assert!(source.contains("Download folder"));
@@ -1563,7 +1567,7 @@ fn object_browser_component_contract_covers_rows_downloads_and_empty_states() {
 }
 
 #[test]
-fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css() {
+fn object_browser_component_contract_keeps_placement_details_out_of_default_rows() {
     let source = workspace_component_source();
     let css = web_styles_source();
 
@@ -1578,9 +1582,11 @@ fn object_browser_component_contract_covers_placement_badges_and_no_overlap_css(
 
     assert!(css.contains(".dos-table-wrap {\n  max-width: 100%;\n  overflow-x: auto;"));
     assert!(css.contains(".dos-table {\n  width: 100%;\n  border-collapse: collapse;"));
-    assert!(css.contains(".dos-object-browser-table {\n  min-width: 1040px;"));
+    assert!(css.contains(".dos-object-browser-table {\n  min-width: 720px;"));
+    assert!(css.contains(".dos-object-browser-table-wrap {\n  overflow: visible;"));
     assert!(css.contains(".dos-object-browser-table td:first-child span"));
     assert!(css.contains("text-overflow: ellipsis;"));
+    assert!(css.contains(".dos-object-browser-object-details__body"));
     assert!(css.contains(".dos-object-browser-placements {\n  display: flex;\n  flex-wrap: wrap;"));
     assert!(css
         .contains(".dos-object-browser-placement {\n  display: inline-flex;\n  max-width: 220px;"));

@@ -301,6 +301,16 @@ async function assertObjectStoreWorkflow(page, role) {
     path: join(artifactDir, `desktop-${role.name}-objectstores-browser.png`),
     fullPage: false,
   });
+  if (await browserPane.getByRole("columnheader", { name: "Placement", exact: true }).count()) {
+    throw new Error("default ObjectStore file rows must not expose placement diagnostics");
+  }
+  const objectDetails = browserPane.locator(".dos-object-browser-object-details summary");
+  await objectDetails.click();
+  await browserPane.locator(".dos-object-browser-object-details__body").waitFor();
+  await page.screenshot({
+    path: join(artifactDir, `desktop-${role.name}-objectstores-browser-details.png`),
+    fullPage: false,
+  });
   if (await browserPane.getByLabel("Endpoint").count() !== 0) {
     throw new Error("row-scoped ObjectStore browser must not expose a second endpoint selector");
   }

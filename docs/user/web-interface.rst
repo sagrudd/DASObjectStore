@@ -533,10 +533,12 @@ The ``Browse objects`` pane on the ObjectStores page reads
 ``/api/v1/object-stores/<endpoint>/browser`` through the authenticated Web
 session. Operators launch it from the relevant inventory row, navigate folder
 prefixes with breadcrumbs, search by object name or path, and sort by name,
-size, or modified time. Folder and file rows show daemon-reported size, object type,
-readiness, lifecycle state, copy count, and placement badges. Placement badges
-name the managed disk label or external endpoint but do not expose writable
-managed-disk paths to the browser.
+size, or modified time. File rows keep the default browsing view intentionally
+compact: name and object type, size, readiness, modified time, and actions.
+``Details`` opens a small contextual disclosure containing lifecycle, copy
+count, stable object identity, and placement evidence. Managed disk labels or
+external services remain inspectable there without exposing writable managed
+disk paths or forcing storage diagnostics into every row.
 
 Placement summaries distinguish SSD landing copies, verified settled HDD
 copies, external endpoint records, pending placements, and degraded or missing

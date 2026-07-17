@@ -3369,6 +3369,10 @@ non-destructive close, and restores focus to its trigger when closed.
   hovering task pane, keep the registry behind it, remove the redundant store
   selector, and preserve search, sorting, navigation, placement evidence, and
   downloads within the scoped pane.
+- [x] Reduce default file rows to name/type, size, state, modified time, and
+  actions. Move lifecycle, copy, stable identity, and placement evidence into
+  an on-demand detail disclosure instead of rendering diagnostic capsules in
+  every row.
 
 ### 24.4 Remote Upload: explicit ObjectStore selection is mandatory
 
