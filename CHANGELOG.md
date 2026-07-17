@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.111.3 - 2026-07-17
+
+- Preserve dotted third-party dataset identifiers, including ``ont-open-data``
+  names, when creating ObjectStores through the daemon while continuing to
+  reject unsafe path and namespace characters.
+
 ## 0.111.2 - 2026-07-17
 
 - Queue concurrent Web bootstrap asset reads instead of returning empty 503

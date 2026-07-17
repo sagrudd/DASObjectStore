@@ -36,7 +36,7 @@ pub struct CreateObjectStoreRequest {
 
 impl CreateObjectStoreRequest {
     pub fn validate(&self) -> Result<(), CreateObjectStoreValidationError> {
-        validate_safe_name("store_id", &self.store_id)?;
+        validate_store_id(&self.store_id)?;
         validate_safe_name("store_class", &self.store_class)?;
         validate_optional_safe_name("reader_group", self.reader_group.as_deref())?;
         validate_safe_name("writer_group", &self.writer_group)?;
@@ -76,7 +76,7 @@ impl CreateObjectStoreRequest {
     pub fn registry_definition(
         &self,
     ) -> Result<StoreServiceDefinition, CreateObjectStoreValidationError> {
-        validate_safe_name("store_id", &self.store_id)?;
+        validate_store_id(&self.store_id)?;
         validate_safe_name("store_class", &self.store_class)?;
         validate_optional_safe_name("reader_group", self.reader_group.as_deref())?;
         validate_safe_name("writer_group", &self.writer_group)?;
@@ -228,6 +228,19 @@ fn validate_safe_name(
     Ok(())
 }
 
+fn validate_store_id(value: &str) -> Result<(), CreateObjectStoreValidationError> {
+    if value.trim().is_empty() {
+        return Err(CreateObjectStoreValidationError::BlankField { field: "store_id" });
+    }
+    if !is_safe_store_id(value) {
+        return Err(CreateObjectStoreValidationError::UnsafeName {
+            field: "store_id",
+            value: value.to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn validate_optional_safe_name(
     field: &'static str,
     value: Option<&str>,
@@ -249,6 +262,20 @@ fn is_safe_name(value: &str) -> bool {
     }
     bytes[1..].iter().all(|byte| {
         byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'_' || *byte == b'-'
+    })
+}
+
+fn is_safe_store_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 128 || !value.is_ascii() {
+        return false;
+    }
+    let first = bytes[0];
+    if !(first.is_ascii_lowercase() || first.is_ascii_digit()) {
+        return false;
+    }
+    bytes[1..].iter().all(|byte| {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
     })
 }
 
@@ -379,6 +406,44 @@ mod tests {
         assert_eq!(
             request.validate(),
             Err(CreateObjectStoreValidationError::BlankField { field: "store_id" })
+        );
+    }
+
+    #[test]
+    fn preserves_dotted_third_party_dataset_identifiers() {
+        for store_id in ["zymo_fecal_2025.05", "colo824_2024.03"] {
+            let request = CreateObjectStoreRequest {
+                store_id: store_id.to_string(),
+                ..valid_request()
+            };
+
+            request
+                .validate()
+                .expect("third-party dotted store id remains valid");
+            assert_eq!(
+                request
+                    .registry_definition()
+                    .expect("third-party dotted store id projects")
+                    .store_id
+                    .as_str(),
+                store_id
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_store_id_that_could_escape_a_store_namespace() {
+        let request = CreateObjectStoreRequest {
+            store_id: "../generated-data".to_string(),
+            ..valid_request()
+        };
+
+        assert_eq!(
+            request.validate(),
+            Err(CreateObjectStoreValidationError::UnsafeName {
+                field: "store_id",
+                value: "../generated-data".to_string(),
+            })
         );
     }
 
