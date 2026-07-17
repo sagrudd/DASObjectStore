@@ -40,7 +40,9 @@ impl LinuxProcTelemetryCollector {
             web_auth_root: None,
             remote_session_path: None,
             local_group_path: None,
-            sys_root: None,
+            // Production collectors need kernel-owned device resolution for
+            // stable marker aliases such as /dev/disk/by-id/*.
+            sys_root: Some(PathBuf::from("/sys")),
             enclosure_registry: None,
             previous_diskstats: None,
         }
@@ -653,14 +655,25 @@ fn resolve_diskstats_device_name(
         return None;
     };
     for candidate in candidates {
-        for alias_root in [
-            sys_root.join("class/block"),
-            sys_root.join("dev/disk/by-id"),
-            sys_root.join("dev/disk/by-path"),
-            sys_root.join("dev/disk/by-uuid"),
-            sys_root.join("dev/disk/by-partuuid"),
-            sys_root.join("dev/disk/by-label"),
-        ] {
+        let mut alias_roots = vec![sys_root.join("class/block")];
+        if sys_root == Path::new("/sys") {
+            alias_roots.extend([
+                PathBuf::from("/dev/disk/by-id"),
+                PathBuf::from("/dev/disk/by-path"),
+                PathBuf::from("/dev/disk/by-uuid"),
+                PathBuf::from("/dev/disk/by-partuuid"),
+                PathBuf::from("/dev/disk/by-label"),
+            ]);
+        } else {
+            alias_roots.extend([
+                sys_root.join("dev/disk/by-id"),
+                sys_root.join("dev/disk/by-path"),
+                sys_root.join("dev/disk/by-uuid"),
+                sys_root.join("dev/disk/by-partuuid"),
+                sys_root.join("dev/disk/by-label"),
+            ]);
+        }
+        for alias_root in alias_roots {
             let alias = alias_root.join(&candidate);
             let Ok(target) = fs::canonicalize(&alias) else {
                 continue;
@@ -935,6 +948,7 @@ mod tests {
         apply_enclosure_registry, apply_registry_enclosure_labels,
         resolve_diskstats_name_from_sysfs_target, ApplianceDiskCapacityTelemetry,
         ApplianceDiskIoTelemetry, ApplianceEnclosureTelemetry, LinuxDiskIoCounters,
+        LinuxProcTelemetryCollector,
     };
     use dasobjectstore_core::ids::{DiskId, EnclosureId};
     use dasobjectstore_core::{
@@ -957,6 +971,13 @@ mod tests {
             io_time_millis: 0,
             weighted_io_time_millis: 0,
         }
+    }
+
+    #[test]
+    fn live_collector_enables_kernel_device_resolution_by_default() {
+        let collector = LinuxProcTelemetryCollector::new("/proc");
+
+        assert_eq!(collector.sys_root.as_deref(), Some(Path::new("/sys")));
     }
 
     #[test]

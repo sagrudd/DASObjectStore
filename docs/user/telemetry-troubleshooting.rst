@@ -80,6 +80,11 @@ device-mapper ``by-path`` aliases are valid mappings; an unresolved mapping is
 reported as ``device_missing`` rather than converted to zeroes. Correct a
 mapping only through the supported disk-management workflow.
 
+The packaged Linux collector resolves kernel topology through ``/sys`` and
+stable aliases through the host's real ``/dev/disk/by-*`` directories. Do not
+copy those aliases beneath ``/sys`` or replace a stable marker with a transient
+``/dev/sdX`` name to work around ``device_missing``.
+
 Safe escalation evidence
 ------------------------
 

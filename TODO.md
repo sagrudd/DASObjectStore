@@ -3075,6 +3075,11 @@ list until every temporary size-budget exception has been removed.
     when available. Bounded `slaves` traversal now resolves device-mapper and
     MD RAID logical targets to their reported physical counters; USB bridge
     aliases use the same stable sysfs path without trusting marker basenames.
+  - [x] Enable sysfs resolution in the production Linux collector and resolve
+    real-host stable aliases from `/dev/disk/by-*` rather than incorrectly
+    looking beneath `/sys/dev/disk`; focused constructor and fixture regression
+    tests pass. Live packaged verification is pending a safe daemon restart
+    after the operator's active write completes.
 - [~] Validate managed-HDD device markers during enclosure preparation and
   telemetry collection. Emit a per-disk diagnostic when the marker has no
   usable block-device mapping, the device is absent from `/proc/diskstats`, or
