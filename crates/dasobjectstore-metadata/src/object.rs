@@ -1,8 +1,9 @@
 use dasobjectstore_core::ids::{DiskId, InvalidId, ObjectId, PlacementId, StoreId};
 use dasobjectstore_core::object_type::{ObjectType, ObjectTypeParseError};
 use rusqlite::types::Type;
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::path::{Path, PathBuf};
 
@@ -40,6 +41,85 @@ pub fn read_object_inspect(
     summary.placements = read_object_placements(&connection, object_id)?;
 
     Ok(summary)
+}
+
+/// Read every object and placement for one store using a single SQLite
+/// connection and a bounded pair of queries.
+pub fn read_store_object_inspects(
+    live_sqlite_path: impl AsRef<Path>,
+    store_id: &StoreId,
+) -> Result<Vec<ObjectInspectSummary>, ObjectInspectError> {
+    let live_sqlite_path = live_sqlite_path.as_ref();
+    let connection =
+        Connection::open_with_flags(live_sqlite_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut statement = connection.prepare(
+        "SELECT
+            objects.object_id,
+            objects.store_id,
+            stores.class,
+            objects.object_type,
+            objects.state,
+            objects.size_bytes,
+            objects.content_hash,
+            objects.created_at_utc,
+            objects.updated_at_utc
+         FROM objects
+         INNER JOIN stores ON stores.store_id = objects.store_id
+         WHERE objects.store_id = ?1
+         ORDER BY objects.object_id ASC",
+    )?;
+    let rows = statement.query_map([store_id.as_str()], |row| {
+        object_summary_from_row(row, live_sqlite_path)
+    })?;
+    let mut summaries = Vec::new();
+    for row in rows {
+        summaries.push(row?);
+    }
+
+    let summary_indexes = summaries
+        .iter()
+        .enumerate()
+        .map(|(index, summary)| (summary.object_id.as_str().to_string(), index))
+        .collect::<HashMap<_, _>>();
+    let mut placement_statement = connection.prepare(
+        "SELECT
+            placements.object_id,
+            placements.placement_id,
+            placements.disk_id,
+            placements.relative_path,
+            placements.content_hash,
+            placements.verified_at_utc
+         FROM placements
+         INNER JOIN objects ON objects.object_id = placements.object_id
+         WHERE objects.store_id = ?1
+         ORDER BY placements.object_id ASC,
+                  placements.verified_at_utc IS NULL,
+                  placements.verified_at_utc ASC,
+                  placements.placement_id ASC",
+    )?;
+    let placements = placement_statement.query_map([store_id.as_str()], |row| {
+        let object_id = row.get::<_, String>(0)?;
+        let placement_id = parse_id("placement_id", row.get::<_, String>(1)?)?;
+        let disk_id = parse_id("disk_id", row.get::<_, String>(2)?)?;
+        Ok((
+            object_id,
+            ObjectPlacementSummary {
+                placement_id,
+                disk_id,
+                relative_path: row.get(3)?,
+                content_hash: row.get(4)?,
+                verified_at_utc: row.get(5)?,
+            },
+        ))
+    })?;
+    for row in placements {
+        let (object_id, placement) = row?;
+        if let Some(index) = summary_indexes.get(&object_id) {
+            summaries[*index].placements.push(placement);
+        }
+    }
+
+    Ok(summaries)
 }
 
 #[derive(Debug)]
@@ -115,29 +195,34 @@ fn read_object_row(
              INNER JOIN stores ON stores.store_id = objects.store_id
              WHERE objects.object_id = ?1",
             [object_id.as_str()],
-            |row| {
-                let object_id = parse_id("object_id", row.get::<_, String>(0)?)?;
-                let store_id = parse_id("store_id", row.get::<_, String>(1)?)?;
-                let object_type = parse_object_type(row.get::<_, String>(3)?)?;
-                let size_bytes = optional_u64("size_bytes", row.get::<_, Option<i64>>(5)?)?;
-
-                Ok(ObjectInspectSummary {
-                    live_sqlite_path: live_sqlite_path.to_path_buf(),
-                    object_id,
-                    store_id,
-                    store_class: row.get(2)?,
-                    object_type,
-                    state: row.get(4)?,
-                    size_bytes,
-                    content_hash: row.get(6)?,
-                    created_at_utc: row.get(7)?,
-                    updated_at_utc: row.get(8)?,
-                    placements: Vec::new(),
-                })
-            },
+            |row| object_summary_from_row(row, live_sqlite_path),
         )
         .optional()?
         .ok_or_else(|| ObjectInspectError::ObjectNotFound(object_id.clone()))
+}
+
+fn object_summary_from_row(
+    row: &Row<'_>,
+    live_sqlite_path: &Path,
+) -> Result<ObjectInspectSummary, rusqlite::Error> {
+    let object_id = parse_id("object_id", row.get::<_, String>(0)?)?;
+    let store_id = parse_id("store_id", row.get::<_, String>(1)?)?;
+    let object_type = parse_object_type(row.get::<_, String>(3)?)?;
+    let size_bytes = optional_u64("size_bytes", row.get::<_, Option<i64>>(5)?)?;
+
+    Ok(ObjectInspectSummary {
+        live_sqlite_path: live_sqlite_path.to_path_buf(),
+        object_id,
+        store_id,
+        store_class: row.get(2)?,
+        object_type,
+        state: row.get(4)?,
+        size_bytes,
+        content_hash: row.get(6)?,
+        created_at_utc: row.get(7)?,
+        updated_at_utc: row.get(8)?,
+        placements: Vec::new(),
+    })
 }
 
 fn parse_object_type(value: String) -> Result<ObjectType, rusqlite::Error> {
@@ -212,9 +297,9 @@ fn optional_u64(field: &'static str, value: Option<i64>) -> Result<Option<u64>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{read_object_inspect, ObjectInspectError};
+    use super::{read_object_inspect, read_store_object_inspects, ObjectInspectError};
     use crate::LIVE_SCHEMA_SQL;
-    use dasobjectstore_core::ids::ObjectId;
+    use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
     use std::fs;
@@ -255,6 +340,29 @@ mod tests {
         let err = read_object_inspect(&live_sqlite_path, &object_id()).expect_err("missing object");
 
         assert!(matches!(err, ObjectInspectError::ObjectNotFound(_)));
+
+        fs::remove_dir_all(root).expect("cleanup root");
+    }
+
+    #[test]
+    fn reads_store_objects_and_placements_in_bulk() {
+        let root = temp_root("store-object-inspects");
+        fs::create_dir_all(&root).expect("create root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_object_fixture(&connection);
+
+        let summaries = read_store_object_inspects(
+            &live_sqlite_path,
+            &StoreId::new("store-a").expect("store id"),
+        )
+        .expect("store object inspects");
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].object_id.as_str(), "object-a");
+        assert_eq!(summaries[0].placements.len(), 2);
+        assert_eq!(summaries[0].placements[0].disk_id.as_str(), "disk-a");
+        assert_eq!(summaries[0].placements[1].disk_id.as_str(), "disk-b");
 
         fs::remove_dir_all(root).expect("cleanup root");
     }

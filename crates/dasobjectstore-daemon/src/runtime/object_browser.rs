@@ -10,8 +10,7 @@ use dasobjectstore_core::ids::{InvalidId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::ObjectState;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_metadata::{
-    read_object_inspect, read_store_contents, ObjectInspectError, ObjectPlacementSummary,
-    StoreContentsReadError, StoreContentsRequest,
+    read_store_object_inspects, ObjectInspectError, ObjectPlacementSummary,
 };
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -35,22 +34,19 @@ pub fn read_object_browser_metadata(
     store_id: StoreId,
 ) -> Result<Vec<ObjectBrowserMetadataEntry>, ObjectBrowserMetadataReadError> {
     let live_sqlite_path = live_sqlite_path.as_ref();
-    let snapshot = read_store_contents(&StoreContentsRequest::new(
-        live_sqlite_path,
-        store_id.clone(),
-    ))?;
-    let mut entries = Vec::with_capacity(snapshot.objects.len());
+    let summaries = read_store_object_inspects(live_sqlite_path, &store_id)?;
+    let mut entries = Vec::with_capacity(summaries.len());
 
-    for object in snapshot.objects {
-        let object_id = ObjectId::new(object.object_id.clone()).map_err(|source| {
-            ObjectBrowserMetadataReadError::InvalidObjectId {
-                value: object.object_id.clone(),
-                source,
-            }
-        })?;
-        let inspect = read_object_inspect(live_sqlite_path, &object_id)?;
+    for inspect in summaries {
+        let object_id =
+            ObjectId::new(inspect.object_id.as_str().to_string()).map_err(|source| {
+                ObjectBrowserMetadataReadError::InvalidObjectId {
+                    value: inspect.object_id.as_str().to_string(),
+                    source,
+                }
+            })?;
         let lifecycle_state = parse_object_state(&inspect.state)?;
-        let size_bytes = inspect.size_bytes.unwrap_or(object.size_bytes);
+        let size_bytes = inspect.size_bytes.unwrap_or(0);
         let checksum = inspect
             .content_hash
             .clone()
@@ -62,7 +58,7 @@ pub fn read_object_browser_metadata(
 
         entries.push(ObjectBrowserMetadataEntry {
             object_id,
-            path: object.path,
+            path: relative_object_path(&store_id, inspect.object_id.as_str()),
             object_type: inspect.object_type,
             size_bytes,
             modified_at_utc: Some(inspect.updated_at_utc),
@@ -150,7 +146,6 @@ pub fn query_object_browser_metadata(
 
 #[derive(Debug)]
 pub enum ObjectBrowserMetadataReadError {
-    StoreContents(StoreContentsReadError),
     ObjectInspect(ObjectInspectError),
     InvalidObjectId { value: String, source: InvalidId },
     UnsupportedObjectState { value: String },
@@ -159,7 +154,6 @@ pub enum ObjectBrowserMetadataReadError {
 impl Display for ObjectBrowserMetadataReadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::StoreContents(err) => Display::fmt(err, formatter),
             Self::ObjectInspect(err) => Display::fmt(err, formatter),
             Self::InvalidObjectId { value, source } => {
                 write!(
@@ -179,16 +173,19 @@ impl Display for ObjectBrowserMetadataReadError {
 
 impl std::error::Error for ObjectBrowserMetadataReadError {}
 
-impl From<StoreContentsReadError> for ObjectBrowserMetadataReadError {
-    fn from(err: StoreContentsReadError) -> Self {
-        Self::StoreContents(err)
-    }
-}
-
 impl From<ObjectInspectError> for ObjectBrowserMetadataReadError {
     fn from(err: ObjectInspectError) -> Self {
         Self::ObjectInspect(err)
     }
+}
+
+fn relative_object_path(store_id: &StoreId, object_id: &str) -> String {
+    let prefix = format!("{}/", store_id.as_str());
+    object_id
+        .strip_prefix(&prefix)
+        .unwrap_or(object_id)
+        .trim_matches('/')
+        .to_string()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

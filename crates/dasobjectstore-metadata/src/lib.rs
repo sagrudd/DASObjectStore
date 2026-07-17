@@ -103,7 +103,8 @@ pub use markers::{
     record_pool_state_marker, record_pool_state_marker_at, PoolStateMarker, PoolStateMarkerKind,
 };
 pub use object::{
-    read_object_inspect, ObjectInspectError, ObjectInspectSummary, ObjectPlacementSummary,
+    read_object_inspect, read_store_object_inspects, ObjectInspectError, ObjectInspectSummary,
+    ObjectPlacementSummary,
 };
 pub use object_commit::{commit_object_put, ObjectMetadataCommitError};
 pub use placement_log::{PlacementLogEvent, PlacementLogRecord, PLACEMENT_LOG_FORMAT_VERSION};
