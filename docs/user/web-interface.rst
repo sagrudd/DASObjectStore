@@ -766,10 +766,10 @@ with:
 The installer uses packaged ``/opt/grammateus`` and ``/opt/floundeR`` contexts
 when present, or explicit source paths supplied by the build target.
 
-Endpoints Workspace
--------------------
+Connections Workspace
+---------------------
 
-The standalone ``Endpoints`` navigation entry loads
+The standalone ``Connections`` navigation entry loads
 ``/products/dasobjectstore/api/v1/workspaces/endpoints``. It reads endpoint
 inventory from ``/opt/dasobjectstore/endpoints.json`` by default, or from the
 path named by ``DASOBJECTSTORE_ENDPOINTS_PATH`` when that environment variable
@@ -789,15 +789,29 @@ Endpoint validation states are ``draft``, ``pending_validation``,
 ``validated``, ``degraded``, ``rejected``, and ``unknown``. Degraded, rejected,
 unknown, draft, and pending states generate visible warnings.
 
-Standalone administrator sessions can submit endpoint inventory creation or
-updates from the ``Endpoints`` page. The inventory table is the primary
-surface: ``Add endpoint`` opens a contextual task pane and each row exposes an
-``Edit`` action that pre-fills the pane from the selected endpoint. The pane
-separates endpoint identity/service details, validation evidence, optional
-ObjectStore/governance binding, and a final review. The confirmation phrase is
-only shown for a live update in that review; it is never present in the
-inventory table. Successful daemon acceptance closes the pane and refreshes the
-inventory, while errors keep the pane open with editable values and context.
+The interface calls these records *connections*: an operator-facing connection
+describes how an ObjectStore is reached through direct DASObjectStore service,
+a NAS/NFS gateway, or an S3-compatible service. ``Endpoint`` remains the stable
+API and integration-contract term. A binding means that a named ObjectStore is
+made available through the connection for a governance domain; it does not
+create another ObjectStore or move its data.
+
+The inventory table is the primary surface. It shows connection type, attached
+ObjectStores, health, and the age of the last validation evidence. Opening a row
+shows service address and validation evidence first; endpoint, manager,
+binding, and governance identifiers are available under ``Technical details``.
+``Add connection`` uses the live ObjectStore inventory instead of asking an
+operator to type binding identifiers. New connections are recorded as
+``pending_validation``. The Web browser cannot declare a connection validated;
+that state requires daemon-owned validation evidence. Until a dedicated
+connection-test action is available, use the formal CLI/API validation workflow
+for the endpoint type and then refresh the inventory.
+
+Standalone administrator sessions can submit connection inventory creation or
+updates from this page. The confirmation phrase is only shown for a live update
+in the pane review; it is never present in the inventory table. Successful
+daemon acceptance closes the pane and refreshes the inventory, while errors
+keep the pane open with editable values and context.
 
 The form submits to ``POST /api/v1/workspaces/endpoints/upsert``. The route
 requires the same standalone session headers as other Web administrator routes

@@ -18,9 +18,85 @@
   font-size: 0.78rem;
 }
 
+.dos-connection-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.dos-connection-detail__hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.dos-connection-detail__hero h2,
+.dos-connection-detail__hero p {
+  margin: 0;
+}
+
+.dos-connection-detail__hero p {
+  margin-top: 4px;
+  color: #69777f;
+}
+
+.dos-connection-facts {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 0;
+}
+
+.dos-connection-facts > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.45fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 11px 0;
+  border-top: 1px solid rgba(21, 48, 54, 0.1);
+}
+
+.dos-connection-facts dt {
+  color: #69777f;
+}
+
+.dos-connection-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #153036;
+  font-weight: 600;
+}
+
+.dos-technical-details details {
+  border-top: 1px solid rgba(21, 48, 54, 0.1);
+  padding-top: 14px;
+}
+
+.dos-technical-details summary {
+  cursor: pointer;
+  color: #0b6973;
+  font-weight: 700;
+}
+
+.dos-readonly-field {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(12, 111, 120, 0.06);
+}
+
+.dos-readonly-field small,
+.dos-form-guidance {
+  color: #69777f;
+  line-height: 1.45;
+}
+
 @media (max-width: 640px) {
   .dos-endpoints-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .dos-connection-facts > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

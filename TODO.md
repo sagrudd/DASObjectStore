@@ -3350,6 +3350,17 @@ non-destructive close, and restores focus to its trigger when closed.
   an inline error. Loading, empty, permission-denied, and transport-error
   states must still have a clear inventory heading and the appropriate action
   affordance; do not regress to a form-only page.
+- [x] Recast the operator surface as ``Connections`` while retaining Endpoint
+  as the protocol term. Show connection type, attached ObjectStores, health,
+  and last validation time in the inventory; move stable IDs and governance
+  metadata into click-open technical details.
+- [x] Populate attachment choices from live ObjectStore inventory, generate the
+  binding identity, and make validation evidence read-only so the browser
+  cannot self-assert that a connection has been tested.
+- [ ] Add a daemon-owned ``test_endpoint_connection`` operation with typed,
+  endpoint-kind-specific evidence for direct DASObjectStore, NAS/NFS gateway,
+  and S3-compatible services. The Web action must invoke that operation and
+  must never infer success from browser reachability or a registry write.
 
 ### 24.4 Remote Upload: explicit ObjectStore selection is mandatory
 

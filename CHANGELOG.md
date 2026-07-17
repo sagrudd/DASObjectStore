@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.0 - 2026-07-17
+
+- Recast the Endpoints workspace as operator-facing Connections: a compact
+  inventory explains type, ObjectStore consumers, health, and validation age,
+  while click-open detail panes keep protocol identifiers secondary.
+- Replace raw binding entry with live ObjectStore selection, generate binding
+  identity, and prevent the Web form from declaring its own validation result.
+  New connections remain pending until daemon-owned evidence is available.
+
 ## 0.113.0 - 2026-07-17
 
 - Add accessible client-side sorting to the ObjectStore resource index for

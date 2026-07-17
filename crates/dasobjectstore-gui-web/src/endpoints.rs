@@ -98,16 +98,36 @@ pub fn endpoint_upsert_fields_ready(
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
+pub fn endpoint_kind_label(kind: &str) -> &'static str {
+    match kind {
+        "dasobjectstore_das" => "DASObjectStore direct storage",
+        "dasobjectstore_nfs" => "NAS / NFS",
+        "s3_compatible" => "S3-compatible service",
+        _ => "Storage service",
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+pub fn endpoint_validation_label(state: &str) -> &'static str {
+    match state {
+        "validated" => "Connected",
+        "pending_validation" => "Needs testing",
+        "draft" => "Draft",
+        "degraded" => "Attention needed",
+        "rejected" => "Unavailable",
+        _ => "Status unknown",
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
 pub fn endpoint_binding_fields_ready(
     binding_enabled: bool,
-    binding_id: &str,
+    _binding_id: &str,
     governance_domain: &str,
     store_id: &str,
 ) -> bool {
     !binding_enabled
-        || (!binding_id.trim().is_empty()
-            && !governance_domain.trim().is_empty()
-            && !store_id.trim().is_empty())
+        || (!governance_domain.trim().is_empty() && !store_id.trim().is_empty())
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -225,6 +245,7 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
     let api_path = endpoints_workspace_api_path(&props.api_base_path);
     let endpoints_state = use_state(|| ApiLoadState::<EndpointsWorkspaceResponse>::Loading);
     let form_state = use_state(EndpointUpsertFormState::default);
+    let stores_state = use_state(Vec::<crate::api::ObjectStoreCardResponse>::new);
     let pane_mode = use_state(|| TaskPaneMode::Closed);
     let add_endpoint_trigger_ref = use_node_ref();
 
@@ -247,14 +268,28 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
         });
     }
 
+    {
+        let path = crate::workspace::objectstores_workspace_api_path(&props.api_base_path);
+        let stores_state = stores_state.clone();
+        use_effect_with(path.clone(), move |path| {
+            let path = path.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Ok(view) = crate::api::get_object_stores_dashboard(&path).await {
+                    stores_state.set(view.stores);
+                }
+            });
+            || ()
+        });
+    }
+
     html! {
         <section class="dos-page dos-endpoints" data-page="endpoints" data-api-route={api_path}>
             <header class="dos-page-header">
-                <p>{ "Endpoint inventory" }</p>
-                <h1>{ "Endpoints" }</h1>
-                <span>{ "DAS, NAS/NFS, S3-compatible, and Mnemosyne-governed storage endpoints." }</span>
+                <p>{ "Storage connections" }</p>
+                <h1>{ "Connections" }</h1>
+                <span>{ "The services through which ObjectStores are reached by applications and external storage systems." }</span>
             </header>
-            { render_endpoints_state(&*endpoints_state, endpoints_state.clone(), form_state, pane_mode, add_endpoint_trigger_ref, props.api_base_path.clone()) }
+            { render_endpoints_state(&*endpoints_state, endpoints_state.clone(), form_state, pane_mode, add_endpoint_trigger_ref, props.api_base_path.clone(), (*stores_state).clone()) }
         </section>
     }
 }
@@ -267,6 +302,7 @@ fn render_endpoints_state(
     pane_mode: UseStateHandle<TaskPaneMode>,
     add_endpoint_trigger_ref: NodeRef,
     api_base_path: String,
+    stores: Vec<crate::api::ObjectStoreCardResponse>,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
@@ -287,6 +323,7 @@ fn render_endpoints_state(
                 pane_mode,
                 add_endpoint_trigger_ref,
                 api_base_path,
+                stores,
             )
         }
         ApiLoadState::Empty(message) => html! {
@@ -318,6 +355,7 @@ fn render_endpoint_inventory(
     pane_mode: UseStateHandle<TaskPaneMode>,
     add_endpoint_trigger_ref: NodeRef,
     api_base_path: String,
+    stores: Vec<crate::api::ObjectStoreCardResponse>,
 ) -> Html {
     html! {
         <>
@@ -328,18 +366,18 @@ fn render_endpoint_inventory(
             <div class="dos-card dos-wide-card dos-endpoint-inventory" data-section="endpoint-inventory">
                 <div class="dos-table-wrap">
                     <table class="dos-table dos-dense-table dos-endpoints-table">
-                        <thead><tr><th>{ "Endpoint" }</th><th>{ "Kind / service" }</th><th>{ "Validation" }</th><th>{ "Bindings" }</th><th>{ "Action" }</th></tr></thead>
+                        <thead><tr><th>{ "Connection" }</th><th>{ "Type" }</th><th>{ "Used by" }</th><th>{ "Health" }</th><th>{ "Last checked" }</th><th><span class="dos-visually-hidden">{ "Action" }</span></th></tr></thead>
                         <tbody>{ for view.inventory.endpoints.iter().map(|item| {
                             let endpoint = item.clone();
                             let endpoint_for_form = endpoint.clone();
-                            let endpoint_id = endpoint.endpoint_id.clone();
                             let form_state = form_state.clone();
                             let pane_mode = pane_mode.clone();
-                            let edit = Callback::from(move |_| {
+                            let inspect = Callback::from(move |_| {
                                 form_state.set(endpoint_form_state_from_item(&endpoint_for_form));
-                                pane_mode.set(TaskPaneMode::Edit(endpoint_id.clone()));
+                                pane_mode.set(TaskPaneMode::Review);
                             });
-                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.endpoint_id.clone() }</small></td><td>{ format!("{} · {}", endpoint.kind, endpoint.object_service_url) }</td><td>{ endpoint.validation.state.clone() }<small>{ endpoint.validation.message.clone().unwrap_or_else(|| "no validation message".to_string()) }</small></td><td>{ endpoint.active_bindings.len() }</td><td><button type="button" class="dos-secondary-action" onclick={edit}>{ "Edit" }</button></td></tr> }
+                            let used_by = if endpoint.active_bindings.is_empty() { "Not attached".to_string() } else { endpoint.active_bindings.iter().map(|binding| binding.store_id.as_str()).collect::<Vec<_>>().join(", ") };
+                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.object_service_url.clone() }</small></td><td>{ endpoint_kind_label(&endpoint.kind) }</td><td>{ used_by }</td><td><span class={classes!("dos-status-pill", format!("is-{}", endpoint.validation.state))}>{ endpoint_validation_label(&endpoint.validation.state) }</span></td><td>{ endpoint.validation.checked_at_utc.clone().unwrap_or_else(|| "Not yet checked".to_string()) }</td><td><button type="button" class="dos-secondary-action" onclick={inspect} aria-label={format!("Open {} connection", endpoint.display_name)}>{ "Open" }</button></td></tr> }
                         }) }</tbody>
                     </table>
                 </div>
@@ -360,7 +398,7 @@ fn render_endpoint_inventory(
                     </section>
                 }
             </div>
-            { render_endpoint_task_pane(view, endpoints_state, form_state, pane_mode, add_endpoint_trigger_ref, api_base_path) }
+            { render_endpoint_task_pane(view, endpoints_state, form_state, pane_mode, add_endpoint_trigger_ref, api_base_path, stores) }
         </>
     }
 }
@@ -378,8 +416,8 @@ fn render_endpoint_toolbar(
     });
     html! {
         <section class="dos-card dos-wide-card dos-endpoints-toolbar" data-section="endpoints-toolbar">
-            <div><span class="dos-card-label">{ "Endpoint inventory" }</span><h2>{ "Storage endpoints" }</h2><p>{ "Inspect registered endpoints; add and edit operations open in a contextual task pane." }</p></div>
-            <button type="button" class="dos-auth-submit" ref={add_endpoint_trigger_ref} onclick={open_add} disabled={!enabled}>{ if enabled { "Add endpoint" } else { "Endpoint actions unavailable" } }</button>
+            <div><span class="dos-card-label">{ "Connection inventory" }</span><h2>{ "Available connections" }</h2><p>{ "See how ObjectStores are exposed, whether each connection is trusted, and which stores use it." }</p></div>
+            <button type="button" class="dos-auth-submit" ref={add_endpoint_trigger_ref} onclick={open_add} disabled={!enabled}>{ if enabled { "Add connection" } else { "Connection actions unavailable" } }</button>
         </section>
     }
 }
@@ -444,6 +482,7 @@ fn render_endpoint_task_pane(
     pane_mode: UseStateHandle<TaskPaneMode>,
     add_endpoint_trigger_ref: NodeRef,
     api_base_path: String,
+    stores: Vec<crate::api::ObjectStoreCardResponse>,
 ) -> Html {
     let mode = (*pane_mode).clone();
     if matches!(mode, TaskPaneMode::Closed) {
@@ -454,9 +493,47 @@ fn render_endpoint_task_pane(
         Callback::<()>::from(move |_| pane_mode.set(TaskPaneMode::Closed))
     };
     html! {
-        <TaskPane mode={mode} title={if matches!(*pane_mode, TaskPaneMode::Create) { "Add endpoint".to_string() } else { "Edit endpoint".to_string() }} selected_context={Some(form_state.endpoint_id.clone())} return_focus_to={Some(add_endpoint_trigger_ref)} on_close={on_close}>
-            { render_endpoint_upsert_card(form_state, api_base_path, endpoints_state, pane_mode) }
+        <TaskPane mode={mode.clone()} title={if matches!(mode, TaskPaneMode::Create) { "Add connection".to_string() } else if matches!(mode, TaskPaneMode::Review) { form_state.display_name.clone() } else { "Edit connection".to_string() }} selected_context={Some(form_state.endpoint_id.clone())} return_focus_to={Some(add_endpoint_trigger_ref)} on_close={on_close}>
+            if matches!(mode, TaskPaneMode::Review) {
+                { render_endpoint_detail(form_state, pane_mode) }
+            } else {
+                { render_endpoint_upsert_card(form_state, api_base_path, endpoints_state, pane_mode, stores) }
+            }
         </TaskPane>
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_endpoint_detail(
+    form_state: UseStateHandle<EndpointUpsertFormState>,
+    pane_mode: UseStateHandle<TaskPaneMode>,
+) -> Html {
+    let state = (*form_state).clone();
+    let edit = {
+        let pane_mode = pane_mode.clone();
+        let endpoint_id = state.endpoint_id.clone();
+        Callback::from(move |_| pane_mode.set(TaskPaneMode::Edit(endpoint_id.clone())))
+    };
+    html! {
+        <div class="dos-connection-detail">
+            <section class="dos-task-pane__section">
+                <span class="dos-card-label">{ "Connection" }</span>
+                <div class="dos-connection-detail__hero">
+                    <div><h2>{ state.display_name.clone() }</h2><p>{ endpoint_kind_label(&state.kind) }</p></div>
+                    <span class={classes!("dos-status-pill", format!("is-{}", state.validation_state))}>{ endpoint_validation_label(&state.validation_state) }</span>
+                </div>
+                <dl class="dos-connection-facts">
+                    <div><dt>{ "Service address" }</dt><dd>{ state.object_service_url.clone() }</dd></div>
+                    <div><dt>{ "Used by" }</dt><dd>{ if state.binding_enabled { state.store_id.clone() } else { "No ObjectStore attached".to_string() } }</dd></div>
+                    <div><dt>{ "Last checked" }</dt><dd>{ if state.checked_at_utc.is_empty() { "Not yet checked".to_string() } else { state.checked_at_utc.clone() } }</dd></div>
+                    if !state.validation_message.is_empty() { <div><dt>{ "Evidence" }</dt><dd>{ state.validation_message.clone() }</dd></div> }
+                </dl>
+            </section>
+            <section class="dos-task-pane__section dos-technical-details">
+                <details><summary>{ "Technical details" }</summary><dl class="dos-connection-facts"><div><dt>{ "Endpoint ID" }</dt><dd>{ state.endpoint_id.clone() }</dd></div><div><dt>{ "Manager" }</dt><dd>{ state.manager_product_id.clone() }</dd></div>{ if state.binding_enabled { html! { <><div><dt>{ "Binding ID" }</dt><dd>{ state.binding_id.clone() }</dd></div><div><dt>{ "Governance domain" }</dt><dd>{ state.governance_domain.clone() }</dd></div></> } } else { Html::default() } }</dl></details>
+            </section>
+            <button type="button" class="dos-auth-submit" onclick={edit}>{ "Edit connection" }</button>
+        </div>
     }
 }
 
@@ -480,6 +557,7 @@ fn render_endpoint_upsert_card(
     api_base_path: String,
     endpoints_state: UseStateHandle<ApiLoadState<EndpointsWorkspaceResponse>>,
     pane_mode: UseStateHandle<TaskPaneMode>,
+    stores: Vec<crate::api::ObjectStoreCardResponse>,
 ) -> Html {
     let state = (*form_state).clone();
     let fields_ready = endpoint_upsert_fields_ready(
@@ -540,14 +618,14 @@ fn render_endpoint_upsert_card(
     html! {
         <section class="dos-card dos-create-card dos-endpoint-upsert" data-action="endpoint_inventory_upsert">
             <span class="dos-create-mark">{ "+" }</span>
-            <h2>{ "Create or update endpoint" }</h2>
-            <p>{ "Record a validated storage endpoint through dasobjectstored. The daemon persists the registry and Activity receives an endpoint-validation job." }</p>
+            <h2>{ if matches!(*pane_mode, TaskPaneMode::Create) { "Add a storage connection" } else { "Update connection" } }</h2>
+            <p>{ "Describe where the storage service is reached. New connections remain untrusted until the daemon records validation evidence." }</p>
             <span class="dos-status-pill">{ if state.dry_run { "Dry run" } else { "Live update" } }</span>
             <div class="dos-objectstore-form">
                 <section class="dos-task-pane__section" data-section="endpoint-identity">
-                <span class="dos-card-label">{ "Endpoint identity and service" }</span>
+                <span class="dos-card-label">{ "Connection details" }</span>
                 <div class="dos-form-grid">
-                    { endpoint_text_field("Endpoint ID", state.endpoint_id.clone(), {
+                    { endpoint_text_field("Connection ID", state.endpoint_id.clone(), {
                         let form_state = form_state.clone();
                         Callback::from(move |event: InputEvent| {
                             update_endpoint_form_from_input(&form_state, event, |state, value| {
@@ -564,7 +642,7 @@ fn render_endpoint_upsert_card(
                         })
                     }) }
                     <label class="dos-form-field">
-                        <span>{ "Endpoint kind" }</span>
+                        <span>{ "What are you connecting?" }</span>
                         <select onchange={{
                             let form_state = form_state.clone();
                             Callback::from(move |event: Event| {
@@ -578,7 +656,7 @@ fn render_endpoint_upsert_card(
                             <option value="s3_compatible">{ "S3 compatible" }</option>
                         </select>
                     </label>
-                    { endpoint_text_field("Object-service URL", state.object_service_url.clone(), {
+                    { endpoint_text_field(if state.kind == "s3_compatible" { "S3 service URL" } else if state.kind == "dasobjectstore_nfs" { "NAS / NFS gateway URL" } else { "DASObjectStore service URL" }, state.object_service_url.clone(), {
                         let form_state = form_state.clone();
                         Callback::from(move |event: InputEvent| {
                             update_endpoint_form_from_input(&form_state, event, |state, value| {
@@ -586,48 +664,7 @@ fn render_endpoint_upsert_card(
                             });
                         })
                     }) }
-                    <label class="dos-form-field">
-                        <span>{ "Validation state" }</span>
-                        <select onchange={{
-                            let form_state = form_state.clone();
-                            Callback::from(move |event: Event| {
-                                update_endpoint_form_from_select(&form_state, event, |state, value| {
-                                    state.validation_state = value;
-                                });
-                            })
-                        }} value={state.validation_state.clone()}>
-                            <option value="draft">{ "Draft" }</option>
-                            <option value="pending_validation">{ "Pending validation" }</option>
-                            <option value="validated">{ "Validated" }</option>
-                            <option value="degraded">{ "Degraded" }</option>
-                            <option value="rejected">{ "Rejected" }</option>
-                            <option value="unknown">{ "Unknown" }</option>
-                        </select>
-                    </label>
-                    { endpoint_text_field("Checked at UTC", state.checked_at_utc.clone(), {
-                        let form_state = form_state.clone();
-                        Callback::from(move |event: InputEvent| {
-                            update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                state.checked_at_utc = value;
-                            });
-                        })
-                    }) }
-                    { endpoint_text_field("Validation message", state.validation_message.clone(), {
-                        let form_state = form_state.clone();
-                        Callback::from(move |event: InputEvent| {
-                            update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                state.validation_message = value;
-                            });
-                        })
-                    }) }
-                    { endpoint_text_field("Manager product", state.manager_product_id.clone(), {
-                        let form_state = form_state.clone();
-                        Callback::from(move |event: InputEvent| {
-                            update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                state.manager_product_id = value;
-                            });
-                        })
-                    }) }
+                    <div class="dos-form-field dos-readonly-field"><span>{ "Connection health" }</span><strong>{ endpoint_validation_label(&state.validation_state) }</strong><small>{ "Validation evidence is maintained by the daemon, not declared in this form." }</small></div>
                 </div>
                 </section>
                 <section class="dos-risk-review dos-task-pane__section" data-section="endpoint-binding">
@@ -647,49 +684,20 @@ fn render_endpoint_upsert_card(
                                 })
                             }}
                         />
-                        <span>{ "Attach an ObjectStore/governance binding to this endpoint record." }</span>
+                        <span>{ "Make an ObjectStore available through this connection." }</span>
                     </label>
                     if state.binding_enabled {
                         <div class="dos-form-grid">
-                            { endpoint_text_field("Binding ID", state.binding_id.clone(), {
-                                let form_state = form_state.clone();
-                                Callback::from(move |event: InputEvent| {
-                                    update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                        state.binding_id = value;
-                                    });
-                                })
-                            }) }
-                            { endpoint_text_field("Governance domain", state.governance_domain.clone(), {
-                                let form_state = form_state.clone();
-                                Callback::from(move |event: InputEvent| {
-                                    update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                        state.governance_domain = value;
-                                    });
-                                })
-                            }) }
-                            { endpoint_text_field("ObjectStore ID", state.store_id.clone(), {
-                                let form_state = form_state.clone();
-                                Callback::from(move |event: InputEvent| {
-                                    update_endpoint_form_from_input(&form_state, event, |state, value| {
-                                        state.store_id = value;
-                                    });
-                                })
-                            }) }
-                            <label class="dos-form-field">
-                                <span>{ "Readiness" }</span>
-                                <select onchange={{
+                            <label class="dos-form-field"><span>{ "ObjectStore" }</span><select onchange={{
                                     let form_state = form_state.clone();
                                     Callback::from(move |event: Event| {
                                         update_endpoint_form_from_select(&form_state, event, |state, value| {
-                                            state.binding_readiness = value;
+                                            state.store_id = value.clone();
+                                            state.binding_id = String::new();
                                         });
                                     })
-                                }} value={state.binding_readiness.clone()}>
-                                    <option value="ready">{ "Ready" }</option>
-                                    <option value="degraded">{ "Degraded" }</option>
-                                    <option value="blocked">{ "Blocked" }</option>
-                                </select>
-                            </label>
+                                }} value={state.store_id.clone()}><option value="">{ "Select an ObjectStore" }</option>{ for stores.iter().map(|store| html! { <option value={store.store_id.clone()}>{ store.display_name.clone() }</option> }) }</select></label>
+                            <p class="dos-form-guidance">{ "DASObjectStore generates the binding identity and uses the local governance domain. These technical values remain available in connection details." }</p>
                         </div>
                     }
                 </section>
@@ -781,7 +789,11 @@ fn endpoint_upsert_request_from_state(
         manager_product_id: state.manager_product_id.trim().to_string(),
         active_bindings: if state.binding_enabled {
             vec![EndpointBindingUpsertRequest {
-                binding_id: state.binding_id.trim().to_string(),
+                binding_id: if state.binding_id.trim().is_empty() {
+                    format!("{}--{}", state.endpoint_id.trim(), state.store_id.trim())
+                } else {
+                    state.binding_id.trim().to_string()
+                },
                 governance_domain: state.governance_domain.trim().to_string(),
                 store_id: state.store_id.trim().to_string(),
                 readiness: state.binding_readiness.clone(),
@@ -901,12 +913,8 @@ mod tests {
             "local",
             "zymo"
         ));
-        assert!(!endpoint_binding_fields_ready(
-            true,
-            "binding-1",
-            "",
-            "zymo"
-        ));
+        assert!(!endpoint_binding_fields_ready(true, "", "", "zymo"));
+        assert!(endpoint_binding_fields_ready(true, "", "local", "zymo"));
         assert!(endpoint_upsert_confirmation_matches(true, ""));
         assert!(endpoint_upsert_confirmation_matches(
             false,

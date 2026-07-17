@@ -342,7 +342,7 @@ fn primary_navigation_uses_redesign_labels() {
             "Home",
             "Enclosures",
             "ObjectStores",
-            "Endpoints",
+            "Connections",
             "Activity",
             "Local Access",
             "Bioinformatics"
@@ -365,8 +365,8 @@ fn primary_navigation_is_host_mode_aware_for_users_groups() {
     assert!(synoptikon_labels.contains(&"Activity"));
     assert!(!standalone_labels.contains(&"Remote Upload"));
     assert!(!synoptikon_labels.contains(&"Remote Upload"));
-    assert!(standalone_labels.contains(&"Endpoints"));
-    assert!(!synoptikon_labels.contains(&"Endpoints"));
+    assert!(standalone_labels.contains(&"Connections"));
+    assert!(!synoptikon_labels.contains(&"Connections"));
     assert!(standalone_labels.contains(&"Local Access"));
     assert!(!synoptikon_labels.contains(&"Local Access"));
 }
@@ -2910,8 +2910,10 @@ fn endpoints_component_contract_is_inventory_first_and_task_pane_scoped() {
         "data-section=\"endpoint-identity\"",
         "data-section=\"endpoint-binding\"",
         "data-section=\"endpoint-review\"",
-        "Add endpoint",
-        "Edit",
+        "Add connection",
+        "Open",
+        "Technical details",
+        "Validation evidence is maintained by the daemon",
         "endpoint_form_state_from_item",
         "refresh_endpoints_workspace",
         "return_focus_to",
@@ -2925,7 +2927,11 @@ fn endpoints_component_contract_is_inventory_first_and_task_pane_scoped() {
     assert!(source.contains("TaskPaneMode::Edit"));
     assert!(!source.contains("render_endpoint_upsert_card(form_state, api_base_path)"));
     let css = web_styles_source();
-    for selector in [".dos-endpoints-toolbar", ".dos-endpoints-table"] {
+    for selector in [
+        ".dos-endpoints-toolbar",
+        ".dos-endpoints-table",
+        ".dos-connection-detail",
+    ] {
         assert!(
             css.contains(selector),
             "missing Endpoints style: {selector}"

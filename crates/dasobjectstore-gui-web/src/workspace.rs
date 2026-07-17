@@ -95,7 +95,7 @@ impl WorkspacePage {
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
             Self::RemoteUpload => "Remote Upload",
-            Self::Endpoints => "Endpoints",
+            Self::Endpoints => "Connections",
             Self::UsersGroups => "Local Access",
             Self::Bioinformatics => "Bioinformatics",
         }
@@ -108,7 +108,7 @@ impl WorkspacePage {
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
             Self::RemoteUpload => "Remote Upload",
-            Self::Endpoints => "Endpoints",
+            Self::Endpoints => "Connections",
             Self::UsersGroups => "Local Access",
             Self::Bioinformatics => "Bioinformatics",
         }
