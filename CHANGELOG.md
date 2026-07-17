@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.111.2 - 2026-07-17
+
+- Queue concurrent Web bootstrap asset reads instead of returning empty 503
+  responses, and keep a visible startup shell until the WASM application is
+  ready.
+- Restore the canonical Mnemosyne footer wordmark, partial-mark colours, and
+  left-aligned product/version composition.
+- Replace per-object SQLite catalogue inspection with two bulk read-only
+  queries so large ObjectStores remain within the daemon bridge deadline.
+- Move the daemon-owned mutable store registry from read-only ``/etc`` into
+  ``/var/lib/dasobjectstore``, migrate existing definitions during package
+  configuration, and return a typed final response for control-handler errors.
+- Require APT-managed Debian installations, repair package-script portability,
+  and remove the unnecessary ripgrep dependency from the build lock check.
+- Consume the portfolio Prosopikon crates from their shared workspace source.
+
 ## 0.111.1 - 2026-07-16
 
 - Make application-upload quota settlement restart-safe with durable
