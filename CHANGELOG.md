@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.5 - 2026-07-17
+
+- Honour the requested Home telemetry window on the authenticated appliance
+  route and default the browser to the one-day view, keeping the current day's
+  physical disk writes visible after they age beyond the one-hour window.
+
 ## 0.114.4 - 2026-07-17
 
 - Make live Home throughput visible in sub-day windows by aggregating the

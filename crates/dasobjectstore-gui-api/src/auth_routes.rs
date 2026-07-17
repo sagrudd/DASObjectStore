@@ -234,9 +234,12 @@ impl StandaloneUsersGroupsRouteState {
 
 async fn standalone_home_dashboard(
     State(_state): State<StandaloneDashboardRouteState>,
+    Query(query): Query<crate::routes::HomeDashboardQuery>,
     _actor: AuthenticatedGuiActor,
 ) -> Result<Json<crate::dashboard::HomeDashboardView>, (StatusCode, Json<AuthRouteError>)> {
-    Ok(Json(crate::home_aggregator::live_home_dashboard()))
+    Ok(Json(
+        crate::home_aggregator::live_home_dashboard_for_window(query.selected_window()),
+    ))
 }
 
 async fn standalone_cached_home_dashboard(
@@ -1633,6 +1636,33 @@ mod tests {
             "admin_required"
         );
 
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn standalone_home_dashboard_honours_the_requested_telemetry_window() {
+        let root = temp_root("standalone-home-dashboard-window");
+        let auth_store = registered_auth_store_for_user(&root, "stephen");
+        let login = auth_store
+            .login("stephen", "secret")
+            .expect("login succeeds");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store,
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("dasobjectstore", vec!["sudo"]),
+            }),
+        });
+
+        let encoded = get_json_with_session::<serde_json::Value>(
+            app,
+            "/api/v1/dashboard/home?telemetry_window=one_day",
+            "stephen",
+            &login.session_token,
+        )
+        .await;
+
+        assert_eq!(encoded["telemetry_window"]["selected"], "one_day");
+        assert_eq!(encoded["telemetry_window"]["selected_label"], "1 day");
         cleanup(&root);
     }
 

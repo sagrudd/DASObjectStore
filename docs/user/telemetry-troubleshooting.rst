@@ -91,6 +91,10 @@ Safe escalation evidence
 Capture the Home warning, selected telemetry window, daemon service status,
 recent journal diagnostics, state-file timestamp/permissions, each affected
 marker, ``findmnt``/sysfs identity, and the relevant ``/proc/diskstats`` row.
+Home initially requests the one-day window; selecting another window causes a
+new authenticated dashboard request and changes the aggregation interval.
+Confirm that the selected-window badge changes before interpreting an empty or
+flat chart as missing telemetry.
 After a supported repair, verify that Home changes from unavailable or stale
 to a fresh sample after two cadences. Never delete managed roots, fabricate
 telemetry values, or use a telemetry reset as a substitute for fixing service,

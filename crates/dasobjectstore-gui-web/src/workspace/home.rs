@@ -4,7 +4,7 @@ use super::*;
 #[cfg(target_arch = "wasm32")]
 #[function_component(HomeDashboard)]
 pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
-    let selected_telemetry_window = use_state(|| "one_hour".to_string());
+    let selected_telemetry_window = use_state(|| "one_day".to_string());
     let api_path = home_dashboard_api_path_with_window(
         &props.api_base_path,
         selected_telemetry_window.as_str(),

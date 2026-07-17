@@ -3125,6 +3125,9 @@ list until every temporary size-budget exception has been removed.
     intervals to their observed range and identify the chart as physical disk
     IO so active appliance writes remain visible without implying source-byte
     accounting.
+  - [x] Honour the selected telemetry window through the authenticated
+    appliance route and default Home to the one-day view, so a day's sustained
+    writes do not disappear from the initial graph after one hour.
 - [~] Add appliance integration coverage using managed marker, mount, sysfs,
   and `/proc/diskstats` fixtures for SATA, partition, USB, and device-mapper
   paths; assert first-sample warm-up, later non-zero rates, unavailable-device

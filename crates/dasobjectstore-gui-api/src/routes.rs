@@ -71,7 +71,7 @@ async fn actions() -> Json<GuiActionCatalog> {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct HomeDashboardQuery {
+pub(crate) struct HomeDashboardQuery {
     #[serde(default)]
     telemetry_window: Option<ApplianceTelemetryWindow>,
     #[serde(default)]
@@ -79,7 +79,7 @@ struct HomeDashboardQuery {
 }
 
 impl HomeDashboardQuery {
-    fn selected_window(&self) -> ApplianceTelemetryWindow {
+    pub(crate) fn selected_window(&self) -> ApplianceTelemetryWindow {
         self.telemetry_window
             .or(self.window)
             .unwrap_or_else(ApplianceTelemetryWindow::default)
