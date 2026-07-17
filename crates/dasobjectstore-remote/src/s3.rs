@@ -171,9 +171,7 @@ pub fn plan_upload_with_credentials(
 
 fn validate_content_type(content_type: &str) -> Result<&str, RemoteS3Error> {
     let mut parts = content_type.split('/');
-    let has_exactly_two_nonempty_parts = parts
-        .next()
-        .is_some_and(|part| !part.is_empty())
+    let has_exactly_two_nonempty_parts = parts.next().is_some_and(|part| !part.is_empty())
         && parts.next().is_some_and(|part| !part.is_empty())
         && parts.next().is_none();
     let valid = !content_type.is_empty()

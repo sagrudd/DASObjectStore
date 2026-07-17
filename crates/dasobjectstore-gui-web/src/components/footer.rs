@@ -61,8 +61,8 @@ pub fn das_object_store_footer(props: &DasObjectStoreFooterProps) -> Html {
 #[cfg(test)]
 mod tests {
     use super::{
-        DasObjectStoreFooterContent, FooterAvailabilityState, MNEMOSYNE_FOOTER_PARTIAL_SRC,
-        MNEMOSYNE_FOOTER_WORDMARK_SRC, MNEMOSYNE_HOME_URL, footer_required_for_state,
+        footer_required_for_state, DasObjectStoreFooterContent, FooterAvailabilityState,
+        MNEMOSYNE_FOOTER_PARTIAL_SRC, MNEMOSYNE_FOOTER_WORDMARK_SRC, MNEMOSYNE_HOME_URL,
     };
 
     #[test]

@@ -967,7 +967,7 @@ fn ensure_profile_catalogue_store(
     definition: &dasobjectstore_object_service::StoreServiceDefinition,
     recorded_at_utc: &str,
 ) -> Result<(), dasobjectstore_core::backend::BackendError> {
-    use rusqlite::{Connection, params};
+    use rusqlite::{params, Connection};
 
     let sqlite_error = |error: rusqlite::Error| {
         dasobjectstore_core::backend::BackendError::InvalidRequest(format!(

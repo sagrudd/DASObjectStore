@@ -7,9 +7,9 @@ use super::{
 use crate::runtime::service::ServiceCommandRunner;
 use dasobjectstore_core::ids::{ObjectId, PlacementId, StoreId};
 use dasobjectstore_core::object_catalogue::{
-    ObjectDigest, PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION, PortableLifecycleState,
-    PortableObjectCatalogue, PortableObjectVersion, PortablePlacement, PortablePlacementLocation,
-    PortableProtectionState, PortableProvenance,
+    ObjectDigest, PortableLifecycleState, PortableObjectCatalogue, PortableObjectVersion,
+    PortablePlacement, PortablePlacementLocation, PortableProtectionState, PortableProvenance,
+    PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
 use serde::Deserialize;
@@ -313,11 +313,9 @@ mod tests {
 
         let calls = runner.calls.lock().expect("calls lock");
         assert_eq!(calls.len(), 2);
-        assert!(
-            calls[0]
-                .windows(2)
-                .any(|args| args == ["--bucket", "store-a"])
-        );
+        assert!(calls[0]
+            .windows(2)
+            .any(|args| args == ["--bucket", "store-a"]));
         let connection = Connection::open(db).expect("open metadata");
         let transactions: u64 = connection
             .query_row(
