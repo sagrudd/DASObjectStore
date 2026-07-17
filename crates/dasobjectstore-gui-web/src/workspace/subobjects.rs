@@ -350,37 +350,6 @@ pub(super) fn object_store_create_review(state: &ObjectStoreCreateFormState) -> 
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn render_object_store_card(
-    store: ObjectStoreCardSummary,
-    on_upload_target: Callback<String>,
-) -> Html {
-    let target_store_id = store.id.clone();
-    let on_upload = Callback::from(move |_| on_upload_target.emit(target_store_id.clone()));
-    html! {
-        <section class="dos-card dos-store-card" data-store-id={store.id.clone()}>
-            <div class="dos-card-row">
-                <span class="dos-card-label">{ store.label }</span>
-                <span class="dos-status-pill">{ store.health }</span>
-            </div>
-            <strong>{ store.name }</strong>
-            <p>{ format!("type: {} · access: {}", store.object_type, store.access) }</p>
-            <p>{ store.policy }</p>
-            <p>{ store.capacity }</p>
-            <p>{ format!("live capacity: {}", store.capacity_status) }</p>
-            <p>{ format!("{} · writer group: {}", store.objects, store.writer_group) }</p>
-            <p>{ store.writer_policy }</p>
-            <p>{ format!("endpoint: {} · last ingest: {}", store.endpoint, store.last_ingested) }</p>
-            <p>{ format!("{} warning(s)", store.warning_count) }</p>
-            { if store.upload_allowed { html! {
-                <button type="button" class="dos-secondary-action" onclick={on_upload}>
-                    { "Upload" }
-                </button>
-            } } else { Html::default() } }
-        </section>
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
 pub(super) fn render_object_stores_state_message(label: &str, title: &str, message: &str) -> Html {
     html! {
         <section class="dos-card dos-wide-card">

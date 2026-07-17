@@ -1,0 +1,305 @@
+.dos-page[data-page="objectstores"] {
+  --mn-color-text-primary: #111111;
+  --mn-color-surface-canvas: #f6f7f5;
+  --mn-color-surface-raised: #ffffff;
+  --mn-color-border-subtle: #d9e0e3;
+  --mn-color-action-primary-default: #0f6b78;
+  --mn-color-action-primary-hover: #0b5964;
+  --mn-color-status-success: #28622b;
+  --mn-color-status-warning: #6f5410;
+  --mn-color-status-danger: #8a3c25;
+  --mn-space-1: 0.25rem;
+  --mn-space-2: 0.5rem;
+  --mn-space-3: 0.75rem;
+  --mn-space-4: 1rem;
+  --mn-space-6: 1.5rem;
+  --mn-space-8: 2rem;
+  --mn-radius-sm: 0.25rem;
+  --mn-radius-md: 0.5rem;
+  --mn-radius-lg: 0.75rem;
+  color: var(--mn-color-text-primary);
+  font-family: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+}
+
+.dos-objectstores-registry {
+  display: grid;
+  gap: var(--mn-space-4);
+}
+
+.dos-objectstores-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mn-space-4);
+  padding: var(--mn-space-3) 0;
+}
+
+.dos-objectstores-toolbar > div {
+  display: grid;
+  gap: var(--mn-space-1);
+}
+
+.dos-objectstores-toolbar strong {
+  color: var(--mn-color-text-primary);
+  font-size: 1rem;
+}
+
+.dos-objectstores-toolbar span {
+  color: #5d6a72;
+  font-size: 0.88rem;
+}
+
+.dos-objectstores-primary-action,
+.dos-objectstores-open,
+.dos-objectstores-pane-actions button {
+  min-height: 38px;
+  border: 1px solid var(--mn-color-border-subtle);
+  border-radius: var(--mn-radius-md);
+  padding: 0 var(--mn-space-4);
+  color: var(--mn-color-action-primary-default);
+  background: var(--mn-color-surface-raised);
+  font-weight: 720;
+}
+
+.dos-objectstores-primary-action {
+  border-color: var(--mn-color-action-primary-default);
+  color: #ffffff;
+  background: var(--mn-color-action-primary-default);
+}
+
+.dos-objectstores-primary-action:hover:not(:disabled) {
+  border-color: var(--mn-color-action-primary-hover);
+  background: var(--mn-color-action-primary-hover);
+}
+
+.dos-objectstores-primary-action:disabled,
+.dos-objectstores-pane-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.dos-objectstores-table-wrap {
+  overflow: hidden;
+  border: 1px solid var(--mn-color-border-subtle);
+  border-radius: var(--mn-radius-lg);
+  background: var(--mn-color-surface-raised);
+}
+
+.dos-objectstores-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: #33424b;
+  font-size: 0.87rem;
+}
+
+.dos-objectstores-table th,
+.dos-objectstores-table td {
+  padding: 0.82rem var(--mn-space-4);
+  border-bottom: 1px solid #e6ecef;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.dos-objectstores-table thead th {
+  color: #627079;
+  background: #fbfcfb;
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dos-objectstores-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.dos-objectstores-table tbody tr:hover,
+.dos-objectstores-table tbody tr[data-selected="true"] {
+  background: #f2f8f7;
+}
+
+.dos-objectstores-table tbody tr[data-selected="true"] th {
+  box-shadow: inset 3px 0 0 var(--mn-color-action-primary-default);
+}
+
+.dos-objectstores-name {
+  display: grid;
+  gap: 0.1rem;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--mn-color-text-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.dos-objectstores-name strong {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.dos-objectstores-name span {
+  color: #6c7880;
+  font-size: 0.74rem;
+  font-weight: 500;
+}
+
+.dos-objectstores-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  color: var(--mn-color-status-success);
+  background: #edf5ec;
+  font-size: 0.75rem;
+  font-weight: 720;
+}
+
+.dos-objectstores-state[data-state*="warning"],
+.dos-objectstores-state[data-state*="degraded"] {
+  color: var(--mn-color-status-warning);
+  background: #fff6da;
+}
+
+.dos-objectstores-state[data-state*="error"],
+.dos-objectstores-state[data-state*="failed"] {
+  color: var(--mn-color-status-danger);
+  background: #f9ece7;
+}
+
+.dos-objectstores-open {
+  min-height: 32px;
+  padding-inline: var(--mn-space-3);
+  background: transparent;
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane {
+  width: min(600px, 100vw);
+  border-color: var(--mn-color-border-subtle);
+  background: var(--mn-color-surface-raised);
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane__form {
+  align-content: start;
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card {
+  display: block;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card > .dos-create-mark,
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card > h2,
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card > p,
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card > .dos-status-pill,
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-create-card > button {
+  display: none;
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane .dos-objectstore-form {
+  margin-top: 0;
+}
+
+.dos-objectstores-detail {
+  display: grid;
+  gap: var(--mn-space-6);
+}
+
+.dos-objectstores-detail section {
+  display: grid;
+  gap: var(--mn-space-3);
+}
+
+.dos-objectstores-detail h3 {
+  margin: 0;
+  padding-bottom: var(--mn-space-2);
+  border-bottom: 1px solid var(--mn-color-border-subtle);
+  color: var(--mn-color-text-primary);
+  font-size: 0.9rem;
+}
+
+.dos-objectstores-detail dl {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.6fr) minmax(0, 1.4fr);
+  gap: var(--mn-space-2) var(--mn-space-4);
+  margin: 0;
+}
+
+.dos-objectstores-detail dt {
+  color: #68757d;
+  font-size: 0.74rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.dos-objectstores-detail dd {
+  min-width: 0;
+  margin: 0;
+  color: #33424b;
+  overflow-wrap: anywhere;
+}
+
+.dos-objectstores-empty td {
+  padding-block: var(--mn-space-8);
+  color: #68757d;
+  text-align: center;
+}
+
+.dos-objectstores-empty strong,
+.dos-objectstores-empty span {
+  display: block;
+}
+
+.dos-objectstores-empty strong {
+  margin-bottom: var(--mn-space-2);
+  color: var(--mn-color-text-primary);
+}
+
+.dos-objectstores-pane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mn-space-2);
+  padding-top: var(--mn-space-4);
+  border-top: 1px solid var(--mn-color-border-subtle);
+}
+
+@media (max-width: 960px) {
+  .dos-objectstores-table th:nth-child(5),
+  .dos-objectstores-table td:nth-child(5),
+  .dos-objectstores-table th:nth-child(6),
+  .dos-objectstores-table td:nth-child(6) {
+    display: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .dos-objectstores-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dos-objectstores-table th:nth-child(2),
+  .dos-objectstores-table td:nth-child(2),
+  .dos-objectstores-table th:nth-child(4),
+  .dos-objectstores-table td:nth-child(4) {
+    display: none;
+  }
+
+  .dos-objectstores-table th,
+  .dos-objectstores-table td {
+    padding-inline: var(--mn-space-3);
+  }
+
+  .dos-objectstores-detail dl {
+    grid-template-columns: 1fr;
+    gap: var(--mn-space-1);
+  }
+
+  .dos-objectstores-detail dd + dt {
+    margin-top: var(--mn-space-2);
+  }
+}

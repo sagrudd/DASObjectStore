@@ -6,6 +6,7 @@ pub(super) fn render_object_store_create_card(
     view: Option<&ObjectStoresPageResponse>,
     create_state: UseStateHandle<ObjectStoreCreateFormState>,
     api_base_path: String,
+    on_created: Callback<String>,
 ) -> Html {
     let (status, detail) = match view {
         Some(view) if view.create_object_store.enabled => (
@@ -134,6 +135,7 @@ pub(super) fn render_object_store_create_card(
     let submit = {
         let create_state = create_state.clone();
         let api_base_path = api_base_path.clone();
+        let on_created = on_created.clone();
         Callback::from(move |_| {
             let mut pending = (*create_state).clone();
             pending.submitting = true;
@@ -143,6 +145,7 @@ pub(super) fn render_object_store_create_card(
 
             let create_state = create_state.clone();
             let api_base_path = api_base_path.clone();
+            let on_created = on_created.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let request = object_store_create_request_from_state(&pending);
                 let result = crate::api::submit_object_store_create(&api_base_path, &request).await;
@@ -150,8 +153,10 @@ pub(super) fn render_object_store_create_card(
                 next.submitting = false;
                 match result {
                     Ok(response) => {
+                        let store_id = response.store_id.clone();
                         next.submitted = Some(response);
                         next.error = None;
+                        on_created.emit(store_id);
                     }
                     Err(error) => {
                         next.submitted = None;

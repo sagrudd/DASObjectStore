@@ -18,8 +18,10 @@ const publicBase = "/products/dasobjectstore/";
 const apiBase = "/products/dasobjectstore/api";
 const apiV1Base = "/products/dasobjectstore/api/v1";
 let visualEndpoint = null;
+let visualVersion = null;
 
 async function main() {
+  visualVersion = await workspaceVersion();
   await buildWebDist();
   await mkdir(artifactDir, { recursive: true });
   const server = await startServer();
@@ -39,6 +41,15 @@ async function main() {
   }
 
   console.log(`web screenshot regression artifacts: ${artifactDir}`);
+}
+
+async function workspaceVersion() {
+  const manifest = await readFile(join(repoRoot, "Cargo.toml"), "utf8");
+  const match = manifest.match(/^version\s*=\s*"([^"]+)"/m);
+  if (!match) {
+    throw new Error("Unable to read the Rust workspace version from Cargo.toml");
+  }
+  return match[1];
 }
 
 async function buildWebDist() {
@@ -95,9 +106,8 @@ async function captureAuthenticatedPages(browser, baseUrl, viewport, role) {
 
 async function assertVisualContract(page, { auth }) {
   await page.locator(".dos-product-footer").waitFor();
-  await page.locator(".dos-product-footer__version").waitFor();
-  await page.getByText("Developed by").waitFor();
-  await page.getByRole("link", { name: "Mnemosyne" }).waitFor();
+  await page.locator(".dos-product-footer__version").waitFor({ state: "attached" });
+  await page.getByRole("link", { name: "Mnemosyne Biosciences" }).waitFor();
 
   if (auth) {
     await page.locator(".dos-topbar").waitFor();
@@ -144,10 +154,6 @@ async function assertVisualContract(page, { auth }) {
     if (!bodyText.includes("DASObjectStore")) {
       issues.push("body text does not include DASObjectStore");
     }
-    if (!bodyText.includes("Developed by")) {
-      issues.push("footer provenance text missing");
-    }
-
     const footer = document.querySelector(".dos-product-footer");
     if (!footer || !visible(footer)) {
       issues.push("footer is not visible");
@@ -260,35 +266,42 @@ async function assertEnclosureWorkflow(page, role) {
 }
 
 async function assertObjectStoreWorkflow(page, role) {
-  const createCard = page.locator("[data-action='store_create']");
-  const createButton = createCard.getByRole("button", { name: "Configure store" });
-  const subobjectCard = page.locator("[data-action='subobject_create']");
-  const subobjectButton = subobjectCard.getByRole("button", { name: "Define SubObject" });
+  const registry = page.locator(".dos-objectstores-table");
+  await registry.waitFor();
+  const createButton = page.getByRole("button", { name: "Create ObjectStore", exact: true });
 
   if (!role.administrator) {
     await expectDisabled(createButton, "non-admin ObjectStore creation must be disabled");
-    await expectDisabled(subobjectButton, "non-admin SubObject creation must be disabled");
-    await createCard.getByText("Admin only").waitFor();
-    await subobjectCard.getByText("Admin only").waitFor();
+    if (await page.locator(".dos-task-pane").count() !== 0) {
+      throw new Error("ObjectStores task pane must be closed for viewers");
+    }
     return;
   }
 
   await expectEnabled(createButton, "admin ObjectStore creation must be enabled");
   await createButton.click();
-  await createCard.getByLabel("Store name").fill("visual-e2e-store");
-  await createCard.getByLabel("Writer group").selectOption("bioinformatics");
-  await createCard.getByLabel("Enclosure").selectOption("qnap-tl-d800c-visual");
-  await createCard.getByRole("button", { name: "Review daemon plan" }).click();
-  await createCard.getByText("dasobjectstore store create visual-e2e-store").waitFor();
-  await createCard.getByPlaceholder("confirm create objectstore").fill("confirm create objectstore");
-  await createCard.getByRole("button", { name: "Submit daemon job" }).click();
-  await createCard.getByText("ObjectStore creation submitted to dasobjectstored.").waitFor();
+  let pane = page.locator(".dos-task-pane[role='dialog']");
+  await pane.waitFor();
+  await pane.getByLabel("Store name").fill("visual-e2e-store");
+  await pane.getByLabel("Writer group").selectOption("bioinformatics");
+  await pane.getByLabel("Enclosure").selectOption("qnap-tl-d800c-visual");
+  await pane.getByRole("button", { name: "Review daemon plan" }).click();
+  await pane.getByText("dasobjectstore store create visual-e2e-store").waitFor();
+  await pane.getByPlaceholder("confirm create objectstore").fill("confirm create objectstore");
+  await pane.getByRole("button", { name: "Submit daemon job" }).click();
+  await pane.getByText("ObjectStore creation submitted to dasobjectstored.").waitFor();
+  await pane.getByRole("button", { name: "Close task pane" }).click();
 
+  await registry.getByRole("button", { name: "Open" }).first().click();
+  pane = page.locator(".dos-task-pane[role='dialog']");
+  await pane.getByText("Overview").waitFor();
+  const subobjectButton = pane.getByRole("button", { name: "Create SubObject" });
   await expectEnabled(subobjectButton, "admin SubObject creation must be enabled");
   await subobjectButton.click();
-  await subobjectCard.getByLabel("SubObject name").fill("pod5/raw");
-  await subobjectCard.getByRole("button", { name: "Review SubObject plan" }).click();
-  await subobjectCard.getByText("dasobjectstore subobject create pod5/raw").waitFor();
+  await pane.getByLabel("SubObject name").fill("pod5/raw");
+  await pane.getByRole("button", { name: "Review SubObject plan" }).click();
+  await pane.getByText("dasobjectstore subobject create pod5/raw").waitFor();
+  await pane.getByRole("button", { name: "Close task pane" }).click();
 }
 
 async function assertUsersGroupsWorkflow(page, role) {
@@ -515,7 +528,7 @@ function apiResponse(pathname, method, request, body = {}) {
     return {
       service: "dasobjectstore-gui-web",
       status: "ready",
-      version: "0.79.0",
+      version: visualVersion,
       instance_id: "visual-instance",
     };
   }

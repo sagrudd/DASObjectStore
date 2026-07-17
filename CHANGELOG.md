@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.112.0 - 2026-07-17
+
+- Recast the ObjectStores Web workspace as a compact inventory-first resource
+  index with click- and keyboard-opened detail/task panes for evidence,
+  creation, browsing, upload, SubObject definition, and policy editing.
+- Keep unavailable capacity honest, remove the three permanent workflow cards,
+  and add responsive, page-owned styling aligned with the Mnemosyne interface
+  language.
+
 ## 0.111.4 - 2026-07-17
 
 - Make Linux CLI and Web listing consumers read the daemon-owned mutable store

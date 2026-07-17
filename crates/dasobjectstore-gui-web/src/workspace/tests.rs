@@ -25,6 +25,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/remote-upload.css"),
         include_str!("../../styles/home.css"),
         include_str!("../../styles/object-browser.css"),
+        include_str!("../../styles/object-stores.css"),
         include_str!("../../styles/activity.css"),
         include_str!("../../styles/local-access.css"),
         include_str!("../../styles/endpoints.css"),
@@ -38,6 +39,10 @@ fn web_styles_source() -> String {
 
 fn object_browser_styles_source() -> &'static str {
     include_str!("../../styles/object-browser.css")
+}
+
+fn object_stores_styles_source() -> &'static str {
+    include_str!("../../styles/object-stores.css")
 }
 
 fn activity_styles_source() -> &'static str {
@@ -110,6 +115,7 @@ fn shared_web_primitives_cover_panes_tables_status_and_responsive_surfaces() {
         "styles/remote-upload.css",
         "styles/home.css",
         "styles/object-browser.css",
+        "styles/object-stores.css",
         "styles/activity.css",
     ] {
         let feature_link = index.find(feature).expect("feature sheet registered");
@@ -123,6 +129,74 @@ fn shared_web_primitives_cover_panes_tables_status_and_responsive_surfaces() {
             "{feature} registered once"
         );
     }
+}
+
+#[test]
+fn objectstores_is_an_inventory_first_resource_index_with_transient_workflows() {
+    let source = include_str!("object_stores.rs");
+
+    for marker in [
+        "dos-objectstores-toolbar",
+        "dos-objectstores-table",
+        "TaskPaneMode::Closed",
+        "TaskPaneMode::Create",
+        "inspect:",
+        "configure:",
+        "subobject:",
+        "aria-expanded",
+        "aria-controls",
+        "Overview",
+        "Storage",
+        "Access & service",
+        "Activity & warnings",
+        "Browse objects",
+        "Create SubObject",
+        "Edit policy",
+    ] {
+        assert!(
+            source.contains(marker),
+            "missing ObjectStores marker {marker}"
+        );
+    }
+    assert!(!source.contains("<div class=\"dos-store-grid\">"));
+    assert!(!source.contains("render_object_store_card("));
+    assert_eq!(source.matches("render_subobject_create_card(").count(), 1);
+}
+
+#[test]
+fn objectstores_feature_css_uses_design_tokens_and_responsive_disclosure() {
+    let css = object_stores_styles_source();
+    let index = include_str!("../../index.html");
+
+    for selector in [
+        ".dos-objectstores-toolbar",
+        ".dos-objectstores-table",
+        ".dos-objectstores-name",
+        ".dos-objectstores-detail",
+        ".dos-objectstores-pane-actions",
+        "@media (max-width: 960px)",
+        "@media (max-width: 700px)",
+    ] {
+        assert!(
+            css.contains(selector),
+            "missing ObjectStores selector {selector}"
+        );
+    }
+    for token in [
+        "--mn-color-text-primary",
+        "--mn-color-surface-raised",
+        "--mn-color-border-subtle",
+        "--mn-color-action-primary-default",
+        "--mn-color-status-success",
+    ] {
+        assert!(css.contains(token), "missing design token {token}");
+    }
+    let feature_link = index
+        .find("styles/object-stores.css")
+        .expect("ObjectStores sheet registered");
+    let base_link = index.find("styles.css").expect("base sheet registered");
+    assert!(feature_link < base_link);
+    assert_eq!(index.matches("styles/object-stores.css").count(), 1);
 }
 
 use super::{
@@ -139,13 +213,12 @@ use super::{
     home_workspace_api_path, object_browser_download_disabled_reason,
     object_browser_file_download_available, object_browser_file_summaries,
     object_browser_folder_download_available, object_browser_folder_summaries,
-    object_browser_initial_endpoint, object_browser_placement_summary,
-    object_browser_placement_summary_state, object_store_bucket_default,
-    object_store_card_summaries, object_store_configure_review_from_values,
-    object_store_create_confirmation_matches, object_store_create_review_from_values,
-    object_store_creation_fields_ready, objectstores_workspace_api_path,
-    page_load_state_from_result_with_stale, primary_navigation_for_host,
-    remote_upload_folder_count, remote_upload_workspace_api_path,
+    object_browser_placement_summary, object_browser_placement_summary_state,
+    object_store_bucket_default, object_store_card_summaries,
+    object_store_configure_review_from_values, object_store_create_confirmation_matches,
+    object_store_create_review_from_values, object_store_creation_fields_ready,
+    objectstores_workspace_api_path, page_load_state_from_result_with_stale,
+    primary_navigation_for_host, remote_upload_folder_count, remote_upload_workspace_api_path,
     subobject_registry_preview_from_values, users_groups_summary_cards,
     users_groups_workspace_api_path, ApiLoadState, EnclosureWizardState, RemoteUploadSelectedFile,
     RemoteUploadSelectionSummary, ThroughputDayResponse, WorkspacePage, ACTIVITY_WORKSPACE_ROUTE,
@@ -1233,10 +1306,6 @@ fn object_browser_payload_maps_to_dense_view_summaries() {
     let folder_summaries = object_browser_folder_summaries(&folders);
     let file_summaries = object_browser_file_summaries(&files);
 
-    assert_eq!(
-        object_browser_initial_endpoint(&view).as_deref(),
-        Some("ENA")
-    );
     assert_eq!(folder_summaries[0].objects, "2 object(s)");
     assert_eq!(folder_summaries[0].size, "2.0 GiB");
     assert_eq!(folder_summaries[0].readiness, "Available");

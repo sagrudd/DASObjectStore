@@ -467,15 +467,20 @@ ObjectStores Page
 
 The redesigned ObjectStores page loads its inventory from
 ``/products/dasobjectstore/api/v1/dashboard/object-stores`` using the browser
-session issued at login. The route reads the same system ObjectStore registry
-used by the CLI and object-service orchestration layer, so visible cards are
-registry-backed rather than placeholder fixtures.
+session issued at login. The route reads the same daemon-owned ObjectStore
+registry used by the CLI and object-service orchestration layer, so visible
+rows are registry-backed rather than placeholder fixtures.
 
-Each ObjectStore card shows the store name, store class, object type, required
-copy count, placement strategy, S3/export state, writer group, public/writeable
-state, object count, used capacity, warning count, and last-ingest timestamp.
-Registry fields come from ``/etc/dasobjectstore/stores.json`` on Linux unless
-the packaged environment overrides the registry path. Object count, used
+The page leads with a compact ObjectStore registry table. Rows show the stable
+name and identifier, plain-language class, health, observed capacity, object
+count, and last activity. Selecting a row opens a keyboard-accessible detail
+pane with storage evidence, copy and placement policy, access and writer-group
+readiness, endpoint state, warnings, and contextual actions. Technical detail
+is retained without forcing every operator to scan it in every row.
+
+Registry fields come from the daemon-owned
+``/var/lib/dasobjectstore/stores.json`` on Linux unless the packaged environment
+overrides the registry path. Object count, used
 capacity, object type, and last-ingest time are read from live SQLite at
 ``/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite`` by default, or from
 ``DASOBJECTSTORE_WEB_LIVE_SQLITE_PATH`` when that override is set.
@@ -488,11 +493,12 @@ and each ObjectStore card's writer-policy readiness. If a store references a
 writer group that is not present in the registry, the card remains visible but
 reports the missing group as an explicit readiness state.
 
-If live SQLite is unavailable, the card remains visible from the registry but
+If live SQLite is unavailable, the row remains visible from the registry but
 reports an explicit usage warning rather than hiding the ObjectStore or
-presenting fixture data. The ``Create ObjectStore`` card remains disabled for
-non-admin users. Administrator sessions can open the browser-side creation form
-and prepare a reviewed action plan.
+presenting fixture data or a misleading zero. The toolbar's ``Create
+ObjectStore`` action remains disabled for non-admin users. Administrator
+sessions open creation in a transient side pane and prepare a reviewed action
+plan without displacing the inventory.
 
 The ObjectStores page is the Web counterpart to ``dasobjectstore store`` and
 managed store policy. It should list each store with class, writer group,
@@ -503,9 +509,9 @@ local-server ingest may use direct-to-HDD placement when policy allows, while
 Web and remote/S3 uploads remain SSD-first regardless of the store's local
 direct-ingest allowance.
 It shows explicit loading, empty-inventory, permission-denied, and
-transport-error states instead of using fixture store cards. The create card
-reflects the daemon/API create affordance, including whether creation is
-currently available or blocked by administrator requirements.
+transport-error states instead of using fixture store rows. The create action
+reflects the daemon/API affordance, including whether creation is currently
+available or blocked by administrator requirements.
 
 The ``Browse objects`` panel on the ObjectStores page reads
 ``/api/v1/object-stores/<endpoint>/browser`` through the authenticated Web
@@ -618,8 +624,9 @@ shape used by CLI registry creation, so unsupported policy vocabulary or invalid
 store-class/copy/retention combinations are rejected before any administrator
 job is accepted.
 
-Existing ObjectStores can be selected in the ``Configure ObjectStore`` card.
-The policy editor is populated from the live ObjectStore card and lets an
+Existing ObjectStores are selected in the registry table. ``Edit policy`` in
+the selected store's detail pane opens a target-scoped task pane. The policy
+editor is populated from the live ObjectStore response and lets an
 administrator review changes to redundancy, writer group, public/writeable
 state, retention, capacity behavior, export mode, store class, and SSD root.
 The browser requests a distinct ``store_configure`` action plan and validates
@@ -627,10 +634,11 @@ store class, copy count, retention, capacity behavior, and export mode against
 the supported domain vocabulary before displaying the planned command. This is
 a review surface only until the matching daemon execution endpoint is wired.
 
-The ``Create SubObject`` card provides the Web counterpart to
-``dasobjectstore subobject create``. Administrators can create a top-level
-SubObject under an ObjectStore or enter an existing parent SubObject name for a
-nested prefix. The form accepts an optional positive logical-capacity budget
+``Create SubObject`` in the selected store's detail pane provides the Web
+counterpart to ``dasobjectstore subobject create``. Administrators can create a
+top-level SubObject under that ObjectStore or enter an existing parent
+SubObject name for a nested prefix. The task pane accepts an optional positive
+logical-capacity budget
 and previews the registry path, object prefix,
 object-type inheritance or override, S3 routing mode, and SSD-root mirror
 target before calling the ``subobject_create`` action-plan route. Object type

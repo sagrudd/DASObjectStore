@@ -541,15 +541,6 @@ pub fn object_store_card_summaries(view: &ObjectStoresPageResponse) -> Vec<Objec
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(super) fn object_browser_initial_endpoint(view: &ObjectStoresPageResponse) -> Option<String> {
-    view.selected_store_id
-        .as_ref()
-        .filter(|store_id| !store_id.trim().is_empty())
-        .cloned()
-        .or_else(|| view.stores.first().map(|store| store.store_id.clone()))
-}
-
-#[cfg(any(target_arch = "wasm32", test))]
 pub fn object_browser_folder_summaries(
     folders: &[ObjectBrowserFolderNodeResponse],
 ) -> Vec<ObjectBrowserFolderSummary> {
