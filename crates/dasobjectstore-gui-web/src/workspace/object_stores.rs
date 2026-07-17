@@ -230,6 +230,9 @@ pub(super) fn render_object_store_inventory(
                 pane_mode.clone(),
                 *registry_sort,
                 registry_sort,
+                browser_endpoint.clone(),
+                browser_prefix.clone(),
+                browser_search.clone(),
             ) }
             { render_object_store_task_surface(
                 view,
@@ -241,22 +244,14 @@ pub(super) fn render_object_store_inventory(
                 configure_state,
                 subobject_state,
                 api_base_path.clone(),
+                browser_state,
+                browser_download_state,
                 browser_endpoint.clone(),
                 browser_prefix.clone(),
+                browser_search,
+                browser_sort,
                 on_upload_target,
             ) }
-            if !browser_endpoint.trim().is_empty() {
-                { render_object_browser_panel(
-                    view,
-                    &*browser_state,
-                    api_base_path,
-                    browser_download_state,
-                    browser_endpoint,
-                    browser_prefix,
-                    browser_search,
-                    browser_sort,
-                ) }
-            }
         </div>
     }
 }
@@ -268,6 +263,9 @@ fn render_object_store_registry_table(
     set_pane_mode: UseStateHandle<TaskPaneMode>,
     sort: ObjectStoreSort,
     set_sort: UseStateHandle<ObjectStoreSort>,
+    browser_endpoint: UseStateHandle<String>,
+    browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
 ) -> Html {
     html! {
         <div class="dos-objectstores-table-wrap">
@@ -300,6 +298,19 @@ fn render_object_store_registry_table(
                             let store_id = store_id.clone();
                             Callback::from(move |_| set_pane_mode.set(TaskPaneMode::Edit(format!("inspect:{store_id}"))))
                         };
+                        let browse_store = {
+                            let set_pane_mode = set_pane_mode.clone();
+                            let browser_endpoint = browser_endpoint.clone();
+                            let browser_prefix = browser_prefix.clone();
+                            let browser_search = browser_search.clone();
+                            let store_id = store_id.clone();
+                            Callback::from(move |_| {
+                                browser_endpoint.set(store_id.clone());
+                                browser_prefix.set(String::new());
+                                browser_search.set(String::new());
+                                set_pane_mode.set(TaskPaneMode::Edit(format!("browse:{store_id}")));
+                            })
+                        };
                         html! {
                             <tr data-selected={open.to_string()} data-store-id={store.id.clone()}>
                                 <th scope="row">
@@ -319,7 +330,13 @@ fn render_object_store_registry_table(
                                 <td>{ compact_capacity(&store.capacity, &store.capacity_status) }</td>
                                 <td>{ store.objects.clone() }</td>
                                 <td>{ store.last_ingested.clone() }</td>
-                                <td><button type="button" class="dos-objectstores-open" onclick={open_store}>{ "Open" }</button></td>
+                                <td><div class="dos-objectstores-row-actions">
+                                    <button type="button" class="dos-objectstores-browse" onclick={browse_store} aria-label={format!("Browse objects in {}", store.name)} title={format!("Browse objects in {}", store.name)}>
+                                        <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="12" r="2.5"/><path d="M14 9h4M14 12h4M14 15h3"/></svg>
+                                        <span>{ "Browse" }</span>
+                                    </button>
+                                    <button type="button" class="dos-objectstores-open" onclick={open_store}>{ "Open" }</button>
+                                </div></td>
                             </tr>
                         }
                     }) }
@@ -380,8 +397,12 @@ fn render_object_store_task_surface(
     configure_state: UseStateHandle<ObjectStoreConfigureFormState>,
     subobject_state: UseStateHandle<SubObjectFormState>,
     api_base_path: String,
+    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
     browser_endpoint: UseStateHandle<String>,
     browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
+    browser_sort: UseStateHandle<String>,
     on_upload_target: Callback<String>,
 ) -> Html {
     let close = {
@@ -431,6 +452,28 @@ fn render_object_store_task_surface(
                 </TaskPane>
             }
         }
+        TaskPaneMode::Edit(context) if context.starts_with("browse:") => {
+            let store_id = context.trim_start_matches("browse:").to_string();
+            let store_name = stores
+                .iter()
+                .find(|store| store.id == store_id)
+                .map(|store| store.name.clone())
+                .unwrap_or_else(|| store_id.clone());
+            html! {
+                <TaskPane mode={TaskPaneMode::Edit(store_id.clone())} title={format!("Browse {store_name}")} selected_context={Some(format!("ObjectStore: {store_id}"))} return_focus_to={Some(create_trigger_ref)} on_close={close}>
+                    { render_object_browser_panel(
+                        view,
+                        &*browser_state,
+                        api_base_path,
+                        browser_download_state,
+                        browser_endpoint,
+                        browser_prefix,
+                        browser_search,
+                        browser_sort,
+                    ) }
+                </TaskPane>
+            }
+        }
         TaskPaneMode::Edit(context) => {
             let store_id = context.trim_start_matches("inspect:");
             let Some(store) = stores.iter().find(|store| store.id == store_id) else {
@@ -449,7 +492,7 @@ fn render_object_store_task_surface(
                 Callback::from(move |_| {
                     browser_endpoint.set(store_id.clone());
                     browser_prefix.set(String::new());
-                    pane_mode.set(TaskPaneMode::Closed);
+                    pane_mode.set(TaskPaneMode::Edit(format!("browse:{store_id}")));
                 })
             };
             let configure = {

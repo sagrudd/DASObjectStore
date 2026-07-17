@@ -51,6 +51,7 @@
 
 .dos-objectstores-primary-action,
 .dos-objectstores-open,
+.dos-objectstores-browse,
 .dos-objectstores-pane-actions button {
   min-height: 38px;
   border: 1px solid var(--mn-color-border-subtle);
@@ -201,6 +202,44 @@
   min-height: 32px;
   padding-inline: var(--mn-space-3);
   background: transparent;
+}
+
+.dos-objectstores-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--mn-space-2);
+  white-space: nowrap;
+}
+
+.dos-objectstores-browse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 32px;
+  border-color: rgba(15, 107, 120, 0.24);
+  border-radius: 999px;
+  padding-inline: 0.7rem 0.82rem;
+  background: #edf6f5;
+}
+
+.dos-objectstores-browse:hover {
+  border-color: var(--mn-color-action-primary-default);
+  background: #e1f0ee;
+}
+
+.dos-objectstores-browse svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.dos-page[data-page="objectstores"] .dos-task-pane:has(.dos-object-browser) {
+  width: min(960px, 100vw);
 }
 
 .dos-page[data-page="objectstores"] .dos-task-pane {

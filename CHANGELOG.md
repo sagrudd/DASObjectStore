@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.1 - 2026-07-17
+
+- Put a compact disk-and-label Browse capsule directly on every ObjectStore
+  inventory row and open the selected store's object browser in a wide,
+  hovering task pane instead of appending it below the registry.
+- Keep browsing scoped to the row that launched it, remove the redundant
+  endpoint selector, and retain search, sorting, navigation, placement
+  evidence, and downloads inside the pane.
+
 ## 0.114.0 - 2026-07-17
 
 - Recast the Endpoints workspace as operator-facing Connections: a compact

@@ -126,8 +126,7 @@ pub fn endpoint_binding_fields_ready(
     governance_domain: &str,
     store_id: &str,
 ) -> bool {
-    !binding_enabled
-        || (!governance_domain.trim().is_empty() && !store_id.trim().is_empty())
+    !binding_enabled || (!governance_domain.trim().is_empty() && !store_id.trim().is_empty())
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -377,7 +376,7 @@ fn render_endpoint_inventory(
                                 pane_mode.set(TaskPaneMode::Review);
                             });
                             let used_by = if endpoint.active_bindings.is_empty() { "Not attached".to_string() } else { endpoint.active_bindings.iter().map(|binding| binding.store_id.as_str()).collect::<Vec<_>>().join(", ") };
-                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.object_service_url.clone() }</small></td><td>{ endpoint_kind_label(&endpoint.kind) }</td><td>{ used_by }</td><td><span class={classes!("dos-status-pill", format!("is-{}", endpoint.validation.state))}>{ endpoint_validation_label(&endpoint.validation.state) }</span></td><td>{ endpoint.validation.checked_at_utc.clone().unwrap_or_else(|| "Not yet checked".to_string()) }</td><td><button type="button" class="dos-secondary-action" onclick={inspect} aria-label={format!("Open {} connection", endpoint.display_name)}>{ "Open" }</button></td></tr> }
+                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.object_service_url.clone() }</small></td><td>{ endpoint_kind_label(&endpoint.kind) }</td><td>{ used_by }</td><td><span class={classes!("dos-status-pill", format!("is-{}", endpoint.validation.state))}>{ endpoint_validation_label(&endpoint.validation.state) }</span></td><td>{ endpoint.validation.checked_at_utc.clone().unwrap_or_else(|| "Not yet checked".to_string()) }</td><td><button type="button" class="dos-secondary-action" onclick={inspect} aria-label={format!("Open details for {}", endpoint.display_name)}>{ "Open" }</button></td></tr> }
                         }) }</tbody>
                     </table>
                 </div>

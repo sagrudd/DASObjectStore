@@ -479,6 +479,12 @@ pane with storage evidence, copy and placement policy, access and writer-group
 readiness, endpoint state, warnings, and contextual actions. Technical detail
 is retained without forcing every operator to scan it in every row.
 
+Each row also has a compact disk-marked ``Browse`` capsule. It opens a wide,
+hovering object-browser pane scoped to that ObjectStore, leaving the registry
+in place behind it. The pane does not provide a second ObjectStore selector:
+the row is the selection, the pane title confirms it, and closing the pane
+returns to the same inventory context.
+
 ``ObjectStore``, ``Capacity``, ``Objects``, and ``Last activity`` column
 headings are keyboard-operable sort controls. ObjectStore order starts
 alphabetically; the evidence columns start with highest capacity/count or most
@@ -523,11 +529,11 @@ transport-error states instead of using fixture store rows. The create action
 reflects the daemon/API affordance, including whether creation is currently
 available or blocked by administrator requirements.
 
-The ``Browse objects`` panel on the ObjectStores page reads
+The ``Browse objects`` pane on the ObjectStores page reads
 ``/api/v1/object-stores/<endpoint>/browser`` through the authenticated Web
-session. Operators can select an ObjectStore endpoint, navigate folder prefixes
-with breadcrumbs, search by object name or path, and sort by name, size, or
-modified time. Folder and file rows show daemon-reported size, object type,
+session. Operators launch it from the relevant inventory row, navigate folder
+prefixes with breadcrumbs, search by object name or path, and sort by name,
+size, or modified time. Folder and file rows show daemon-reported size, object type,
 readiness, lifecycle state, copy count, and placement badges. Placement badges
 name the managed disk label or external endpoint but do not expose writable
 managed-disk paths to the browser.

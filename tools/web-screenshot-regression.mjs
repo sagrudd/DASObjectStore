@@ -291,6 +291,25 @@ async function assertObjectStoreWorkflow(page, role) {
   await registry.getByRole("button", { name: "Sort by Capacity, ascending" }).click();
   const createButton = page.getByRole("button", { name: "Create ObjectStore", exact: true });
 
+  const zymoRow = registry.locator("tr[data-store-id='zymo-fecal-2025-05']");
+  const browseButton = zymoRow.getByRole("button", { name: /Browse objects in/ });
+  await browseButton.click();
+  let browserPane = page.locator(".dos-task-pane[role='dialog']");
+  await browserPane.locator(".dos-object-browser:not([data-state='loading'])").waitFor();
+  await browserPane.getByText("Browse objects", { exact: true }).waitFor();
+  await page.screenshot({
+    path: join(artifactDir, `desktop-${role.name}-objectstores-browser.png`),
+    fullPage: false,
+  });
+  if (await browserPane.getByLabel("Endpoint").count() !== 0) {
+    throw new Error("row-scoped ObjectStore browser must not expose a second endpoint selector");
+  }
+  if (await page.locator(".dos-objectstores-registry > .dos-object-browser").count() !== 0) {
+    throw new Error("ObjectStore browser must not be appended below the registry");
+  }
+  await browserPane.getByRole("button", { name: "Close task pane" }).click();
+  await browserPane.waitFor({ state: "detached" });
+
   if (!role.administrator) {
     await expectDisabled(createButton, "non-admin ObjectStore creation must be disabled");
     if (await page.locator(".dos-task-pane").count() !== 0) {
@@ -368,7 +387,7 @@ async function assertUsersGroupsWorkflow(page, role) {
 async function assertEndpointsWorkflow(page, role) {
   const inventory = page.locator("[data-section='endpoint-inventory']");
   await inventory.waitFor();
-  const addButton = page.getByRole("button", { name: "Add endpoint", exact: true });
+  const addButton = page.getByRole("button", { name: "Add connection", exact: true });
   if (!role.administrator) {
     await expectEnabled(addButton, "endpoint inventory remains visible to viewers");
     await addButton.click();
@@ -380,14 +399,12 @@ async function assertEndpointsWorkflow(page, role) {
   await addButton.click();
   const pane = page.locator(".dos-task-pane[role='dialog']");
   await pane.waitFor();
-  await pane.getByLabel("Endpoint ID").fill("visual-endpoint");
-  await pane.getByLabel("Display name").fill("Visual endpoint");
-  await pane.getByLabel("Object-service URL").fill("https://endpoint.example.test:9443");
-  if (await pane.getByLabel("Attach an ObjectStore/governance binding to this endpoint record.").count()) {
-    await pane.getByLabel("Attach an ObjectStore/governance binding to this endpoint record.").check();
-    await pane.getByLabel("Binding ID").fill("visual-binding");
-    await pane.getByLabel("Governance domain").fill("local");
-    await pane.getByLabel("ObjectStore ID").fill("zymo-fecal-2025-05");
+  await pane.getByLabel("Connection ID").fill("visual-endpoint");
+  await pane.getByLabel("Display name").fill("Visual connection");
+  await pane.getByLabel("NAS / NFS gateway URL").fill("https://endpoint.example.test:9443");
+  if (await pane.getByLabel("Make an ObjectStore available through this connection.").count()) {
+    await pane.getByLabel("Make an ObjectStore available through this connection.").check();
+    await pane.locator("[data-section='endpoint-binding'] select").selectOption("zymo-fecal-2025-05");
   }
   if (await pane.getByLabel("Confirmation phrase").count() !== 0) {
     throw new Error("dry-run endpoint review must not show a confirmation phrase");
@@ -396,9 +413,12 @@ async function assertEndpointsWorkflow(page, role) {
   await pane.getByLabel("Confirmation phrase").fill("record endpoint inventory");
   await pane.getByRole("button", { name: "Record endpoint" }).click();
   await expectHidden(pane, "successful endpoint update must close the task pane");
-  await inventory.getByText("Visual endpoint").waitFor();
-  await inventory.getByRole("button", { name: "Edit" }).first().click();
-  await page.getByRole("dialog").getByLabel("Endpoint ID").waitFor();
+  await inventory.getByText("Visual connection").waitFor();
+  await inventory.getByRole("button", { name: "Open details for Visual connection" }).click();
+  const detailPane = page.getByRole("dialog");
+  await detailPane.getByText("Technical details").waitFor();
+  await detailPane.getByRole("button", { name: "Edit connection" }).click();
+  await detailPane.getByLabel("Connection ID").waitFor();
 }
 
 async function assertActivityWorkflow(page) {
@@ -562,6 +582,9 @@ function apiResponse(pathname, method, request, body = {}) {
   if (pathname === `${apiV1Base}/dashboard/object-stores`) {
     return objectStoresDashboard(role);
   }
+  if (pathname.startsWith(`${apiV1Base}/object-stores/`) && pathname.endsWith("/browser")) {
+    return objectBrowserResponse(pathname);
+  }
   if (pathname === `${apiV1Base}/workspaces/activity`) {
     return activityWorkspace();
   }
@@ -609,6 +632,73 @@ function capacity(total, used, free, usedPercentBasisPoints) {
     used_tib: used,
     free_tib: free,
     used_percent_basis_points: usedPercentBasisPoints,
+  };
+}
+
+function objectBrowserResponse(pathname) {
+  const segments = pathname.split("/").filter(Boolean);
+  const endpoint = decodeURIComponent(segments.at(-2));
+  return {
+    endpoint,
+    prefix: "",
+    breadcrumbs: [],
+    folders: [
+      {
+        name: "pod5",
+        prefix: "pod5/",
+        object_count: 128,
+        total_size_bytes: 68719476736,
+        readiness: "available",
+      },
+      {
+        name: "reports",
+        prefix: "reports/",
+        object_count: 12,
+        total_size_bytes: 33554432,
+        readiness: "available",
+      },
+    ],
+    files: [
+      {
+        object_id: "visual-object-001",
+        name: "manifest.json",
+        path: "manifest.json",
+        object_type: "application/json",
+        size_bytes: 18432,
+        modified_at_utc: "2026-07-17T12:30:00Z",
+        checksum: {
+          algorithm: "sha256",
+          value: "d1b6c6d8e9024a627f4ecdb580e897c78b87e87c8b943175528208a9a12b7aa1",
+          verified_at_utc: "2026-07-17T12:31:00Z",
+        },
+        readiness: "available",
+        lifecycle_state: "settled",
+        copy_count: 2,
+        placements: [
+          {
+            disk_id: "qnap-1057",
+            disk_label: "QNAP bay 1",
+            location: "hdd_settled",
+            state: "verified",
+            size_bytes: 18432,
+            checksum: null,
+            verified_at_utc: "2026-07-17T12:31:00Z",
+          },
+          {
+            disk_id: "qnap-1058",
+            disk_label: "QNAP bay 2",
+            location: "hdd_settled",
+            state: "verified",
+            size_bytes: 18432,
+            checksum: null,
+            verified_at_utc: "2026-07-17T12:31:00Z",
+          },
+        ],
+        download_source: "hdd_settled",
+      },
+    ],
+    next_cursor: null,
+    total_entries: 3,
   };
 }
 

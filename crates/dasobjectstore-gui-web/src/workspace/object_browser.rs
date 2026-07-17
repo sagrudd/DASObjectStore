@@ -14,15 +14,6 @@ pub(super) fn render_object_browser_panel(
     let selected_endpoint = (*browser_endpoint).clone();
     let search_value = (*browser_search).clone();
     let sort_value = (*browser_sort).clone();
-    let on_endpoint_change = {
-        let browser_endpoint = browser_endpoint.clone();
-        let browser_prefix = browser_prefix.clone();
-        Callback::from(move |event: Event| {
-            let input: HtmlSelectElement = event.target_unchecked_into();
-            browser_endpoint.set(input.value());
-            browser_prefix.set(String::new());
-        })
-    };
     let on_search = {
         let browser_search = browser_search.clone();
         Callback::from(move |event: InputEvent| {
@@ -39,25 +30,15 @@ pub(super) fn render_object_browser_panel(
     };
 
     html! {
-        <section class="dos-card dos-wide-card dos-object-browser" data-state={browser_state.state_name()}>
+        <section class="dos-object-browser" data-state={browser_state.state_name()} data-objectstore={selected_endpoint.clone()}>
             <div class="dos-card-row">
                 <div>
                     <span class="dos-card-label">{ "Browse objects" }</span>
-                    <h2>{ "ObjectStore contents" }</h2>
+                    <h2>{ view.stores.iter().find(|store| store.store_id == selected_endpoint).map(|store| store.display_name.clone()).unwrap_or_else(|| "ObjectStore contents".to_string()) }</h2>
                 </div>
                 <span class="dos-status-pill">{ browser_state.state_name() }</span>
             </div>
             <div class="dos-object-browser-controls">
-                <label>
-                    <span>{ "Endpoint" }</span>
-                    <select onchange={on_endpoint_change} value={selected_endpoint}>
-                        { for view.stores.iter().map(|store| {
-                            html! {
-                                <option value={store.store_id.clone()}>{ store.display_name.clone() }</option>
-                            }
-                        }) }
-                    </select>
-                </label>
                 <label>
                     <span>{ "Search" }</span>
                     <input

@@ -143,6 +143,7 @@ fn objectstores_is_an_inventory_first_resource_index_with_transient_workflows() 
         "inspect:",
         "configure:",
         "subobject:",
+        "browse:",
         "aria-expanded",
         "aria-controls",
         "aria-sort",
@@ -152,6 +153,8 @@ fn objectstores_is_an_inventory_first_resource_index_with_transient_workflows() 
         "Access & service",
         "Activity & warnings",
         "Browse objects",
+        "dos-objectstores-browse",
+        "Browse objects in {}",
         "Create SubObject",
         "Edit policy",
     ] {
@@ -178,6 +181,9 @@ fn objectstores_feature_css_uses_design_tokens_and_responsive_disclosure() {
         ".dos-objectstores-sort:focus-visible",
         ".dos-objectstores-detail",
         ".dos-objectstores-pane-actions",
+        ".dos-objectstores-browse",
+        ".dos-objectstores-row-actions",
+        ".dos-task-pane:has(.dos-object-browser)",
         "@media (max-width: 960px)",
         "@media (max-width: 700px)",
     ] {

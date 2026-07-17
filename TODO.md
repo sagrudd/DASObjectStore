@@ -3362,6 +3362,14 @@ non-destructive close, and restores focus to its trigger when closed.
   and S3-compatible services. The Web action must invoke that operation and
   must never infer success from browser reachability or a registry write.
 
+### 24.4 ObjectStore-scoped object browser
+
+- [x] Replace the page-bottom object browser with a disk-marked ``Browse``
+  capsule on each ObjectStore inventory row. Open the selected store in a wide
+  hovering task pane, keep the registry behind it, remove the redundant store
+  selector, and preserve search, sorting, navigation, placement evidence, and
+  downloads within the scoped pane.
+
 ### 24.4 Remote Upload: explicit ObjectStore selection is mandatory
 
 - [x] Remove `RemoteUpload` from the global `PRIMARY_NAVIGATION` and
