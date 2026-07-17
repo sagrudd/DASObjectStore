@@ -77,9 +77,9 @@ repair_managed_tree() {
 
   chown "$service_user:$service_group" "$root"
   chmod 0750 "$root"
-  find "$root" \
+  find "$root" -mindepth 1 \
     -path "$root/lost+found" -prune \
-    -o -mindepth 1 -exec chown "$service_user:$service_group" {} +
+    -o -exec chown "$service_user:$service_group" {} +
   find "$root" \
     -path "$root/lost+found" -prune \
     -o -type d -exec chmod 0750 {} +
