@@ -3588,6 +3588,9 @@ browser and appliance acceptance remain external validation gates.
   trigger those risks.
 - [x] Review file sizes before each milestone completion and split modules that
   have grown too broad.
+- [x] Preserve explicit strict conflict policy selection across both daemon
+  ingest command variants and prove it in CLI parsing tests and dry-run
+  receipts before importing governed public genomic assets.
 - [x] Treat current Synoptikon/Mneion conventions as mutable design inputs when
   DASObjectStore requires deeper integration, provided affected software,
   schemas, migrations, tests, and docs are updated coherently.

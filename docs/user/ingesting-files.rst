@@ -313,7 +313,9 @@ Examples:
 The three policy flags are mutually exclusive. Normal operator use leaves them
 unset so checksum calculation stays in the copy path. Use ``--strict`` for a
 deliberate, preflight duplicate check; use ``--lazy`` only for trusted repeat
-imports where a size match is sufficient.
+imports where a size match is sufficient. The dry-run receipt reports the
+selected policy; do not proceed when an explicitly requested policy is not
+shown verbatim.
 
 Group Requirements
 ------------------

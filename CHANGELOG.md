@@ -8,6 +8,11 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.7 - 2026-07-17
+
+- Honour explicit ``--strict`` conflict policy selection for daemon ingest and
+  direct-import requests instead of silently using the default force policy.
+
 ## 0.114.6 - 2026-07-17
 
 - Always grant the packaged daemon recursive read-only ACL access to the

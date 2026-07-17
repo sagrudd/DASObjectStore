@@ -108,6 +108,8 @@ impl IngestFilesArgs {
             DaemonIngestConflictPolicy::Force
         } else if self.lazy {
             DaemonIngestConflictPolicy::Lazy
+        } else if self.strict {
+            DaemonIngestConflictPolicy::Strict
         } else {
             DaemonIngestConflictPolicy::Force
         }
@@ -296,6 +298,8 @@ impl IngestDirectImportArgs {
             DaemonIngestConflictPolicy::Force
         } else if self.lazy {
             DaemonIngestConflictPolicy::Lazy
+        } else if self.strict {
+            DaemonIngestConflictPolicy::Strict
         } else {
             DaemonIngestConflictPolicy::Force
         }
@@ -400,6 +404,24 @@ mod tests {
         };
         assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Force);
         assert_eq!(files.object_type(), ObjectType::Naive);
+
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "files",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/mnt/external/zymo",
+            "--strict",
+        ])
+        .expect("strict ingest files parses");
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command")
+        };
+        let Some(IngestCommand::Files(files)) = args.command() else {
+            panic!("expected files command")
+        };
+        assert_eq!(files.conflict_policy(), DaemonIngestConflictPolicy::Strict);
     }
 
     #[test]
@@ -540,5 +562,23 @@ mod tests {
         assert_eq!(import.conflict_policy(), DaemonIngestConflictPolicy::Lazy);
         assert!(import.tui());
         assert!(import.dry_run());
+
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "direct-import",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/home/stephen/zymo_fecal_2025.05",
+            "--strict",
+        ])
+        .expect("strict ingest direct-import parses");
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command")
+        };
+        let Some(IngestCommand::DirectImport(import)) = args.command() else {
+            panic!("expected direct-import command")
+        };
+        assert_eq!(import.conflict_policy(), DaemonIngestConflictPolicy::Strict);
     }
 }
