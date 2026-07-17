@@ -18,7 +18,7 @@ pub const STORE_REGISTRY_ENV: &str = "DASOBJECTSTORE_STORE_REGISTRY_PATH";
 #[cfg(target_os = "macos")]
 const DEFAULT_STORE_REGISTRY_PATH: &str = "/usr/local/etc/dasobjectstore/stores.json";
 #[cfg(not(target_os = "macos"))]
-const DEFAULT_STORE_REGISTRY_PATH: &str = "/etc/dasobjectstore/stores.json";
+const DEFAULT_STORE_REGISTRY_PATH: &str = "/var/lib/dasobjectstore/stores.json";
 
 pub const PORTABLE_STORE_REGISTRY_RELATIVE_PATH: &str = ".dasobjectstore/stores.json";
 
@@ -256,6 +256,15 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn linux_default_reads_the_daemon_owned_mutable_registry() {
+        assert_eq!(
+            super::DEFAULT_STORE_REGISTRY_PATH,
+            "/var/lib/dasobjectstore/stores.json"
+        );
+    }
 
     #[test]
     fn creates_system_managed_store_registry() {

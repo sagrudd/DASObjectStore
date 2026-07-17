@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.111.4 - 2026-07-17
+
+- Make Linux CLI and Web listing consumers read the daemon-owned mutable store
+  registry under ``/var/lib`` so newly created ObjectStores appear immediately
+  instead of being hidden by the stale pre-migration ``/etc`` snapshot.
+
 ## 0.111.3 - 2026-07-17
 
 - Preserve dotted third-party dataset identifiers, including ``ont-open-data``
