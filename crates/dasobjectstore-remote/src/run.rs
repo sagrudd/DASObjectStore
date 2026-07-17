@@ -325,7 +325,7 @@ fn run_upload(
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
     let config = resolved_valid_config(cli)?;
-    let route = resolve_upload_route(&config, args.store())?;
+    let route = resolve_upload_route(&config, args.store(), args.bucket())?;
     let credentials = match route.credentials.clone() {
         Some(credentials) => Some(credentials),
         None => resolve_credentials(cli, &config)?,
@@ -702,11 +702,14 @@ struct RemoteUploadRoute {
 fn resolve_upload_route(
     config: &RemoteConfig,
     requested_object_store: &str,
+    reviewed_bucket: Option<&str>,
 ) -> Result<RemoteUploadRoute, RemoteRunError> {
     if config.paired_appliances.is_empty() {
         return Ok(RemoteUploadRoute {
             object_store: requested_object_store.to_string(),
-            bucket: requested_object_store.to_string(),
+            bucket: reviewed_bucket
+                .unwrap_or(requested_object_store)
+                .to_string(),
             credentials: None,
             credential_source: AwsS3CredentialSource::AwsProfile,
             session_renewal_status: None,
@@ -1067,6 +1070,19 @@ mod tests {
     }
 
     #[test]
+    fn unpaired_daemon_route_keeps_logical_store_and_reviewed_bucket_distinct() {
+        let mut config = paired_config();
+        config.paired_appliances.clear();
+
+        let route =
+            resolve_upload_route(&config, "pinakotheke_media", Some("dos-pinakotheke-media"))
+                .expect("reviewed daemon route resolves");
+
+        assert_eq!(route.object_store, "pinakotheke_media");
+        assert_eq!(route.bucket, "dos-pinakotheke-media");
+    }
+
+    #[test]
     fn paired_upload_rejects_ungranted_bucket_name() {
         let path = temp_config_path("upload-rejects-bucket");
         let root = temp_source_root("upload-rejects-bucket-source");
@@ -1101,7 +1117,7 @@ mod tests {
         let mut config = paired_config();
         config.paired_appliances[0].session = None;
 
-        let err = resolve_upload_route(&config, "zymo_fecal_2025.05")
+        let err = resolve_upload_route(&config, "zymo_fecal_2025.05", None)
             .expect_err("missing session rejected");
 
         assert!(err.to_string().contains("no active remote upload session"));
@@ -1116,7 +1132,8 @@ mod tests {
             .expect("session");
         session.expires_at = "2000-01-01T00:00:00Z".to_string();
 
-        let err = resolve_upload_route(&config, "zymo_fecal_2025.05").expect_err("expiry rejected");
+        let err =
+            resolve_upload_route(&config, "zymo_fecal_2025.05", None).expect_err("expiry rejected");
 
         assert!(err.to_string().contains("expired remote upload session"));
         assert!(!err.to_string().contains("super-secret"));
@@ -1174,8 +1191,8 @@ mod tests {
         std::fs::create_dir_all(&root).expect("create source");
         let source = root.join("reads.fastq.gz");
         std::fs::write(&source, b"ACGT").expect("write source");
-        let route =
-            resolve_upload_route(&config, "zymo_fecal_2025.05").expect("paired route resolves");
+        let route = resolve_upload_route(&config, "zymo_fecal_2025.05", None)
+            .expect("paired route resolves");
         let credentials = route.credentials.clone();
         let plan = plan_upload_with_credentials(
             &config,

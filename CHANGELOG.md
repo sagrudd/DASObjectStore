@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.3 - 2026-07-17
+
+- Allow daemon-submitted remote uploads to carry a reviewed logical
+  ObjectStore name and its distinct provider bucket binding, so authoritative
+  catalogue settlement does not require S3-compatible logical names.
+
 ## 0.114.2 - 2026-07-17
 
 - Simplify ObjectStore file rows to name/type, size, state, modified time, and

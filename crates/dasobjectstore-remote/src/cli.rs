@@ -328,6 +328,9 @@ pub struct UploadArgs {
     /// Exact object key; valid only for single-file uploads.
     #[arg(long)]
     key: Option<String>,
+    /// Reviewed provider bucket binding for daemon submission without an easyconnect session.
+    #[arg(long, requires = "submit_to_daemon")]
+    bucket: Option<String>,
     /// Explicit MIME type for a single-file object (for example image/png).
     #[arg(long)]
     content_type: Option<String>,
@@ -360,6 +363,10 @@ impl UploadArgs {
 
     pub fn key(&self) -> Option<&str> {
         self.key.as_deref()
+    }
+
+    pub fn bucket(&self) -> Option<&str> {
+        self.bucket.as_deref()
     }
 
     pub fn content_type(&self) -> Option<&str> {
