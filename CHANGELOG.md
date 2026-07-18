@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.10 - 2026-07-18
+
+- Align the Monas adapter and Web UI on Prosopikon's persisted authority UUID
+  contract so a composed Monas process uses one compatible authority type and
+  can bind product context to the same issuer, principal, and session IDs.
+
 ## 0.114.9 - 2026-07-18
 
 - Resolve Monas host sessions to immutable Prosopikon principal and session
