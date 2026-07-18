@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.8 - 2026-07-18
+
+- Pin the Monas integration and Web UI to the published Prosopikon immutable
+  identity contract so downstream hosts compile against one authority-store
+  type instead of resolving a private sibling checkout or a second legacy
+  Prosopikon revision.
+
 ## 0.114.7 - 2026-07-17
 
 - Honour explicit ``--strict`` conflict policy selection for daemon ingest and

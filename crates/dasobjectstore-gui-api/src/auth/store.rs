@@ -289,6 +289,15 @@ impl From<ProsopikonAuthError> for LocalAuthStoreError {
             ProsopikonAuthError::InvalidPassword => Self::InvalidPassword,
             ProsopikonAuthError::InvalidSessionToken => Self::InvalidSessionToken,
             ProsopikonAuthError::ExpiredSessionToken => Self::ExpiredSessionToken,
+            ProsopikonAuthError::ImmutableIdentityMigrationRequired { .. } => {
+                Self::InvalidSessionToken
+            }
+            ProsopikonAuthError::SourceRegistryIdRequired
+            | ProsopikonAuthError::RegistryDigestMismatch
+            | ProsopikonAuthError::RegistryMigrationLocked
+            | ProsopikonAuthError::RegistryIdentityConflict { .. } => {
+                Self::ProsopikonStore(err.to_string())
+            }
             ProsopikonAuthError::PasswordRequired => Self::PasswordRequired,
             ProsopikonAuthError::PasswordHash => Self::PasswordHash,
         }
