@@ -10,7 +10,6 @@ use dasobjectstore_gui_api::{
     VerifiedHostAuthenticatedContext, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
-use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 
 pub const HOST_ADAPTER_CONTEXT_TTL_SECONDS: i64 = 5 * 60;
@@ -57,7 +56,7 @@ pub fn accept_monas_host_session(
     accepted_at_unix_seconds: i64,
 ) -> Result<VerifiedHostAuthenticatedContext, HostSessionAdapterError> {
     let session = auth_store
-        .verify_session(&issue.username, &issue.session_token)
+        .verify_session_identity(&issue.username, &issue.session_token)
         .map_err(|err| HostSessionAdapterError::MonasSession(err.to_string()))?;
     let session_expiry = session.expires_at_utc.timestamp();
     let context_expiry = session_expiry.min(
@@ -72,8 +71,8 @@ pub fn accept_monas_host_session(
             .issuer()
             .to_string(),
         audience: HOST_AUTH_AUDIENCE.to_string(),
-        subject_id: session.username,
-        session_id: session_digest(&issue.session_token),
+        subject_id: session.principal_id.to_string(),
+        session_id: session.session_id.to_string(),
         roles: vec!["authenticated".to_string()],
         issued_at_unix_seconds: accepted_at_unix_seconds,
         expires_at_unix_seconds: context_expiry,
@@ -130,11 +129,11 @@ impl HostAuthenticationContextVerifier for MonasLiveVerifier<'_> {
     fn verify_live_session(&self, context: &HostAuthenticatedContext) -> Result<(), String> {
         let session = self
             .auth_store
-            .verify_session(&self.issue.username, &self.issue.session_token)
+            .verify_session_identity(&self.issue.username, &self.issue.session_token)
             .map_err(|err| err.to_string())?;
-        if session.username != context.subject_id
+        if session.principal_id.to_string() != context.subject_id
             || session.expires_at_utc.timestamp() != self.expected_expiry
-            || context.session_id != session_digest(&self.issue.session_token)
+            || context.session_id != session.session_id.to_string()
         {
             return Err("Monas session identity changed during adaptation".to_string());
         }
@@ -159,10 +158,4 @@ impl<V: SynoptikonLiveSessionVerifier + ?Sized> HostAuthenticationContextVerifie
         }
         self.verifier.verify_live_session(self.session)
     }
-}
-
-fn session_digest(session_token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(session_token.as_bytes());
-    format!("prosopikon:sha256:{:x}", hasher.finalize())
 }

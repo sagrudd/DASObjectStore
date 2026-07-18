@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.9 - 2026-07-18
+
+- Resolve Monas host sessions to immutable Prosopikon principal and session
+  UUIDs before constructing the audience-bound DASObjectStore actor context;
+  unmigrated and revoked compatibility sessions now fail closed.
+
 ## 0.114.8 - 2026-07-18
 
 - Pin the Monas integration and Web UI to the published Prosopikon immutable

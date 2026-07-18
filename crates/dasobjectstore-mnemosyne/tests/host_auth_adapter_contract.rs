@@ -36,6 +36,9 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
         correlation_id: "corr-monas-1".to_string(),
         csrf_binding_sha256: csrf_binding(),
     };
+    let identity = store
+        .verify_session_identity("operator", &login.session_token)
+        .expect("immutable identity resolves");
 
     let verified = accept_monas_host_session(&store, &issue, now).expect("session accepted");
     let context = verified.context();
@@ -43,7 +46,8 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
         context.authority,
         HostAuthenticationAuthority::MonasStandalone
     );
-    assert_eq!(context.subject_id, "operator");
+    assert_eq!(context.subject_id, identity.principal_id.to_string());
+    assert_eq!(context.session_id, identity.session_id.to_string());
     assert_eq!(context.roles, ["authenticated"]);
     assert!(context.expires_at_unix_seconds <= now + 300);
     let serialized = serde_json::to_string(context).expect("context serializes");
@@ -66,6 +70,48 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     ));
     assert!(!rejection.to_string().contains(&login.session_token));
     assert_monas_router_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
+    assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
+    cleanup(&root);
+}
+
+#[tokio::test]
+async fn monas_adapter_rejects_unmigrated_legacy_identity() {
+    let root = temp_root("monas-unmigrated");
+    let store = registered_store(&root);
+    let login = store
+        .login_with_session_ttl_seconds("operator", "secret", Some(3_600))
+        .expect("login succeeds");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(store.registry_path()).expect("registry reads"))
+            .expect("registry parses");
+    let user = document["users"][0].as_object_mut().expect("user object");
+    user.remove("principal_id");
+    user["sessions"]
+        .as_array_mut()
+        .expect("sessions array")
+        .iter_mut()
+        .for_each(|session| {
+            session
+                .as_object_mut()
+                .expect("session object")
+                .remove("session_id");
+        });
+    fs::write(
+        store.registry_path(),
+        serde_json::to_vec_pretty(&document).expect("registry serializes"),
+    )
+    .expect("legacy fixture writes");
+    let issue = MonasHostSessionIssue {
+        username: "operator".to_string(),
+        session_token: login.session_token.clone(),
+        correlation_id: "corr-monas-unmigrated".to_string(),
+        csrf_binding_sha256: csrf_binding(),
+    };
+
+    assert!(matches!(
+        accept_monas_host_session(&store, &issue, unix_now()),
+        Err(HostSessionAdapterError::MonasSession(_))
+    ));
     assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
     cleanup(&root);
 }
@@ -210,7 +256,10 @@ async fn assert_monas_product_api_accepts(
             .await
             .expect("session response body");
         let session: serde_json::Value = serde_json::from_slice(&body).expect("session JSON");
-        assert_eq!(session["subject_id"], "operator");
+        let identity = store
+            .verify_session_identity("operator", session_token)
+            .expect("immutable identity resolves");
+        assert_eq!(session["subject_id"], identity.principal_id.to_string());
         assert_eq!(session["authority"], "monas_standalone");
         assert_eq!(session["csrf_token"], monas_csrf_binding(session_token));
         assert!(session.get("session_token").is_none());
