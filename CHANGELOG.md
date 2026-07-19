@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.118.1 - 2026-07-19
+
+- Permit multiple ObjectStores to bind to the same named appliance pool root
+  while retaining strict cross-store overlap rejection for folder, drive, and
+  staging paths. This allows legacy enclosure stores to receive their proper
+  appliance profile binding without manufacturing per-store host paths.
+
 ## 0.118.0 - 2026-07-19
 
 - Add a default asynchronous daemon-start garbage collector for completed

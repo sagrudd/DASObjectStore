@@ -312,6 +312,10 @@ completion.
     journals applied reports under daemon state. Live appliance reclaim is
     deferred until the active recovery ingest can be restarted safely on the
     packaged version.
+  - [x] Allow distinct ObjectStores to share one explicitly named appliance
+    pool root while preserving folder, drive, and staging overlap rejection.
+    The ``epic_collection`` appliance binding dry-run passes; apply it after
+    0.118.1 is packaged without interrupting the active recovery ingest.
   - [x] Add a provider-independent completion-commit gate to the daemon remote
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring,

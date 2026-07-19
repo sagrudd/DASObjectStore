@@ -611,7 +611,7 @@ fn validate_persisted_path(
     Ok(())
 }
 
-/// Validate the daemon-owned one-to-one claims made by local profiles.
+/// Validate exclusive local folder/drive claims and shared appliance-pool claims.
 ///
 /// Portable manifests identify a backend, while this registry binds that
 /// identity to local paths.  Claims are therefore checked here, where the
@@ -638,7 +638,8 @@ fn validate_binding_claims(
             }
             let left_staging = left_binding.ssd_staging_root.as_deref();
             let right_staging = right_binding.ssd_staging_root.as_deref();
-            if paths_overlap(&left_binding.backend_root, &right_binding.backend_root)
+            if (paths_overlap(&left_binding.backend_root, &right_binding.backend_root)
+                && !shared_appliance_pool_root(left_binding, right_binding))
                 || left_staging
                     .is_some_and(|staging| paths_overlap(staging, &right_binding.backend_root))
                 || right_staging
@@ -699,10 +700,12 @@ fn validate_binding_claims(
                     BackendReference::Appliance {
                         pool_id: right_pool,
                     },
-                ) if left_pool == right_pool => {
+                ) if left_pool == right_pool
+                    && left_binding.backend_root != right_binding.backend_root =>
+                {
                     return Err(invalid_binding(format!(
-                        "stores {} and {} claim the same appliance pool",
-                        left_binding.manifest.store_id, right_binding.manifest.store_id
+                        "stores {} and {} resolve appliance pool {} to different roots",
+                        left_binding.manifest.store_id, right_binding.manifest.store_id, left_pool
                     )));
                 }
                 _ => {}
@@ -710,6 +713,16 @@ fn validate_binding_claims(
         }
     }
     Ok(())
+}
+
+fn shared_appliance_pool_root(left: &BackendProfileBinding, right: &BackendProfileBinding) -> bool {
+    matches!(
+        (&left.manifest.backend, &right.manifest.backend),
+        (
+            BackendReference::Appliance { pool_id: left_pool },
+            BackendReference::Appliance { pool_id: right_pool }
+        ) if left_pool == right_pool && left.backend_root == right.backend_root
+    )
 }
 
 fn paths_overlap(left: &Path, right: &Path) -> bool {
@@ -862,6 +875,17 @@ mod tests {
         binding
     }
 
+    fn appliance_binding(store_id: &str, root: &Path) -> BackendProfileBinding {
+        let mut binding = folder_binding(store_id, root);
+        binding.manifest.deployment_profile = DeploymentProfile::Appliance;
+        binding.manifest.host_mode = HostMode::System;
+        binding.manifest.protection = ProtectionPolicy::ApplianceProtected;
+        binding.manifest.backend = BackendReference::Appliance {
+            pool_id: "local-appliance".to_string(),
+        };
+        binding
+    }
+
     #[test]
     fn round_trips_binding_and_canonicalizes_roots() {
         let root = root("roundtrip");
@@ -959,6 +983,23 @@ mod tests {
         upsert_profile_binding(&path, first_binding).expect("first binding");
 
         assert!(upsert_profile_binding(&path, folder_binding("nested", &nested)).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn allows_distinct_stores_to_share_the_same_appliance_pool_root() {
+        let root = root("shared-appliance-pool");
+        let path = root.join("bindings.json");
+        let pool = root.join("ssd");
+        fs::create_dir_all(&pool).expect("pool root");
+
+        upsert_profile_binding(&path, appliance_binding("first", &pool))
+            .expect("first appliance binding");
+        upsert_profile_binding(&path, appliance_binding("second", &pool))
+            .expect("second appliance binding");
+
+        assert!(read_profile_binding(&path, "first").unwrap().is_some());
+        assert!(read_profile_binding(&path, "second").unwrap().is_some());
         let _ = fs::remove_dir_all(root);
     }
 
