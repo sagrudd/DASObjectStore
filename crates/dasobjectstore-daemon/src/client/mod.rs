@@ -1326,6 +1326,8 @@ mod tests {
                     max_object_bytes: Some(10),
                     max_total_bytes: Some(100),
                 },
+                correlation_id: None,
+                governed_binding: None,
                 proof: "proof".to_string(),
             },
         };

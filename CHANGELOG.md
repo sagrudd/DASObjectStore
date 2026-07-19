@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.121.0 - 2026-07-19
+
+- Admit the approved Ergasterion split-authority bridge as a dynamically
+  evaluated `ergasterion.object-store-binding.v1` scope source for daemon-owned
+  application identities. Every exchange now fails closed on absent, expired,
+  mismatched, cross-store, cross-prefix, excessive-operation, or excessive-byte
+  binding scope before provider access.
+- Return a versioned, non-secret registration record for governed identities,
+  publishing the audience, audit purpose, operation vocabulary, dynamic scope
+  constraints, bounded lifetime/renewal/revocation policy, safe denial reason,
+  and rotation/incident/deprovisioning procedures without credentials or
+  storage implementation details.
+- Set the initial Ergasterion governed-read registration ceiling to 64 GiB per
+  object and 256 GiB aggregate per short-lived capability; callers must request
+  an explicit equal-or-smaller limit and may never infer an unbounded default.
+
 ## 0.120.1 - 2026-07-19
 
 - Reuse existing catalogue and placement checksum proof during store-scoped

@@ -1,6 +1,9 @@
 use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
 use dasobjectstore_core::application_auth::{
     ApplicationAuthValidationError, ApplicationIdentity, ApplicationKeyDescriptor,
+    ApplicationOperation, APPLICATION_AUTH_CONTRACT_REVISION, APPLICATION_AUTH_SCHEMA_VERSION,
+    GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS, GOVERNED_CAPABILITY_RENEWAL_WINDOW_SECONDS,
+    GOVERNED_REVOCATION_PROPAGATION_SECONDS, MAX_ACCESS_TOKEN_TTL_SECONDS,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -54,6 +57,72 @@ pub struct ApplicationIdentityRegistrationResponse {
     pub identity: ApplicationIdentity,
     pub replaced: bool,
     pub administrator_actor: Option<String>,
+    /// Non-secret interoperability evidence. Present for identities whose
+    /// scope is evaluated from a governed external binding.
+    pub registration: Option<ApplicationRegistrationRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationRegistrationRecord {
+    pub schema_version: String,
+    pub contract_revision: String,
+    pub application_id: String,
+    pub audience: String,
+    pub audit_purpose: String,
+    pub binding_schema_version: String,
+    pub operations: Vec<ApplicationOperation>,
+    pub dynamic_object_store_scope: bool,
+    pub dynamic_prefix_scope: bool,
+    pub dynamic_per_object_bytes: bool,
+    pub dynamic_aggregate_bytes: bool,
+    pub max_object_bytes: u64,
+    pub max_total_bytes: u64,
+    pub max_capability_lifetime_seconds: u64,
+    pub renewal_window_seconds: u64,
+    pub revocation_propagation_seconds: u64,
+    pub replay_protection: String,
+    pub clock_skew_seconds: u64,
+    pub correlation_id_contract: String,
+    pub audit_event_schema: String,
+    pub safe_denial_reason: String,
+    pub compatibility_procedure: String,
+    pub rotation_procedure: String,
+    pub incident_procedure: String,
+    pub deprovisioning_procedure: String,
+}
+
+impl ApplicationRegistrationRecord {
+    fn from_identity(identity: &ApplicationIdentity) -> Option<Self> {
+        let policy = identity.dynamic_binding.as_ref()?;
+        Some(Self {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            contract_revision: APPLICATION_AUTH_CONTRACT_REVISION.to_string(),
+            application_id: identity.application_id.clone(),
+            audience: policy.audience.clone(),
+            audit_purpose: policy.audit_purpose.clone(),
+            binding_schema_version: policy.schema_version.clone(),
+            operations: identity.scope.operations.clone(),
+            dynamic_object_store_scope: true,
+            dynamic_prefix_scope: true,
+            dynamic_per_object_bytes: true,
+            dynamic_aggregate_bytes: true,
+            max_object_bytes: policy.max_object_bytes,
+            max_total_bytes: policy.max_total_bytes,
+            max_capability_lifetime_seconds: MAX_ACCESS_TOKEN_TTL_SECONDS,
+            renewal_window_seconds: GOVERNED_CAPABILITY_RENEWAL_WINDOW_SECONDS,
+            revocation_propagation_seconds: GOVERNED_REVOCATION_PROPAGATION_SECONDS,
+            replay_protection: "signed canonical exchange; deterministic token identity; single-use capability nonce where applicable".to_string(),
+            clock_skew_seconds: GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS,
+            correlation_id_contract: "caller-supplied opaque correlation ID, redacted and bounded".to_string(),
+            audit_event_schema: "dasobjectstore.application_audit.v1".to_string(),
+            safe_denial_reason: "governed_scope_denied".to_string(),
+            compatibility_procedure: "parallel-reader minor revisions; explicit migration for changed authority semantics".to_string(),
+            rotation_procedure: "register overlapping public key, canary exchange, then revoke prior key".to_string(),
+            incident_procedure: "revoke identity or key through daemon administrator API and correlate application audit event IDs".to_string(),
+            deprovisioning_procedure: "revoke identity, allow bounded token expiry, verify audit evidence, then remove public descriptors".to_string(),
+        })
+    }
 }
 
 impl ApplicationIdentityRegistrationResponse {
@@ -63,6 +132,7 @@ impl ApplicationIdentityRegistrationResponse {
         request: ApplicationIdentityRegistrationRequest,
         replaced: bool,
     ) -> Self {
+        let registration = ApplicationRegistrationRecord::from_identity(&request.identity);
         Self {
             accepted: DaemonJobAcceptedResponse {
                 job_id,
@@ -73,6 +143,7 @@ impl ApplicationIdentityRegistrationResponse {
             identity: request.identity,
             replaced,
             administrator_actor: request.administrator_actor,
+            registration,
         }
     }
 }
@@ -348,6 +419,7 @@ mod tests {
                     max_object_bytes: Some(10_000),
                     max_total_bytes: Some(100_000),
                 },
+                dynamic_binding: None,
                 issued_at_unix_seconds: 1_000,
                 expires_at_unix_seconds: 100_000,
                 active: true,
@@ -450,5 +522,28 @@ mod tests {
             request.validate(),
             Err(super::ApplicationCredentialRevocationValidationError::ConfirmationMismatch)
         ));
+    }
+
+    #[test]
+    fn governed_registration_fixture_returns_non_secret_contract_evidence() {
+        let request: ApplicationIdentityRegistrationRequest = serde_json::from_str(include_str!(
+            "../../../../docs/user/examples/ergasterion-application-identity-registration.json"
+        ))
+        .expect("governed registration fixture");
+        request.validate().expect("governed registration validates");
+        let response = ApplicationIdentityRegistrationResponse::accepted(
+            DaemonJobId::new("governed-registration").expect("job"),
+            "2026-07-19T00:00:00Z",
+            request,
+            false,
+        );
+        let registration = response.registration.expect("registration evidence");
+        assert_eq!(registration.application_id, "app-7e4a31c9b260");
+        assert_eq!(registration.safe_denial_reason, "governed_scope_denied");
+        assert_eq!(registration.max_capability_lifetime_seconds, 900);
+        let encoded = serde_json::to_string(&registration).expect("serialize");
+        for forbidden in ["private_key", "client_secret", "bearer_token", "/srv/"] {
+            assert!(!encoded.contains(forbidden), "must omit {forbidden}");
+        }
     }
 }

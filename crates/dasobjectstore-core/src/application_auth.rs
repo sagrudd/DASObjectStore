@@ -7,6 +7,7 @@
 use crate::ids::StoreId;
 use crate::ingress::IngressOrigin;
 use crate::object_type::ObjectType;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
@@ -14,6 +15,123 @@ pub const APPLICATION_AUTH_SCHEMA_VERSION: &str = "dasobjectstore.application_au
 pub const MAX_ACCESS_TOKEN_TTL_SECONDS: u64 = 15 * 60;
 pub const MAX_UPLOAD_COMPLETION_TTL_SECONDS: u64 = 15 * 60;
 pub const MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS: u64 = 24 * 60 * 60;
+pub const APPLICATION_AUTH_CONTRACT_REVISION: &str = "1.1";
+pub const GOVERNED_BINDING_SCHEMA_VERSION: &str = "ergasterion.object-store-binding.v1";
+pub const GOVERNED_CAPABILITY_RENEWAL_WINDOW_SECONDS: u64 = 5 * 60;
+pub const GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS: u64 = 30;
+pub const GOVERNED_REVOCATION_PROPAGATION_SECONDS: u64 = MAX_ACCESS_TOKEN_TTL_SECONDS;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GovernedObjectStoreBindingScope {
+    pub prefixes: Vec<String>,
+    pub operations: Vec<ApplicationOperation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GovernedObjectStoreBinding {
+    pub schema_version: String,
+    pub binding_id: String,
+    pub tenant_id: String,
+    pub project_id: String,
+    pub object_store_id: StoreId,
+    pub scope: GovernedObjectStoreBindingScope,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub status: GovernedBindingStatus,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernedBindingStatus {
+    Active,
+}
+
+impl GovernedObjectStoreBinding {
+    pub fn validate_at(&self, now_unix_seconds: u64) -> Result<(), ApplicationAuthValidationError> {
+        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION {
+            return Err(ApplicationAuthValidationError::UnsupportedBindingSchema);
+        }
+        for (field, value) in [
+            ("binding_id", self.binding_id.as_str()),
+            ("tenant_id", self.tenant_id.as_str()),
+            ("project_id", self.project_id.as_str()),
+        ] {
+            validate_binding_id(field, value)?;
+        }
+        if self.scope.prefixes.is_empty() || self.scope.operations.is_empty() {
+            return Err(ApplicationAuthValidationError::InvalidBinding);
+        }
+        if has_duplicates(&self.scope.prefixes) || has_duplicates(&self.scope.operations) {
+            return Err(ApplicationAuthValidationError::InvalidBinding);
+        }
+        for prefix in &self.scope.prefixes {
+            validate_logical_path("binding prefix", prefix)?;
+        }
+        if self.scope.operations.iter().any(|operation| {
+            !matches!(
+                operation,
+                ApplicationOperation::Read
+                    | ApplicationOperation::List
+                    | ApplicationOperation::Verify
+            )
+        }) {
+            return Err(ApplicationAuthValidationError::InvalidBinding);
+        }
+        let issued = parse_rfc3339_seconds(&self.issued_at)?;
+        let expires = parse_rfc3339_seconds(&self.expires_at)?;
+        if expires <= issued
+            || now_unix_seconds.saturating_add(GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS) < issued
+            || now_unix_seconds >= expires.saturating_add(GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS)
+        {
+            return Err(ApplicationAuthValidationError::BindingInactiveOrExpired);
+        }
+        Ok(())
+    }
+
+    fn contains(&self, requested: &ApplicationScope) -> bool {
+        requested.store_ids.len() == 1
+            && requested.store_ids[0] == self.object_store_id
+            && !requested.prefixes.is_empty()
+            && requested.object_types.is_empty()
+            && requested
+                .operations
+                .iter()
+                .all(|operation| self.scope.operations.contains(operation))
+            && requested.prefixes.iter().all(|prefix| {
+                self.scope
+                    .prefixes
+                    .iter()
+                    .any(|allowed| prefix_contains(allowed, prefix))
+            })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicBindingPolicy {
+    pub schema_version: String,
+    pub audience: String,
+    pub audit_purpose: String,
+    pub max_object_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+impl DynamicBindingPolicy {
+    fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
+        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION
+            || self.audience.trim().is_empty()
+            || self.audit_purpose != "ergasterion.governed-data-access"
+            || self.max_object_bytes == 0
+            || self.max_total_bytes == 0
+            || self.max_object_bytes > self.max_total_bytes
+        {
+            return Err(ApplicationAuthValidationError::InvalidBindingPolicy);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -145,6 +263,39 @@ impl ApplicationScope {
             && limit_contains(self.max_object_bytes, requested.max_object_bytes)
             && limit_contains(self.max_total_bytes, requested.max_total_bytes)
     }
+
+    fn validate_dynamic_ceiling(&self) -> Result<(), ApplicationAuthValidationError> {
+        if !self.store_ids.is_empty() || !self.prefixes.is_empty() {
+            return Err(ApplicationAuthValidationError::InvalidBindingPolicy);
+        }
+        if self.operations.is_empty() || has_duplicates(&self.operations) {
+            return Err(ApplicationAuthValidationError::EmptyScope("operations"));
+        }
+        if self.operations.iter().any(|operation| {
+            !matches!(
+                operation,
+                ApplicationOperation::Read
+                    | ApplicationOperation::List
+                    | ApplicationOperation::Verify
+            )
+        }) {
+            return Err(ApplicationAuthValidationError::InvalidBindingPolicy);
+        }
+        Ok(())
+    }
+
+    fn dynamic_ceiling_contains(&self, requested: &Self) -> bool {
+        requested
+            .operations
+            .iter()
+            .all(|operation| self.operations.contains(operation))
+            && list_scope_contains(
+                &self.object_types,
+                &requested.object_types,
+                |allowed, value| allowed == value,
+            )
+            && self.ingress_origin == requested.ingress_origin
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -157,6 +308,8 @@ pub struct ApplicationIdentity {
     pub environment: ApplicationEnvironment,
     pub credential_kind: ApplicationCredentialKind,
     pub scope: ApplicationScope,
+    #[serde(default)]
+    pub dynamic_binding: Option<DynamicBindingPolicy>,
     pub issued_at_unix_seconds: u64,
     pub expires_at_unix_seconds: u64,
     pub active: bool,
@@ -176,7 +329,12 @@ impl ApplicationIdentity {
                 "development self-signed credentials require development environment".to_string(),
             ));
         }
-        self.scope.validate()
+        if let Some(policy) = &self.dynamic_binding {
+            self.scope.validate_dynamic_ceiling()?;
+            policy.validate()
+        } else {
+            self.scope.validate()
+        }
     }
 
     /// Authorize one provider upload-completion capability against the
@@ -245,6 +403,10 @@ pub struct AccessTokenExchangeRequest {
     pub requested_issued_at_unix_seconds: u64,
     pub requested_expires_at_unix_seconds: u64,
     pub scope: ApplicationScope,
+    #[serde(default)]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub governed_binding: Option<GovernedObjectStoreBinding>,
     /// Opaque proof bytes supplied by the authenticated key/certificate
     /// exchange. The core contract validates shape only; cryptographic
     /// verification belongs to the daemon authority.
@@ -264,6 +426,32 @@ pub trait ApplicationExchangeProofVerifier {
 }
 
 impl AccessTokenExchangeRequest {
+    /// Re-check the external binding against daemon time immediately before
+    /// issuance. This prevents a correctly signed but expired request from
+    /// being replayed by selecting an old requested issuance timestamp.
+    pub fn validate_governed_freshness(
+        &self,
+        identity: &ApplicationIdentity,
+        now_unix_seconds: u64,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        let Some(_) = identity.dynamic_binding else {
+            return Ok(());
+        };
+        let binding = self
+            .governed_binding
+            .as_ref()
+            .ok_or(ApplicationAuthValidationError::BindingRequired)?;
+        binding.validate_at(now_unix_seconds)?;
+        if self
+            .requested_issued_at_unix_seconds
+            .abs_diff(now_unix_seconds)
+            > GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS
+        {
+            return Err(ApplicationAuthValidationError::BindingInactiveOrExpired);
+        }
+        Ok(())
+    }
+
     /// Validate fields that are independent of any daemon-owned identity or
     /// key registry. The daemon performs this check before looking up either
     /// authority, while `validate_against` adds membership, lifetime, scope,
@@ -274,6 +462,9 @@ impl AccessTokenExchangeRequest {
         validate_slug("key_id", &self.key_id)?;
         validate_text("audience", &self.audience)?;
         validate_opaque_proof(&self.proof)?;
+        if let Some(correlation_id) = &self.correlation_id {
+            validate_slug("correlation_id", correlation_id)?;
+        }
         validate_lifetime(
             self.requested_issued_at_unix_seconds,
             self.requested_expires_at_unix_seconds,
@@ -329,8 +520,27 @@ impl AccessTokenExchangeRequest {
             });
         }
         self.scope.validate()?;
-        if !identity.scope.contains(&self.scope) {
+        if identity.dynamic_binding.is_none() && !identity.scope.contains(&self.scope) {
             return Err(ApplicationAuthValidationError::ScopeNotContained);
+        }
+        match (&identity.dynamic_binding, &self.governed_binding) {
+            (Some(policy), Some(binding)) => {
+                binding.validate_at(self.requested_issued_at_unix_seconds)?;
+                if self.correlation_id.is_none()
+                    || self.audience != policy.audience
+                    || !identity.scope.dynamic_ceiling_contains(&self.scope)
+                    || !binding.contains(&self.scope)
+                    || self.scope.max_object_bytes.is_none()
+                    || self.scope.max_total_bytes.is_none()
+                    || self.scope.max_object_bytes > Some(policy.max_object_bytes)
+                    || self.scope.max_total_bytes > Some(policy.max_total_bytes)
+                {
+                    return Err(ApplicationAuthValidationError::BindingScopeNotContained);
+                }
+            }
+            (Some(_), None) => return Err(ApplicationAuthValidationError::BindingRequired),
+            (None, Some(_)) => return Err(ApplicationAuthValidationError::UnexpectedBinding),
+            (None, None) => {}
         }
         Ok(())
     }
@@ -400,7 +610,18 @@ impl AccessTokenClaims {
             });
         }
         self.scope.validate()?;
-        if !identity.scope.contains(&self.scope) {
+        if identity.dynamic_binding.is_some() {
+            let policy = identity.dynamic_binding.as_ref().expect("checked");
+            if self.audience != policy.audience
+                || !identity.scope.dynamic_ceiling_contains(&self.scope)
+                || self.scope.max_object_bytes.is_none()
+                || self.scope.max_total_bytes.is_none()
+                || self.scope.max_object_bytes > Some(policy.max_object_bytes)
+                || self.scope.max_total_bytes > Some(policy.max_total_bytes)
+            {
+                return Err(ApplicationAuthValidationError::ScopeNotContained);
+            }
+        } else if !identity.scope.contains(&self.scope) {
             return Err(ApplicationAuthValidationError::ScopeNotContained);
         }
         Ok(())
@@ -500,6 +721,13 @@ pub enum ApplicationAuthValidationError {
     ProofRejected,
     IdentityMismatch,
     ScopeNotContained,
+    UnsupportedBindingSchema,
+    InvalidBinding,
+    InvalidBindingPolicy,
+    BindingRequired,
+    UnexpectedBinding,
+    BindingInactiveOrExpired,
+    BindingScopeNotContained,
     Invalid(String),
 }
 
@@ -525,6 +753,21 @@ impl Display for ApplicationAuthValidationError {
             Self::IdentityMismatch => formatter.write_str("token application identity mismatch"),
             Self::ScopeNotContained => {
                 formatter.write_str("token scope exceeds its application identity")
+            }
+            Self::UnsupportedBindingSchema => {
+                formatter.write_str("unsupported governed binding schema")
+            }
+            Self::InvalidBinding => formatter.write_str("governed binding is invalid"),
+            Self::InvalidBindingPolicy => formatter.write_str("dynamic binding policy is invalid"),
+            Self::BindingRequired => formatter.write_str("governed binding is required"),
+            Self::UnexpectedBinding => {
+                formatter.write_str("governed binding is not accepted by this identity")
+            }
+            Self::BindingInactiveOrExpired => {
+                formatter.write_str("governed binding is inactive or expired")
+            }
+            Self::BindingScopeNotContained => {
+                formatter.write_str("requested scope exceeds governed binding")
             }
             Self::Invalid(message) => formatter.write_str(message),
         }
@@ -575,6 +818,30 @@ fn validate_slug(field: &'static str, value: &str) -> Result<(), ApplicationAuth
         return Err(ApplicationAuthValidationError::UnsafeField(field));
     }
     Ok(())
+}
+
+fn validate_binding_id(
+    field: &'static str,
+    value: &str,
+) -> Result<(), ApplicationAuthValidationError> {
+    if value.len() < 3
+        || value.len() > 128
+        || !value.as_bytes()[0].is_ascii_lowercase()
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(ApplicationAuthValidationError::UnsafeField(field));
+    }
+    Ok(())
+}
+
+fn parse_rfc3339_seconds(value: &str) -> Result<u64, ApplicationAuthValidationError> {
+    let timestamp = DateTime::parse_from_rfc3339(value)
+        .map_err(|_| ApplicationAuthValidationError::InvalidBinding)?
+        .with_timezone(&Utc)
+        .timestamp();
+    u64::try_from(timestamp).map_err(|_| ApplicationAuthValidationError::InvalidBinding)
 }
 
 fn validate_logical_path(
@@ -684,6 +951,7 @@ mod tests {
             environment: ApplicationEnvironment::Production,
             credential_kind: ApplicationCredentialKind::AsymmetricKey,
             scope: scope(),
+            dynamic_binding: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
@@ -784,6 +1052,8 @@ mod tests {
             requested_issued_at_unix_seconds: 2_000,
             requested_expires_at_unix_seconds: 2_600,
             scope: identity.scope.clone(),
+            correlation_id: None,
+            governed_binding: None,
             proof: "base64-signature".to_string(),
         };
         request.validate_against(&identity, &key).expect("exchange");
@@ -840,6 +1110,8 @@ mod tests {
             requested_issued_at_unix_seconds: 2_000,
             requested_expires_at_unix_seconds: 2_600,
             scope: identity.scope.clone(),
+            correlation_id: None,
+            governed_binding: None,
             proof: "detached-signature".to_string(),
         };
         assert_eq!(
@@ -1007,5 +1279,104 @@ mod tests {
         let encoded = serde_json::to_string(&descriptor).expect("encode");
         assert!(!encoded.contains("private_key"));
         assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn governed_binding_fail_closes_cross_project_storage_scope() {
+        let issued = parse_rfc3339_seconds("2026-07-19T00:00:00Z").expect("issued");
+        let mut identity = identity();
+        identity.application_id = "ergasterion-governed-data".to_string();
+        identity.scope = ApplicationScope {
+            store_ids: Vec::new(),
+            prefixes: Vec::new(),
+            object_types: Vec::new(),
+            operations: vec![
+                ApplicationOperation::List,
+                ApplicationOperation::Read,
+                ApplicationOperation::Verify,
+            ],
+            ingress_origin: IngressOrigin::Synoptikon,
+            max_object_bytes: None,
+            max_total_bytes: None,
+        };
+        identity.dynamic_binding = Some(DynamicBindingPolicy {
+            schema_version: GOVERNED_BINDING_SCHEMA_VERSION.to_string(),
+            audience: "ergasterion-governed-data-service".to_string(),
+            audit_purpose: "ergasterion.governed-data-access".to_string(),
+            max_object_bytes: 64 * 1024 * 1024 * 1024,
+            max_total_bytes: 256 * 1024 * 1024 * 1024,
+        });
+        identity.issued_at_unix_seconds = issued - 60;
+        identity.expires_at_unix_seconds = issued + 86_400;
+        identity.validate().expect("dynamic identity");
+
+        let key = ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: "ergasterion-key-1".to_string(),
+            algorithm: ApplicationKeyAlgorithm::Ed25519,
+            public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            public_key_material: None,
+            issued_at_unix_seconds: issued - 60,
+            expires_at_unix_seconds: issued + 86_400,
+            active: true,
+        };
+        let binding = GovernedObjectStoreBinding {
+            schema_version: GOVERNED_BINDING_SCHEMA_VERSION.to_string(),
+            binding_id: "binding-governed-inputs".to_string(),
+            tenant_id: "tenant-laboratory".to_string(),
+            project_id: "project-rna-counts".to_string(),
+            object_store_id: StoreId::new("pinakotheke_media").expect("store"),
+            scope: GovernedObjectStoreBindingScope {
+                prefixes: vec!["project-rna/inputs".to_string()],
+                operations: vec![ApplicationOperation::List, ApplicationOperation::Read],
+            },
+            issued_at: "2026-07-19T00:00:00Z".to_string(),
+            expires_at: "2026-07-19T01:00:00Z".to_string(),
+            status: GovernedBindingStatus::Active,
+        };
+        let request_scope = ApplicationScope {
+            store_ids: vec![binding.object_store_id.clone()],
+            prefixes: vec!["project-rna/inputs/sample-1".to_string()],
+            object_types: Vec::new(),
+            operations: vec![ApplicationOperation::Read],
+            ingress_origin: IngressOrigin::Synoptikon,
+            max_object_bytes: Some(8 * 1024 * 1024 * 1024),
+            max_total_bytes: Some(32 * 1024 * 1024 * 1024),
+        };
+        let request = AccessTokenExchangeRequest {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: identity.application_id.clone(),
+            key_id: key.key_id.clone(),
+            audience: "ergasterion-governed-data-service".to_string(),
+            requested_issued_at_unix_seconds: issued + 60,
+            requested_expires_at_unix_seconds: issued + 600,
+            scope: request_scope,
+            correlation_id: Some("corr-ergasterion-1".to_string()),
+            governed_binding: Some(binding),
+            proof: "signed-proof".to_string(),
+        };
+        request
+            .validate_against(&identity, &key)
+            .expect("bound scope");
+
+        let mut cross_store = request.clone();
+        cross_store.scope.store_ids = vec![StoreId::new("another-project").expect("store")];
+        assert_eq!(
+            cross_store.validate_against(&identity, &key),
+            Err(ApplicationAuthValidationError::BindingScopeNotContained)
+        );
+        let mut empty_prefix = request.clone();
+        empty_prefix.scope.prefixes.clear();
+        assert_eq!(
+            empty_prefix.validate_against(&identity, &key),
+            Err(ApplicationAuthValidationError::BindingScopeNotContained)
+        );
+        let mut missing = request;
+        missing.governed_binding = None;
+        assert_eq!(
+            missing.validate_against(&identity, &key),
+            Err(ApplicationAuthValidationError::BindingRequired)
+        );
     }
 }

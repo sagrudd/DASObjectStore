@@ -55,8 +55,8 @@ pub use application_identity::{
     ApplicationCredentialRevocationValidationError, ApplicationIdentityRegistrationRequest,
     ApplicationIdentityRegistrationResponse, ApplicationIdentityRegistrationValidationError,
     ApplicationKeyRegistrationRequest, ApplicationKeyRegistrationResponse,
-    ApplicationKeyRegistrationValidationError, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
-    APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+    ApplicationKeyRegistrationValidationError, ApplicationRegistrationRecord,
+    APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION, APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
 };
 pub use application_mtls::{
     ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,
@@ -986,6 +986,8 @@ mod tests {
                         max_object_bytes: Some(10),
                         max_total_bytes: Some(100),
                     },
+                    correlation_id: None,
+                    governed_binding: None,
                     proof: "proof".to_string(),
                 },
             },

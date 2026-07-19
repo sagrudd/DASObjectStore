@@ -278,6 +278,7 @@ mod tests {
                 max_object_bytes: Some(10_000),
                 max_total_bytes: Some(100_000),
             },
+            dynamic_binding: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,

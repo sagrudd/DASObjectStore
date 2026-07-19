@@ -272,6 +272,7 @@ fn application_identity(application_id: &str, scope: ApplicationScope) -> Applic
         environment: ApplicationEnvironment::Production,
         credential_kind: ApplicationCredentialKind::AsymmetricKey,
         scope,
+        dynamic_binding: None,
         issued_at_unix_seconds: 1_000,
         expires_at_unix_seconds: 100_000,
         active: true,
@@ -331,6 +332,8 @@ fn signed_exchange(
         requested_issued_at_unix_seconds: 2_000,
         requested_expires_at_unix_seconds: 2_600,
         scope,
+        correlation_id: None,
+        governed_binding: None,
         proof: String::new(),
     };
     exchange.proof = BASE64.encode(signing_key.sign(&exchange.signing_payload()).as_ref());

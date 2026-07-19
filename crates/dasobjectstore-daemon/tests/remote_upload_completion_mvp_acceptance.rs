@@ -315,6 +315,7 @@ fn seed_identity(path: &Path) {
                 max_object_bytes: Some(1024),
                 max_total_bytes: Some(4096),
             },
+            dynamic_binding: None,
             issued_at_unix_seconds: now - 60,
             expires_at_unix_seconds: now + 3600,
             active: true,

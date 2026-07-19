@@ -126,6 +126,29 @@ where
                     },
                 )
             })?;
+            if identity.dynamic_binding.is_some() {
+                let now_unix_seconds = dasobjectstore_core::utc::parse_utc_timestamp_seconds(&now)
+                    .and_then(|value| u64::try_from(value).ok())
+                    .ok_or_else(|| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: "daemon clock cannot validate governed binding"
+                                    .to_string(),
+                            },
+                        )
+                    })?;
+                exchange
+                    .validate_governed_freshness(&identity, now_unix_seconds)
+                    .map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: format!(
+                                    "application access-token exchange rejected: {error}"
+                                ),
+                            },
+                        )
+                    })?;
+            }
             let token_id = stable_easyconnect_id(
                 "application-access-token",
                 &exchange.application_id,

@@ -1,0 +1,33 @@
+{
+  "identity": {
+    "schema_version": "dasobjectstore.application_auth.v1",
+    "application_id": "app-7e4a31c9b260",
+    "owner": "Ergasterion governed-data service",
+    "purpose": "ergasterion.governed-data-access",
+    "environment": "production",
+    "credential_kind": "asymmetric_key",
+    "scope": {
+      "store_ids": [],
+      "prefixes": [],
+      "object_types": [],
+      "operations": ["list", "read", "verify"],
+      "ingress_origin": "synoptikon",
+      "max_object_bytes": null,
+      "max_total_bytes": null
+    },
+    "dynamic_binding": {
+      "schema_version": "ergasterion.object-store-binding.v1",
+      "audience": "ergasterion-governed-data-service",
+      "audit_purpose": "ergasterion.governed-data-access",
+      "max_object_bytes": 68719476736,
+      "max_total_bytes": 274877906944
+    },
+    "issued_at_unix_seconds": 1784419200,
+    "expires_at_unix_seconds": 1815955200,
+    "active": true
+  },
+  "dry_run": false,
+  "client_request_id": "ergasterion-registration-20260719",
+  "administrator_actor": null,
+  "confirmation_marker": "confirm application identity registration"
+}

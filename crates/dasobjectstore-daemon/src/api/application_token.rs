@@ -60,6 +60,8 @@ mod tests {
                 requested_issued_at_unix_seconds: 10,
                 requested_expires_at_unix_seconds: 20,
                 scope: sample_scope(),
+                correlation_id: None,
+                governed_binding: None,
                 proof: "proof".to_string(),
             },
         };

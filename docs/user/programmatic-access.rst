@@ -101,6 +101,32 @@ private keys, accept private/bearer secret fields, or bypass daemon
 authorization. Treat the JSON response as credential material and keep it in a
 trusted process boundary.
 
+Governed Ergasterion binding
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The opaque ``app-7e4a31c9b260`` identity uses the approved dynamic
+``ergasterion.object-store-binding.v1`` bridge. Its registration is deliberately
+store-neutral: each signed exchange must carry one active binding and an exact
+requested ObjectStore, logical-prefix, and ``list``/``read``/``verify`` subset.
+The daemon rejects missing, expired, cross-store, cross-prefix, excessive-byte,
+and unsupported-operation requests before backend access. ``verify`` is a
+daemon-side metadata/checksum check, not an implicit general read grant.
+
+The maximum issued scope is 64 GiB per object, 256 GiB aggregate, and 15
+minutes. The exchange must request explicit equal-or-smaller byte limits; there
+is no permissive default. Registration returns a non-secret interoperability
+record containing the approved audience, audit purpose, scope capabilities,
+timing policy, stable denial reason, and lifecycle procedures. Registering the
+identity alone does not grant access: a deployment authority must separately
+register a public key or mTLS certificate mapping, and Ergasterion must keep
+the resulting short-lived capability in process memory only.
+
+The reviewed non-secret registration request is shipped as
+``docs/user/examples/ergasterion-application-identity-registration.json``.
+Run it first with ``"dry_run": true`` and inspect the returned registration
+record; only a local DASObjectStore administrator may apply it. The example
+contains no credential material.
+
 Profile readiness
 -----------------
 

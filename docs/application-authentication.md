@@ -37,6 +37,37 @@ identifier, issued/expiry times, allowed ObjectStore and namespace, operation
 set, ingress origin, and optional byte/object limits. The daemon rejects missing
 or excessive scope before touching a backend.
 
+### Governed Ergasterion reads
+
+The approved split-authority bridge accepts
+`ergasterion.object-store-binding.v1` as a dynamically evaluated scope source;
+DASObjectStore does not mirror project bindings or manufacture project
+authority. The binding is part of the canonical signed exchange request. The
+daemon validates its active RFC 3339 lifetime, tenant/project/binding identity
+shape, exact ObjectStore, logical prefixes, and the read-only operation set
+before issuing resolved claims. A missing, expired, cross-store, cross-prefix,
+or excessive binding fails closed before any provider request.
+
+The assigned opaque service principal is `app-7e4a31c9b260`, with audience
+`ergasterion-governed-data-service` and audit purpose
+`ergasterion.governed-data-access`. Its v1 operation vocabulary is `list`,
+`read`, and `verify`; `verify` means daemon-side metadata/checksum verification
+and does not grant a separate payload-read route. The registration ceiling is
+64 GiB per object and 256 GiB aggregate per capability. Every exchange must
+request explicit equal-or-smaller limits, which the daemon returns in the
+resolved claims. Tokens remain bounded by the production 15-minute maximum;
+clients should renew within the final five minutes. Revocation propagation is
+therefore at most 15 minutes, with 30 seconds of clock skew accepted only for
+binding boundary evaluation.
+
+Successful registration returns a non-secret registration record alongside
+the identity. It documents the contract revision, limits, correlation/audit
+contract, stable `governed_scope_denied` consumer reason, public-key rotation,
+incident revocation, compatibility, and deprovisioning procedures. It contains
+no token, secret, private key, endpoint, bucket, or managed path. An
+Ergasterion deployment still requires a separately registered public key or
+mTLS mapping before it can exchange a signed request.
+
 An upload initiation response may include a short-lived, single-use completion
 capability bound to the paired session, ObjectStore, upload ID, object key,
 expected length, checksum, audience, expiry, and nonce. A client submits that

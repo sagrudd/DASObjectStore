@@ -4272,6 +4272,7 @@ mod tests {
                     max_object_bytes: Some(10_000),
                     max_total_bytes: Some(100_000),
                 },
+                dynamic_binding: None,
                 issued_at_unix_seconds: 1_000,
                 expires_at_unix_seconds: 100_000,
                 active: true,
@@ -4624,6 +4625,8 @@ mod tests {
             scope: application_identity_registration_request_for_auth_test(application_id)
                 .identity
                 .scope,
+            correlation_id: None,
+            governed_binding: None,
             proof: String::new(),
         };
         exchange.proof = BASE64.encode(signing_key.sign(&exchange.signing_payload()).as_ref());

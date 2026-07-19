@@ -90,6 +90,7 @@ mod tests {
                 max_object_bytes: Some(10_000),
                 max_total_bytes: Some(100_000),
             },
+            dynamic_binding: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
             active: true,
@@ -118,6 +119,8 @@ mod tests {
             requested_issued_at_unix_seconds: 2_000,
             requested_expires_at_unix_seconds: 2_600,
             scope: identity.scope.clone(),
+            correlation_id: None,
+            governed_binding: None,
             proof: BASE64.encode([0u8; 64]),
         };
         assert!(request.validate_against(&identity, &key).is_ok());
@@ -165,6 +168,8 @@ mod tests {
             requested_issued_at_unix_seconds: 2_000,
             requested_expires_at_unix_seconds: 2_600,
             scope: identity.scope.clone(),
+            correlation_id: None,
+            governed_binding: None,
             proof: String::new(),
         };
         request.proof = BASE64.encode(signing_key.sign(&request.signing_payload()).as_ref());
@@ -214,6 +219,8 @@ mod tests {
             requested_issued_at_unix_seconds: 2_000,
             requested_expires_at_unix_seconds: 2_600,
             scope: identity.scope.clone(),
+            correlation_id: None,
+            governed_binding: None,
             proof: String::new(),
         };
         request.proof = BASE64.encode(
