@@ -1,9 +1,15 @@
-use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::{
+    ids::StoreId,
+    object_catalogue::{PortableObjectVersion, PortableProtectionState},
+};
 use regex::Regex;
 use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
-use std::fmt::{self, Display};
 use std::path::PathBuf;
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StoreContentsRequest {
@@ -91,6 +97,7 @@ pub fn read_store_contents(
     )?;
     let mut rows = statement.query(params![request.store_id.as_str()])?;
     let mut objects = Vec::new();
+    let mut seen_object_ids = BTreeSet::new();
     while let Some(row) = rows.next()? {
         let object_id = row.get::<_, String>(0)?;
         let path = relative_object_path(&request.store_id, &object_id);
@@ -118,7 +125,7 @@ pub fn read_store_contents(
             },
         );
         objects.push(StoreContentsObject {
-            object_id,
+            object_id: object_id.clone(),
             path: display_path,
             kind: "file".to_string(),
             object_type: row.get(1)?,
@@ -126,7 +133,73 @@ pub fn read_store_contents(
             size_bytes,
             updated_at_utc: row.get(4)?,
         });
+        seen_object_ids.insert(object_id);
     }
+
+    if table_exists(&connection, "profile_catalogue_objects")? {
+        let mut statement = connection.prepare(
+            "SELECT object_id, object_version, object_json, committed_at_utc
+             FROM profile_catalogue_objects
+             WHERE store_id = ?1
+             ORDER BY object_id ASC, object_version DESC",
+        )?;
+        let mut rows = statement.query(params![request.store_id.as_str()])?;
+        while let Some(row) = rows.next()? {
+            let row_object_id = row.get::<_, String>(0)?;
+            if seen_object_ids.contains(&row_object_id) {
+                continue;
+            }
+            let row_version = checked_object_version(row.get::<_, i64>(1)?)?;
+            let object: PortableObjectVersion = serde_json::from_str(&row.get::<_, String>(2)?)
+                .map_err(StoreContentsReadError::InvalidProfileObject)?;
+            let object_id = object.object_id.to_string();
+            if object_id != row_object_id || object.version != row_version {
+                return Err(StoreContentsReadError::ProfileObjectIdentityMismatch {
+                    object_id: row_object_id,
+                    object_version: row_version,
+                });
+            }
+            let path = relative_object_path(&request.store_id, &object_id);
+            if request
+                .prefix
+                .as_ref()
+                .is_some_and(|prefix| path != *prefix && !path.starts_with(&format!("{prefix}/")))
+                || filter
+                    .as_ref()
+                    .is_some_and(|regex| !regex.is_match(&path) && !regex.is_match(&object_id))
+            {
+                continue;
+            }
+            let display_path = request.prefix.as_ref().map_or_else(
+                || path.clone(),
+                |prefix| {
+                    path.strip_prefix(prefix)
+                        .unwrap_or(&path)
+                        .trim_matches('/')
+                        .to_string()
+                },
+            );
+            let state = match object.protection_state {
+                PortableProtectionState::Verified | PortableProtectionState::Protected => {
+                    "Protected"
+                }
+                PortableProtectionState::Unprotected => "Unprotected",
+                PortableProtectionState::RedownloadRequired => "RedownloadRequired",
+            };
+            objects.push(StoreContentsObject {
+                object_id: object_id.clone(),
+                path: display_path,
+                kind: "file".to_string(),
+                object_type: "profile_object".to_string(),
+                state: state.to_string(),
+                size_bytes: object.size_bytes,
+                updated_at_utc: row.get(3)?,
+            });
+            seen_object_ids.insert(object_id);
+        }
+    }
+
+    objects.sort_by(|left, right| left.object_id.cmp(&right.object_id));
 
     Ok(StoreContentsSnapshot {
         live_sqlite_path: request.live_sqlite_path.clone(),
@@ -181,12 +254,31 @@ fn checked_size_bytes(value: i64) -> Result<u64, StoreContentsReadError> {
         .map_err(|_| StoreContentsReadError::NegativeByteCount { value })
 }
 
+fn checked_object_version(value: i64) -> Result<u64, StoreContentsReadError> {
+    u64::try_from(value)
+        .ok()
+        .filter(|version| *version > 0)
+        .ok_or(StoreContentsReadError::InvalidProfileObjectVersion { value })
+}
+
 #[derive(Debug)]
 pub enum StoreContentsReadError {
     Sqlite(rusqlite::Error),
     InvalidFilter(regex::Error),
-    StoreNotFound { store_id: StoreId },
-    NegativeByteCount { value: i64 },
+    StoreNotFound {
+        store_id: StoreId,
+    },
+    NegativeByteCount {
+        value: i64,
+    },
+    InvalidProfileObject(serde_json::Error),
+    InvalidProfileObjectVersion {
+        value: i64,
+    },
+    ProfileObjectIdentityMismatch {
+        object_id: String,
+        object_version: u64,
+    },
 }
 
 impl Display for StoreContentsReadError {
@@ -206,6 +298,19 @@ impl Display for StoreContentsReadError {
                     "invalid negative object size in store contents: {value}"
                 )
             }
+            Self::InvalidProfileObject(err) => {
+                write!(formatter, "invalid profile catalogue object: {err}")
+            }
+            Self::InvalidProfileObjectVersion { value } => {
+                write!(formatter, "invalid profile catalogue object version: {value}")
+            }
+            Self::ProfileObjectIdentityMismatch {
+                object_id,
+                object_version,
+            } => write!(
+                formatter,
+                "profile catalogue row identity does not match object `{object_id}` version {object_version}"
+            ),
         }
     }
 }
@@ -262,6 +367,49 @@ mod tests {
         assert_eq!(snapshot.objects[0].path, "raw/nested/sample.pod5");
         assert_eq!(snapshot.objects[1].path, "raw/sample.fastq.gz");
         assert_eq!(snapshot.total_size_bytes(), 384);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn includes_latest_verified_provider_catalogue_objects() {
+        let root = temp_root("contents-provider-catalogue");
+        let live_sqlite_path = create_live_sqlite(&root);
+        insert_profile_object(&live_sqlite_path, "artists/account/image.jpg", 6, 256);
+        insert_profile_object(&live_sqlite_path, "artists/account/image.jpg", 7, 512);
+
+        let snapshot = read_store_contents(&StoreContentsRequest::new(
+            &live_sqlite_path,
+            StoreId::new("zymo_fecal_2025.05").expect("store id"),
+        ))
+        .expect("provider contents read");
+
+        assert_eq!(snapshot.objects.len(), 1);
+        assert_eq!(snapshot.objects[0].object_id, "artists/account/image.jpg");
+        assert_eq!(snapshot.objects[0].state, "Protected");
+        assert_eq!(snapshot.objects[0].object_type, "profile_object");
+        assert_eq!(snapshot.objects[0].size_bytes, 512);
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn locally_landed_object_precedes_the_same_provider_key() {
+        let root = temp_root("contents-provider-deduplication");
+        let live_sqlite_path = create_live_sqlite(&root);
+        let object_id = "artists/account/image.jpg";
+        insert_object(&live_sqlite_path, object_id, 128, "image");
+        insert_profile_object(&live_sqlite_path, object_id, 7, 512);
+
+        let snapshot = read_store_contents(&StoreContentsRequest::new(
+            &live_sqlite_path,
+            StoreId::new("zymo_fecal_2025.05").expect("store id"),
+        ))
+        .expect("deduplicated contents read");
+
+        assert_eq!(snapshot.objects.len(), 1);
+        assert_eq!(snapshot.objects[0].object_type, "image");
+        assert_eq!(snapshot.objects[0].size_bytes, 128);
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -408,6 +556,81 @@ mod tests {
                 ],
             )
             .expect("object inserts");
+    }
+
+    fn insert_profile_object(
+        live_sqlite_path: &Path,
+        object_id: &str,
+        object_version: i64,
+        size_bytes: u64,
+    ) {
+        let connection = Connection::open(live_sqlite_path).expect("open sqlite");
+        let transaction_id = format!("provider-{object_version}");
+        let object_json = serde_json::json!({
+            "object_id": object_id,
+            "version": object_version,
+            "size_bytes": size_bytes,
+            "checksum": {
+                "algorithm": "sha256",
+                "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "provenance": {
+                "source_kind": "remote_upload",
+                "locator": object_id,
+                "revision": null
+            },
+            "lifecycle": "hash_verified",
+            "protection_policy": "externally_replicated",
+            "protection_state": "verified",
+            "placements": [{
+                "placement_id": format!("provider-{object_version}"),
+                "location": {
+                    "kind": "provider",
+                    "provider": "garage",
+                    "object_key": format!("bucket/{object_id}")
+                },
+                "checksum": {
+                    "algorithm": "sha256",
+                    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "verified_at_utc": null
+            }]
+        })
+        .to_string();
+        connection
+            .execute(
+                "INSERT INTO profile_catalogue_transactions (
+                    transaction_id, profile_namespace, store_id, schema_version,
+                    source_retained, catalogue_json, committed_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    transaction_id,
+                    "provider:garage",
+                    "zymo_fecal_2025.05",
+                    1,
+                    1,
+                    "{}",
+                    "2026-01-04T00:00:00Z"
+                ],
+            )
+            .expect("profile transaction inserts");
+        connection
+            .execute(
+                "INSERT INTO profile_catalogue_objects (
+                    profile_namespace, store_id, object_id, object_version,
+                    transaction_id, object_json, committed_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    "provider:garage",
+                    "zymo_fecal_2025.05",
+                    object_id,
+                    object_version,
+                    transaction_id,
+                    object_json,
+                    "2026-01-04T00:00:00Z"
+                ],
+            )
+            .expect("profile object inserts");
     }
 
     fn temp_root(name: &str) -> PathBuf {

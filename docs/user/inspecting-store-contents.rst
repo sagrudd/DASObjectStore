@@ -5,6 +5,14 @@ Use ``dasobjectstore store contents`` to inspect the logical contents recorded
 for an object store. The command reads live metadata and does not walk or mutate
 managed HDD payload directories.
 
+The list combines locally landed objects with the latest verified object
+version from each authoritative provider-profile catalogue, including remote
+Garage uploads. A provider object whose checksum and placement were verified
+is reported as ``Protected``. If the same logical key is also present in the
+local settled catalogue it appears once, using the local row. Malformed or
+identity-mismatched provider metadata fails the read instead of making the
+object silently disappear.
+
 The equivalent ``dasobjectstore store objects`` and
 ``dasobjectstore store list-contents`` aliases are available when a shorter
 listing-oriented command is more convenient.

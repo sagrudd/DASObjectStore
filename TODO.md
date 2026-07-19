@@ -1918,6 +1918,9 @@ list until every temporary size-budget exception has been removed.
   are preserved.
 - [x] Support `store contents STORE/PREFIX` folder/file targets with explicit
   directory/file rendering and scoped path output.
+- [x] Include the latest verified provider-profile versions in `store contents`
+  so remote Garage commits and locally landed objects share one authoritative,
+  deduplicated inventory surface.
 
 ## Milestone 7: HDD Placement and Copy Verification
 

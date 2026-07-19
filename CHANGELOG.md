@@ -8,6 +8,16 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.121.1 - 2026-07-19
+
+- Include the latest verified provider-profile object versions in
+  ``dasobjectstore store contents`` so an authoritative remote Garage commit is
+  not falsely reported as absent.
+- Deduplicate provider-profile and locally landed rows by logical object key,
+  retaining the local settled row when both authorities describe the same key.
+- Fail closed on malformed or identity-mismatched profile catalogue rows and
+  preserve the existing bounded prefix and regular-expression filters.
+
 ## 0.121.0 - 2026-07-19
 
 - Admit the approved Ergasterion split-authority bridge as a dynamically
