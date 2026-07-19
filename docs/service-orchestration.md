@@ -61,6 +61,20 @@ dasobjectstore service up \
   --project-directory /var/lib/dasobjectstore/garage
 ```
 
+This example is the `garage_legacy` topology: Garage owns public port `3900`
+and later reconciliation imports accepted payloads into managed storage. The
+opt-in `direct_gateway` topology gives public port `3900` to the
+DASObjectStore standalone server and moves Garage to a loopback-only port such
+as `127.0.0.1:3901`. Garage keeps its existing metadata/data volumes, buckets,
+and keys for compatibility and recovery. Never start the two listeners on the
+same port, expose the private Garage port, or delete provider data as part of
+the mode switch. Render the private mapping with container `--api-port 3900`,
+`--published-api-port 3901`, and `--bind-address 127.0.0.1`; this produces
+`127.0.0.1:3901:3900` without rewriting retained `garage.toml`. The
+architecture decision and exact migration/rollback and
+acceptance procedure are documented in
+[Direct S3 ingress](user/direct-s3-ingress.rst).
+
 The rendered Garage Compose file is process configuration: image, ports,
 volumes, and `garage.toml`. It is not the authoritative bucket registry and
 does not contain per-ObjectStore access keys. Adding an ObjectStore must not

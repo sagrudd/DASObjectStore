@@ -74,6 +74,13 @@ pub(super) async fn standalone_profile_s3_put(
         )
     })?;
 
+    stream_profile_s3_put(request, body).await
+}
+
+pub(crate) async fn stream_profile_s3_put(
+    request: ProviderStreamUploadOpenRequest,
+    body: Body,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let (sender, receiver) = mpsc::channel(UPLOAD_CHANNEL_CAPACITY);
     let upload_task = tokio::spawn(upload_to_daemon(request.clone(), receiver));
     let mut body_stream = body.into_data_stream();

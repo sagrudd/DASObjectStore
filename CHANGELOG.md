@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.119.0 - 2026-07-19
+
+- Add an opt-in DASObjectStore-owned, AWS Signature V4 S3 ingress gateway that
+  streams ordinary PUT and multipart parts directly into store-private managed
+  SSD namespaces, with bounded backpressure and daemon-owned capacity policy.
+- Make SSD acknowledgement transactional with catalogue visibility, verified
+  SSD placement, a durable `remote_s3` ingest record, and the HDD destage job;
+  retain strict waiting semantics for `AfterHddPlacement`.
+- Serve authenticated LIST, HEAD, GET, and ranged GET from the authoritative
+  profile catalogue, and provide idempotent multipart completion and abort.
+- Support atomic cumulative multipart reservation growth and private Garage
+  publication (`host:3901` to retained `container:3900`) for safe opt-in rollout
+  and rollback without rewriting Garage configuration or provider data.
+- Document the integration decision, threat and failure analysis, appliance
+  migration, rollback, recovery, acceptance, and performance evidence process.
+
 ## 0.118.2 - 2026-07-19
 
 - Resolve startup capacity-reservation lease maintenance through the same

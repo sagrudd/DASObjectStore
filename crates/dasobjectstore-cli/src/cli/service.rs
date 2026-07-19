@@ -134,6 +134,11 @@ pub(crate) struct ServiceRenderComposeArgs {
     /// API port to expose.
     #[arg(long)]
     api_port: u16,
+    /// Optional host-side Garage API port. Keeps the container listener and
+    /// retained garage.toml on --api-port while publishing Garage internally
+    /// for a DASObjectStore-owned S3 gateway.
+    #[arg(long)]
+    published_api_port: Option<u16>,
     /// Host path for the generated Garage configuration file.
     #[arg(long, default_value = "/etc/dasobjectstore/garage.toml")]
     config_path: PathBuf,
@@ -165,6 +170,9 @@ impl ServiceRenderComposeArgs {
     }
     pub(crate) fn api_port(&self) -> u16 {
         self.api_port
+    }
+    pub(crate) fn published_api_port(&self) -> Option<u16> {
+        self.published_api_port
     }
     pub(crate) fn config_path(&self) -> &Path {
         &self.config_path

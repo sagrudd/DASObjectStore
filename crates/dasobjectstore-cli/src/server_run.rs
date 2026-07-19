@@ -7,10 +7,10 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
     application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
-    gui_api_router_for_host_mode_with_application_auth, LocalAuthStore, LocalAuthStoreError,
-    MtlsApplicationConnectInfo, MtlsListenerError, StandaloneAuthenticationConfig,
-    StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsAssetError,
-    StandaloneTlsAssetReport,
+    gui_api_router_for_host_mode_with_application_auth, s3_gateway_router, LocalAuthStore,
+    LocalAuthStoreError, MtlsApplicationConnectInfo, MtlsListenerError,
+    StandaloneAuthenticationConfig, StandaloneServerConfig, StandaloneServerConfigError,
+    StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -72,12 +72,26 @@ async fn start_server(
     let web_root = config.product_root.join("web");
     let auth_root = auth_store.root().to_path_buf();
     let mtls_enabled = config.application_mtls.enabled;
+    let s3_ingress = config.s3_ingress.clone();
     let primary_router = standalone_router_with_application_auth(
         web_root,
         config.authentication.clone(),
         auth_root,
         !mtls_enabled,
     );
+    let direct_s3 = async move {
+        if s3_ingress.enabled() {
+            let address = s3_ingress.socket_addr().map_err(io::Error::other)?;
+            let listener = tokio::net::TcpListener::bind(address).await?;
+            axum::serve(
+                listener,
+                s3_gateway_router(s3_ingress.max_concurrent_uploads).into_make_service(),
+            )
+            .await
+        } else {
+            std::future::pending::<io::Result<()>>().await
+        }
+    };
     if mtls_enabled {
         let mtls_addr = config.application_mtls.socket_addr()?;
         let listener = build_application_mtls_listener(&config).await?;
@@ -93,11 +107,11 @@ async fn start_server(
             application_mtls_router()
                 .into_make_service_with_connect_info::<MtlsApplicationConnectInfo>(),
         );
-        tokio::try_join!(primary, applications)?;
+        tokio::try_join!(primary, applications, direct_s3)?;
     } else {
-        axum_server::bind_rustls(socket_addr, tls)
-            .serve(primary_router.into_make_service())
-            .await?;
+        let primary =
+            axum_server::bind_rustls(socket_addr, tls).serve(primary_router.into_make_service());
+        tokio::try_join!(primary, direct_s3)?;
     }
     Ok(())
 }

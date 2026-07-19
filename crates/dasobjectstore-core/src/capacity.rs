@@ -267,6 +267,39 @@ impl CapacityReservationLedger {
         Ok(())
     }
 
+    /// Atomically change an existing reservation without creating an
+    /// unreserved window. Multipart ingress uses this to grow admission as
+    /// verified parts arrive when the final S3 object size is not known at
+    /// initiation time.
+    pub fn resize_reservation(
+        &mut self,
+        reservation_id: &str,
+        bytes: u64,
+    ) -> Result<(), CapacityLedgerError> {
+        let previous = self
+            .reservations
+            .get(reservation_id)
+            .copied()
+            .ok_or(CapacityLedgerError::UnknownReservation)?;
+        let other_reserved = self.reserved_bytes().saturating_sub(previous);
+        let outstanding = self
+            .used_bytes
+            .checked_add(other_reserved)
+            .and_then(|value| value.checked_add(bytes))
+            .ok_or(CapacityLedgerError::Overflow)?;
+        if let Some(limit) = self.policy.logical_limit_bytes {
+            let admitted_limit = limit.saturating_sub(self.policy.backend_reserve_bytes);
+            if outstanding > admitted_limit {
+                return Err(CapacityLedgerError::InsufficientCapacity {
+                    available_bytes: admitted_limit
+                        .saturating_sub(self.used_bytes.saturating_add(other_reserved)),
+                });
+            }
+        }
+        self.reservations.insert(reservation_id.to_string(), bytes);
+        Ok(())
+    }
+
     /// Release reservations older than `max_age_seconds` at `now_unix_seconds`.
     /// Legacy schema-v1 reservations have timestamp zero and are intentionally
     /// retained until explicitly released, preventing an upgrade from
@@ -505,5 +538,21 @@ mod tests {
             Err(CapacityLedgerError::UnknownReservation)
         );
         assert_eq!(ledger.snapshot_with_expiry(), initial);
+    }
+
+    #[test]
+    fn resize_grows_atomically_and_preserves_previous_charge_when_rejected() {
+        let mut ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 100)
+            .expect("valid capacity policy");
+        ledger.reserve("multipart", 200).expect("initial part fits");
+        ledger
+            .resize_reservation("multipart", 500)
+            .expect("cumulative parts fit");
+        assert_eq!(ledger.reservation_bytes("multipart"), Some(500));
+        assert!(matches!(
+            ledger.resize_reservation("multipart", 801),
+            Err(CapacityLedgerError::InsufficientCapacity { .. })
+        ));
+        assert_eq!(ledger.reservation_bytes("multipart"), Some(500));
     }
 }

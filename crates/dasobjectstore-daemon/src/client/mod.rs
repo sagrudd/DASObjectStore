@@ -40,6 +40,7 @@ use crate::api::{
     ProfileMigrationResponse, ProfileReadinessRequest, ProfileReadinessResponse,
     ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,
     ProfileS3HealthRequest, ProfileS3HealthResponse, ProfileS3ListRequest, ProfileS3ListResponse,
+    ProfileS3MultipartAbortRequest, ProfileS3MultipartAbortResponse,
     ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
     ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
@@ -297,6 +298,16 @@ where
         match self.send(DaemonApiRequest::ProfileS3MultipartComplete(request))? {
             DaemonApiResponse::ProfileS3MultipartComplete(response) => Ok(response),
             response => Err(unexpected("profile_s3_multipart_complete", response)),
+        }
+    }
+
+    pub fn profile_s3_multipart_abort(
+        &self,
+        request: ProfileS3MultipartAbortRequest,
+    ) -> Result<ProfileS3MultipartAbortResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3MultipartAbort(request))? {
+            DaemonApiResponse::ProfileS3MultipartAbort(response) => Ok(response),
+            response => Err(unexpected("profile_s3_multipart_abort", response)),
         }
     }
 
@@ -875,6 +886,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileS3Delete(_) => "profile_s3_delete",
         DaemonApiResponse::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
+        DaemonApiResponse::ProfileS3MultipartAbort(_) => "profile_s3_multipart_abort",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
         DaemonApiResponse::ProfileS3Verify(_) => "profile_s3_verify",
         DaemonApiResponse::ProfileS3Health(_) => "profile_s3_health",

@@ -6,6 +6,13 @@ policy exports S3. Remote computers can then upload with the AWS CLI using
 ``s3api put-object``, ``s3 cp``, or ``s3 sync`` against the DASObjectStore
 endpoint URL.
 
+The endpoint can be served in two deployment modes. ``garage_legacy`` keeps
+Garage on the public S3 listener and retains the established reconcile-after-
+upload path. The opt-in ``direct_gateway`` mode streams uploads into the
+selected ObjectStore's managed SSD and keeps Garage on a private listener for
+legacy and recovery operations. See :doc:`direct-s3-ingress` before changing
+listener ownership; installing a package does not enable direct mode.
+
 For routine remote-computer use, prefer the standalone
 ``dasobjectstore-remote`` client described in :doc:`remote-client`. It wraps the
 same S3 path with remote configuration, secure password prompting for

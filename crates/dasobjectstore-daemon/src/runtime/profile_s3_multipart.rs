@@ -74,7 +74,6 @@ impl MultipartPartJournal {
             if manifest.store_id != request.store_id.as_str()
                 || manifest.reservation_id != request.reservation_id
                 || manifest.object != request.object
-                || manifest.reservation_size_bytes != request.reservation_size_bytes
             {
                 return Err(MultipartPartJournalError::IdentityMismatch);
             }
@@ -97,6 +96,21 @@ impl MultipartPartJournal {
 
     pub fn staged_bytes(&self) -> u64 {
         self.manifest.parts.iter().map(|part| part.size_bytes).sum()
+    }
+
+    pub fn contains_part(&self, part_number: u32) -> bool {
+        self.manifest
+            .parts
+            .iter()
+            .any(|part| part.part_number == part_number)
+    }
+
+    pub fn resize_reservation(&mut self, bytes: u64) -> Result<(), MultipartPartJournalError> {
+        if bytes < self.staged_bytes() {
+            return Err(MultipartPartJournalError::ReservationExceeded);
+        }
+        self.manifest.reservation_size_bytes = bytes;
+        self.persist()
     }
 
     pub fn open_for_completion(
@@ -157,7 +171,6 @@ impl MultipartPartJournal {
         if request.store_id.as_str() != self.manifest.store_id
             || request.reservation_id != self.manifest.reservation_id
             || request.object != self.manifest.object
-            || request.reservation_size_bytes != self.manifest.reservation_size_bytes
         {
             return Err(MultipartPartJournalError::IdentityMismatch);
         }

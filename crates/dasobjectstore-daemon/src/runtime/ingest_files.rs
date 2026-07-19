@@ -772,6 +772,8 @@ impl LocalFileIngestExecutor {
                     max_attempts: 8,
                     priority: 0,
                     committed_at_utc: accepted_at_utc,
+                    ingest_job_id: None,
+                    ingress_origin: None,
                 },
             ) {
                 Ok(report) => report,

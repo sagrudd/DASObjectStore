@@ -322,6 +322,37 @@ pub struct ProfileS3MultipartCompletionResponse {
     pub committed: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartAbortRequest {
+    pub store_id: StoreId,
+    pub reservation_id: String,
+    pub key: BackendObjectKey,
+}
+
+impl ProfileS3MultipartAbortRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.store_id.as_str().trim().is_empty() || self.reservation_id.trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField {
+                field: "multipart_abort_identity",
+            });
+        }
+        validate_object_key(&self.key).map_err(|value| {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "key",
+                value,
+            }
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartAbortResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub reservation_id: String,
+    pub aborted: bool,
+}
+
 impl ProfileS3MultipartCompletionResponse {
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != PROFILE_S3_SCHEMA_VERSION {

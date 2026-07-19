@@ -6,6 +6,9 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::Path;
+use std::time::Duration;
+
+const PUBLICATION_BUSY_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +52,11 @@ pub struct VerifiedSsdCommitRequest<'a> {
     pub max_attempts: u32,
     pub priority: i32,
     pub committed_at_utc: &'a str,
+    /// Optional durable ingress job identity. Direct S3 uses this to make the
+    /// `remote_s3` origin and SSD-accepted state part of the same SQLite
+    /// transaction as catalogue visibility and the destage queue.
+    pub ingest_job_id: Option<&'a str>,
+    pub ingress_origin: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -125,6 +133,7 @@ pub fn commit_verified_ssd_and_enqueue(
     validate_ssd_request(&request)?;
     let size = to_i64(request.size_bytes)?;
     let mut connection = Connection::open(path)?;
+    connection.busy_timeout(PUBLICATION_BUSY_TIMEOUT)?;
     connection.execute_batch(LIVE_SCHEMA_SQL)?;
     let tx = connection.transaction()?;
     ensure_store(&tx, request.store_id)?;
@@ -144,6 +153,7 @@ pub fn commit_verified_ssd_and_enqueue(
                 request.object_id.to_string(),
             ));
         }
+        insert_ingress_job(&tx, &request, size)?;
         let job_id: String = tx.query_row(
             "SELECT destage_job_id FROM destage_queue WHERE object_id = ?1",
             [request.object_id.as_str()],
@@ -158,6 +168,7 @@ pub fn commit_verified_ssd_and_enqueue(
     }
 
     tx.execute("INSERT INTO objects (object_id, store_id, object_type, state, size_bytes, content_hash, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'PlacementPlanned',?4,?5,?6,?6)", params![request.object_id.as_str(), request.store_id.as_str(), request.object_type, size, request.content_hash, request.committed_at_utc])?;
+    insert_ingress_job(&tx, &request, size)?;
     tx.execute("INSERT INTO ssd_object_placements (object_id, store_id, relative_path, size_bytes, content_hash_algorithm, content_hash, verified_at_utc, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?7)", params![request.object_id.as_str(), request.store_id.as_str(), request.relative_path, size, request.content_hash_algorithm, request.content_hash, request.committed_at_utc])?;
     tx.execute("INSERT INTO destage_queue (destage_job_id, store_id, object_id, state, expected_size_bytes, content_hash_algorithm, content_hash, acknowledgement_policy, required_copy_count, priority, max_attempts, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'queued_for_hdd',?4,?5,?6,?7,?8,?9,?10,?11,?11)", params![request.destage_job_id, request.store_id.as_str(), request.object_id.as_str(), size, request.content_hash_algorithm, request.content_hash, request.acknowledgement_policy, request.required_copy_count, request.priority, request.max_attempts, request.committed_at_utc])?;
     tx.commit()?;
@@ -166,6 +177,21 @@ pub fn commit_verified_ssd_and_enqueue(
         state: DestageState::QueuedForHdd,
         idempotent: false,
     })
+}
+
+fn insert_ingress_job(
+    tx: &Transaction<'_>,
+    request: &VerifiedSsdCommitRequest<'_>,
+    size: i64,
+) -> Result<(), DestageMetadataError> {
+    let (Some(job_id), Some(origin)) = (request.ingest_job_id, request.ingress_origin) else {
+        return Ok(());
+    };
+    tx.execute(
+        "INSERT OR IGNORE INTO ingest_jobs (ingest_job_id, store_id, object_id, object_type, state, ingest_mode, acknowledgement_policy, priority, staging_path, expected_size_bytes, received_bytes, content_hash, content_hash_algorithm, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,?4,'ssd_accepted',?5,?6,?7,?8,?9,?9,?10,?11,?12,?12)",
+        params![job_id, request.store_id.as_str(), request.object_id.as_str(), request.object_type, origin, request.acknowledgement_policy, request.priority, request.relative_path, size, request.content_hash, request.content_hash_algorithm, request.committed_at_utc],
+    )?;
+    Ok(())
 }
 
 /// Claims one runnable row. Supplying the previously served store implements
@@ -513,6 +539,11 @@ fn validate_ssd_request(r: &VerifiedSsdCommitRequest<'_>) -> Result<(), DestageM
     if r.max_attempts == 0 {
         return Err(DestageMetadataError::ZeroAttempts);
     }
+    match (r.ingest_job_id, r.ingress_origin) {
+        (None, None) => {}
+        (Some(job), Some(origin)) if !job.trim().is_empty() && !origin.trim().is_empty() => {}
+        _ => return Err(DestageMetadataError::InvalidIdentifier),
+    }
     Ok(())
 }
 fn ensure_store(tx: &Transaction<'_>, id: &StoreId) -> Result<(), DestageMetadataError> {
@@ -668,6 +699,8 @@ mod tests {
                 max_attempts: 3,
                 priority: 0,
                 committed_at_utc: "2026-01-01T00:01:00Z",
+                ingest_job_id: None,
+                ingress_origin: None,
             },
         )
         .expect_err("conflict");
@@ -914,6 +947,8 @@ mod tests {
                 max_attempts: 3,
                 priority,
                 committed_at_utc: "2026-01-01T00:00:00Z",
+                ingest_job_id: None,
+                ingress_origin: None,
             },
         )
     }

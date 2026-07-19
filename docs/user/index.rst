@@ -28,6 +28,7 @@ stabilized in the current MVP.
    garbage-collection
    remote-upload
    remote-s3-uploads
+   direct-s3-ingress
    remote-client
    programmatic-access
    store-repair

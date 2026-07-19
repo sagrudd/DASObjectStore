@@ -7,7 +7,16 @@ use crate::api::{
 };
 use crate::server::unix_socket::UnixSocketDaemonServerError;
 use dasobjectstore_core::backend::ObjectStoreBackend;
+use dasobjectstore_core::ids::ObjectId;
+use dasobjectstore_core::store::AcknowledgementPolicy;
+use dasobjectstore_metadata::{
+    commit_verified_ssd_and_enqueue, read_destage, DestageState, VerifiedSsdCommitRequest,
+};
 use std::io::{self, Read};
+use std::time::{Duration, Instant};
+
+const AFTER_HDD_ACK_DEADLINE: Duration = Duration::from_secs(300);
+const AFTER_HDD_ACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(crate) struct ProviderStreamSource {
     pub reader: Box<dyn Read + Send>,
@@ -37,6 +46,93 @@ where
             &self.clock.now_utc(),
         )
         .map(|_| ())
+    }
+
+    pub(super) fn commit_profile_s3_acceptance(
+        &self,
+        definition: &dasobjectstore_object_service::StoreServiceDefinition,
+        binding: &crate::runtime::BackendProfileBinding,
+        backend: &FolderBackend,
+        record: &dasobjectstore_core::backend::BackendObjectRecord,
+        upload_id: &str,
+    ) -> Result<(), String> {
+        self.publish_profile_s3_catalogue(&definition.store_id, backend)
+            .map_err(|error| error.to_string())?;
+        let object_id =
+            ObjectId::new(record.key.object_id.clone()).map_err(|error| error.to_string())?;
+        let managed_ssd_root = binding
+            .ssd_staging_root
+            .as_deref()
+            .unwrap_or(&binding.backend_root);
+        let payload_path = backend
+            .root()
+            .join(".dasobjectstore/objects")
+            .join(&record.key.object_id);
+        let relative_path = payload_path
+            .strip_prefix(managed_ssd_root)
+            .map_err(|_| {
+                "direct S3 payload escaped its authoritative managed SSD root".to_string()
+            })?
+            .to_string_lossy()
+            .into_owned();
+        let acknowledgement_policy = match definition.policy.acknowledgement_policy {
+            AcknowledgementPolicy::AfterSsdIngest => "after_ssd_ingest",
+            AcknowledgementPolicy::AfterHddPlacement => "after_hdd_placement",
+        };
+        let destage_job_id = format!("destage-direct-s3-{upload_id}");
+        commit_verified_ssd_and_enqueue(
+            &self.live_sqlite_path,
+            VerifiedSsdCommitRequest {
+                destage_job_id: &destage_job_id,
+                store_id: &definition.store_id,
+                object_id: &object_id,
+                object_type: definition.policy.class.name(),
+                relative_path: &relative_path,
+                size_bytes: record.size_bytes,
+                content_hash_algorithm: "sha256",
+                content_hash: record.checksum.trim_start_matches("sha256:"),
+                acknowledgement_policy,
+                required_copy_count: definition.policy.copies,
+                max_attempts: 8,
+                priority: 0,
+                committed_at_utc: &self.clock.now_utc(),
+                ingest_job_id: Some(&format!("ingest-direct-s3-{upload_id}")),
+                ingress_origin: Some("remote_s3"),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        if definition.policy.acknowledgement_policy == AcknowledgementPolicy::AfterHddPlacement {
+            let deadline = Instant::now() + AFTER_HDD_ACK_DEADLINE;
+            loop {
+                let state = read_destage(&self.live_sqlite_path, &object_id)
+                    .map_err(|error| error.to_string())?
+                    .ok_or_else(|| "durable HDD acknowledgement job disappeared".to_string())?;
+                match state.state {
+                    DestageState::HddCopyVerified
+                        if state.verified_copy_count >= state.required_copy_count =>
+                    {
+                        break;
+                    }
+                    DestageState::DestageFailed
+                    | DestageState::NeedsReview
+                    | DestageState::Cancelled => {
+                        return Err(format!(
+                            "HDD placement did not satisfy acknowledgement policy: {:?}: {}",
+                            state.state,
+                            state.last_error.as_deref().unwrap_or("no detail")
+                        ));
+                    }
+                    _ if Instant::now() >= deadline => {
+                        return Err(
+                            "HDD placement acknowledgement exceeded its 300 second deadline"
+                                .to_string(),
+                        );
+                    }
+                    _ => std::thread::sleep(AFTER_HDD_ACK_POLL_INTERVAL),
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn handle_provider_stream_multipart_part_upload_for_actor(
@@ -71,23 +167,40 @@ where
                     )))
                 }
             };
-        if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "provider_stream_unavailable",
-                "multipart part staging is available for bounded folder profiles only",
-            )));
-        }
-        let mut journal =
-            match crate::runtime::MultipartPartJournal::open(binding.backend_root, &request) {
-                Ok(journal) => journal,
-                Err(error) => {
+        let (backend_root, _) = match crate::runtime::direct_s3_profile_backend(&binding) {
+            Ok(specification) => specification,
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    error.to_string(),
+                )))
+            }
+        };
+        let mut journal = match crate::runtime::MultipartPartJournal::open(backend_root, &request) {
+            Ok(journal) => journal,
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_failed",
+                    error.to_string(),
+                )))
+            }
+        };
+        let previous_reserved_bytes = journal.staged_bytes();
+        let duplicate_part = journal.contains_part(request.part_number);
+        let admitted = previous_reserved_bytes != 0;
+        let requested_reservation_bytes = if duplicate_part {
+            previous_reserved_bytes
+        } else {
+            match previous_reserved_bytes.checked_add(request.expected_size_bytes) {
+                Some(bytes) => bytes,
+                None => {
                     return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "provider_stream_multipart_failed",
-                        error.to_string(),
+                        "provider_stream_multipart_rejected",
+                        "multipart reservation size overflow",
                     )))
                 }
-            };
-        let admitted = journal.staged_bytes() != 0;
+            }
+        };
         if !admitted {
             let Some(provider) = self.service_orchestrator.capacity_provider() else {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -99,14 +212,14 @@ where
                 Some(subobject) => provider.admit_subobject_ingest(
                     store_id.as_str(),
                     subobject,
-                    request.reservation_size_bytes,
+                    requested_reservation_bytes,
                     1,
                     crate::api::DaemonIngressOrigin::RemoteS3,
                     &request.reservation_id,
                 ),
                 None => provider.admit_remote_upload(
                     store_id.as_str(),
-                    request.reservation_size_bytes,
+                    requested_reservation_bytes,
                     &request.reservation_id,
                 ),
             };
@@ -127,6 +240,51 @@ where
                         .unwrap_or_else(|| "multipart capacity admission rejected".to_string()),
                 )));
             }
+        } else if !duplicate_part {
+            let Some(provider) = self.service_orchestrator.capacity_provider() else {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_unavailable",
+                    "multipart reservation growth requires daemon capacity admission",
+                )));
+            };
+            if let Err(error) = provider.resize_remote_upload(
+                &store_id,
+                authorized.subobject.as_deref(),
+                &request.reservation_id,
+                requested_reservation_bytes,
+            ) {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_rejected",
+                    error.to_string(),
+                )));
+            }
+        }
+        if !duplicate_part {
+            if let Err(error) = journal.resize_reservation(requested_reservation_bytes) {
+                if let Some(provider) = self.service_orchestrator.capacity_provider() {
+                    if admitted {
+                        let _ = provider.resize_remote_upload(
+                            &store_id,
+                            authorized.subobject.as_deref(),
+                            &request.reservation_id,
+                            previous_reserved_bytes,
+                        );
+                    } else {
+                        let _ = match authorized.subobject.as_deref() {
+                            Some(subobject) => provider.release_subobject(
+                                &store_id,
+                                subobject,
+                                &request.reservation_id,
+                            ),
+                            None => provider.release(&store_id, &request.reservation_id),
+                        };
+                    }
+                }
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_multipart_failed",
+                    error.to_string(),
+                )));
+            }
         }
         let part = match journal.stage_part(&request, &mut || {
             read_frame()
@@ -145,6 +303,16 @@ where
                             None => provider.release(&store_id, &request.reservation_id),
                         };
                     }
+                } else if !duplicate_part {
+                    if let Some(provider) = self.service_orchestrator.capacity_provider() {
+                        let _ = provider.resize_remote_upload(
+                            &store_id,
+                            authorized.subobject.as_deref(),
+                            &request.reservation_id,
+                            previous_reserved_bytes,
+                        );
+                    }
+                    let _ = journal.resize_reservation(previous_reserved_bytes);
                 }
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "provider_stream_multipart_failed",
@@ -198,28 +366,9 @@ where
                     )))
                 }
             };
-        if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "provider_stream_unavailable",
-                "provider stream upload is available for bounded folder profiles only",
-            )));
-        }
-        let capacity = match read_store_registry(&self.store_registry_path) {
-            Ok(definitions) => definitions
-                .into_iter()
-                .find(|definition| definition.store_id == store_id)
-                .map(|definition| definition.policy.capacity),
-            Err(_) => None,
-        };
-        let Some(capacity) = capacity else {
-            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "provider_stream_unavailable",
-                "profile capacity policy is unavailable",
-            )));
-        };
-        let mut backend =
-            match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
-                Ok(backend) => backend,
+        let (backend_root, backend_manifest) =
+            match crate::runtime::direct_s3_profile_backend(&binding) {
+                Ok(specification) => specification,
                 Err(error) => {
                     return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "provider_stream_unavailable",
@@ -227,6 +376,85 @@ where
                     )))
                 }
             };
+        let definition = match read_store_registry(&self.store_registry_path) {
+            Ok(definitions) => definitions
+                .into_iter()
+                .find(|definition| definition.store_id == store_id),
+            Err(_) => None,
+        };
+        let Some(definition) = definition else {
+            return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "provider_stream_unavailable",
+                "profile capacity policy is unavailable",
+            )));
+        };
+        let capacity = definition.policy.capacity.clone();
+        let mut backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
+            Ok(backend) => backend,
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    error.to_string(),
+                )))
+            }
+        };
+        match crate::runtime::head_profile_object(&backend, &request.object) {
+            Ok(existing)
+                if existing.size_bytes == request.expected_size_bytes
+                    && existing
+                        .checksum
+                        .eq_ignore_ascii_case(&request.expected_sha256) =>
+            {
+                let record = match backend.records().and_then(|records| {
+                    records
+                        .into_iter()
+                        .find(|record| record.key == existing.key)
+                        .ok_or_else(|| {
+                            dasobjectstore_core::backend::BackendError::NotFound(
+                                existing.key.object_id.clone(),
+                            )
+                        })
+                }) {
+                    Ok(record) => record,
+                    Err(error) => {
+                        return emit_response(DaemonApiResponse::Error(
+                            DaemonApiErrorResponse::new(
+                                "provider_stream_preflight_failed",
+                                error.to_string(),
+                            ),
+                        ))
+                    }
+                };
+                if let Err(error) = self.commit_profile_s3_acceptance(
+                    &definition,
+                    &binding,
+                    &backend,
+                    &record,
+                    &request.upload_id,
+                ) {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_destage_publication_failed",
+                        error,
+                    )));
+                }
+                return emit_response(DaemonApiResponse::ProviderStreamUpload(
+                    ProviderStreamUploadResponse::from_record(request.upload_id, store_id, &record),
+                ));
+            }
+            Ok(_) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_object_conflict",
+                    "an accepted object already exists with different content",
+                )))
+            }
+            Err(dasobjectstore_core::backend::BackendError::NotFound(_)) => {}
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_preflight_failed",
+                    error.to_string(),
+                )))
+            }
+        }
         let Some(provider) = self.service_orchestrator.capacity_provider() else {
             return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                 "provider_stream_upload_unavailable",
@@ -253,10 +481,16 @@ where
                 )))
             }
         };
-        if let Err(error) = self.publish_profile_s3_catalogue(&store_id, &backend) {
+        if let Err(error) = self.commit_profile_s3_acceptance(
+            &definition,
+            &binding,
+            &backend,
+            &record,
+            &request.upload_id,
+        ) {
             return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "provider_stream_catalogue_publication_failed",
-                error.to_string(),
+                "provider_stream_destage_publication_failed",
+                error,
             )));
         }
         emit_response(DaemonApiResponse::ProviderStreamUpload(
@@ -302,12 +536,13 @@ where
                     )))
                 }
             };
-        if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-            return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "provider_stream_unavailable",
-                "provider stream is available for bounded folder profiles only",
-            )));
-        }
+        let (backend_root, backend_manifest) = crate::runtime::direct_s3_profile_backend(&binding)
+            .map_err(|error| {
+                DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    error.to_string(),
+                ))
+            })?;
         let capacity = match read_store_registry(&self.store_registry_path) {
             Ok(definitions) => definitions
                 .into_iter()
@@ -321,8 +556,7 @@ where
                 "profile capacity policy is unavailable",
             )));
         };
-        let backend = match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0)
-        {
+        let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
             Ok(backend) => backend,
             Err(error) => {
                 return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

@@ -1012,8 +1012,17 @@ hardware acceptance.
   with post-delete capacity reconciliation. Successful PUT and multipart
   completion now publish their authoritative profile snapshot through the
   daemon's shared-SQLite crash journal before returning success.
-  Provider-native verification and appliance acceptance remain separately
-  gated.
+  Release 0.119.0 adds an opt-in AWS SigV4 gateway that derives the exact
+  ObjectStore from daemon-managed bucket credentials, streams PUT/multipart
+  parts directly to a store-private managed-SSD namespace, grows multipart
+  capacity atomically, records `remote_s3` SSD acceptance and the durable HDD
+  job in one SQLite transaction, and serves catalogue-backed LIST/HEAD/GET.
+  Multipart completion and abort are idempotent, Garage reconciliation remains
+  available, and the renderer can publish retained Garage container port 3900
+  privately on host port 3901 without rewriting provider state. Remaining
+  acceptance: deploy after the active `disk_002` recovery ingest is quiescent,
+  run signed single/multipart/restart/rollback smoke on the appliance, and
+  record before/after write-amplification measurements.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative

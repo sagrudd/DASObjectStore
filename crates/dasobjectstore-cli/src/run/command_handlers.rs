@@ -148,6 +148,7 @@ pub(crate) fn run_service_render_compose(
                 image: args.image().to_string(),
                 bind_address: args.bind_address().to_string(),
                 api_port: args.api_port(),
+                published_api_port: args.published_api_port(),
                 rpc_port: garage_derived_port(args.api_port(), 1)?,
                 web_port: garage_derived_port(args.api_port(), 2)?,
                 admin_port: garage_derived_port(args.api_port(), 3)?,

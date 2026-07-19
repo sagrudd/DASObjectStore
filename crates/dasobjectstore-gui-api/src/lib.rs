@@ -21,6 +21,8 @@ mod object_stores_aggregator;
 mod remote_upload_aggregator;
 mod reporting;
 pub mod routes;
+mod s3_gateway;
+mod s3_gateway_auth;
 pub mod server_config;
 pub mod tls_assets;
 pub mod view;
@@ -87,10 +89,12 @@ pub use remote_upload_aggregator::{
     RemoteUploadActorView, RemoteUploadObjectStoreView, RemoteUploadWorkspaceView,
 };
 pub use routes::gui_api_router;
+pub use s3_gateway::{s3_gateway_router, S3GatewayState};
 pub use server_config::{
     StandaloneAuthenticationAuthority, StandaloneAuthenticationConfig, StandaloneMutualTlsConfig,
-    StandaloneServerConfig, StandaloneServerConfigError, StandaloneTlsConfig,
-    DEFAULT_MTLS_HTTPS_PORT, DEFAULT_STANDALONE_PUBLIC_BASE_URL,
+    StandaloneS3IngressConfig, StandaloneS3IngressMode, StandaloneServerConfig,
+    StandaloneServerConfigError, StandaloneTlsConfig, DEFAULT_MTLS_HTTPS_PORT,
+    DEFAULT_S3_INGRESS_PORT, DEFAULT_STANDALONE_PUBLIC_BASE_URL,
     DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH, DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH,
 };
 pub use tls_assets::{

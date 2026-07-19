@@ -482,35 +482,39 @@ where
                     )));
                 }
             };
-            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "profile_s3_unavailable",
-                    "profile S3 deletion is available for bounded folder profiles only",
-                )));
-            }
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let (backend_root, backend_manifest) =
+                match crate::runtime::direct_s3_profile_backend(&binding) {
+                    Ok(specification) => specification,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )))
+                    }
+                };
+            let definition = match read_store_registry(&handler.store_registry_path) {
                 Ok(definitions) => definitions
                     .into_iter()
-                    .find(|definition| definition.store_id == store_id)
-                    .map(|definition| definition.policy.capacity),
+                    .find(|definition| definition.store_id == store_id),
                 Err(_) => None,
             };
-            let Some(capacity) = capacity else {
+            let Some(definition) = definition else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_unavailable",
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let mut backend =
-                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
-                    Ok(backend) => backend,
-                    Err(error) => {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_unavailable",
-                            error.to_string(),
-                        )));
-                    }
-                };
+            let capacity = definition.policy.capacity.clone();
+            let mut backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0)
+            {
+                Ok(backend) => backend,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
             let Some(provider) = handler.service_orchestrator.capacity_provider() else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_delete_unavailable",
@@ -533,6 +537,84 @@ where
                     store_id,
                     key: request.key,
                     deleted,
+                },
+            ))
+        }
+        DaemonApiRequest::ProfileS3MultipartAbort(request) => {
+            let authorized = match handler.authorize_endpoint_write_scope(actor, &request.store_id)
+            {
+                Ok(authorized) => authorized,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let store_id = authorized.store_id.clone();
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        "multipart abort requires a registered profile",
+                    )));
+                }
+            };
+            let (backend_root, _) = match crate::runtime::direct_s3_profile_backend(&binding) {
+                Ok(specification) => specification,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_abort_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            let qualified_key = authorized.qualify_object(&request.key);
+            let journal = crate::runtime::MultipartPartJournal::open_for_completion(
+                &backend_root,
+                store_id.as_str(),
+                &request.reservation_id,
+                qualified_key,
+                1,
+            );
+            let aborted = match journal {
+                Ok(journal) => {
+                    if let Err(error) = journal.remove() {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_abort_failed",
+                            error.to_string(),
+                        )));
+                    }
+                    if let Some(provider) = handler.service_orchestrator.capacity_provider() {
+                        match authorized.subobject.as_deref() {
+                            Some(subobject) => provider
+                                .release_subobject(&store_id, subobject, &request.reservation_id)
+                                .map_err(DaemonRequestHandlerError::ServiceRuntime)?,
+                            None => provider
+                                .release(&store_id, &request.reservation_id)
+                                .map_err(DaemonRequestHandlerError::ServiceRuntime)?,
+                        }
+                    }
+                    true
+                }
+                Err(crate::runtime::MultipartPartJournalError::Manifest(_)) => false,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_abort_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileS3MultipartAbort(
+                crate::api::ProfileS3MultipartAbortResponse {
+                    schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    reservation_id: request.reservation_id,
+                    aborted,
                 },
             ))
         }
@@ -561,26 +643,29 @@ where
                     )));
                 }
             };
-            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "profile_s3_unavailable",
-                    "multipart completion is available for bounded folder profiles only",
-                )));
-            }
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let (backend_root, backend_manifest) =
+                match crate::runtime::direct_s3_profile_backend(&binding) {
+                    Ok(specification) => specification,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            let definition = match read_store_registry(&handler.store_registry_path) {
                 Ok(definitions) => definitions
                     .into_iter()
-                    .find(|definition| definition.store_id == store_id)
-                    .map(|definition| definition.policy.capacity),
+                    .find(|definition| definition.store_id == store_id),
                 Err(_) => None,
             };
-            let Some(capacity) = capacity else {
+            let Some(definition) = definition else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_unavailable",
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let backend_root = binding.backend_root.clone();
+            let capacity = definition.policy.capacity.clone();
             let journal = match crate::runtime::MultipartPartJournal::open_for_completion(
                 &backend_root,
                 request.store_id.as_str(),
@@ -635,7 +720,7 @@ where
                 });
             }
             let mut backend =
-                match FolderBackend::open(&backend_root, binding.manifest, capacity, 0) {
+                match FolderBackend::open(&backend_root, backend_manifest, capacity, 0) {
                     Ok(backend) => backend,
                     Err(error) => {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -681,10 +766,17 @@ where
                         )));
                     }
                 };
-            if let Err(response) =
-                storage_profiles::publish_profile_s3_catalogue(handler, &store_id, &backend)
-            {
-                return Ok(response);
+            if let Err(error) = handler.commit_profile_s3_acceptance(
+                &definition,
+                &binding,
+                &backend,
+                &record,
+                &request.reservation_id,
+            ) {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_multipart_publication_failed",
+                    error,
+                )));
             }
             let response = crate::api::ProfileS3MultipartCompletionResponse {
                 schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
@@ -718,12 +810,16 @@ where
                     )));
                 }
             };
-            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "profile_s3_unavailable",
-                    "profile S3 is available for bounded folder profiles only",
-                )));
-            }
+            let (backend_root, backend_manifest) =
+                match crate::runtime::direct_s3_profile_backend(&binding) {
+                    Ok(specification) => specification,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )))
+                    }
+                };
             let capacity = match read_store_registry(&handler.store_registry_path) {
                 Ok(definitions) => definitions
                     .into_iter()
@@ -737,16 +833,15 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let backend =
-                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
-                    Ok(backend) => backend,
-                    Err(error) => {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_unavailable",
-                            error.to_string(),
-                        )));
-                    }
-                };
+            let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
+                Ok(backend) => backend,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
             let object = match head_profile_object(&backend, &request.key) {
                 Ok(object) => object,
                 Err(error) => {
@@ -788,12 +883,16 @@ where
                     )));
                 }
             };
-            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "profile_s3_unavailable",
-                    "profile S3 is available for bounded folder profiles only",
-                )));
-            }
+            let (backend_root, backend_manifest) =
+                match crate::runtime::direct_s3_profile_backend(&binding) {
+                    Ok(specification) => specification,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )))
+                    }
+                };
             let capacity = match read_store_registry(&handler.store_registry_path) {
                 Ok(definitions) => definitions
                     .into_iter()
@@ -807,16 +906,15 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let backend =
-                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
-                    Ok(backend) => backend,
-                    Err(error) => {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_unavailable",
-                            error.to_string(),
-                        )));
-                    }
-                };
+            let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
+                Ok(backend) => backend,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
             let object = match verify_profile_object(&backend, &request.key) {
                 Ok(object) => object,
                 Err(error) => {
@@ -861,12 +959,16 @@ where
                     )));
                 }
             };
-            if binding.manifest.deployment_profile != DeploymentProfile::Folder {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "profile_s3_unavailable",
-                    "profile S3 is available for bounded folder profiles only",
-                )));
-            }
+            let (backend_root, backend_manifest) =
+                match crate::runtime::direct_s3_profile_backend(&binding) {
+                    Ok(specification) => specification,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )))
+                    }
+                };
             let capacity = match read_store_registry(&handler.store_registry_path) {
                 Ok(definitions) => definitions
                     .into_iter()
@@ -880,16 +982,15 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let backend =
-                match FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0) {
-                    Ok(backend) => backend,
-                    Err(error) => {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_unavailable",
-                            error.to_string(),
-                        )));
-                    }
-                };
+            let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
+                Ok(backend) => backend,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
             let health = match profile_health(&backend) {
                 Ok(health) => health,
                 Err(error) => {
@@ -997,9 +1098,10 @@ fn advertise_provider_stream_downloads<S, C>(
     else {
         return;
     };
-    if binding.manifest.deployment_profile != DeploymentProfile::Folder {
+    let Ok((backend_root, backend_manifest)) = crate::runtime::direct_s3_profile_backend(&binding)
+    else {
         return;
-    }
+    };
     let Ok(definitions) = read_store_registry(&handler.store_registry_path) else {
         return;
     };
@@ -1010,8 +1112,7 @@ fn advertise_provider_stream_downloads<S, C>(
     else {
         return;
     };
-    let Ok(backend) = FolderBackend::open(binding.backend_root, binding.manifest, capacity, 0)
-    else {
+    let Ok(backend) = FolderBackend::open(backend_root, backend_manifest, capacity, 0) else {
         return;
     };
     let Ok(records) = backend.records() else {

@@ -143,6 +143,18 @@ pub trait CapacityAdmissionProvider: Send + Sync {
         )
     }
 
+    fn resize_remote_upload(
+        &self,
+        _store_id: &StoreId,
+        _subobject: Option<&str>,
+        _reservation_id: &str,
+        _requested_bytes: u64,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        Err(unavailable(
+            "capacity provider does not support atomic reservation resize",
+        ))
+    }
+
     fn commit(
         &self,
         _store_id: &StoreId,
@@ -1017,6 +1029,45 @@ where
             crate::api::DaemonIngressOrigin::RemoteS3,
             reservation_id,
         )
+    }
+
+    fn resize_remote_upload(
+        &self,
+        store_id: &StoreId,
+        subobject: Option<&str>,
+        reservation_id: &str,
+        requested_bytes: u64,
+    ) -> Result<(), DaemonServiceRuntimeError> {
+        let policy = self.policy_for_store(store_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| unavailable("capacity ledger lock poisoned"))?;
+        let ledger = self.ledger_for_store(&mut state.ledgers, store_id, policy)?;
+        let before = ledger.clone();
+        match (&mut *ledger, subobject) {
+            (StoreCapacityLedger::Flat(ledger), None) => ledger
+                .resize_reservation(reservation_id, requested_bytes)
+                .map_err(|error| unavailable(format!("capacity resize failed: {error:?}")))?,
+            (StoreCapacityLedger::Hierarchical(ledger), None) => ledger
+                .resize_store_reservation(reservation_id, requested_bytes)
+                .map_err(|error| unavailable(format!("capacity resize failed: {error}")))?,
+            (StoreCapacityLedger::Hierarchical(ledger), Some(subobject)) => ledger
+                .resize(subobject, reservation_id, requested_bytes)
+                .map_err(|error| {
+                    unavailable(format!("SubObject capacity resize failed: {error}"))
+                })?,
+            (StoreCapacityLedger::Flat(_), Some(_)) => {
+                return Err(unavailable(
+                    "SubObject capacity resize requires a hierarchical ledger",
+                ));
+            }
+        }
+        if let Err(error) = self.save_store_ledger(store_id, ledger) {
+            *ledger = before;
+            return Err(error);
+        }
+        Ok(())
     }
 
     fn commit(

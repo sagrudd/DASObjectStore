@@ -31,9 +31,9 @@ mod profile_delete;
 #[path = "profile_download.rs"]
 mod profile_download;
 #[path = "profile_multipart.rs"]
-mod profile_multipart;
+pub(crate) mod profile_multipart;
 #[path = "profile_upload.rs"]
-mod profile_upload;
+pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
 use auth_identity_routes::*;

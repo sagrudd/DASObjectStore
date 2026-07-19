@@ -1331,6 +1331,8 @@ mod tests {
                 max_attempts: 8,
                 priority: 0,
                 committed_at_utc: "2026-07-19T00:00:00Z",
+                ingest_job_id: None,
+                ingress_origin: None,
             },
         )
         .expect("SSD acknowledgement");

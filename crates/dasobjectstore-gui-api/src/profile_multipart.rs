@@ -95,6 +95,13 @@ pub(super) async fn standalone_profile_s3_multipart_part(
         )
     })?;
 
+    stream_profile_s3_multipart_part(request, body).await
+}
+
+pub(crate) async fn stream_profile_s3_multipart_part(
+    request: ProviderStreamMultipartPartUploadOpenRequest,
+    body: Body,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let (sender, receiver) = mpsc::channel(PART_UPLOAD_CHANNEL_CAPACITY);
     let upload_task = tokio::spawn(upload_multipart_part_to_daemon(request.clone(), receiver));
     let mut body_stream = body.into_data_stream();
@@ -271,6 +278,15 @@ pub(super) async fn standalone_profile_s3_multipart_complete(
         )
     })?;
 
+    complete_profile_s3_multipart(request).await
+}
+
+pub(crate) async fn complete_profile_s3_multipart(
+    request: ProfileS3MultipartCompletionRequest,
+) -> Result<
+    axum::Json<ProfileS3MultipartCompletionResponse>,
+    (StatusCode, axum::Json<AuthRouteError>),
+> {
     crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(

@@ -67,6 +67,14 @@ surface. Authorization decisions should combine local group policy, standalone
 sessions, or Synoptikon-provided actor context with store-level writer/admin
 policy.
 
+Remote S3 writes follow the same authority boundary. The accepted direct
+ingress decision places a feature-gated DASObjectStore S3 gateway in front of
+Garage, authenticates an exact managed credential-to-store/bucket binding, and
+streams bytes through the daemon provider protocol into a store-private managed
+SSD namespace. Garage remains available in legacy mode and as a recovery source;
+it is not authoritative for direct-object placement. See
+[DASObjectStore-owned direct S3 ingress](direct-s3-ingress-adr.md).
+
 ## Workspace Crates
 
 ### `dasobjectstore-core`

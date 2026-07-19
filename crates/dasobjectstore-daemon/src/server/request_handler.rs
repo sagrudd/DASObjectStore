@@ -1332,6 +1332,16 @@ mod tests {
         assert_eq!(published.0, "profile-s3:upload-store");
         assert_eq!(published.1, "objects/hello.txt");
         assert_eq!(published.2, 1);
+        let destage = dasobjectstore_metadata::read_destage(
+            &live_sqlite,
+            &ObjectId::new("objects/hello.txt").expect("object id"),
+        )
+        .expect("destage query")
+        .expect("durable destage row");
+        assert_eq!(destage.store_id.as_str(), "upload-store");
+        assert_eq!(destage.expected_size_bytes, 5);
+        assert_eq!(destage.content_hash, &checksum["sha256:".len()..]);
+        assert_eq!(destage.acknowledgement_policy, "after_ssd_ingest");
         connection
             .execute("DELETE FROM profile_catalogue_objects", [])
             .expect("simulate shared catalogue drift");

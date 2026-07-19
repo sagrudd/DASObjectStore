@@ -11,6 +11,7 @@ pub const DEFAULT_STANDALONE_PUBLIC_BASE_URL: &str = "https://127.0.0.1:8448";
 pub const DEFAULT_TLS_CERTIFICATE_RELATIVE_PATH: &str = "tls/server.crt";
 pub const DEFAULT_TLS_PRIVATE_KEY_RELATIVE_PATH: &str = "tls/server.key";
 pub const DEFAULT_MTLS_HTTPS_PORT: u16 = 8449;
+pub const DEFAULT_S3_INGRESS_PORT: u16 = 3900;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneServerConfig {
@@ -23,6 +24,8 @@ pub struct StandaloneServerConfig {
     pub tls: StandaloneTlsConfig,
     #[serde(default)]
     pub application_mtls: StandaloneMutualTlsConfig,
+    #[serde(default)]
+    pub s3_ingress: StandaloneS3IngressConfig,
 }
 
 impl StandaloneServerConfig {
@@ -42,6 +45,7 @@ impl StandaloneServerConfig {
             authentication: StandaloneAuthenticationConfig::default(),
             tls,
             application_mtls: StandaloneMutualTlsConfig::default(),
+            s3_ingress: StandaloneS3IngressConfig::default(),
         }
     }
 
@@ -64,11 +68,99 @@ impl StandaloneServerConfig {
         self.tls.validate()?;
         self.authentication.validate()?;
         self.application_mtls.validate(self.https_port)?;
+        self.s3_ingress
+            .validate(self.https_port, &self.application_mtls)?;
         Ok(())
     }
 
     pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
         self.authentication.gui_api_host_mode()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StandaloneS3IngressMode {
+    #[default]
+    GarageLegacy,
+    DirectGateway,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneS3IngressConfig {
+    #[serde(default)]
+    pub mode: StandaloneS3IngressMode,
+    #[serde(default = "default_s3_ingress_bind_address")]
+    pub bind_address: String,
+    #[serde(default = "default_s3_ingress_port")]
+    pub port: u16,
+    #[serde(default = "default_s3_ingress_upstream")]
+    pub legacy_upstream_endpoint: String,
+    #[serde(default = "default_s3_max_concurrent_uploads")]
+    pub max_concurrent_uploads: usize,
+}
+
+impl StandaloneS3IngressConfig {
+    pub fn enabled(&self) -> bool {
+        self.mode == StandaloneS3IngressMode::DirectGateway
+    }
+
+    pub fn socket_addr(&self) -> Result<SocketAddr, StandaloneServerConfigError> {
+        let address = self.bind_address.parse::<IpAddr>().map_err(|_| {
+            StandaloneServerConfigError::InvalidS3IngressBindAddress {
+                bind_address: self.bind_address.clone(),
+            }
+        })?;
+        validate_https_port(self.port)?;
+        Ok(SocketAddr::new(address, self.port))
+    }
+
+    fn validate(
+        &self,
+        primary_port: u16,
+        application_mtls: &StandaloneMutualTlsConfig,
+    ) -> Result<(), StandaloneServerConfigError> {
+        if !self.enabled() {
+            return Ok(());
+        }
+        self.socket_addr()?;
+        if self.port == primary_port
+            || (application_mtls.enabled && self.port == application_mtls.https_port)
+        {
+            return Err(StandaloneServerConfigError::DuplicateListenerPort {
+                https_port: self.port,
+            });
+        }
+        let upstream = self
+            .legacy_upstream_endpoint
+            .strip_prefix("http://")
+            .or_else(|| self.legacy_upstream_endpoint.strip_prefix("https://"))
+            .ok_or_else(|| StandaloneServerConfigError::InvalidS3LegacyUpstream {
+                endpoint: self.legacy_upstream_endpoint.clone(),
+            })?;
+        if upstream.trim().is_empty() {
+            return Err(StandaloneServerConfigError::InvalidS3LegacyUpstream {
+                endpoint: self.legacy_upstream_endpoint.clone(),
+            });
+        }
+        if self.max_concurrent_uploads == 0 || self.max_concurrent_uploads > 256 {
+            return Err(StandaloneServerConfigError::InvalidS3Concurrency {
+                value: self.max_concurrent_uploads,
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Default for StandaloneS3IngressConfig {
+    fn default() -> Self {
+        Self {
+            mode: StandaloneS3IngressMode::GarageLegacy,
+            bind_address: default_s3_ingress_bind_address(),
+            port: default_s3_ingress_port(),
+            legacy_upstream_endpoint: default_s3_ingress_upstream(),
+            max_concurrent_uploads: default_s3_max_concurrent_uploads(),
+        }
     }
 }
 
@@ -226,6 +318,9 @@ pub enum StandaloneServerConfigError {
     InvalidSessionTtlSeconds { session_ttl_seconds: i64 },
     InvalidMutualTlsBindAddress { bind_address: String },
     DuplicateListenerPort { https_port: u16 },
+    InvalidS3IngressBindAddress { bind_address: String },
+    InvalidS3LegacyUpstream { endpoint: String },
+    InvalidS3Concurrency { value: usize },
 }
 
 impl Display for StandaloneServerConfigError {
@@ -272,7 +367,23 @@ impl Display for StandaloneServerConfigError {
             ),
             Self::DuplicateListenerPort { https_port } => write!(
                 formatter,
-                "application mTLS port must differ from primary HTTPS port: {https_port}"
+                "listener port must be unique across HTTPS, mTLS, and S3 ingress: {https_port}"
+            ),
+            Self::InvalidS3IngressBindAddress { bind_address } => {
+                write!(
+                    formatter,
+                    "invalid direct S3 ingress bind address: {bind_address}"
+                )
+            }
+            Self::InvalidS3LegacyUpstream { endpoint } => {
+                write!(
+                    formatter,
+                    "invalid legacy Garage upstream endpoint: {endpoint}"
+                )
+            }
+            Self::InvalidS3Concurrency { value } => write!(
+                formatter,
+                "direct S3 max_concurrent_uploads must be between 1 and 256: {value}"
             ),
         }
     }
@@ -288,6 +399,22 @@ fn default_mtls_bind_address() -> String {
 
 fn default_mtls_https_port() -> u16 {
     DEFAULT_MTLS_HTTPS_PORT
+}
+
+fn default_s3_ingress_bind_address() -> String {
+    DEFAULT_STANDALONE_BIND_ADDRESS.to_string()
+}
+
+fn default_s3_ingress_port() -> u16 {
+    DEFAULT_S3_INGRESS_PORT
+}
+
+fn default_s3_ingress_upstream() -> String {
+    "http://127.0.0.1:3901".to_string()
+}
+
+fn default_s3_max_concurrent_uploads() -> usize {
+    8
 }
 
 fn default_application_identity_registry_path() -> PathBuf {
@@ -431,6 +558,8 @@ mod tests {
         assert_eq!(encoded["authentication"]["session_ttl_seconds"], 3600);
         assert_eq!(encoded["application_mtls"]["enabled"], false);
         assert_eq!(encoded["application_mtls"]["https_port"], 8449);
+        assert_eq!(encoded["s3_ingress"]["mode"], "garage_legacy");
+        assert_eq!(encoded["s3_ingress"]["port"], 3900);
     }
 
     #[test]
@@ -493,6 +622,73 @@ mod tests {
             config.application_mtls.socket_addr().expect("mTLS address"),
             "127.0.0.1:8449".parse().expect("address")
         );
+    }
+
+    #[test]
+    fn validates_feature_gated_direct_s3_listener() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+        config.validate().expect("direct S3 config is valid");
+        assert_eq!(
+            config.s3_ingress.socket_addr().expect("S3 address"),
+            "127.0.0.1:3900".parse().expect("address")
+        );
+
+        config.s3_ingress.port = config.https_port;
+        assert!(matches!(
+            config.validate(),
+            Err(StandaloneServerConfigError::DuplicateListenerPort { .. })
+        ));
+    }
+
+    #[test]
+    fn old_server_config_without_s3_section_stays_on_legacy_gateway() {
+        let config: StandaloneServerConfig = serde_json::from_value(serde_json::json!({
+            "bind_address": "127.0.0.1",
+            "https_port": 8448,
+            "public_base_url": "https://127.0.0.1:8448",
+            "product_root": "/opt/dasobjectstore",
+            "tls": {
+                "certificate_path": "/opt/dasobjectstore/tls/server.crt",
+                "private_key_path": "/opt/dasobjectstore/tls/server.key"
+            }
+        }))
+        .expect("legacy server config parses");
+
+        assert_eq!(
+            config.s3_ingress.mode,
+            super::StandaloneS3IngressMode::GarageLegacy
+        );
+        assert!(!config.s3_ingress.enabled());
+        config.validate().expect("legacy config remains valid");
+    }
+
+    #[test]
+    fn direct_s3_listener_rejects_invalid_address_upstream_and_budget() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+
+        config.s3_ingress.bind_address = "not-an-address".to_string();
+        assert!(matches!(
+            config.validate(),
+            Err(StandaloneServerConfigError::InvalidS3IngressBindAddress { .. })
+        ));
+
+        config.s3_ingress.bind_address = "127.0.0.1".to_string();
+        config.s3_ingress.legacy_upstream_endpoint = "127.0.0.1:3901".to_string();
+        assert!(matches!(
+            config.validate(),
+            Err(StandaloneServerConfigError::InvalidS3LegacyUpstream { .. })
+        ));
+
+        config.s3_ingress.legacy_upstream_endpoint = "http://127.0.0.1:3901".to_string();
+        for invalid in [0, 257] {
+            config.s3_ingress.max_concurrent_uploads = invalid;
+            assert_eq!(
+                config.validate().expect_err("invalid budget rejected"),
+                StandaloneServerConfigError::InvalidS3Concurrency { value: invalid }
+            );
+        }
     }
 
     #[test]

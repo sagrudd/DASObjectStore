@@ -17,6 +17,10 @@ pub struct GarageProviderConfig {
     pub image: String,
     pub bind_address: String,
     pub api_port: u16,
+    /// Optional host-side API port. The container keeps `api_port`, allowing
+    /// the direct ingress gateway to own public 3900 while Garage remains on
+    /// its retained internal 3900 listener and is published on loopback 3901.
+    pub published_api_port: Option<u16>,
     pub rpc_port: u16,
     pub web_port: u16,
     pub admin_port: u16,
@@ -34,6 +38,7 @@ impl Default for GarageProviderConfig {
             image: DEFAULT_GARAGE_IMAGE.to_string(),
             bind_address: "127.0.0.1".to_string(),
             api_port: DEFAULT_GARAGE_API_PORT,
+            published_api_port: None,
             rpc_port: DEFAULT_GARAGE_API_PORT + 1,
             web_port: DEFAULT_GARAGE_API_PORT + 2,
             admin_port: DEFAULT_GARAGE_API_PORT + 3,
@@ -133,20 +138,28 @@ impl ObjectServiceProvider for GarageProvider {
         yaml.push_str("    restart: unless-stopped\n");
         yaml.push_str("    stop_grace_period: 30s\n");
         yaml.push_str("    ports:\n");
+        let published_api_port = self
+            .config
+            .published_api_port
+            .unwrap_or(self.config.api_port);
         yaml.push_str(&render_port_mapping(
             &self.config.bind_address,
+            published_api_port,
             self.config.api_port,
         ));
         yaml.push_str(&render_port_mapping(
             &self.config.bind_address,
+            published_api_port + 1,
             self.config.rpc_port,
         ));
         yaml.push_str(&render_port_mapping(
             &self.config.bind_address,
+            published_api_port + 2,
             self.config.web_port,
         ));
         yaml.push_str(&render_port_mapping(
             &self.config.bind_address,
+            published_api_port + 3,
             self.config.admin_port,
         ));
         yaml.push_str("    volumes:\n");
@@ -201,12 +214,12 @@ impl ObjectServiceProvider for GarageProvider {
     }
 }
 
-fn render_port_mapping(bind_address: &str, port: u16) -> String {
+fn render_port_mapping(bind_address: &str, host_port: u16, container_port: u16) -> String {
     format!(
         "      - \"{}:{}:{}\"\n",
         escape_yaml_string(bind_address),
-        port,
-        port
+        host_port,
+        container_port
     )
 }
 
@@ -227,6 +240,14 @@ fn validate_config(config: &GarageProviderConfig) -> Result<(), ObjectServiceErr
     {
         return Err(ObjectServiceError::InvalidConfiguration(
             "Garage ports must be greater than zero".to_string(),
+        ));
+    }
+    if config
+        .published_api_port
+        .is_some_and(|port| port == 0 || port > u16::MAX - 3)
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "Garage published API port must leave room for four listener mappings".to_string(),
         ));
     }
     if config.replication_factor == 0 {
@@ -340,6 +361,21 @@ mod tests {
 
         assert!(rendered.compose_yaml.contains("\"0.0.0.0:3900:3900\""));
         assert!(rendered.compose_yaml.contains("\"0.0.0.0:3901:3901\""));
+    }
+
+    #[test]
+    fn publishes_retained_container_listener_on_private_gateway_port() {
+        let provider = GarageProvider::new(GarageProviderConfig {
+            published_api_port: Some(4900),
+            ..GarageProviderConfig::default()
+        });
+        let rendered = provider
+            .render_compose(&request())
+            .expect("Garage compose renders");
+
+        assert!(rendered.compose_yaml.contains("\"127.0.0.1:4900:3900\""));
+        assert!(rendered.compose_yaml.contains("\"127.0.0.1:4901:3901\""));
+        assert_eq!(provider.config().api_port, 3900);
     }
 
     #[test]

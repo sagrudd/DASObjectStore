@@ -13,6 +13,7 @@ mod capacity_persistence;
 mod capacity_provider;
 mod config;
 mod destage_worker;
+mod direct_s3_ingress;
 pub(crate) mod disk_lockdown;
 mod drive_backend;
 mod enclosure_prepare;
@@ -124,6 +125,11 @@ pub use config::{
 };
 pub use destage_worker::{
     run_one_durable_destage, DurableDestageOutcome, DurableDestageWorkerConfig,
+};
+pub use direct_s3_ingress::{
+    direct_s3_profile_backend, direct_s3_profile_backend_root, direct_s3_store_private_root,
+    DirectS3IngressIdentity, DirectS3IngressJournal, DirectS3IngressJournalError,
+    DirectS3IngressState,
 };
 pub use drive_backend::{DriveBackend, DriveRuntimeGuard};
 pub use endpoint_registry::{

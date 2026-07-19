@@ -253,6 +253,16 @@ impl SubObjectCapacityLedger {
             .reservation_bytes(&store_reservation_id(reservation_id))
     }
 
+    pub fn resize_store_reservation(
+        &mut self,
+        reservation_id: &str,
+        bytes: u64,
+    ) -> Result<(), SubObjectCapacityError> {
+        self.parent
+            .resize_reservation(&store_reservation_id(reservation_id), bytes)
+            .map_err(SubObjectCapacityError::Parent)
+    }
+
     pub fn renew_store_reservation_at_unix_seconds(
         &mut self,
         reservation_id: &str,
@@ -363,6 +373,29 @@ impl SubObjectCapacityLedger {
             .map_err(SubObjectCapacityError::Parent)?;
         if let Err(error) = child.reserve(reservation_id, bytes) {
             let _ = self.parent.release(&parent_reservation_id);
+            return Err(SubObjectCapacityError::Child(error));
+        }
+        Ok(())
+    }
+
+    pub fn resize(
+        &mut self,
+        child_id: &str,
+        reservation_id: &str,
+        bytes: u64,
+    ) -> Result<(), SubObjectCapacityError> {
+        let before = self.clone();
+        let parent_reservation_id = parent_reservation_id(child_id, reservation_id);
+        self.parent
+            .resize_reservation(&parent_reservation_id, bytes)
+            .map_err(SubObjectCapacityError::Parent)?;
+        let child = self.children.get_mut(child_id).ok_or_else(|| {
+            SubObjectCapacityError::UnknownChild {
+                child_id: child_id.to_string(),
+            }
+        })?;
+        if let Err(error) = child.resize_reservation(reservation_id, bytes) {
+            *self = before;
             return Err(SubObjectCapacityError::Child(error));
         }
         Ok(())
