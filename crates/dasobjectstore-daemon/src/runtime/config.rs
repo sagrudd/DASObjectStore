@@ -99,6 +99,19 @@ impl DaemonRuntimeConfig {
         validate_absolute_path("product_root", &self.product_root)?;
         self.telemetry.validate()?;
         self.object_service.validate()?;
+        if let Some(limit) = self
+            .ingest_resource_policy
+            .max_concurrent_transactions
+        {
+            if !(crate::api::DaemonIngestResourceBudget::MIN_CONCURRENT_TRANSACTIONS
+                ..=crate::api::DaemonIngestResourceBudget::MAX_CONCURRENT_TRANSACTIONS)
+                .contains(&limit)
+            {
+                return Err(
+                    DaemonRuntimeConfigError::InvalidMaxConcurrentIngestTransactions(limit),
+                );
+            }
+        }
 
         if self.socket_path.parent() != Some(self.runtime_dir.as_path()) {
             return Err(DaemonRuntimeConfigError::SocketOutsideRuntimeDir {
@@ -183,6 +196,7 @@ pub enum DaemonRuntimeConfigError {
         runtime_dir: PathBuf,
     },
     InvalidTelemetryCadenceSeconds(u64),
+    InvalidMaxConcurrentIngestTransactions(u16),
 }
 
 impl Display for DaemonRuntimeConfigError {
@@ -204,6 +218,12 @@ impl Display for DaemonRuntimeConfigError {
             Self::InvalidTelemetryCadenceSeconds(seconds) => write!(
                 formatter,
                 "unsupported telemetry cadence {seconds}s; supported cadences are 6s and 30s"
+            ),
+            Self::InvalidMaxConcurrentIngestTransactions(limit) => write!(
+                formatter,
+                "ingest_resource_policy.max_concurrent_transactions must be between {} and {}, got {limit}",
+                crate::api::DaemonIngestResourceBudget::MIN_CONCURRENT_TRANSACTIONS,
+                crate::api::DaemonIngestResourceBudget::MAX_CONCURRENT_TRANSACTIONS,
             ),
         }
     }
@@ -298,6 +318,7 @@ mod tests {
     #[test]
     fn configured_ingest_policy_round_trips_through_json() {
         let mut config = DaemonRuntimeConfig::default_packaged();
+        config.ingest_resource_policy.max_concurrent_transactions = Some(6);
         config.ingest_resource_policy.memory_budget_bytes = 256 * 1024 * 1024;
         config.ingest_resource_policy.worker_counts.hdd_write = 2;
 
@@ -306,6 +327,17 @@ mod tests {
             serde_json::from_str(&encoded).expect("config deserializes");
 
         assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn rejects_out_of_range_concurrent_ingest_limit() {
+        let mut config = DaemonRuntimeConfig::default_packaged();
+        config.ingest_resource_policy.max_concurrent_transactions = Some(17);
+
+        assert_eq!(
+            config.validate(),
+            Err(DaemonRuntimeConfigError::InvalidMaxConcurrentIngestTransactions(17))
+        );
     }
 
     #[test]

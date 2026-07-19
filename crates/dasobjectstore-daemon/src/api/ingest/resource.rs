@@ -3,6 +3,13 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DaemonIngestResourcePolicy {
+    /// Upper bound for simultaneously running ingest transactions.
+    ///
+    /// `None` selects a conservative limit from the effective CPU, memory,
+    /// and I/O budgets. Explicit values are still constrained by those
+    /// budgets, so this setting cannot disable resource safety.
+    #[serde(default)]
+    pub max_concurrent_transactions: Option<u16>,
     pub worker_counts: DaemonIngestWorkerCounts,
     pub memory_budget_bytes: u64,
     pub ssd_reserve_bytes: u64,
@@ -16,6 +23,7 @@ impl Default for DaemonIngestResourcePolicy {
         let worker_counts = DaemonIngestWorkerCounts::default();
 
         Self {
+            max_concurrent_transactions: None,
             worker_counts,
             memory_budget_bytes: 1024 * 1024 * 1024,
             ssd_reserve_bytes: 10 * 1024 * 1024 * 1024,
@@ -84,6 +92,11 @@ pub struct DaemonIngestResourceBudget {
 }
 
 impl DaemonIngestResourceBudget {
+    pub const MIN_CONCURRENT_TRANSACTIONS: u16 = 1;
+    pub const MAX_CONCURRENT_TRANSACTIONS: u16 = 16;
+    pub const TRANSACTION_MEMORY_BYTES: u64 = 8 * 1024 * 1024;
+    pub const TRANSACTION_IO_WORKERS: u16 = 2;
+
     pub fn from_policy(policy: DaemonIngestResourcePolicy, available_cpu_cores: u16) -> Self {
         let cpu_cores = available_cpu_cores
             .saturating_sub(policy.system_safety_reserve.cpu_cores)
@@ -91,23 +104,46 @@ impl DaemonIngestResourceBudget {
         let memory_bytes = policy
             .memory_budget_bytes
             .saturating_sub(policy.system_safety_reserve.memory_bytes);
-        let socket_workers = policy
-            .worker_counts
-            .scan
-            .saturating_add(policy.worker_counts.finalization)
-            .max(1);
         let io_workers = policy
             .worker_counts
             .source_read
             .saturating_add(policy.worker_counts.ssd_stage)
             .saturating_add(policy.worker_counts.hdd_write)
             .max(1);
+        let resource_limit = cpu_cores
+            .min(
+                (memory_bytes / Self::TRANSACTION_MEMORY_BYTES)
+                    .min(u64::from(u16::MAX)) as u16,
+            )
+            .min(io_workers / Self::TRANSACTION_IO_WORKERS)
+            .clamp(
+                Self::MIN_CONCURRENT_TRANSACTIONS,
+                Self::MAX_CONCURRENT_TRANSACTIONS,
+            );
+        let socket_workers = policy
+            .max_concurrent_transactions
+            .unwrap_or(resource_limit)
+            .clamp(
+                Self::MIN_CONCURRENT_TRANSACTIONS,
+                Self::MAX_CONCURRENT_TRANSACTIONS,
+            );
         Self {
             cpu_cores,
             memory_bytes,
             socket_workers,
             io_workers,
         }
+    }
+
+    /// Maximum number of standard ingest reservations this budget can admit.
+    pub fn concurrent_transaction_limit(self) -> u16 {
+        self.cpu_cores
+            .min(
+                (self.memory_bytes / Self::TRANSACTION_MEMORY_BYTES)
+                    .min(u64::from(u16::MAX)) as u16,
+            )
+            .min(self.socket_workers)
+            .min(self.io_workers / Self::TRANSACTION_IO_WORKERS)
     }
 }
 
@@ -395,6 +431,42 @@ mod tests {
                 available: 0,
             }
         );
+    }
+
+    #[test]
+    fn automatic_transaction_limit_uses_cpu_memory_and_io_budgets() {
+        let policy = DaemonIngestResourcePolicy {
+            max_concurrent_transactions: None,
+            memory_budget_bytes: 1024 * 1024 * 1024,
+            system_safety_reserve: DaemonIngestSystemSafetyReserve {
+                cpu_cores: 2,
+                memory_bytes: 512 * 1024 * 1024,
+            },
+            ..DaemonIngestResourcePolicy::default()
+        };
+
+        let budget = DaemonIngestResourceBudget::from_policy(policy, 12);
+
+        assert_eq!(budget.concurrent_transaction_limit(), 8);
+        assert_eq!(budget.socket_workers, 8);
+    }
+
+    #[test]
+    fn explicit_transaction_limit_caps_but_does_not_override_resources() {
+        let policy = DaemonIngestResourcePolicy {
+            max_concurrent_transactions: Some(12),
+            memory_budget_bytes: 1024 * 1024 * 1024,
+            system_safety_reserve: DaemonIngestSystemSafetyReserve {
+                cpu_cores: 0,
+                memory_bytes: 0,
+            },
+            ..DaemonIngestResourcePolicy::default()
+        };
+
+        let budget = DaemonIngestResourceBudget::from_policy(policy, 4);
+
+        assert_eq!(budget.socket_workers, 12);
+        assert_eq!(budget.concurrent_transaction_limit(), 4);
     }
 
     #[test]

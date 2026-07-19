@@ -468,6 +468,32 @@ identity read/traverse ACLs for the selected source tree before submission.
 Interrupted imports should be inspected through daemon job status and store
 state before retrying.
 
+Concurrent transaction admission
+--------------------------------
+
+The daemon derives a conservative concurrent-ingest limit from its effective
+CPU, memory, and I/O budgets. Automatic admission is bounded between one and
+16 transactions and, on a host with sufficient resources, permits more than
+two independent ingests. This transaction limit does not enlarge the worker
+pools used inside each ingest.
+
+Operators may set an upper bound in ``daemon.json`` when workload isolation
+requires it:
+
+.. code-block:: json
+
+   {
+     "ingest_resource_policy": {
+       "max_concurrent_transactions": 6
+     }
+   }
+
+The complete ``ingest_resource_policy`` object must retain the remaining
+policy fields already present in the installation. Supported explicit values
+are 1 through 16. CPU, memory, and I/O budgets still apply, so an explicit
+upper bound cannot force unsafe overcommit. Omitting the field selects the
+automatic limit.
+
 Inspect and Drain the Ingest Queue
 ----------------------------------
 

@@ -10,8 +10,6 @@ use crate::api::{
 };
 use std::sync::{Arc, OnceLock};
 
-const INGEST_RESOURCE_MEMORY_RESERVATION_BYTES: u64 = 8 * 1024 * 1024;
-
 pub(crate) fn submit_ingest_files_with_resource_gate(
     request: SubmitIngestFilesRequest,
     accepted_at_utc: &str,
@@ -35,9 +33,9 @@ pub(super) fn reserve_ingest_resources(
         .unwrap_or_else(shared_ingest_resource_gate)
         .try_reserve(DaemonIngestResourceReservation {
             cpu_cores: 1,
-            memory_bytes: INGEST_RESOURCE_MEMORY_RESERVATION_BYTES,
+            memory_bytes: DaemonIngestResourceBudget::TRANSACTION_MEMORY_BYTES,
             socket_workers: 1,
-            io_workers: 2,
+            io_workers: DaemonIngestResourceBudget::TRANSACTION_IO_WORKERS,
         })
 }
 
@@ -57,12 +55,7 @@ fn shared_ingest_resource_gate() -> Arc<DaemonIngestResourceGate> {
             .map(|cores| cores.get().min(u16::MAX as usize) as u16)
             .unwrap_or(1)
             .max(1);
-        let mut budget = DaemonIngestResourceBudget::from_policy(policy, available_cpu_cores);
-        // The packaged daemon may accept several independent jobs while each
-        // still retains one control lane and two I/O lanes. Keep the shared
-        // gate bounded without serializing normal job admission.
-        budget.socket_workers = budget.socket_workers.max(8);
-        budget.io_workers = budget.io_workers.max(16);
+        let budget = DaemonIngestResourceBudget::from_policy(policy, available_cpu_cores);
         Arc::new(DaemonIngestResourceGate::new(budget))
     }))
 }

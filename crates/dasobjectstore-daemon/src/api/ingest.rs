@@ -1214,6 +1214,7 @@ mod tests {
 
     fn adaptive_resource_policy() -> DaemonIngestResourcePolicy {
         DaemonIngestResourcePolicy {
+            max_concurrent_transactions: None,
             worker_counts: DaemonIngestWorkerCounts {
                 scan: 2,
                 source_read: 4,

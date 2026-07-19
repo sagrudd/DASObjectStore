@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.115.0 - 2026-07-19
+
+- Replace the packaged daemon's accidental two-transaction ingest ceiling
+  with a bounded automatic limit derived from effective CPU, memory, and I/O
+  capacity; the default remains conservative and never exceeds 16 concurrent
+  transactions.
+- Add the optional daemon configuration field
+  ``ingest_resource_policy.max_concurrent_transactions``. Explicit limits are
+  validated in the range 1 through 16 and remain subordinate to resource
+  safety budgets.
+- Use the same budget derivation for configured and fallback ingest gates,
+  removing their previous admission inconsistency.
+
 ## 0.114.11 - 2026-07-19
 
 - Continue directory ingest after an individual source file cannot be read,

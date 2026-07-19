@@ -29,6 +29,12 @@ evidence and detailed source tasks.
 
 ### Current campaign gate status (2026-07-16)
 
+- `[~]` Durable ingest resource admission — bounded auto/explicit concurrent
+  transaction budgeting is delivered in 0.115.0. Remaining: transactional
+  persistent wait queue, per-store fair scheduling, idempotent submission,
+  cooperative cancellation/restart recovery, typed queue diagnostics, and
+  pre-transfer Garage admission using the same held lease.
+
 - `[x]` Gate 0 — root-isolated local Docker rendering, daemon bootstrap,
   daemon-owned Garage provisioning, scoped credential export, and an S3
   put/head/list/get/checksum/delete smoke are delivered. This remains local
