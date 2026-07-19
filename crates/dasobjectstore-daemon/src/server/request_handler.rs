@@ -35,7 +35,8 @@ use crate::api::{
     StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
     StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
     StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+    SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
+    UpdateObjectStoreAcknowledgementPolicyResponse, UpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse, PROFILE_BROWSER_SCHEMA_VERSION, PROFILE_S3_SCHEMA_VERSION,
 };
@@ -128,6 +129,7 @@ use self::job_projection::{
     daemon_job_summary_from_local_admin, daemon_job_summary_from_prepare_enclosure,
     daemon_job_summary_from_profile_binding, daemon_job_summary_from_profile_migration,
     daemon_job_summary_from_service_lifecycle, daemon_job_summary_from_service_provision,
+    daemon_job_summary_from_update_object_store_acknowledgement_policy,
     daemon_job_summary_from_update_object_store_ingest_policy,
     remote_easyconnect_aws_cli_upload_job_request,
 };
@@ -422,6 +424,60 @@ where
             &request,
             previous_ingest_mode,
             ingest_mode,
+            store_id,
+        ))
+    }
+
+    fn update_object_store_acknowledgement_policy(
+        &self,
+        request: UpdateObjectStoreAcknowledgementPolicyRequest,
+        accepted_at_utc: &str,
+    ) -> Result<UpdateObjectStoreAcknowledgementPolicyResponse, ObjectServiceError> {
+        let acknowledgement_policy = request
+            .validate()
+            .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
+        let store_id = StoreId::new(request.store_id.clone()).map_err(|_| {
+            ObjectServiceError::InvalidConfiguration(format!(
+                "invalid store_id: {}",
+                request.store_id
+            ))
+        })?;
+        let mut definitions = read_store_registry(&self.store_registry_path)?;
+        let definition = definitions
+            .iter_mut()
+            .find(|definition| definition.store_id == store_id)
+            .ok_or_else(|| {
+                ObjectServiceError::InvalidConfiguration(format!(
+                    "unknown object store: {store_id}"
+                ))
+            })?;
+        let previous = definition.policy.acknowledgement_policy;
+        definition.policy.acknowledgement_policy = acknowledgement_policy;
+        definition
+            .policy
+            .validate()
+            .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
+        if !request.dry_run {
+            upsert_store_definition(&self.store_registry_path, definition.clone())?;
+        }
+        let job_id_value = format!(
+            "objectstore-acknowledgement-policy-{}",
+            accepted_at_utc
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_ascii_lowercase()
+        );
+        let job_id = crate::api::DaemonJobId::new(job_id_value.clone()).map_err(|_| {
+            ObjectServiceError::InvalidConfiguration(format!("invalid job id: {job_id_value}"))
+        })?;
+        Ok(UpdateObjectStoreAcknowledgementPolicyResponse::accepted(
+            job_id,
+            accepted_at_utc,
+            &request,
+            previous,
+            acknowledgement_policy,
             store_id,
         ))
     }
@@ -5528,6 +5584,7 @@ mod tests {
                 job_id: IngestJobId::new("ingest-files-2026-07-07t12-35-00z").expect("job id"),
                 accepted_at_utc: accepted_at_utc.to_string(),
                 dry_run: request.dry_run,
+                objects: Vec::new(),
             })
         }
 

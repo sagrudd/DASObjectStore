@@ -208,6 +208,38 @@ pub struct SubmitIngestFilesResponse {
     pub job_id: IngestJobId,
     pub accepted_at_utc: String,
     pub dry_run: bool,
+    /// Per-object authoritative completion evidence. Older daemon responses
+    /// omit this additive field; clients must then inspect the queue.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<DaemonIngestObjectCompletion>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonIngestAcknowledgementState {
+    SsdAcknowledged,
+    FullyHddSettled,
+    Queued,
+    UnderReplicated,
+    Failed,
+}
+
+/// Path-free evidence that tells a client whether its local staging copy may
+/// be released. `local_copy_may_be_deleted` is true only after authoritative
+/// catalogue visibility, verified managed-SSD placement, and durable queue
+/// registration have committed together (or HDD policy is already satisfied).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonIngestObjectCompletion {
+    pub object_id: ObjectId,
+    pub catalogue_state: String,
+    pub acknowledgement_policy: dasobjectstore_core::store::AcknowledgementPolicy,
+    pub acknowledgement_state: DaemonIngestAcknowledgementState,
+    pub ssd_verified: bool,
+    pub required_hdd_copies: u8,
+    pub verified_hdd_copies: u8,
+    pub destage_job_id: Option<String>,
+    pub newly_committed: bool,
+    pub local_copy_may_be_deleted: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -8,11 +8,43 @@ pub(super) fn run_ingest_queue(
 ) -> Result<(), CliError> {
     let live_sqlite_path = super::metadata_paths::resolve_live_sqlite_path(args.live_sqlite_path());
     let snapshot = read_ingest_queue_for_store(&live_sqlite_path, args.store_id())?;
+    let durable_destage =
+        dasobjectstore_metadata::list_destage_queue(&live_sqlite_path, Some(args.store_id()))
+            .map_err(|error| CliError::CommandFailed(error.to_string()))?;
+    let durable_destage_diagnostics =
+        dasobjectstore_metadata::destage_queue_diagnostics(&live_sqlite_path)
+            .map_err(|error| CliError::CommandFailed(error.to_string()))?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &snapshot)?;
         writer.write_all(b"\n")?;
     } else {
         write_ingest_queue_summary(&snapshot, writer)?;
+        writeln!(
+            writer,
+            "Durable HDD destage: {} object(s)",
+            durable_destage.len()
+        )?;
+        writeln!(
+            writer,
+            "Queued bytes: {}; active bytes: {}; failed/review: {}",
+            durable_destage_diagnostics.queued_bytes,
+            durable_destage_diagnostics.active_bytes,
+            durable_destage_diagnostics.failed_object_count
+        )?;
+        for record in durable_destage {
+            writeln!(
+                writer,
+                "- {} state={:?} copies={}/{} attempts={}/{} retry={} error={}",
+                record.object_id,
+                record.state,
+                record.verified_copy_count,
+                record.required_copy_count,
+                record.attempt_count,
+                record.max_attempts,
+                record.next_retry_at_utc.as_deref().unwrap_or("none"),
+                record.last_error.as_deref().unwrap_or("none")
+            )?;
+        }
     }
 
     Ok(())

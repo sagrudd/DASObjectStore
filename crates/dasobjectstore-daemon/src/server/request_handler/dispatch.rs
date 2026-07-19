@@ -59,6 +59,7 @@ where
         | DaemonApiRequest::ApplianceTelemetry(_)
         | DaemonApiRequest::SubmitIngestFiles(_)
         | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
+        | DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(_)
         | DaemonApiRequest::ObjectBrowser(_)
         | DaemonApiRequest::ProfileBrowser(_)
         | DaemonApiRequest::ProfileCatalogueExport(_)

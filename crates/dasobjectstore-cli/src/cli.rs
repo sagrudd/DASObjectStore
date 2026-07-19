@@ -33,13 +33,13 @@ pub(crate) use service::{
     ServiceRenderComposeArgs, ServiceStatusArgs,
 };
 pub(crate) use store::{
-    StoreAdoptArgs, StoreArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand,
-    StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs,
-    StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs,
-    StoreProfileBindingOperation, StoreProfileBrowserArgs, StoreProfileHeadArgs,
-    StoreProfileHealthArgs, StoreProfileInspectionArgs, StoreProfileMigrationArgs,
-    StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs,
-    StoreValidateArgs, StoreVerifyArgs,
+    StoreAcknowledgementPolicyArgs, StoreAdoptArgs, StoreArgs, StoreCapabilitiesArgs,
+    StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs,
+    StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs,
+    StoreProfileBindingArgs, StoreProfileBindingOperation, StoreProfileBrowserArgs,
+    StoreProfileHeadArgs, StoreProfileHealthArgs, StoreProfileInspectionArgs,
+    StoreProfileMigrationArgs, StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs,
+    StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs,
 };
 pub(crate) use subobject::{
     SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,

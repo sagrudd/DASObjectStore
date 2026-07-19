@@ -9,13 +9,13 @@ use crate::cli::{
     ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
     PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand, PoolImportArgs,
     PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceRenderComposeArgs,
-    StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs,
-    StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
-    StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
-    StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
-    StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
-    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
-    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
+    StoreAcknowledgementPolicyArgs, StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs,
+    StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs,
+    StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs,
+    StoreProfileBindingOperation, StoreProfileBrowserArgs, StoreProfileHeadArgs,
+    StoreProfileHealthArgs, StoreProfileInspectionArgs, StoreProfileMigrationArgs,
+    StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs,
+    StoreValidateArgs, StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod application_auth;
 mod command_handlers;
@@ -154,9 +154,9 @@ use self::store_read::{
     run_store_user_service_plan, run_store_validate,
 };
 use self::store_write::{
-    run_store_adopt, run_store_create, run_store_deduplicate, run_store_delete, run_store_drain,
-    run_store_ingest_policy, run_store_profile_binding, run_store_profile_migration,
-    run_store_repair, run_store_verify,
+    run_store_acknowledgement_policy, run_store_adopt, run_store_create, run_store_deduplicate,
+    run_store_delete, run_store_drain, run_store_ingest_policy, run_store_profile_binding,
+    run_store_profile_migration, run_store_repair, run_store_verify,
 };
 use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
@@ -189,7 +189,8 @@ use dasobjectstore_daemon::{
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,
     StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UnixSocketDaemonTransport, UpdateObjectStoreIngestPolicyRequest,
+    SubmitIngestFilesResponse, UnixSocketDaemonTransport,
+    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreIngestPolicyRequest,
     DEFAULT_DAEMON_STATE_DIR, DISK_LOCKDOWN_CONFIRMATION as LOCKDOWN_CONFIRMATION,
     OBJECT_STORE_CREATE_CONFIRMATION,
 };
@@ -323,6 +324,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             Some(StoreCommand::Capacity(args)) => run_store_capacity(args, writer),
             Some(StoreCommand::List(args)) => run_store_list(args, writer),
             Some(StoreCommand::IngestPolicy(args)) => run_store_ingest_policy(args, writer),
+            Some(StoreCommand::AcknowledgementPolicy(args)) => {
+                run_store_acknowledgement_policy(args, writer)
+            }
             Some(StoreCommand::S3Upload(args)) => run_store_s3_upload(args, writer),
             Some(StoreCommand::Validate(args)) => run_store_validate(args, writer),
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
@@ -4327,6 +4331,7 @@ mod tests {
                     job_id: IngestJobId::new("job-zymo").expect("job id"),
                     accepted_at_utc: "2026-07-07T10:27:12Z".to_string(),
                     dry_run: false,
+                    objects: Vec::new(),
                 },
             ))
         });
@@ -4395,6 +4400,7 @@ mod tests {
                         job_id: IngestJobId::new("job-zymo").expect("job id"),
                         accepted_at_utc: "2026-07-09T09:21:21Z".to_string(),
                         dry_run: false,
+                        objects: Vec::new(),
                     },
                 ))
             }
@@ -4853,6 +4859,7 @@ mod tests {
                     job_id: IngestJobId::new("job-direct").expect("job id"),
                     accepted_at_utc: "2026-07-09T14:16:12Z".to_string(),
                     dry_run: false,
+                    objects: Vec::new(),
                 },
             ))
         });

@@ -53,6 +53,7 @@ use crate::api::{
     StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
     StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
     StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
@@ -657,6 +658,21 @@ where
         }
     }
 
+    pub fn update_object_store_acknowledgement_policy(
+        &self,
+        request: UpdateObjectStoreAcknowledgementPolicyRequest,
+    ) -> Result<UpdateObjectStoreAcknowledgementPolicyResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(
+            request,
+        ))? {
+            DaemonApiResponse::UpdateObjectStoreAcknowledgementPolicy(response) => Ok(response),
+            response => Err(unexpected(
+                "update_object_store_acknowledgement_policy",
+                response,
+            )),
+        }
+    }
+
     pub fn object_browser(
         &self,
         request: ObjectBrowserRequest,
@@ -869,6 +885,9 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::CapacityAdmission(_) => "capacity_admission",
         DaemonApiResponse::CapacityStatus(_) => "capacity_status",
         DaemonApiResponse::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
+        DaemonApiResponse::UpdateObjectStoreAcknowledgementPolicy(_) => {
+            "update_object_store_acknowledgement_policy"
+        }
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
         DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",

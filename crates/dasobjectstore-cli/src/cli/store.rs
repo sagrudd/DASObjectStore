@@ -75,6 +75,9 @@ pub(crate) enum StoreCommand {
     List(StoreListArgs),
     /// Inspect or update the daemon-owned store ingest landing policy.
     IngestPolicy(StoreIngestPolicyArgs),
+    /// Inspect or update when the daemon acknowledges a store write.
+    #[command(name = "acknowledgement-policy")]
+    AcknowledgementPolicy(StoreAcknowledgementPolicyArgs),
     /// Render AWS CLI commands for remote S3-compatible uploads.
     S3Upload(StoreS3UploadArgs),
     /// Validate a JSON store policy file.
@@ -526,6 +529,49 @@ pub(crate) enum StoreIngestMode {
     SsdFirst,
     DirectToHdd,
 }
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct StoreAcknowledgementPolicyArgs {
+    store_id: StoreId,
+    #[arg(long, value_enum)]
+    policy: StoreAcknowledgementPolicy,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long, default_value = "")]
+    confirm: String,
+    #[arg(long)]
+    json: bool,
+}
+impl StoreAcknowledgementPolicyArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+    pub(crate) fn policy(&self) -> StoreAcknowledgementPolicy {
+        self.policy
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub(crate) enum StoreAcknowledgementPolicy {
+    AfterSsdIngest,
+    AfterHddPlacement,
+}
+impl StoreAcknowledgementPolicy {
+    pub(crate) fn as_api_value(self) -> &'static str {
+        match self {
+            Self::AfterSsdIngest => "after_ssd_ingest",
+            Self::AfterHddPlacement => "after_hdd_placement",
+        }
+    }
+}
 impl StoreIngestMode {
     pub(crate) fn as_api_value(self) -> &'static str {
         match self {
@@ -910,7 +956,10 @@ impl StoreContentsArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{StoreCommand, StoreIngestMode, StoreProfileBindingOperation, StoreS3UploadAuth};
+    use super::{
+        StoreAcknowledgementPolicy, StoreCommand, StoreIngestMode, StoreProfileBindingOperation,
+        StoreS3UploadAuth,
+    };
     use crate::cli::{Cli, Command};
     use clap::Parser;
     use dasobjectstore_core::store::StoreClass;
@@ -974,6 +1023,34 @@ mod tests {
                 "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"
             ))
         );
+    }
+
+    #[test]
+    fn parses_acknowledgement_policy_mutation() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "acknowledgement-policy",
+            "epic_collection",
+            "--policy",
+            "after-ssd-ingest",
+            "--confirm",
+            "confirm acknowledgement policy",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("acknowledgement policy parses");
+        let Some(Command::Store(args)) = cli.command() else {
+            panic!("store command")
+        };
+        let Some(StoreCommand::AcknowledgementPolicy(policy)) = args.command() else {
+            panic!("acknowledgement policy command")
+        };
+        assert_eq!(policy.store_id().as_str(), "epic_collection");
+        assert_eq!(policy.policy(), StoreAcknowledgementPolicy::AfterSsdIngest);
+        assert_eq!(policy.confirm(), "confirm acknowledgement policy");
+        assert!(policy.dry_run());
+        assert!(policy.json());
     }
 
     #[test]

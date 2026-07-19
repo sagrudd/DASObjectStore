@@ -22,6 +22,7 @@ pub(crate) fn resolve_object_download_with_hdd_root(
     resolve_one_object_download_with_roots(
         live_sqlite_path,
         &discover_managed_hdd_roots(hdd_root)?,
+        &crate::runtime::default_ssd_root(),
         store_id,
         request,
     )
@@ -58,6 +59,7 @@ pub(crate) fn resolve_object_folder_download_with_hdd_root(
         let download = resolve_one_object_download_with_roots(
             live_sqlite_path,
             &disk_roots,
+            &crate::runtime::default_ssd_root(),
             store_id,
             &ObjectDownloadRequest {
                 endpoint: request.endpoint.clone(),
@@ -96,6 +98,7 @@ pub(crate) fn resolve_object_folder_download_with_hdd_root(
 fn resolve_one_object_download_with_roots(
     live_sqlite_path: &Path,
     disk_roots: &[DiskCopyRoot],
+    ssd_root: &Path,
     store_id: &StoreId,
     request: &ObjectDownloadRequest,
 ) -> Result<ObjectDownloadResponse, ObjectDownloadResolveError> {
@@ -107,11 +110,15 @@ fn resolve_one_object_download_with_roots(
         });
     }
 
-    let (disk_id, source_path) =
-        verified_source_path(&summary.placements, disk_roots).ok_or_else(|| {
-            ObjectDownloadResolveError::NoVerifiedManagedPlacement {
-                object_id: request.object_id.clone(),
-            }
+    let (disk_id, source_path) = verified_source_path(&summary.placements, disk_roots)
+        .or(verified_ssd_source_path(
+            live_sqlite_path,
+            ssd_root,
+            store_id,
+            &request.object_id,
+        )?)
+        .ok_or_else(|| ObjectDownloadResolveError::NoVerifiedManagedPlacement {
+            object_id: request.object_id.clone(),
         })?;
     let metadata = fs::metadata(&source_path)?;
     if !metadata.is_file() {
@@ -127,6 +134,26 @@ fn resolve_one_object_download_with_roots(
         source_path,
         size_bytes: metadata.len(),
     })
+}
+
+fn verified_ssd_source_path(
+    live_sqlite_path: &Path,
+    ssd_root: &Path,
+    store_id: &StoreId,
+    object_id: &ObjectId,
+) -> Result<Option<(DiskId, PathBuf)>, ObjectDownloadResolveError> {
+    Ok(
+        dasobjectstore_metadata::read_ssd_placement(live_sqlite_path, object_id)?
+            .filter(|placement| {
+                placement.store_id == *store_id && placement.evicted_at_utc.is_none()
+            })
+            .and_then(|placement| safe_relative_path(&placement.relative_path))
+            .and_then(|relative| {
+                DiskId::new("managed-ssd")
+                    .ok()
+                    .map(|disk_id| (disk_id, ssd_root.join(relative)))
+            }),
+    )
 }
 
 fn verified_source_path(
@@ -252,6 +279,7 @@ fn folder_archive_name(prefix: &str) -> String {
 #[derive(Debug)]
 pub(crate) enum ObjectDownloadResolveError {
     Inspect(ObjectInspectError),
+    SsdMetadata(dasobjectstore_metadata::DestageMetadataError),
     HddDiscovery(DaemonIngestFilesRuntimeError),
     Io(std::io::Error),
     ObjectNotInStore {
@@ -301,7 +329,9 @@ impl ObjectDownloadResolveError {
             Self::NoVerifiedManagedPlacement { .. } | Self::SourceNotFile { .. } => {
                 "object_download_unavailable"
             }
-            Self::HddDiscovery(_) | Self::Io(_) | Self::Inspect(_) => "object_download_failed",
+            Self::HddDiscovery(_) | Self::Io(_) | Self::Inspect(_) | Self::SsdMetadata(_) => {
+                "object_download_failed"
+            }
         }
     }
 }
@@ -310,6 +340,7 @@ impl Display for ObjectDownloadResolveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Inspect(error) => Display::fmt(error, formatter),
+            Self::SsdMetadata(error) => Display::fmt(error, formatter),
             Self::HddDiscovery(error) => Display::fmt(error, formatter),
             Self::Io(error) => write!(formatter, "object download IO failed: {error}"),
             Self::ObjectNotInStore {
@@ -390,6 +421,12 @@ impl From<ObjectInspectError> for ObjectDownloadResolveError {
     }
 }
 
+impl From<dasobjectstore_metadata::DestageMetadataError> for ObjectDownloadResolveError {
+    fn from(error: dasobjectstore_metadata::DestageMetadataError) -> Self {
+        Self::SsdMetadata(error)
+    }
+}
+
 impl From<DaemonIngestFilesRuntimeError> for ObjectDownloadResolveError {
     fn from(error: DaemonIngestFilesRuntimeError) -> Self {
         Self::HddDiscovery(error)
@@ -406,6 +443,7 @@ impl From<std::io::Error> for ObjectDownloadResolveError {
 mod tests {
     use super::{
         resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+        resolve_one_object_download_with_roots,
     };
     use crate::api::{ObjectDownloadRequest, ObjectFolderDownloadRequest};
     use crate::runtime::object_download::{
@@ -456,6 +494,39 @@ mod tests {
         assert_eq!(response.source_path, source_path);
         assert_eq!(response.size_bytes, b"download payload".len() as u64);
 
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn resolves_catalogue_verified_ssd_placement_without_hdd_copy() {
+        let root = temp_root("download-ssd-fallback");
+        let live_sqlite_path = root.join("live.sqlite");
+        let ssd_root = root.join("ssd");
+        fs::create_dir_all(&root).expect("fixture root");
+        let connection = fixture_connection(&live_sqlite_path);
+        insert_object_row_fixture(&connection, "ena/raw/metadata.tsv", "sha256:payload");
+        connection.execute("INSERT INTO ssd_object_placements (object_id, store_id, relative_path, size_bytes, content_hash_algorithm, content_hash, verified_at_utc, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,7,'sha256','sha256:payload',?4,?4,?4)", params!["ena/raw/metadata.tsv", store_id().as_str(), "managed/metadata.tsv", "2026-07-19T10:00:00Z"]).expect("ssd placement");
+        fs::create_dir_all(ssd_root.join("managed")).expect("ssd parent");
+        fs::write(ssd_root.join("managed/metadata.tsv"), b"payload").expect("ssd payload");
+        let request = ObjectDownloadRequest {
+            endpoint: store_id(),
+            object_id: object_id("ena/raw/metadata.tsv"),
+            delegated_actor: None,
+        };
+        let resolved = resolve_one_object_download_with_roots(
+            &live_sqlite_path,
+            &[],
+            &ssd_root,
+            &store_id(),
+            &request,
+        )
+        .expect("SSD fallback");
+        assert_eq!(resolved.source_disk_id.as_str(), "managed-ssd");
+        assert_eq!(resolved.source_path, ssd_root.join("managed/metadata.tsv"));
+        fs::remove_file(&resolved.source_path).expect("remove payload");
+        assert!(
+            matches!(resolve_one_object_download_with_roots(&live_sqlite_path, &[], &ssd_root, &store_id(), &request), Err(ObjectDownloadResolveError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound)
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 

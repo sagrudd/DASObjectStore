@@ -221,6 +221,16 @@ pub fn settle_staged_object_to_hdd_with_controlled_progress(
     report
 }
 
+/// Settle and verify HDD copies while retaining the authoritative SSD payload.
+/// The caller may remove it only after catalogue promotion commits and policy
+/// marks the SSD placement eviction eligible.
+pub fn settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress(
+    staged: &StagedObjectPut,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<ObjectPutReport, ObjectPutError> {
+    settle_staged_object_to_hdd_inner(staged, &mut progress)
+}
+
 pub fn put_object_direct_to_hdd_with_controlled_progress(
     request: DirectObjectPutRequest,
     mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,

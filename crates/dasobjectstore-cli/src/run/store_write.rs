@@ -563,6 +563,55 @@ pub(super) fn run_store_ingest_policy(
     Ok(())
 }
 
+pub(super) fn run_store_acknowledgement_policy(
+    args: &StoreAcknowledgementPolicyArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    ));
+    let response = client.update_object_store_acknowledgement_policy(
+        UpdateObjectStoreAcknowledgementPolicyRequest {
+            store_id: args.store_id().to_string(),
+            acknowledgement_policy: args.policy().as_api_value().to_string(),
+            dry_run: args.dry_run(),
+            client_request_id: Some(format!(
+                "cli-store-acknowledgement-policy-{}",
+                args.store_id()
+            )),
+            administrator_actor: None,
+            confirmation_marker: args.confirm().to_string(),
+        },
+    )?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(
+            writer,
+            "ObjectStore acknowledgement policy {}",
+            if response.changed {
+                "updated"
+            } else {
+                "unchanged"
+            }
+        )?;
+        writeln!(writer, "Store: {}", response.store_id)?;
+        writeln!(
+            writer,
+            "Previous policy: {:?}",
+            response.previous_acknowledgement_policy
+        )?;
+        writeln!(
+            writer,
+            "Requested policy: {:?}",
+            response.acknowledgement_policy
+        )?;
+        writeln!(writer, "Dry run: {}", response.accepted.dry_run)?;
+    }
+    Ok(())
+}
+
 pub(super) fn run_store_repair(
     args: &StoreRepairArgs,
     writer: &mut impl Write,

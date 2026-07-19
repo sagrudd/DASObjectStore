@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 4);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 5);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -105,6 +105,52 @@ ON ingest_jobs (store_id, state, priority DESC, created_at_utc);
 CREATE INDEX IF NOT EXISTS idx_ingest_jobs_object
 ON ingest_jobs (object_id);
 
+-- Durable SSD acknowledgement and asynchronous HDD settlement are kept
+-- separate from the legacy HDD-only placements table.  One row is the
+-- authoritative managed SSD copy and one row is the idempotent unit of work.
+CREATE TABLE IF NOT EXISTS ssd_object_placements (
+    object_id TEXT PRIMARY KEY NOT NULL REFERENCES objects(object_id),
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    relative_path TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    content_hash_algorithm TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    verified_at_utc TEXT NOT NULL,
+    eviction_eligible INTEGER NOT NULL DEFAULT 0 CHECK (eviction_eligible IN (0, 1)),
+    evicted_at_utc TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS destage_queue (
+    destage_job_id TEXT PRIMARY KEY NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_id TEXT NOT NULL UNIQUE REFERENCES objects(object_id),
+    state TEXT NOT NULL,
+    expected_size_bytes INTEGER NOT NULL CHECK (expected_size_bytes >= 0),
+    content_hash_algorithm TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    acknowledgement_policy TEXT NOT NULL,
+    required_copy_count INTEGER NOT NULL CHECK (required_copy_count > 0),
+    verified_copy_count INTEGER NOT NULL DEFAULT 0 CHECK (verified_copy_count >= 0),
+    priority INTEGER NOT NULL DEFAULT 0,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 8 CHECK (max_attempts > 0),
+    last_error TEXT,
+    next_retry_at_utc TEXT,
+    lease_owner TEXT,
+    lease_expires_at_utc TEXT,
+    cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_destage_queue_runnable
+ON destage_queue (state, next_retry_at_utc, priority DESC, created_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_destage_queue_store
+ON destage_queue (store_id, state, priority DESC, created_at_utc);
+
 -- Profile-neutral catalogue handoffs are deliberately isolated from the
 -- legacy objects/placements tables.  The latter derive appliance paths from
 -- disk rows; these rows retain the portable namespace, transaction, and
@@ -147,7 +193,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 4);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 5);
     }
 
     #[test]
@@ -162,6 +208,7 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "destage_queue",
                 "disks",
                 "ingest_jobs",
                 "metadata_format_versions",
@@ -172,6 +219,7 @@ mod tests {
                 "pools",
                 "profile_catalogue_objects",
                 "profile_catalogue_transactions",
+                "ssd_object_placements",
                 "stores",
             ]
         );
@@ -236,6 +284,53 @@ mod tests {
                 "failure_message",
                 "created_at_utc",
                 "updated_at_utc",
+            ]
+        );
+    }
+
+    #[test]
+    fn live_schema_defines_durable_destage_columns() {
+        let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        assert_eq!(
+            table_columns(&connection, "ssd_object_placements"),
+            vec![
+                "object_id",
+                "store_id",
+                "relative_path",
+                "size_bytes",
+                "content_hash_algorithm",
+                "content_hash",
+                "verified_at_utc",
+                "eviction_eligible",
+                "evicted_at_utc",
+                "created_at_utc",
+                "updated_at_utc"
+            ]
+        );
+        assert_eq!(
+            table_columns(&connection, "destage_queue"),
+            vec![
+                "destage_job_id",
+                "store_id",
+                "object_id",
+                "state",
+                "expected_size_bytes",
+                "content_hash_algorithm",
+                "content_hash",
+                "acknowledgement_policy",
+                "required_copy_count",
+                "verified_copy_count",
+                "priority",
+                "attempt_count",
+                "max_attempts",
+                "last_error",
+                "next_retry_at_utc",
+                "lease_owner",
+                "lease_expires_at_utc",
+                "cancellation_requested",
+                "created_at_utc",
+                "updated_at_utc"
             ]
         );
     }

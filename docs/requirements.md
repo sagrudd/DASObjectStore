@@ -256,6 +256,21 @@ Appliance store policy represents these modes as `AfterSsdIngest` and
 `AfterHddPlacement`. Folder/drive acknowledgement SHALL use profile-neutral
 durable-finalization terminology in future compatibility-sensitive contracts.
 
+`AfterSsdIngest` success SHALL be returned only after one transaction makes
+the object catalogue-visible, records a verified and synchronized managed-SSD
+placement, and registers a durable restart-safe HDD destage job. The response
+SHALL carry per-object, path-free evidence and SHALL be the only authority for
+a client to release its local staging copy. HDD settlement SHALL continue
+asynchronously with bounded leases, retries, fairness across stores, and
+operator-visible failed or review-required states.
+
+The managed SSD copy SHALL remain readable until HDD policy is satisfied.
+After verified HDD placements and catalogue promotion commit atomically, an
+independent idempotent eviction pass MAY remove the managed SSD copy. SSD
+capacity admission SHALL account for the complete incoming file and preserve
+the configured critical free-space reserve; durable queued and active destage
+bytes SHALL be exposed in diagnostics.
+
 DASObjectStore SHALL support CLI-managed direct-to-HDD imports for massive
 server-local datasets where SSD staging is undesirable.
 

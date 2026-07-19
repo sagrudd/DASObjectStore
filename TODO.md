@@ -1857,6 +1857,11 @@ list until every temporary size-budget exception has been removed.
 - [x] Implement object state transitions from `received_on_ssd` to
   `ssd_eviction_eligible`.
 - [x] Implement store-configurable acknowledgement policy.
+- [x] Make ``AfterSsdIngest`` a real asynchronous durability boundary: commit
+  catalogue visibility, a verified synchronized SSD placement, and a durable
+  fair/retryable HDD queue row atomically; return path-free per-object release
+  evidence; retain SSD reads until atomic HDD promotion; and evict through a
+  separate guarded pass.
 - [x] Implement SSD capacity measurement and high-watermark policy.
 - [x] Implement priority queue and backpressure behavior for SSD pressure.
 - [x] Promote HDD destage urgency as SSD pressure rises.

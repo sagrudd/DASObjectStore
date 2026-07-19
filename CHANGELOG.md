@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.117.0 - 2026-07-19
+
+- Implement store-selectable asynchronous ``AfterSsdIngest`` acknowledgement.
+  Catalogue visibility, the verified synchronized SSD placement, and a durable
+  HDD destage job now commit atomically before path-free per-object completion
+  evidence permits a client to release its local copy.
+- Add a restart-safe, leased and fair HDD destage worker with bounded retries,
+  explicit failure/review states, atomic verified-placement promotion, and a
+  separate guarded SSD eviction pass.
+- Keep queued SSD-only objects visible and downloadable through Object Browser,
+  reuse complete reconciliation staging after proven SSD acknowledgement, and
+  reject intake when a complete file would violate the critical SSD reserve.
+
 ## 0.116.1 - 2026-07-19
 
 - Correct Live Status HDD settlement route labels, improve connected-host

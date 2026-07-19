@@ -56,6 +56,33 @@ pub fn read_object_browser_metadata(
                 verified_at_utc: None,
             });
 
+        let mut placements: Vec<_> = inspect
+            .placements
+            .iter()
+            .map(|placement| placement_node(placement, size_bytes))
+            .collect();
+        if let Some(ssd) = dasobjectstore_metadata::read_ssd_placement(live_sqlite_path, &object_id)
+            .map_err(ObjectBrowserMetadataReadError::Destage)?
+            .filter(|placement| placement.evicted_at_utc.is_none())
+        {
+            let verified_at_utc = ssd.verified_at_utc;
+            placements.push(ObjectBrowserPlacement {
+                disk_id: None,
+                disk_label: Some("Managed SSD".to_string()),
+                location: ObjectBrowserPlacementLocation::SsdLanding,
+                state: ObjectBrowserPlacementState::Verified,
+                size_bytes,
+                checksum: inspect
+                    .content_hash
+                    .clone()
+                    .map(|value| ObjectBrowserChecksum {
+                        algorithm: "sha256".to_string(),
+                        value,
+                        verified_at_utc: Some(verified_at_utc.clone()),
+                    }),
+                verified_at_utc: Some(verified_at_utc),
+            });
+        }
         entries.push(ObjectBrowserMetadataEntry {
             object_id,
             path: relative_object_path(&store_id, inspect.object_id.as_str()),
@@ -64,11 +91,7 @@ pub fn read_object_browser_metadata(
             modified_at_utc: Some(inspect.updated_at_utc),
             checksum,
             lifecycle_state,
-            placements: inspect
-                .placements
-                .iter()
-                .map(|placement| placement_node(placement, size_bytes))
-                .collect(),
+            placements,
         });
     }
 
@@ -147,6 +170,7 @@ pub fn query_object_browser_metadata(
 #[derive(Debug)]
 pub enum ObjectBrowserMetadataReadError {
     ObjectInspect(ObjectInspectError),
+    Destage(dasobjectstore_metadata::DestageMetadataError),
     InvalidObjectId { value: String, source: InvalidId },
     UnsupportedObjectState { value: String },
 }
@@ -155,6 +179,7 @@ impl Display for ObjectBrowserMetadataReadError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ObjectInspect(err) => Display::fmt(err, formatter),
+            Self::Destage(err) => Display::fmt(err, formatter),
             Self::InvalidObjectId { value, source } => {
                 write!(
                     formatter,
@@ -343,7 +368,16 @@ fn file_node(
         placements: include_placement
             .then(|| entry.placements.clone())
             .unwrap_or_default(),
-        download_source: (copy_count > 0).then_some(ObjectBrowserDownloadSource::HddSettled),
+        download_source: if copy_count > 0 {
+            Some(ObjectBrowserDownloadSource::HddSettled)
+        } else if entry.placements.iter().any(|placement| {
+            placement.location == ObjectBrowserPlacementLocation::SsdLanding
+                && placement.state == ObjectBrowserPlacementState::Verified
+        }) {
+            Some(ObjectBrowserDownloadSource::SsdVerified)
+        } else {
+            None
+        },
     }
 }
 

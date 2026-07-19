@@ -4,6 +4,7 @@ pub mod attach;
 pub mod capacity;
 pub mod contents;
 pub mod copy;
+pub mod destage;
 pub mod direct_import;
 pub mod disk;
 pub mod drain;
@@ -49,6 +50,14 @@ pub use copy::{
     write_verified_hdd_copy_with_progress, HddCopyError, HddCopyReport, HddCopyRequest,
     HddInlineHashCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
+pub use destage::{
+    cancel_destage, claim_next_destage, commit_verified_ssd_and_enqueue, destage_queue_diagnostics,
+    fail_destage, list_destage_queue, list_ssd_eviction_candidates, mark_ssd_evicted,
+    pause_destage, promote_hdd_settlement, read_destage, read_ssd_placement, resume_destage,
+    retry_destage, DestageMetadataError, DestageQueueDiagnostics, DestageQueueRecord, DestageState,
+    HddSettlementPromotionRequest, SsdPlacementRecord, VerifiedHddPlacement,
+    VerifiedSsdCommitReport, VerifiedSsdCommitRequest,
+};
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
     DirectHddImportRequest,
@@ -91,6 +100,7 @@ pub use local_object_store::{
     existing_object_payload_candidate_paths, object_payload_path,
     put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
     put_object_ssd_first_with_controlled_progress, put_object_ssd_first_with_progress,
+    settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress,
     settle_staged_object_to_hdd_with_controlled_progress,
     stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest, ObjectPutError,
     ObjectPutPlacementReport, ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport,

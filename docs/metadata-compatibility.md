@@ -108,6 +108,14 @@ SSD-only and is therefore not recoverable after SSD loss. For
 satisfied by verified HDD placement, so SSD loss before acknowledgement should
 behave as an incomplete write rather than durable data loss.
 
+Live schema ``0.5`` makes that SSD-only interval explicit. It adds a verified
+SSD placement record and a durable HDD destage queue row in the same SQLite
+transaction that publishes the object. Queue rows retain their acknowledgement
+policy snapshot, required and verified copy counts, retry/lease state, and last
+error across daemon restarts. HDD settlement promotion records concrete
+verified placements and marks the SSD copy eviction-eligible atomically; the
+payload is removed only by a later guarded eviction pass.
+
 DASObjectStore does not claim that local metadata snapshots are a backup. Users
 still need independent backup for data that cannot be redownloaded or
 recomputed.

@@ -250,6 +250,33 @@ pub(super) fn update_object_store_ingest_policy_validation_error(
     }
 }
 
+pub(super) fn update_object_store_acknowledgement_policy_validation_error(
+    err: UpdateObjectStoreAcknowledgementPolicyValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        UpdateObjectStoreAcknowledgementPolicyValidationError::InvalidStoreId(value) => {
+            DaemonRequestValidationError::UnsafeLocalName {
+                field: "store_id",
+                value,
+            }
+        }
+        UpdateObjectStoreAcknowledgementPolicyValidationError::InvalidAcknowledgementPolicy(
+            value,
+        ) => DaemonRequestValidationError::UnsupportedFieldValue {
+            field: "acknowledgement_policy",
+            value,
+        },
+        UpdateObjectStoreAcknowledgementPolicyValidationError::BlankClientRequestId => {
+            DaemonRequestValidationError::BlankClientRequestId
+        }
+        UpdateObjectStoreAcknowledgementPolicyValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: ACKNOWLEDGEMENT_POLICY_CONFIRMATION,
+            }
+        }
+    }
+}
+
 pub(super) fn prepare_enclosure_validation_error(
     err: PrepareEnclosureValidationError,
 ) -> DaemonRequestValidationError {

@@ -1,21 +1,23 @@
 use crate::api::{
-    DaemonIngestConflictAction, DaemonIngestConflictPolicy, DaemonIngestHddActiveTransfer,
-    DaemonIngestHddTransferPhase, DaemonIngestObjectSnapshot, DaemonIngestPipelineStage,
-    DaemonIngestProgressEvent, DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry,
-    DaemonIngestWorkerActivity, DaemonIngestWorkerTelemetry, DaemonIngressLandingMode,
-    DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonIngestAcknowledgementState, DaemonIngestConflictAction, DaemonIngestConflictPolicy,
+    DaemonIngestHddActiveTransfer, DaemonIngestHddTransferPhase, DaemonIngestObjectCompletion,
+    DaemonIngestObjectSnapshot, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
+    DaemonIngestQueueDepths, DaemonIngestStage, DaemonIngestTelemetry, DaemonIngestWorkerActivity,
+    DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
 };
 use crate::runtime::capacity_provider::CapacityAdmissionProvider;
 use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
-use dasobjectstore_core::store::{IngestMode, StorePolicy};
+use dasobjectstore_core::store::{AcknowledgementPolicy, IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    commit_object_put, existing_object_payload_candidate_paths, measure_ssd_capacity,
-    put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
-    settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
+    commit_object_put, commit_verified_ssd_and_enqueue, existing_object_payload_candidate_paths,
+    measure_ssd_capacity, put_object_direct_to_hdd_with_controlled_progress, read_destage,
+    read_object_inspect, settle_staged_object_to_hdd_with_controlled_progress,
+    stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
     IngestJobPaths, IngestPayloadWriteError, IngestStagingLayout, IngestWriteReport,
     ObjectInspectError, ObjectPutError, ObjectPutProgress, ObjectPutProgressStage,
-    ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
+    ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut, VerifiedSsdCommitRequest,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, ObjectServiceError,
@@ -81,6 +83,7 @@ pub struct DaemonFileIngestSummary {
     pub copies: u8,
     pub object_type: ObjectType,
     pub dry_run: bool,
+    pub object_completions: Vec<DaemonIngestObjectCompletion>,
 }
 
 pub fn submit_ingest_files_to_local_store(
@@ -171,6 +174,7 @@ impl LocalFileIngestExecutor {
             job_id,
             accepted_at_utc: accepted_at_utc.to_string(),
             dry_run: summary.dry_run,
+            objects: summary.object_completions,
         })
     }
 
@@ -230,6 +234,7 @@ impl LocalFileIngestExecutor {
             copies,
             object_type: request.object_type,
             dry_run: request.dry_run,
+            object_completions: Vec::new(),
         };
         let mut capacity_reservations = IngestCapacityReservations::new(
             self.capacity_provider.clone(),
@@ -323,6 +328,24 @@ impl LocalFileIngestExecutor {
                 accepted_at_utc,
                 &mut capacity_reservations,
                 ingress_origin,
+                endpoint.store.policy.acknowledgement_policy,
+                progress,
+            );
+        }
+
+        if endpoint.store.policy.acknowledgement_policy == AcknowledgementPolicy::AfterSsdIngest {
+            return self.execute_after_ssd_acknowledgement(
+                request,
+                job_id,
+                summary,
+                files,
+                managed_disk_roots,
+                copies,
+                source_bytes,
+                total_work_bytes,
+                accepted_at_utc,
+                &mut capacity_reservations,
+                ingress_origin,
                 progress,
             );
         }
@@ -364,6 +387,21 @@ impl LocalFileIngestExecutor {
             }
             crate::api::ingest_control::wait_for_source_admission();
             capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
+            let capacity = measure_ssd_capacity(&self.ssd_root)?;
+            let percentage_reserve = capacity.total_bytes.saturating_mul(u64::from(
+                100_u8.saturating_sub(self.capacity_policy.critical_watermark_percent),
+            )) / 100;
+            let required_reserve = self
+                .capacity_policy
+                .minimum_free_bytes
+                .max(percentage_reserve);
+            if capacity.available_bytes.saturating_sub(entry.size_bytes) < required_reserve {
+                capacity_reservations.release(entry)?;
+                return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                    "SSD admission rejected {}: complete file requires {} bytes while preserving {} bytes of critical reserve; {} bytes are available",
+                    entry.relative_path.display(), entry.size_bytes, required_reserve, capacity.available_bytes
+                )));
+            }
             wait_for_ssd_admission(
                 &self.ssd_root,
                 &capacity_policy,
@@ -589,7 +627,219 @@ impl LocalFileIngestExecutor {
             message: Some("file ingest complete".to_string()),
         })?;
 
+        let mut summary = summary;
+        summary.object_completions = files
+            .iter()
+            .map(|entry| DaemonIngestObjectCompletion {
+                object_id: entry.object_id.clone(),
+                catalogue_state: "HddCopyVerified".to_string(),
+                acknowledgement_policy: AcknowledgementPolicy::AfterHddPlacement,
+                acknowledgement_state: DaemonIngestAcknowledgementState::FullyHddSettled,
+                ssd_verified: false,
+                required_hdd_copies: copies,
+                verified_hdd_copies: copies,
+                destage_job_id: None,
+                newly_committed: false,
+                local_copy_may_be_deleted: true,
+            })
+            .collect();
         Ok(summary)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn execute_after_ssd_acknowledgement(
+        &self,
+        request: SubmitIngestFilesRequest,
+        job_id: &IngestJobId,
+        mut summary: DaemonFileIngestSummary,
+        files: Vec<FileIngestEntry>,
+        managed_disk_roots: Vec<DiskCopyRoot>,
+        copies: u8,
+        source_bytes: u64,
+        total_work_bytes: u64,
+        accepted_at_utc: &str,
+        capacity_reservations: &mut IngestCapacityReservations,
+        ingress_origin: DaemonIngressOrigin,
+        mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
+    ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
+        let mut completed_bytes = 0_u64;
+        let mut source_failures = Vec::new();
+
+        for (index, entry) in files.iter().enumerate() {
+            if let Some(existing) = read_destage(&self.live_sqlite_path, &entry.object_id)
+                .map_err(|error| DaemonIngestFilesRuntimeError::CommandFailed(error.to_string()))?
+            {
+                summary
+                    .object_completions
+                    .push(DaemonIngestObjectCompletion {
+                        object_id: entry.object_id.clone(),
+                        catalogue_state: format!("{:?}", existing.state),
+                        acknowledgement_policy: AcknowledgementPolicy::AfterSsdIngest,
+                        acknowledgement_state: DaemonIngestAcknowledgementState::SsdAcknowledged,
+                        ssd_verified: true,
+                        required_hdd_copies: existing.required_copy_count,
+                        verified_hdd_copies: existing.verified_copy_count,
+                        destage_job_id: Some(existing.destage_job_id),
+                        newly_committed: false,
+                        local_copy_may_be_deleted: true,
+                    });
+                completed_bytes = completed_bytes.saturating_add(entry.size_bytes);
+                continue;
+            }
+
+            crate::api::ingest_control::wait_for_source_admission();
+            capacity_reservations.admit(job_id, entry, copies, ingress_origin)?;
+            let request_put = ObjectPutRequest::new(
+                entry.object_id.clone(),
+                &entry.source_path,
+                &self.ssd_root,
+                managed_disk_roots.clone(),
+                copies,
+            )
+            .with_object_type(request.object_type);
+            let staged = match stage_object_on_ssd_with_controlled_progress(
+                &request_put,
+                |object_progress| {
+                    progress(DaemonIngestProgressEvent {
+                        job_id: job_id.clone(),
+                        endpoint: request.endpoint.clone(),
+                        stage: DaemonIngestStage::SsdIngest,
+                        pipeline_stage: Some(match object_progress.stage {
+                            ObjectPutProgressStage::SsdIngest => {
+                                DaemonIngestPipelineStage::SsdStage
+                            }
+                            ObjectPutProgressStage::SsdFlush => DaemonIngestPipelineStage::SsdFlush,
+                            _ => DaemonIngestPipelineStage::SsdStage,
+                        }),
+                        work_bytes_done: completed_bytes
+                            .saturating_add(object_progress.bytes_written),
+                        work_bytes_total: Some(total_work_bytes),
+                        source_bytes_done: Some(
+                            completed_bytes.saturating_add(object_progress.bytes_written),
+                        ),
+                        source_bytes_total: Some(source_bytes),
+                        stage_bytes_done: Some(object_progress.bytes_written),
+                        stage_bytes_total: Some(entry.size_bytes),
+                        files_done: index as u64,
+                        files_total: Some(files.len() as u64),
+                        current_object_id: Some(entry.object_id.clone()),
+                        ssd_pressure: None,
+                        telemetry: None,
+                        active_hdd_transfers: Vec::new(),
+                        resource_policy: None,
+                        message: Some(
+                            "writing and synchronizing the managed SSD acknowledgement copy"
+                                .to_string(),
+                        ),
+                    })
+                    .map_err(|error| ObjectPutError::Io(io::Error::other(error.to_string())))
+                },
+            ) {
+                Ok(staged) => staged,
+                Err(ObjectPutError::Io(error)) if error.raw_os_error() == Some(5) => {
+                    capacity_reservations.release(entry)?;
+                    source_failures.push(format!("{}: {error}", entry.relative_path.display()));
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let relative_path = staged
+                .staged_payload_path
+                .strip_prefix(&self.ssd_root)
+                .map_err(|_| {
+                    DaemonIngestFilesRuntimeError::CommandFailed(
+                        "managed SSD staging path escaped its configured root".to_string(),
+                    )
+                })?
+                .to_string_lossy()
+                .into_owned();
+            let destage_job_id = format!("destage-{}", entry.object_id.as_str());
+            let object_type = request.object_type.to_string();
+            let report = match commit_verified_ssd_and_enqueue(
+                &self.live_sqlite_path,
+                VerifiedSsdCommitRequest {
+                    destage_job_id: &destage_job_id,
+                    store_id: &summary.store_id,
+                    object_id: &entry.object_id,
+                    object_type: &object_type,
+                    relative_path: &relative_path,
+                    size_bytes: staged.bytes_staged,
+                    content_hash_algorithm: &staged.content_hash_algorithm,
+                    content_hash: &staged.content_hash,
+                    acknowledgement_policy: "after_ssd_ingest",
+                    required_copy_count: copies,
+                    max_attempts: 8,
+                    priority: 0,
+                    committed_at_utc: accepted_at_utc,
+                },
+            ) {
+                Ok(report) => report,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&staged.job_root);
+                    capacity_reservations.release(entry)?;
+                    return Err(DaemonIngestFilesRuntimeError::CommandFailed(
+                        error.to_string(),
+                    ));
+                }
+            };
+            capacity_reservations.commit(entry)?;
+            completed_bytes = completed_bytes.saturating_add(entry.size_bytes);
+            summary
+                .object_completions
+                .push(DaemonIngestObjectCompletion {
+                    object_id: entry.object_id.clone(),
+                    catalogue_state: "QueuedForHdd".to_string(),
+                    acknowledgement_policy: AcknowledgementPolicy::AfterSsdIngest,
+                    acknowledgement_state: DaemonIngestAcknowledgementState::SsdAcknowledged,
+                    ssd_verified: true,
+                    required_hdd_copies: copies,
+                    verified_hdd_copies: 0,
+                    destage_job_id: Some(report.destage_job_id),
+                    newly_committed: !report.idempotent,
+                    local_copy_may_be_deleted: true,
+                });
+        }
+
+        progress(DaemonIngestProgressEvent {
+            job_id: job_id.clone(),
+            endpoint: request.endpoint,
+            stage: if source_failures.is_empty() {
+                DaemonIngestStage::Complete
+            } else {
+                DaemonIngestStage::Failed
+            },
+            pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
+            work_bytes_done: completed_bytes,
+            work_bytes_total: Some(total_work_bytes),
+            source_bytes_done: Some(completed_bytes),
+            source_bytes_total: Some(source_bytes),
+            stage_bytes_done: Some(0),
+            stage_bytes_total: Some(0),
+            files_done: summary.object_completions.len() as u64,
+            files_total: Some(files.len() as u64),
+            current_object_id: None,
+            ssd_pressure: None,
+            telemetry: None,
+            active_hdd_transfers: Vec::new(),
+            resource_policy: None,
+            message: Some(if source_failures.is_empty() {
+                "SSD acknowledgement committed; durable HDD destage queued".to_string()
+            } else {
+                format!(
+                    "partial SSD acknowledgement; {} unreadable source file(s) were skipped",
+                    source_failures.len()
+                )
+            }),
+        })?;
+        if source_failures.is_empty() {
+            Ok(summary)
+        } else {
+            Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "partial ingest completed after skipping {} unreadable source file(s): {}",
+                source_failures.len(),
+                source_failures.join("; ")
+            )))
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -597,7 +847,7 @@ impl LocalFileIngestExecutor {
         &self,
         request: SubmitIngestFilesRequest,
         job_id: &IngestJobId,
-        summary: DaemonFileIngestSummary,
+        mut summary: DaemonFileIngestSummary,
         files: Vec<FileIngestEntry>,
         managed_disk_roots: Vec<DiskCopyRoot>,
         copies: u8,
@@ -607,6 +857,7 @@ impl LocalFileIngestExecutor {
         accepted_at_utc: &str,
         capacity_reservations: &mut IngestCapacityReservations,
         ingress_origin: DaemonIngressOrigin,
+        acknowledgement_policy: AcknowledgementPolicy,
         mut progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonFileIngestSummary, DaemonIngestFilesRuntimeError> {
         let mut state = PipelineProgressState::new(
@@ -753,6 +1004,21 @@ impl LocalFileIngestExecutor {
             message: Some("direct-to-HDD local file ingest complete".to_string()),
         })?;
 
+        summary.object_completions = files
+            .iter()
+            .map(|entry| DaemonIngestObjectCompletion {
+                object_id: entry.object_id.clone(),
+                catalogue_state: "HddCopyVerified".to_string(),
+                acknowledgement_policy,
+                acknowledgement_state: DaemonIngestAcknowledgementState::FullyHddSettled,
+                ssd_verified: false,
+                required_hdd_copies: copies,
+                verified_hdd_copies: copies,
+                destage_job_id: None,
+                newly_committed: false,
+                local_copy_may_be_deleted: true,
+            })
+            .collect();
         Ok(summary)
     }
 }
@@ -1076,15 +1342,16 @@ mod tests {
     };
     use crate::api::{
         CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
-        DaemonIngestConflictPolicy, DaemonIngestHddTransferPhase, DaemonIngestPipelineStage,
-        DaemonIngressLandingMode, DaemonIngressOrigin, DaemonSsdPressure, SubmitIngestFilesRequest,
+        DaemonIngestAcknowledgementState, DaemonIngestConflictPolicy, DaemonIngestHddTransferPhase,
+        DaemonIngestPipelineStage, DaemonIngressLandingMode, DaemonIngressOrigin,
+        DaemonSsdPressure, SubmitIngestFilesRequest,
     };
     use crate::runtime::{CapacityAdmissionProvider, DaemonServiceRuntimeError};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
-        hash_file_sha256, object_payload_path, DiskCopyRoot, IngestStagingLayout,
+        hash_file_sha256, object_payload_path, read_destage, DiskCopyRoot, IngestStagingLayout,
         ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
@@ -1364,7 +1631,7 @@ mod tests {
                 resource_gate: None,
             };
             let mut events = Vec::new();
-            executor
+            let response = executor
                 .submit(
                     SubmitIngestFilesRequest {
                         endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
@@ -1384,6 +1651,23 @@ mod tests {
                     },
                 )
                 .expect("external origin ingest succeeds");
+
+            assert_eq!(response.objects.len(), 1);
+            assert_eq!(
+                response.objects[0].acknowledgement_state,
+                DaemonIngestAcknowledgementState::SsdAcknowledged
+            );
+            assert!(response.objects[0].ssd_verified);
+            assert!(response.objects[0].destage_job_id.is_some());
+            assert!(response.objects[0].local_copy_may_be_deleted);
+            let queued = read_destage(
+                ssd_root.join(".dasobjectstore/live.sqlite"),
+                &response.objects[0].object_id,
+            )
+            .expect("read durable queue")
+            .expect("durable queue row");
+            assert_eq!(queued.required_copy_count, 1);
+            assert_eq!(queued.verified_copy_count, 0);
 
             assert!(events.iter().any(|event| {
                 event.message.as_deref().is_some_and(|message| {

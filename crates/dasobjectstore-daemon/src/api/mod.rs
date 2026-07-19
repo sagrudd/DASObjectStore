@@ -101,28 +101,29 @@ pub use health::{
 pub use ingest::DaemonIngestHddTransferPhase;
 pub use ingest::{
     decide_ingest_admission, CancelIngestJobRequest, CancelIngestJobResponse,
-    DaemonIngestAdaptiveSchedulerInput, DaemonIngestAdaptiveSchedulingLimit,
-    DaemonIngestAdaptiveWorkerSchedule, DaemonIngestAdmissionAction, DaemonIngestAdmissionDecision,
-    DaemonIngestAdmissionInput, DaemonIngestAdmissionReason, DaemonIngestBottleneck,
-    DaemonIngestBoundedBufferPolicy, DaemonIngestBufferPoolPolicySet,
-    DaemonIngestCompletionFraction, DaemonIngestConflictAction, DaemonIngestConflictDecision,
-    DaemonIngestConflictPolicy, DaemonIngestConflictReason, DaemonIngestErrorRate,
-    DaemonIngestHddActiveTransfer, DaemonIngestHddQueueState, DaemonIngestHddTargetQueue,
-    DaemonIngestObjectSnapshot, DaemonIngestPipelinePressure, DaemonIngestPipelineStage,
-    DaemonIngestPlacementSchedulerInput, DaemonIngestPressure, DaemonIngestProgressEvent,
-    DaemonIngestProgressFractions, DaemonIngestQueueDepths, DaemonIngestResourceBudget,
-    DaemonIngestResourceGate, DaemonIngestResourceLease, DaemonIngestResourcePolicy,
-    DaemonIngestResourceReservation, DaemonIngestResourceReservationError,
-    DaemonIngestSchedulingPolicy, DaemonIngestStage, DaemonIngestSystemSafetyReserve,
-    DaemonIngestSystemTelemetry, DaemonIngestTargetCapacity, DaemonIngestTargetFailureState,
-    DaemonIngestTelemetry, DaemonIngestThroughputTelemetry, DaemonIngestThroughputTrend,
-    DaemonIngestWorkerActivity, DaemonIngestWorkerCounts, DaemonIngestWorkerTelemetry,
-    DaemonIngressLandingMode, DaemonIngressOrigin, DaemonRequestValidationError,
-    DaemonSourceReadBackpressureAction, DaemonSourceReadBackpressureDecision,
-    DaemonSourceReadBackpressureInput, DaemonSourceReadBackpressurePolicy,
-    DaemonSourceReadBackpressureReason, DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy,
-    DaemonSourceToSsdQueueUsage, IngestJobStatusRequest, IngestJobStatusResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    DaemonIngestAcknowledgementState, DaemonIngestAdaptiveSchedulerInput,
+    DaemonIngestAdaptiveSchedulingLimit, DaemonIngestAdaptiveWorkerSchedule,
+    DaemonIngestAdmissionAction, DaemonIngestAdmissionDecision, DaemonIngestAdmissionInput,
+    DaemonIngestAdmissionReason, DaemonIngestBottleneck, DaemonIngestBoundedBufferPolicy,
+    DaemonIngestBufferPoolPolicySet, DaemonIngestCompletionFraction, DaemonIngestConflictAction,
+    DaemonIngestConflictDecision, DaemonIngestConflictPolicy, DaemonIngestConflictReason,
+    DaemonIngestErrorRate, DaemonIngestHddActiveTransfer, DaemonIngestHddQueueState,
+    DaemonIngestHddTargetQueue, DaemonIngestObjectCompletion, DaemonIngestObjectSnapshot,
+    DaemonIngestPipelinePressure, DaemonIngestPipelineStage, DaemonIngestPlacementSchedulerInput,
+    DaemonIngestPressure, DaemonIngestProgressEvent, DaemonIngestProgressFractions,
+    DaemonIngestQueueDepths, DaemonIngestResourceBudget, DaemonIngestResourceGate,
+    DaemonIngestResourceLease, DaemonIngestResourcePolicy, DaemonIngestResourceReservation,
+    DaemonIngestResourceReservationError, DaemonIngestSchedulingPolicy, DaemonIngestStage,
+    DaemonIngestSystemSafetyReserve, DaemonIngestSystemTelemetry, DaemonIngestTargetCapacity,
+    DaemonIngestTargetFailureState, DaemonIngestTelemetry, DaemonIngestThroughputTelemetry,
+    DaemonIngestThroughputTrend, DaemonIngestWorkerActivity, DaemonIngestWorkerCounts,
+    DaemonIngestWorkerTelemetry, DaemonIngressLandingMode, DaemonIngressOrigin,
+    DaemonRequestValidationError, DaemonSourceReadBackpressureAction,
+    DaemonSourceReadBackpressureDecision, DaemonSourceReadBackpressureInput,
+    DaemonSourceReadBackpressurePolicy, DaemonSourceReadBackpressureReason,
+    DaemonSourceReadPriority, DaemonSourceToSsdPriorityPolicy, DaemonSourceToSsdQueueUsage,
+    IngestJobStatusRequest, IngestJobStatusResponse, SubmitIngestFilesRequest,
+    SubmitIngestFilesResponse,
 };
 pub use ingest_control::{
     DaemonIngestControlAction, DaemonIngestControlState, IngestControlRequest,
@@ -256,8 +257,10 @@ pub use store_deduplicate::{
     StoreDeduplicateValidationError, STORE_DEDUPLICATE_CONFIRMATION,
 };
 pub use store_policy::{
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpdateObjectStoreIngestPolicyValidationError, DIRECT_TO_HDD_POLICY_CONFIRMATION,
+    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
+    UpdateObjectStoreAcknowledgementPolicyValidationError, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpdateObjectStoreIngestPolicyValidationError,
+    ACKNOWLEDGEMENT_POLICY_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
 };
 pub use store_repair::{
     StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
@@ -323,6 +326,7 @@ pub enum DaemonApiRequest {
     CapacityAdmission(CapacityAdmissionRequest),
     CapacityStatus(CapacityStatusRequest),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
+    UpdateObjectStoreAcknowledgementPolicy(UpdateObjectStoreAcknowledgementPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
@@ -393,6 +397,9 @@ impl DaemonApiRequest {
             Self::CapacityAdmission(_) => "capacity_admission",
             Self::CapacityStatus(_) => "capacity_status",
             Self::UpdateObjectStoreIngestPolicy(_) => "update_object_store_ingest_policy",
+            Self::UpdateObjectStoreAcknowledgementPolicy(_) => {
+                "update_object_store_acknowledgement_policy"
+            }
             Self::ObjectBrowser(_) => "object_browser",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
@@ -509,6 +516,10 @@ impl DaemonApiRequest {
                 .validate()
                 .map(|_| ())
                 .map_err(update_object_store_ingest_policy_validation_error),
+            Self::UpdateObjectStoreAcknowledgementPolicy(request) => request
+                .validate()
+                .map(|_| ())
+                .map_err(update_object_store_acknowledgement_policy_validation_error),
             Self::ObjectBrowser(request) => request.validate(),
             Self::ObjectDownload(request) => request.validate(),
             Self::ObjectFolderDownload(request) => request.validate(),
@@ -608,6 +619,7 @@ pub enum DaemonApiResponse {
     CapacityAdmission(CapacityAdmissionResponse),
     CapacityStatus(CapacityStatusResponse),
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
+    UpdateObjectStoreAcknowledgementPolicy(UpdateObjectStoreAcknowledgementPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),

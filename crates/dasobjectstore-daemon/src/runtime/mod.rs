@@ -12,6 +12,7 @@ mod capacity_lease_audit;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
+mod destage_worker;
 pub(crate) mod disk_lockdown;
 mod drive_backend;
 mod enclosure_prepare;
@@ -119,6 +120,9 @@ pub use config::{
     DEFAULT_DAEMON_RUNTIME_DIR, DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME,
     DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
     LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
+};
+pub use destage_worker::{
+    run_one_durable_destage, DurableDestageOutcome, DurableDestageWorkerConfig,
 };
 pub use drive_backend::{DriveBackend, DriveRuntimeGuard};
 pub use endpoint_registry::{

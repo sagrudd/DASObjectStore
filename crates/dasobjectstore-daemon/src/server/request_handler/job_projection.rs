@@ -198,6 +198,24 @@ pub(super) fn daemon_job_summary_from_update_object_store_ingest_policy(
     )
 }
 
+pub(super) fn daemon_job_summary_from_update_object_store_acknowledgement_policy(
+    response: &UpdateObjectStoreAcknowledgementPolicyResponse,
+) -> DaemonJobSummary {
+    daemon_job_summary_from_accepted(
+        response.accepted.job_id.clone(),
+        response.accepted.kind.clone(),
+        response.accepted.accepted_at_utc.clone(),
+        response.accepted.dry_run,
+        response.administrator_actor.clone(),
+        format!(
+            "ObjectStore {} acknowledgement policy changed from {:?} to {:?}",
+            response.store_id,
+            response.previous_acknowledgement_policy,
+            response.acknowledgement_policy
+        ),
+    )
+}
+
 pub(super) fn daemon_job_summary_from_endpoint_inventory(
     response: &UpsertEndpointInventoryResponse,
 ) -> DaemonJobSummary {

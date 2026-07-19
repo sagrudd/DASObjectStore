@@ -189,6 +189,38 @@ where
             ))?;
             Ok(DaemonApiResponse::UpdateObjectStoreIngestPolicy(response))
         }
+        DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(mut request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new("administrator_authentication_required", "object-store acknowledgement policy updates require an authenticated local administrator")));
+            };
+            let trusted_web_peer = actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER)
+                && request
+                    .administrator_actor
+                    .as_deref()
+                    .is_some_and(|value| !value.trim().is_empty());
+            if !actor.is_administrator() && !trusted_web_peer {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new("administrator_authorization_required", "object-store acknowledgement policy updates require administrator authorization")));
+            }
+            if actor.is_administrator() {
+                request.administrator_actor = Some(actor.display_name());
+            }
+            let now = handler.clock.now_utc();
+            let response = match handler.update_object_store_acknowledgement_policy(request, &now) {
+                Ok(response) => response,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "store_policy_update_failed",
+                        error.to_string(),
+                    )))
+                }
+            };
+            handler.record_admin_job(
+                daemon_job_summary_from_update_object_store_acknowledgement_policy(&response),
+            )?;
+            Ok(DaemonApiResponse::UpdateObjectStoreAcknowledgementPolicy(
+                response,
+            ))
+        }
         DaemonApiRequest::ApplianceTelemetry(request) => {
             match handler.appliance_telemetry_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::ApplianceTelemetry(response)),

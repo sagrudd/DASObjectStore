@@ -168,6 +168,34 @@ verification, metadata mutation, and progress events. During normal CLI
 operation the operator sees daemon-emitted byte-level progress lines as the job
 runs, followed by the final daemon job submission summary.
 
+Acknowledgement and background destage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each ObjectStore chooses when an ingest client may release its local copy.
+``AfterHddPlacement`` waits for the configured number of verified HDD copies.
+``AfterSsdIngest`` returns earlier, but only after the daemon has synchronized
+the complete SSD payload and atomically committed catalogue visibility, the
+verified managed-SSD placement, and a durable HDD destage job. The response is
+per-object and includes the queue identity; a client must not infer safety from
+transport completion alone.
+
+The daemon resumes queued HDD work after restart, leases only one worker per
+object, rotates work across ObjectStores, and applies bounded retry backoff.
+Failed work remains inspectable instead of disappearing. Reads and the Web
+Object Browser continue to use the verified SSD copy while HDD settlement is
+pending. Once all required HDD placements verify and their catalogue promotion
+commits, a separate guarded pass removes the managed SSD staging directory.
+
+New intake is rejected before copying when the complete file would cross the
+critical SSD reserve. This is intentional backpressure: inspect the ingest and
+destage queue, resolve HDD availability or failed work, and retry. Do not delete
+files from the managed SSD tree manually.
+
+``dasobjectstore ingest queue STORE`` includes the durable HDD backlog, queued
+and active byte totals, retry counts, next-retry time, and the last bounded
+failure message. The existing ``--json`` ingest-queue schema remains unchanged
+for compatibility; richer daemon/Web queue projection is additive.
+
 Ingress-origin rules are deliberately simple:
 
 * Normal ``dasobjectstore ingest files`` submits a local-server hint. The

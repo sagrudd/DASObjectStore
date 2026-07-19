@@ -77,7 +77,8 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         });
     }
 
-    let manifest_path = if let Some(existing_manifest) =
+    let mut reused_checkpoint = false;
+    let mut manifest_path = if let Some(existing_manifest) =
         discover_incomplete_reconciliation_manifest(
             &reconciliation_root,
             store_id.as_str(),
@@ -85,6 +86,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         )
         .map_err(reconciliation_manifest_error)?
     {
+        reused_checkpoint = true;
         staging_path = existing_manifest
             .parent()
             .and_then(|path| path.parent())
@@ -153,6 +155,32 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     let objects = provider.list_objects(ReconciliationListRequest {
         prefix: prefix.as_deref(),
     })?;
+    if !reused_checkpoint {
+        if let Some(reusable_manifest) = discover_reusable_complete_manifest(
+            &reconciliation_root,
+            store_id.as_str(),
+            prefix.as_deref(),
+            &objects,
+        )? {
+            let reusable_staging = reusable_manifest
+                .parent()
+                .and_then(Path::parent)
+                .map(Path::to_path_buf)
+                .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!(
+                        "reconciliation checkpoint has no staging root: {}",
+                        reusable_manifest.display()
+                    ),
+                })?;
+            if requested_staging_path != reusable_staging {
+                let _ = fs::remove_dir(&requested_staging_path);
+            }
+            staging_path = reusable_staging;
+            manifest_path = reusable_manifest;
+            manifest = ReconciliationManifest::load(&manifest_path)
+                .map_err(reconciliation_manifest_error)?;
+        }
+    }
     let plan = plan_reconciliation(&mut manifest, &objects);
     if let Some(action) = plan.actions.iter().find(|action| {
         matches!(
@@ -179,7 +207,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     )?;
     let ingest = submit_ingest_files_with_resource_gate(
         SubmitIngestFilesRequest {
-            endpoint: store_id,
+            endpoint: store_id.clone(),
             source_path: staging_path.clone(),
             object_type: ObjectType::Naive,
             copies: None,
@@ -197,6 +225,13 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("S3 reconciliation ingest failed: {error}"),
     })?;
+    cleanup_duplicate_completed_staging(
+        &reconciliation_root,
+        &staging_path,
+        store_id.as_str(),
+        prefix.as_deref(),
+        &ingest,
+    )?;
     Ok(StoreRepairS3Reconciliation {
         bucket_name,
         prefix,
@@ -205,6 +240,118 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         ingest_job_id: Some(ingest.job_id.to_string()),
         dry_run: false,
     })
+}
+
+fn cleanup_duplicate_completed_staging(
+    root: &Path,
+    retained_staging: &Path,
+    store_id: &str,
+    prefix: Option<&str>,
+    ingest: &crate::api::SubmitIngestFilesResponse,
+) -> Result<(), DaemonServiceRuntimeError> {
+    use dasobjectstore_core::store::AcknowledgementPolicy;
+    if ingest.objects.is_empty()
+        || !ingest.objects.iter().all(|object| {
+            object.acknowledgement_policy == AcknowledgementPolicy::AfterSsdIngest
+                && object.ssd_verified
+                && object.destage_job_id.is_some()
+                && object.local_copy_may_be_deleted
+        })
+    {
+        return Ok(());
+    }
+    let entries = fs::read_dir(root).map_err(|error| reconciliation_file_error(root, error))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| reconciliation_file_error(root, error))?;
+        let path = entry.path();
+        if path == retained_staging {
+            continue;
+        }
+        let manifest_path = path.join(".dasobjectstore/reconciliation-manifest.json");
+        let Ok(metadata) = fs::symlink_metadata(&manifest_path) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let manifest =
+            ReconciliationManifest::load(&manifest_path).map_err(reconciliation_manifest_error)?;
+        if manifest.store_id == store_id
+            && manifest.prefix.as_deref() == prefix
+            && manifest
+                .entries
+                .values()
+                .all(|entry| entry.state == ReconciliationEntryState::Complete)
+        {
+            fs::remove_dir_all(&path).map_err(|error| reconciliation_file_error(&path, error))?;
+        }
+    }
+    Ok(())
+}
+
+fn discover_reusable_complete_manifest(
+    root: &Path,
+    store_id: &str,
+    prefix: Option<&str>,
+    objects: &[ReconciliationObject],
+) -> Result<Option<std::path::PathBuf>, DaemonServiceRuntimeError> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(reconciliation_file_error(root, error)),
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| reconciliation_file_error(root, error))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| reconciliation_file_error(&entry.path(), error))?;
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        let path = entry
+            .path()
+            .join(".dasobjectstore/reconciliation-manifest.json");
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let manifest =
+            ReconciliationManifest::load(&path).map_err(reconciliation_manifest_error)?;
+        if manifest.store_id != store_id
+            || manifest.prefix.as_deref() != prefix
+            || manifest.entries.len() != objects.len()
+        {
+            continue;
+        }
+        let staging = path
+            .parent()
+            .and_then(Path::parent)
+            .expect("manifest layout checked");
+        let reusable = objects.iter().all(|object| {
+            manifest.entries.get(&object.key).is_some_and(|saved| {
+                saved.state == ReconciliationEntryState::Complete
+                    && saved.size_bytes == object.size_bytes
+                    && saved.source_revision == object.source_revision
+                    && saved.relative_path.as_deref().is_some_and(|relative| {
+                        let candidate = staging.join(relative);
+                        fs::metadata(candidate).ok().is_some_and(|metadata| {
+                            metadata.is_file()
+                                && object.size_bytes.is_none_or(|size| metadata.len() == size)
+                        })
+                    })
+            })
+        });
+        if reusable {
+            candidates.push((manifest.updated_at_unix_seconds, path));
+        }
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by_key(|(updated, _)| *updated)
+        .map(|(_, path)| path))
 }
 
 fn execute_reconciliation_plan<P: ReconciliationProvider>(
@@ -732,8 +879,12 @@ fn emit_reconciliation_key_progress(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_range_download, reconciliation_download_args, GarageReconciliationProvider,
-        ReconciliationDownloadRequest, ReconciliationProvider,
+        append_range_download, discover_reusable_complete_manifest, reconciliation_download_args,
+        GarageReconciliationProvider, ReconciliationDownloadRequest, ReconciliationProvider,
+    };
+    use crate::runtime::reconciliation::{
+        ReconciliationEntryState, ReconciliationManifest, ReconciliationManifestEntry,
+        ReconciliationObject,
     };
     use crate::runtime::service::{ServiceCommandOutput, ServiceCommandRunner};
     use std::fs;
@@ -770,6 +921,40 @@ mod tests {
             ));
         fs::create_dir_all(&root).expect("validation root");
         root
+    }
+
+    #[test]
+    fn reuses_complete_staging_only_when_provider_identity_and_payload_match() {
+        let root = validation_root("reusable-complete");
+        let stage = root.join("stage");
+        fs::create_dir_all(stage.join(".dasobjectstore")).expect("manifest parent");
+        fs::write(stage.join("archive.bin"), b"payload").expect("payload");
+        let mut manifest = ReconciliationManifest::new("epic_collection", None);
+        manifest.entries.insert(
+            "archive.bin".to_string(),
+            ReconciliationManifestEntry {
+                source_key: "archive.bin".to_string(),
+                relative_path: Some("archive.bin".to_string()),
+                size_bytes: Some(7),
+                source_revision: Some("etag-1".to_string()),
+                state: ReconciliationEntryState::Complete,
+                downloaded_bytes: 7,
+                message: None,
+            },
+        );
+        let manifest_path = stage.join(".dasobjectstore/reconciliation-manifest.json");
+        manifest.save_atomic(&manifest_path).expect("save manifest");
+        let objects = vec![ReconciliationObject {
+            key: "archive.bin".to_string(),
+            size_bytes: Some(7),
+            source_revision: Some("etag-1".to_string()),
+        }];
+        assert_eq!(
+            discover_reusable_complete_manifest(&root, "epic_collection", None, &objects)
+                .expect("discover"),
+            Some(manifest_path)
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

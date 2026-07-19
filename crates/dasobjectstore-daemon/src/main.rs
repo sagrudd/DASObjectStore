@@ -1,6 +1,7 @@
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
-    profile_binding_registry_path,
+    profile_binding_registry_path, run_one_durable_destage, DurableDestageOutcome,
+    DurableDestageWorkerConfig,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -112,12 +113,41 @@ fn run() -> Result<(), String> {
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
+    let _durable_destage_loop = spawn_durable_destage_loop();
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(
         "dasobjectstored listening on {}",
         server.socket_path().display()
     );
     server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn spawn_durable_destage_loop() -> thread::JoinHandle<()> {
+    let config = DurableDestageWorkerConfig::from_environment(format!("{}-destage", host_id()));
+    thread::spawn(move || {
+        let mut previously_served_store = None;
+        loop {
+            match run_one_durable_destage(
+                &config,
+                &current_utc_timestamp(),
+                previously_served_store.as_ref(),
+            ) {
+                Ok(DurableDestageOutcome::Settled { store_id, .. }) => {
+                    previously_served_store = Some(store_id);
+                }
+                Ok(DurableDestageOutcome::Idle) => thread::sleep(Duration::from_secs(1)),
+                Ok(DurableDestageOutcome::Evicted { .. }) => {}
+                Ok(DurableDestageOutcome::Deferred { object_id, message }) => {
+                    eprintln!("durable destage deferred for {object_id}: {message}");
+                    thread::sleep(Duration::from_secs(1));
+                }
+                Err(error) => {
+                    eprintln!("durable destage worker failed: {error}");
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    })
 }
 
 fn spawn_capacity_lease_loop(
