@@ -51,12 +51,13 @@ pub use appliance_telemetry::{
     ApplianceTelemetryWindowAvailability,
 };
 pub use application_identity::{
-    ApplicationCredentialRevocationRequest, ApplicationCredentialRevocationResponse,
-    ApplicationCredentialRevocationValidationError, ApplicationIdentityRegistrationRequest,
-    ApplicationIdentityRegistrationResponse, ApplicationIdentityRegistrationValidationError,
-    ApplicationKeyRegistrationRequest, ApplicationKeyRegistrationResponse,
-    ApplicationKeyRegistrationValidationError, ApplicationRegistrationRecord,
-    APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION, APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
+    ApplicationCredentialEnrollmentRecord, ApplicationCredentialRevocationRequest,
+    ApplicationCredentialRevocationResponse, ApplicationCredentialRevocationValidationError,
+    ApplicationIdentityRegistrationRequest, ApplicationIdentityRegistrationResponse,
+    ApplicationIdentityRegistrationValidationError, ApplicationKeyRegistrationRequest,
+    ApplicationKeyRegistrationResponse, ApplicationKeyRegistrationValidationError,
+    ApplicationRegistrationRecord, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
+    APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION,
 };
 pub use application_mtls::{
     ApplicationMtlsAuthorizationContext, ApplicationMtlsAuthorizationRequest,

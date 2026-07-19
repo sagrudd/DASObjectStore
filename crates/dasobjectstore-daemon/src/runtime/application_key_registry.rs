@@ -3,6 +3,8 @@
 //! registry.
 
 use super::DaemonServiceRuntimeError;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use dasobjectstore_core::application_auth::ApplicationKeyDescriptor;
 use dasobjectstore_core::application_auth::{
     ApplicationCredentialKind, ApplicationIdentity, ApplicationKeyAlgorithm,
@@ -156,6 +158,16 @@ pub fn upsert_application_key(
         .map_err(|error| invalid_key(error.to_string()))?;
     let path = path.as_ref();
     let mut registry = read_registry(path)?;
+    if registry.keys.iter().any(|registered| {
+        registered.application_id != key.application_id
+            && registered
+                .public_key_fingerprint
+                .eq_ignore_ascii_case(&key.public_key_fingerprint)
+    }) {
+        return Err(invalid_key(
+            "public credential fingerprint is already assigned to another application identity",
+        ));
+    }
     if let Some(existing) = registry.keys.iter_mut().find(|existing| {
         existing.application_id == key.application_id && existing.key_id == key.key_id
     }) {
@@ -169,6 +181,102 @@ pub fn upsert_application_key(
             .then_with(|| left.key_id.cmp(&right.key_id))
     });
     write_registry(path, &registry)
+}
+
+/// Validate a public credential descriptor against its daemon-owned identity
+/// before either dry-run acceptance or registry mutation. This prevents
+/// orphaned keys, cross-identity descriptors, credential-kind confusion, and
+/// descriptors whose advertised fingerprint does not match their public
+/// material.
+pub fn validate_application_key_enrollment(
+    identity: &ApplicationIdentity,
+    key: &ApplicationKeyDescriptor,
+    registered_keys: &[ApplicationKeyDescriptor],
+) -> Result<(), DaemonServiceRuntimeError> {
+    identity
+        .validate()
+        .map_err(|error| invalid_key(error.to_string()))?;
+    key.validate()
+        .map_err(|error| invalid_key(error.to_string()))?;
+    if !identity.active || identity.application_id != key.application_id {
+        return Err(invalid_key(
+            "public credential must reference one active registered identity",
+        ));
+    }
+    if key.issued_at_unix_seconds < identity.issued_at_unix_seconds
+        || key.expires_at_unix_seconds > identity.expires_at_unix_seconds
+    {
+        return Err(invalid_key(
+            "public credential lifetime must be contained by its application identity",
+        ));
+    }
+    match (identity.credential_kind, key.algorithm) {
+        (
+            ApplicationCredentialKind::AsymmetricKey
+            | ApplicationCredentialKind::DevelopmentSelfSigned,
+            ApplicationKeyAlgorithm::Ed25519 | ApplicationKeyAlgorithm::EcdsaP256Sha256,
+        ) => validate_asymmetric_public_material(key)?,
+        (ApplicationCredentialKind::MtlsCertificate, ApplicationKeyAlgorithm::MtlsCertificate) => {
+            if key.public_key_material.is_some() {
+                return Err(invalid_key(
+                    "mTLS enrollment accepts only the certificate fingerprint, not certificate material",
+                ));
+            }
+        }
+        _ => {
+            return Err(invalid_key(
+                "public credential algorithm does not match the identity credential kind",
+            ))
+        }
+    }
+    if registered_keys.iter().any(|registered| {
+        registered.application_id != key.application_id
+            && registered
+                .public_key_fingerprint
+                .eq_ignore_ascii_case(&key.public_key_fingerprint)
+    }) {
+        return Err(invalid_key(
+            "public credential fingerprint is already assigned to another application identity",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_asymmetric_public_material(
+    key: &ApplicationKeyDescriptor,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let encoded = key
+        .public_key_material
+        .as_deref()
+        .ok_or_else(|| invalid_key("asymmetric enrollment requires public key material"))?;
+    let material = BASE64
+        .decode(encoded)
+        .map_err(|_| invalid_key("public key material must be canonical base64"))?;
+    let valid_length = match key.algorithm {
+        ApplicationKeyAlgorithm::Ed25519 => material.len() == 32,
+        ApplicationKeyAlgorithm::EcdsaP256Sha256 => {
+            material.len() == 65 && material.first() == Some(&0x04)
+        }
+        ApplicationKeyAlgorithm::MtlsCertificate => false,
+    };
+    if !valid_length {
+        return Err(invalid_key(
+            "public key material has an invalid length or encoding for its algorithm",
+        ));
+    }
+    let fingerprint = format!(
+        "sha256:{}",
+        Sha256::digest(&material)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    if fingerprint != key.public_key_fingerprint {
+        return Err(invalid_key(
+            "public key fingerprint does not match the supplied public material",
+        ));
+    }
+    Ok(())
 }
 
 pub fn deactivate_application_key(
@@ -287,9 +395,11 @@ mod tests {
     use super::{
         deactivate_application_key, default_application_key_registry_path, list_application_keys,
         read_application_key, resolve_mtls_application_identity, upsert_application_key,
-        APPLICATION_KEY_REGISTRY_SCHEMA,
+        validate_application_key_enrollment, APPLICATION_KEY_REGISTRY_SCHEMA,
     };
     use crate::runtime::upsert_application_identity;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine;
     use dasobjectstore_core::application_auth::{
         ApplicationCredentialKind, ApplicationEnvironment, ApplicationIdentity,
         ApplicationKeyAlgorithm, ApplicationKeyDescriptor, ApplicationOperation, ApplicationScope,
@@ -321,12 +431,17 @@ mod tests {
     }
 
     fn key(application_id: &str, key_id: &str) -> ApplicationKeyDescriptor {
+        use sha2::{Digest, Sha256};
+        let fingerprint = Sha256::digest(format!("{application_id}:{key_id}").as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         ApplicationKeyDescriptor {
             schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
             application_id: application_id.to_string(),
             key_id: key_id.to_string(),
             algorithm: ApplicationKeyAlgorithm::Ed25519,
-            public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
+            public_key_fingerprint: format!("sha256:{fingerprint}"),
             public_key_material: None,
             issued_at_unix_seconds: 1_000,
             expires_at_unix_seconds: 100_000,
@@ -358,6 +473,32 @@ mod tests {
         }
     }
 
+    fn asymmetric_identity(application_id: &str) -> ApplicationIdentity {
+        let mut identity = mtls_identity(application_id);
+        identity.credential_kind = ApplicationCredentialKind::AsymmetricKey;
+        identity
+    }
+
+    fn valid_ed25519_key(application_id: &str, key_id: &str) -> ApplicationKeyDescriptor {
+        use sha2::{Digest, Sha256};
+        let material = [7_u8; 32];
+        let fingerprint = Sha256::digest(material)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        ApplicationKeyDescriptor {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: application_id.to_string(),
+            key_id: key_id.to_string(),
+            algorithm: ApplicationKeyAlgorithm::Ed25519,
+            public_key_fingerprint: format!("sha256:{fingerprint}"),
+            public_key_material: Some(BASE64.encode(material)),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 100_000,
+            active: true,
+        }
+    }
+
     fn mtls_key(
         application_id: &str,
         key_id: &str,
@@ -381,6 +522,42 @@ mod tests {
             default_application_key_registry_path("/var/lib/dasobjectstore"),
             PathBuf::from("/var/lib/dasobjectstore/application-keys.json")
         );
+    }
+
+    #[test]
+    fn enrollment_requires_matching_identity_kind_material_and_fingerprint() {
+        let identity = asymmetric_identity("ergasterion");
+        let key = valid_ed25519_key("ergasterion", "key-1");
+        validate_application_key_enrollment(&identity, &key, &[]).expect("valid enrollment");
+
+        let mut wrong_fingerprint = key.clone();
+        wrong_fingerprint.public_key_fingerprint = format!("sha256:{}", "0".repeat(64));
+        assert!(validate_application_key_enrollment(&identity, &wrong_fingerprint, &[]).is_err());
+
+        let mut certificate = key.clone();
+        certificate.algorithm = ApplicationKeyAlgorithm::MtlsCertificate;
+        certificate.public_key_material = None;
+        assert!(validate_application_key_enrollment(&identity, &certificate, &[]).is_err());
+    }
+
+    #[test]
+    fn enrollment_rejects_cross_identity_fingerprint_reuse() {
+        let identity = asymmetric_identity("ergasterion");
+        let key = valid_ed25519_key("ergasterion", "key-1");
+        let mut existing = key.clone();
+        existing.application_id = "another-application".to_string();
+        assert!(validate_application_key_enrollment(&identity, &key, &[existing]).is_err());
+    }
+
+    #[test]
+    fn registry_atomically_rejects_cross_identity_fingerprint_reuse() {
+        let path = root("fingerprint-uniqueness").join("keys.json");
+        let existing = key("first-application", "key-1");
+        upsert_application_key(&path, existing.clone()).expect("write first key");
+        let mut duplicate = key("second-application", "key-1");
+        duplicate.public_key_fingerprint = existing.public_key_fingerprint;
+        assert!(upsert_application_key(&path, duplicate).is_err());
+        assert_eq!(list_application_keys(&path).expect("list").len(), 1);
     }
 
     #[test]
@@ -468,9 +645,15 @@ mod tests {
         assert_eq!(resolved.application_id, "synoptikon");
 
         upsert_application_identity(&identities, mtls_identity("monas")).expect("second identity");
-        upsert_application_key(&keys, mtls_key("monas", "duplicate", certificate))
-            .expect("ambiguous certificate");
-        assert!(resolve_mtls_application_identity(&identities, &keys, certificate, 2_000).is_err());
+        assert!(
+            upsert_application_key(&keys, mtls_key("monas", "duplicate", certificate)).is_err()
+        );
+        assert_eq!(
+            resolve_mtls_application_identity(&identities, &keys, certificate, 2_000)
+                .expect("rejected ambiguity leaves original mapping")
+                .application_id,
+            "synoptikon"
+        );
         assert!(resolve_mtls_application_identity(&identities, &keys, b"unknown", 2_000).is_err());
         assert!(
             resolve_mtls_application_identity(&identities, &keys, certificate, 100_000).is_err()

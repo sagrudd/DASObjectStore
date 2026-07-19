@@ -218,6 +218,23 @@ pub struct ApplicationKeyRegistrationResponse {
     pub key: ApplicationKeyDescriptor,
     pub replaced: bool,
     pub administrator_actor: Option<String>,
+    pub enrollment: ApplicationCredentialEnrollmentRecord,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationCredentialEnrollmentRecord {
+    pub schema_version: String,
+    pub application_id: String,
+    pub key_id: String,
+    pub algorithm: dasobjectstore_core::application_auth::ApplicationKeyAlgorithm,
+    pub public_key_fingerprint: String,
+    pub issued_at_unix_seconds: u64,
+    pub expires_at_unix_seconds: u64,
+    pub active: bool,
+    pub exchange_transport: String,
+    pub private_material_received: bool,
+    pub rotation_overlap_supported: bool,
 }
 
 impl ApplicationKeyRegistrationResponse {
@@ -227,6 +244,24 @@ impl ApplicationKeyRegistrationResponse {
         request: ApplicationKeyRegistrationRequest,
         replaced: bool,
     ) -> Self {
+        let enrollment = ApplicationCredentialEnrollmentRecord {
+            schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+            application_id: request.key.application_id.clone(),
+            key_id: request.key.key_id.clone(),
+            algorithm: request.key.algorithm,
+            public_key_fingerprint: request.key.public_key_fingerprint.clone(),
+            issued_at_unix_seconds: request.key.issued_at_unix_seconds,
+            expires_at_unix_seconds: request.key.expires_at_unix_seconds,
+            active: request.key.active,
+            exchange_transport: match request.key.algorithm {
+                dasobjectstore_core::application_auth::ApplicationKeyAlgorithm::MtlsCertificate => {
+                    "mutual_tls".to_string()
+                }
+                _ => "signed_canonical_exchange".to_string(),
+            },
+            private_material_received: false,
+            rotation_overlap_supported: true,
+        };
         Self {
             accepted: DaemonJobAcceptedResponse {
                 job_id,
@@ -237,6 +272,7 @@ impl ApplicationKeyRegistrationResponse {
             key: request.key,
             replaced,
             administrator_actor: request.administrator_actor,
+            enrollment,
         }
     }
 }

@@ -30,6 +30,25 @@ its SHA-256 fingerprint. The daemon's ring-backed verifier supports Ed25519 and
 P-256 detached signatures over the canonical proof-free exchange payload; an
 mTLS certificate descriptor must be verified by the transport layer.
 
+Credential enrollment is a separate administrator operation after identity
+registration. The daemon rejects an enrollment unless the referenced identity
+already exists and is active, the key lifetime is contained by the identity,
+the credential kind and algorithm agree, and the fingerprint is not assigned
+to another application. Ed25519 material must be exactly 32 decoded bytes;
+P-256 material must be a 65-byte uncompressed SEC1 point. In both cases the
+daemon recomputes the SHA-256 fingerprint before persistence. An mTLS mapping
+contains only the CA-verified certificate fingerprint and must not contain
+certificate or private-key material.
+
+One identity uses one credential mode. The registered Ergasterion identity
+`app-7e4a31c9b260` currently selects `asymmetric_key`, so its deployment must
+register an Ed25519 or P-256 public key. Selecting mTLS instead requires a
+reviewed identity replacement with `mtls_certificate` plus the production
+client-CA listener; registering a certificate fingerprint against the current
+asymmetric identity fails closed. Controlled rotation may overlap two active
+descriptors for the same identity, but a fingerprint may never cross identity
+boundaries.
+
 ## Token scope and completion
 
 Access tokens are audience-bound and include an application identity, token

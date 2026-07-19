@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.122.0 - 2026-07-19
+
+- Make application public-credential enrollment identity-bound: reject
+  orphaned descriptors, cross-identity identifiers and fingerprint reuse,
+  lifetimes outside the identity, and algorithm/credential-kind confusion
+  before dry-run acceptance or registry mutation.
+- Require asymmetric enrollment to include bounded canonical public material
+  whose SHA-256 fingerprint and algorithm encoding agree; mTLS enrollment
+  accepts only a CA-verified certificate fingerprint and never certificate or
+  private-key material.
+- Return a non-secret enrollment record identifying the application, key,
+  algorithm, fingerprint, lifetime, transport, activation state, and rotation
+  support while explicitly confirming that no private material was received.
+
 ## 0.121.1 - 2026-07-19
 
 - Include the latest verified provider-profile object versions in

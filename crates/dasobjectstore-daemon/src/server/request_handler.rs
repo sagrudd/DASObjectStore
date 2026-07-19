@@ -51,7 +51,7 @@ use crate::runtime::{
     deactivate_application_identity, deactivate_application_key, default_endpoint_registry_path,
     default_hdd_root, default_ssd_root, discover_managed_hdd_roots,
     finish_profile_binding_recovery, finish_profile_binding_retirement, head_profile_object,
-    issue_application_upload_capability, list_profile_objects_page,
+    issue_application_upload_capability, list_application_keys, list_profile_objects_page,
     migrate_registered_folder_store, profile_binding_lifecycle_state, profile_binding_retired_at,
     profile_diagnostics, profile_health, profile_s3_list_response, provision_garage_store_registry,
     query_object_browser_metadata, read_application_identity, read_application_key,
@@ -61,22 +61,23 @@ use crate::runtime::{
     remove_profile_binding_if_matches, resolve_mtls_application_identity_by_fingerprint,
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
     restore_profile_binding_if_matches, upsert_application_identity, upsert_application_key,
-    upsert_endpoint_inventory_record, upsert_profile_binding, validate_profile_binding_claim,
-    verify_profile_object, AdminJobRegistry, ApplianceTelemetrySampleSet, BackendProfileBinding,
-    DaemonIngestFilesRuntimeError, DaemonServiceRuntimeError,
-    FileBackedRemoteEasyconnectPairedSessionStore, FileBackedRemoteEasyconnectPairingStore,
-    FolderBackend, FolderCatalogue, FolderCatalogueBrowserQuery, FolderInspectionReport,
-    GarageServiceController, LocalAdminRuntimeError, LocalGroupAdminController,
-    LocalGroupAdministrationOperation, LocalGroupAdministrationRequest, ObjectBrowserQueryError,
-    PendingApplicationUploadCapability, ProfileBindingLifecycleState, ReconciliationManifest,
-    RemoteEasyconnectAwsCliUploadJobRequest, RemoteEasyconnectPairedSessionRecord,
-    RemoteEasyconnectPairedSessionRenewalRequest, RemoteEasyconnectPairedSessionStore,
-    RemoteEasyconnectPairedSessionStoreError, RemoteEasyconnectPairingApproval,
-    RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
-    RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate,
-    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry,
-    RemoteUploadProviderCompletion, ServiceCommandRunner, SystemLocalAdminCommandRunner,
-    DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_STATE_DIR,
+    upsert_endpoint_inventory_record, upsert_profile_binding, validate_application_key_enrollment,
+    validate_profile_binding_claim, verify_profile_object, AdminJobRegistry,
+    ApplianceTelemetrySampleSet, BackendProfileBinding, DaemonIngestFilesRuntimeError,
+    DaemonServiceRuntimeError, FileBackedRemoteEasyconnectPairedSessionStore,
+    FileBackedRemoteEasyconnectPairingStore, FolderBackend, FolderCatalogue,
+    FolderCatalogueBrowserQuery, FolderInspectionReport, GarageServiceController,
+    LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
+    LocalGroupAdministrationRequest, ObjectBrowserQueryError, PendingApplicationUploadCapability,
+    ProfileBindingLifecycleState, ReconciliationManifest, RemoteEasyconnectAwsCliUploadJobRequest,
+    RemoteEasyconnectPairedSessionRecord, RemoteEasyconnectPairedSessionRenewalRequest,
+    RemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStoreError,
+    RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingExchange,
+    RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+    RemoteEasyconnectPairingStoreError, RemoteUploadAdmissionGate, RemoteUploadCompletionMetadata,
+    RemoteUploadCompletionRecord, RemoteUploadProgressTelemetry, RemoteUploadProviderCompletion,
+    ServiceCommandRunner, SystemLocalAdminCommandRunner, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_STATE_DIR,
 };
 use dasobjectstore_core::application_auth::{
     UploadCompletionCapability, APPLICATION_AUTH_SCHEMA_VERSION, MAX_UPLOAD_COMPLETION_TTL_SECONDS,
@@ -4288,14 +4289,19 @@ mod tests {
         application_id: &str,
         key_id: &str,
     ) -> ApplicationKeyRegistrationRequest {
+        let public_key_material = [7_u8; 32];
+        let fingerprint = Sha256::digest(public_key_material)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         ApplicationKeyRegistrationRequest {
             key: ApplicationKeyDescriptor {
                 schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
                 application_id: application_id.to_string(),
                 key_id: key_id.to_string(),
                 algorithm: ApplicationKeyAlgorithm::Ed25519,
-                public_key_fingerprint: format!("sha256:{}", "a".repeat(64)),
-                public_key_material: None,
+                public_key_fingerprint: format!("sha256:{fingerprint}"),
+                public_key_material: Some(BASE64.encode(public_key_material)),
                 issued_at_unix_seconds: 1_000,
                 expires_at_unix_seconds: 100_000,
                 active: true,
@@ -4537,10 +4543,17 @@ mod tests {
     fn application_key_registration_persists_descriptor_and_redacts_request_actor() {
         let root = temp_root("application-key-admin");
         let registry = root.join("application-keys.json");
+        let identity_registry = root.join("application-identities.json");
+        upsert_application_identity(
+            &identity_registry,
+            application_identity_registration_request_for_auth_test("admin").identity,
+        )
+        .expect("identity fixture");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:33Z"),
         )
+        .with_application_identity_registry_path(identity_registry)
         .with_application_key_registry_path(&registry)
         .with_application_audit_log_path(root.join("application-audit.json"));
         let actor = DaemonLocalActor::new(0).with_username("root");
@@ -4558,6 +4571,12 @@ mod tests {
         };
         assert_eq!(response.administrator_actor.as_deref(), Some("root"));
         assert!(!response.replaced);
+        assert_eq!(response.enrollment.application_id, "admin");
+        assert_eq!(
+            response.enrollment.exchange_transport,
+            "signed_canonical_exchange"
+        );
+        assert!(!response.enrollment.private_material_received);
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains("spoofed-request-actor"));
         assert!(!serialized.contains("private_key"));
@@ -4567,6 +4586,33 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].operation, "register_key");
         assert_eq!(audit[0].key_id.as_deref(), Some("key-1"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn application_key_registration_rejects_orphaned_public_credential() {
+        let root = temp_root("application-key-orphan");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:02:34Z"),
+        )
+        .with_application_identity_registry_path(root.join("application-identities.json"))
+        .with_application_key_registry_path(root.join("application-keys.json"));
+        let actor = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationKey(
+                    application_key_registration_request_for_auth_test("missing", "key-1"),
+                ),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("typed rejection");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "application_identity_not_registered"
+        ));
         cleanup(&root);
     }
 

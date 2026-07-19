@@ -81,6 +81,29 @@ the confirmation marker required by the typed request:
    sudo dasobjectstore application-auth revoke \
      --request ./credential-revocation.json --json
 
+Register the identity before its public credential. For an asymmetric
+identity, generate the private key inside the consuming service's protected
+secret facility and export only its public bytes. The registration request
+contains the base64 public key, its SHA-256 fingerprint, application/key IDs,
+algorithm, bounded lifetime, and confirmation marker. DASObjectStore
+recomputes the fingerprint and rejects missing, malformed, mismatched,
+cross-identity, or orphaned descriptors. It never receives the private key.
+
+For mTLS, register only the SHA-256 fingerprint of the CA-issued client
+certificate. The application identity must have credential kind
+``mtls_certificate`` and the dedicated production client-CA listener must be
+enabled. Do not send certificate PEM, PKCS#12, or private-key material in the
+registration request. The Ergasterion identity currently uses
+``asymmetric_key``; changing it to mTLS is an explicit identity-policy change,
+not an additional credential silently attached to the same identity.
+
+The JSON response includes a non-secret ``enrollment`` record. Preserve that
+record as deployment evidence; it contains only public identity, fingerprint,
+algorithm, lifetime, transport, activation, and rotation metadata. A
+successful enrollment still does not create a token. The application must
+perform a fresh signed or mTLS-bound exchange and hold the resulting
+short-lived capability in memory only.
+
 An application signs the proof-free exchange payload using its private key and
 submits the resulting request without exposing that key to DASObjectStore. The
 same JSON request can be posted to the standalone HTTPS route when its listener

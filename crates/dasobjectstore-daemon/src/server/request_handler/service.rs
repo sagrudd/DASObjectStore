@@ -278,6 +278,27 @@ where
             let now = handler.clock.now_utc();
             let application_id = request.key.application_id.clone();
             let key_id = request.key.key_id.clone();
+            let Some(identity) = read_application_identity(
+                &handler.application_identity_registry_path,
+                &application_id,
+            )
+            .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+            else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "application_identity_not_registered",
+                    "public credential registration requires an existing daemon-owned application identity",
+                )));
+            };
+            let registered_keys = list_application_keys(&handler.application_key_registry_path)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            if let Err(error) =
+                validate_application_key_enrollment(&identity, &request.key, &registered_keys)
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "application_credential_enrollment_rejected",
+                    error.to_string(),
+                )));
+            }
             let replaced = read_application_key(
                 &handler.application_key_registry_path,
                 &application_id,
