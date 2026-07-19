@@ -239,7 +239,7 @@ fn render_hdd_path(path: &LiveStatusHddTransferResponse) -> Html {
         (path.bytes_done as f64 / path.bytes_total.max(1) as f64 * 100.0).clamp(0.0, 100.0);
     html! {
         <div key={format!("{}-{}-{}", path.job_id, path.disk_id, path.copy_number)} class="dos-live-path" role="listitem">
-            <span class="dos-live-path__route"><strong>{ format!("SSD copy {}", path.copy_number) }</strong><span aria-hidden="true">{ "→" }</span><strong>{ &path.store_id }</strong></span>
+            <span class="dos-live-path__route"><strong>{ format!("HDD copy {}", path.copy_number) }</strong><span aria-hidden="true">{ "→" }</span><strong>{ &path.store_id }</strong></span>
             <span class="dos-live-path__work"><span>{ format!("{} · {}", stage_label(&path.phase), path.disk_id) }</span><strong>{ &path.current_item }</strong></span>
             <span class="dos-live-path__measure"><strong>{ format_progress(path.bytes_done, Some(path.bytes_total)) }</strong><span>{ format_rate(Some(path.bytes_per_second as f64)) }</span></span>
             <span class="dos-live-progress" aria-label={format!("{percent:.0}% complete")}><i style={format!("width: {percent:.1}%")}></i></span>

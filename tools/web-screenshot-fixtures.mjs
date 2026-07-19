@@ -27,6 +27,12 @@ export const authenticatedPages = [
     readySelector: ".dos-home-telemetry-toolbar",
   },
   {
+    name: "live-status",
+    selector: "button[data-page='live-status']",
+    pageSelector: "section[data-page='live-status']",
+    readySelector: ".dos-live-path-list",
+  },
+  {
     name: "enclosures",
     selector: "button[data-page='enclosures']",
     pageSelector: "section[data-page='enclosures']",

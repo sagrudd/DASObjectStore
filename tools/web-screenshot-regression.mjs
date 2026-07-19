@@ -19,6 +19,7 @@ const apiBase = "/products/dasobjectstore/api";
 const apiV1Base = "/products/dasobjectstore/api/v1";
 let visualEndpoint = null;
 let visualVersion = null;
+let visualLiveSequence = 41;
 
 async function main() {
   visualVersion = await workspaceVersion();
@@ -216,6 +217,9 @@ async function assertWorkflowContract(page, pageName, role) {
   switch (pageName) {
     case "enclosures":
       await assertEnclosureWorkflow(page, role);
+      break;
+    case "live-status":
+      await assertLiveStatusWorkflow(page);
       break;
     case "objectstores":
       await assertObjectStoreWorkflow(page, role);
@@ -429,6 +433,8 @@ async function assertEndpointsWorkflow(page, role) {
   await detailPane.getByText("Technical details").waitFor();
   await detailPane.getByRole("button", { name: "Edit connection" }).click();
   await detailPane.getByLabel("Connection ID").waitFor();
+  await detailPane.getByRole("button", { name: "Close task pane" }).click();
+  await expectHidden(detailPane, "endpoint edit pane must close before navigating away");
 }
 
 async function assertActivityWorkflow(page) {
@@ -441,6 +447,27 @@ async function assertActivityWorkflow(page) {
   await page.getByText("SubObject creation", { exact: true }).waitFor();
   await page.getByText("Create local writer group").waitFor();
   await page.getByText("Ingest zymo_fecal_2025.05").waitFor();
+}
+
+async function assertLiveStatusWorkflow(page) {
+  await page.getByText("Host → ObjectStore").waitFor();
+  await page.getByText("SSD ingress", { exact: true }).first().waitFor();
+  await page.getByText("HDD settlement", { exact: true }).first().waitFor();
+  await page.getByText("stephen-NUC12DCMi9", { exact: true }).first().waitFor();
+  await page.waitForTimeout(2_200);
+  const traces = page.locator(".dos-live-trace__line");
+  if (await traces.count() !== 2) {
+    throw new Error("live status must render both SSD and HDD throughput traces");
+  }
+  for (let index = 0; index < 2; index += 1) {
+    const points = (await traces.nth(index).getAttribute("points") ?? "").trim().split(/\s+/);
+    if (points.length < 2) {
+      throw new Error("live status traces must retain more than one sequenced sample");
+    }
+  }
+  await page.getByText("HDD copy 1", { exact: true }).waitFor();
+  await page.locator(".dos-live-path").first().click();
+  await page.getByRole("complementary", { name: "Transfer detail" }).waitFor();
 }
 
 async function assertBioinformaticsWorkflow(page) {
@@ -597,6 +624,9 @@ function apiResponse(pathname, method, request, body = {}) {
   }
   if (pathname === `${apiV1Base}/workspaces/activity`) {
     return activityWorkspace();
+  }
+  if (pathname === `${apiV1Base}/workspaces/live-status`) {
+    return liveStatusWorkspace();
   }
   if (pathname === `${apiV1Base}/workspaces/endpoints` && method === "GET") {
     return endpointsWorkspace();
@@ -998,6 +1028,75 @@ function activityWorkspace() {
         warnings: [],
       },
     ],
+    warnings: [],
+  };
+}
+
+function liveStatusWorkspace() {
+  visualLiveSequence += 1;
+  const rateOffset = (visualLiveSequence % 5) * 16 * 1024 * 1024;
+  return {
+    schema_version: 1,
+    availability: "available",
+    sequence: visualLiveSequence,
+    generated_at_utc: "2026-07-19T06:40:12Z",
+    suggested_refresh_millis: 1000,
+    aggregate: {
+      connected_hosts: 1,
+      active_stores: 1,
+      active_ingests: 1,
+      source_read_bytes_per_second: 734003200,
+      ssd_write_bytes_per_second: 681574400 + rateOffset,
+      hdd_write_bytes_per_second: 503316480 + rateOffset,
+      active_hdd_transfers: 2,
+    },
+    hosts: [{
+      display_name: "stephen-NUC12DCMi9",
+      actors: ["stephen"],
+      active_ingests: 1,
+      object_stores: ["colo829_2024.03"],
+    }],
+    store_writers: [{
+      store_id: "colo829_2024.03",
+      hosts: ["stephen"],
+      active_ingests: 1,
+    }],
+    ssd_ingests: [{
+      job_id: "ingest-visual-live",
+      store_id: "colo829_2024.03",
+      host: "stephen",
+      state: "ssd_ingest",
+      pipeline_stage: "ssd_stage",
+      current_item: "sample_0042.pod5",
+      bytes_done: 68719476736,
+      bytes_total: 137438953472,
+      files_done: 128,
+      files_total: 256,
+      bytes_per_second: 681574400,
+      updated_at_utc: "2026-07-19T06:40:12Z",
+    }],
+    hdd_transfers: [{
+      job_id: "ingest-visual-live",
+      store_id: "colo829_2024.03",
+      disk_id: "qnap-1057",
+      copy_number: 1,
+      current_item: "sample_0041.pod5",
+      bytes_done: 51539607552,
+      bytes_total: 68719476736,
+      bytes_per_second: 251658240,
+      phase: "writing",
+    }, {
+      job_id: "ingest-visual-live",
+      store_id: "colo829_2024.03",
+      disk_id: "qnap-1059",
+      copy_number: 2,
+      current_item: "sample_0041.pod5",
+      bytes_done: 49392123904,
+      bytes_total: 68719476736,
+      bytes_per_second: 251658240,
+      phase: "fsync",
+    }],
+    recent: [],
     warnings: [],
   };
 }

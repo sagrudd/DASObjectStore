@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.116.1 - 2026-07-19
+
+- Correct Live Status HDD settlement route labels, improve connected-host
+  readability on narrow screens, and add deterministic desktop/mobile visual
+  regression coverage for the dashboard, its detail pane, and sequenced
+  throughput traces.
+
 ## 0.116.0 - 2026-07-19
 
 - Add an authenticated Live Status Web workspace backed by the daemon's

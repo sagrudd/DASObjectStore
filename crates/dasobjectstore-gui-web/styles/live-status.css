@@ -33,7 +33,7 @@
 .dos-live-trace p { margin: 3px 0 0; color: var(--live-muted); }
 .dos-live-trace svg { display: block; width: 100%; height: 124px; margin-top: 8px; }
 .dos-live-trace__baseline { fill: none; stroke: #dfe6e6; stroke-width: 1; }
-.dos-live-trace__line { fill: none; stroke: var(--live-accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; transition: points 500ms linear; }
+.dos-live-trace__line { fill: none; stroke: var(--live-accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .dos-live-trace__axis { display: flex; justify-content: space-between; color: var(--live-muted); font-size: .76rem; }
 .dos-live-host-list,.dos-live-wait-list { display: grid; margin-top: 14px; }
 .dos-live-host-list > div { display: grid; grid-template-columns: 12px minmax(120px,1fr) minmax(110px,.7fr) auto; gap: 10px; align-items: center; min-height: 44px; border-top: 1px solid var(--live-line); }
@@ -45,5 +45,5 @@
 .dos-live-wait-list [data-state="warning"] strong { color: var(--dos-status-warning-fg); }
 .dos-live-status-message { min-height: 180px; display: grid; place-content: center; text-align: center; }
 @media (max-width: 1050px) { .dos-live-evidence { grid-template-columns: repeat(3,1fr); } .dos-live-evidence div:nth-child(4) { border-top: 1px solid var(--live-line); } .dos-live-primary { grid-template-columns: 1fr; } .dos-live-detail { position: relative; top: auto; width: auto; } }
-@media (max-width: 760px) { .dos-live-evidence { grid-template-columns: repeat(2,1fr); } .dos-live-evidence div { border-top: 1px solid var(--live-line); } .dos-live-evidence div:nth-child(-n+2) { border-top: 0; } .dos-live-traces,.dos-live-lower { grid-template-columns: 1fr; } .dos-live-path { grid-template-columns: 1fr; gap: 8px; } .dos-live-path__measure { justify-items: start; grid-template-columns: auto auto; gap: 10px; } .dos-live-host-list > div,.dos-live-wait-list > div { grid-template-columns: 12px 1fr; padding: 8px 0; } }
-@media (prefers-reduced-motion: reduce) { .dos-live-progress i,.dos-live-trace__line { transition: none; } }
+@media (max-width: 760px) { .dos-live-evidence { grid-template-columns: repeat(2,1fr); } .dos-live-evidence div { border-top: 1px solid var(--live-line); } .dos-live-evidence div:nth-child(-n+2) { border-top: 0; } .dos-live-traces,.dos-live-lower { grid-template-columns: 1fr; } .dos-live-path { grid-template-columns: 1fr; gap: 8px; } .dos-live-path__measure { justify-items: start; grid-template-columns: auto auto; gap: 10px; } .dos-live-host-list > div,.dos-live-wait-list > div { grid-template-columns: 12px minmax(0,1fr); padding: 8px 0; } .dos-live-host-list > div > strong { grid-column: 2; } .dos-live-host-list > div > span:not(.dos-presence),.dos-live-host-list > div > time { grid-column: 2; } }
+@media (prefers-reduced-motion: reduce) { .dos-live-progress i { transition: none; } }
