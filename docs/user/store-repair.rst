@@ -10,9 +10,8 @@ the live SQLite metadata index. It is intentionally read-only by default:
    dasobjectstore store repair xenognostikon --json
 
 The report includes payload counts, recovered object counts, duplicate/partial
-payloads omitted by size selection, and the metadata path. A repair does not
-claim cryptographic verification; recovered objects remain in a settling state
-until their content hashes are validated.
+payloads omitted by size selection, and the metadata path. A read-only report
+does not claim cryptographic verification.
 
 To rebuild the index after an interrupted or historically incomplete ingest,
 use the explicit administrator confirmation phrase:
@@ -22,15 +21,25 @@ use the explicit administrator confirmation phrase:
    dasobjectstore store repair --apply \
      --confirm "confirm store repair"
 
-For appliance metadata, an apply rebuilds the complete registered store set.
-A store identifier may be provided for a read-only appliance report, but
-filtered appliance ``--apply`` is rejected so repair cannot accidentally
-replace metadata for other stores. Registered bounded-folder profiles use the
-targeted semantics below.
+For appliance metadata, an unfiltered apply rebuilds the complete registered
+store set. Prefer a store identifier for interrupted legacy ingress:
 
-The daemon owns this mutation. It creates and integrity-checks a replacement
-SQLite database, preserves the previous database as a timestamped
-``live.sqlite.pre-repair-*`` backup, and atomically installs the replacement.
+.. code-block:: console
+
+   sudo dasobjectstore store repair xenognostikon --apply \
+     --confirm "confirm store repair"
+
+A store-scoped apply scans only that store's managed HDD payload namespace,
+computes SHA-256 for every selected placement, and updates the existing live
+database in one transaction. Same-size placements must have identical hashes
+or repair hard-fails. Unrelated stores and their queues remain untouched.
+Smaller partial duplicates are excluded, counted in the report, and retained
+for explicit quarantine; the daemon never guesses that they are disposable.
+
+The daemon owns this mutation. Complete appliance rebuilds create and
+integrity-check a replacement SQLite database. Store-scoped repair instead
+uses a transaction against live metadata. Both modes first preserve a
+timestamped ``live.sqlite.pre-*-repair-*`` backup.
 
 For a registered bounded-folder profile, a targeted repair has narrower and
 safer semantics. ``store repair STORE`` compares the authoritative private

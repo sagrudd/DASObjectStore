@@ -317,6 +317,10 @@ completion.
     runs before and after every route, and unresolved completed staging
     hard-fails further growth. Regression tests cover unique progressive
     prefixes, incomplete/active checkpoints, and unproven placement evidence.
+  - [x] Add store-scoped, SHA-256-verifying appliance metadata recovery for
+    interrupted legacy ingress. Targeted apply preserves unrelated stores,
+    refuses same-size placement disagreement, and reports smaller partial
+    duplicates for explicit quarantine.
   - [x] Allow distinct ObjectStores to share one explicitly named appliance
     pool root while preserving folder, drive, and staging overlap rejection.
     The ``epic_collection`` appliance binding dry-run passes; apply it after

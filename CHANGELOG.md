@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.120.0 - 2026-07-19
+
+- Add safe store-scoped appliance metadata recovery: hash every selected HDD
+  placement, hard-fail same-size content disagreement, preserve unrelated live
+  stores transactionally, and promote recovered objects only as
+  `HddCopyVerified` with a consistent SQLite backup.
+- Keep smaller partial duplicates excluded and explicitly reported for later
+  quarantine rather than selecting them as authoritative payloads.
+
 ## 0.119.1 - 2026-07-19
 
 - Reclaim every completed remote-S3 reconciliation snapshot after independent
