@@ -35,6 +35,9 @@ database in one transaction. Same-size placements must have identical hashes
 or repair hard-fails. Unrelated stores and their queues remain untouched.
 Smaller partial duplicates are excluded, counted in the report, and retained
 for explicit quarantine; the daemon never guesses that they are disposable.
+Objects whose catalogue and every selected placement already carry consistent
+``HddCopyVerified`` checksum evidence reuse that proof; only missing or
+unsettled placements are read and hashed again.
 
 The daemon owns this mutation. Complete appliance rebuilds create and
 integrity-check a replacement SQLite database. Store-scoped repair instead

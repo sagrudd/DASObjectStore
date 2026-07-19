@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.120.1 - 2026-07-19
+
+- Reuse existing catalogue and placement checksum proof during store-scoped
+  recovery, avoiding unnecessary multi-terabyte rehashing of objects already
+  in `HddCopyVerified` state while still hashing every missing or unsettled
+  placement before promotion.
+
 ## 0.120.0 - 2026-07-19
 
 - Add safe store-scoped appliance metadata recovery: hash every selected HDD

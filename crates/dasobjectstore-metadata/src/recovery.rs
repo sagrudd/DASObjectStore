@@ -225,6 +225,8 @@ fn apply_filtered_recovery(
         .get(store_id.as_str())
         .ok_or_else(|| RecoverLiveMetadataError::UnknownStore(store_id.as_str().to_string()))?;
 
+    let mut connection = Connection::open(&request.live_sqlite_path)?;
+    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
     let mut verified = Vec::with_capacity(groups.len());
     for (object_id, rows) in groups {
         let max_size = rows.iter().map(|row| row.size_bytes).max().unwrap_or(0);
@@ -232,27 +234,32 @@ fn apply_filtered_recovery(
             .iter()
             .filter(|row| row.size_bytes == max_size)
             .collect::<Vec<_>>();
-        let mut expected_hash = None::<String>;
-        for row in &selected_rows {
-            let hash = sha256_file(&row.absolute_path)?;
-            if expected_hash
-                .as_ref()
-                .is_some_and(|expected| expected != &hash)
-            {
-                return Err(RecoverLiveMetadataError::PlacementContentMismatch {
-                    object_id: object_id.clone(),
-                    size_bytes: max_size,
-                });
+        let content_hash = if let Some(existing_hash) =
+            existing_verified_hash(&connection, object_id, max_size, &selected_rows)?
+        {
+            existing_hash
+        } else {
+            let mut expected_hash = None::<String>;
+            for row in &selected_rows {
+                let hash = sha256_file(&row.absolute_path)?;
+                if expected_hash
+                    .as_ref()
+                    .is_some_and(|expected| expected != &hash)
+                {
+                    return Err(RecoverLiveMetadataError::PlacementContentMismatch {
+                        object_id: object_id.clone(),
+                        size_bytes: max_size,
+                    });
+                }
+                expected_hash = Some(hash);
             }
-            expected_hash = Some(hash);
-        }
-        let content_hash = expected_hash
-            .ok_or_else(|| RecoverLiveMetadataError::MissingSelectedPayload(object_id.clone()))?;
+            expected_hash.ok_or_else(|| {
+                RecoverLiveMetadataError::MissingSelectedPayload(object_id.clone())
+            })?
+        };
         verified.push((object_id, max_size, content_hash, selected_rows));
     }
 
-    let mut connection = Connection::open(&request.live_sqlite_path)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON;")?;
     let backup_path = request.live_sqlite_path.with_extension(format!(
         "sqlite.pre-store-repair-{}-{}",
         store_id.as_str(),
@@ -333,6 +340,44 @@ fn apply_filtered_recovery(
         )
     };
     Ok(report)
+}
+
+fn existing_verified_hash(
+    connection: &Connection,
+    object_id: &str,
+    size_bytes: u64,
+    rows: &[&Payload],
+) -> Result<Option<String>, RecoverLiveMetadataError> {
+    let existing = connection
+        .query_row(
+            "SELECT state,size_bytes,content_hash FROM objects WHERE object_id=?1",
+            [object_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<u64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((state, existing_size, Some(content_hash))) = existing else {
+        return Ok(None);
+    };
+    if state != "HddCopyVerified" || existing_size != Some(size_bytes) || content_hash.is_empty() {
+        return Ok(None);
+    }
+    for row in rows {
+        let proven = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM placements WHERE object_id=?1 AND disk_id=?2 AND relative_path=?3 AND content_hash=?4 AND verified_at_utc IS NOT NULL)",
+            params![object_id, row.disk_id, row.relative_path, content_hash],
+            |result| result.get::<_, bool>(0),
+        )?;
+        if !proven {
+            return Ok(None);
+        }
+    }
+    Ok(Some(content_hash))
 }
 
 fn sha256_file(path: &std::path::Path) -> Result<String, RecoverLiveMetadataError> {
