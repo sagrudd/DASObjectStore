@@ -13,9 +13,9 @@ use dasobjectstore_metadata::{
     commit_object_put, existing_object_payload_candidate_paths, measure_ssd_capacity,
     put_object_direct_to_hdd_with_controlled_progress, read_object_inspect,
     settle_staged_object_to_hdd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
-    IngestJobPaths, IngestStagingLayout, IngestWriteReport, ObjectInspectError, ObjectPutError,
-    ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy, SsdPressure,
-    StagedObjectPut,
+    IngestJobPaths, IngestPayloadWriteError, IngestStagingLayout, IngestWriteReport,
+    ObjectInspectError, ObjectPutError, ObjectPutProgress, ObjectPutProgressStage,
+    ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut,
 };
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, ObjectServiceError,
@@ -347,6 +347,7 @@ impl LocalFileIngestExecutor {
             hdd_scheduler,
         );
         let ssd_flush_worker = spawn_ssd_flush_worker(flush_rx, settle_tx.clone(), event_tx);
+        let mut source_failures = Vec::new();
 
         for entry in &files {
             if maybe_skip_existing_object(
@@ -390,41 +391,77 @@ impl LocalFileIngestExecutor {
             let put_job_id = IngestJobId::new(format!("put-{}", entry.object_id.as_str()))
                 .map_err(|err| DaemonIngestFilesRuntimeError::CommandFailed(err.to_string()))?;
             let job_paths = layout.job_paths(&put_job_id);
-            let mut source = fs::File::open(&entry.source_path)?;
-            let write_report = match job_paths.write_payload_with_hash_unsynced_controlled_progress(
-                &mut source,
-                |bytes_written| {
-                    let object_progress = ObjectPutProgress {
-                        object_id: entry.object_id.clone(),
-                        stage: ObjectPutProgressStage::SsdIngest,
-                        bytes_written,
-                    };
-                    drain_hdd_settlement_events(
-                        &event_rx,
-                        &mut state,
-                        job_id,
-                        &request.endpoint,
-                        &mut progress,
-                        false,
-                        &self.live_sqlite_path,
-                        accepted_at_utc,
-                        &mut capacity_reservations,
-                    )
-                    .map_err(|err| io::Error::other(err.to_string()))?;
-                    state.apply_object_progress(entry, &object_progress);
-                    progress(object_progress_event(
-                        job_id,
-                        &request.endpoint,
-                        entry,
-                        &state,
-                        &object_progress,
-                    ))
-                    .map_err(|err| io::Error::other(err.to_string()))
-                },
-            ) {
+            let write_result = match fs::File::open(&entry.source_path) {
+                Ok(mut source) => job_paths.write_payload_with_hash_unsynced_classified(
+                    &mut source,
+                    |bytes_written| {
+                        let object_progress = ObjectPutProgress {
+                            object_id: entry.object_id.clone(),
+                            stage: ObjectPutProgressStage::SsdIngest,
+                            bytes_written,
+                        };
+                        drain_hdd_settlement_events(
+                            &event_rx,
+                            &mut state,
+                            job_id,
+                            &request.endpoint,
+                            &mut progress,
+                            false,
+                            &self.live_sqlite_path,
+                            accepted_at_utc,
+                            &mut capacity_reservations,
+                        )
+                        .map_err(|err| io::Error::other(err.to_string()))?;
+                        state.apply_object_progress(entry, &object_progress);
+                        progress(object_progress_event(
+                            job_id,
+                            &request.endpoint,
+                            entry,
+                            &state,
+                            &object_progress,
+                        ))
+                        .map_err(|err| io::Error::other(err.to_string()))
+                    },
+                ),
+                Err(error) => Err(IngestPayloadWriteError::SourceRead(error)),
+            };
+            let write_report = match write_result {
                 Ok(write_report) => write_report,
-                Err(err) => {
+                Err(IngestPayloadWriteError::SourceRead(err)) => {
                     let _ = fs::remove_dir_all(&job_paths.job_root);
+                    state.ssd_active = state.ssd_active.saturating_sub(1);
+                    capacity_reservations.release(entry)?;
+                    let failure = format!("{}: {err}", entry.relative_path.display());
+                    eprintln!("ingest source file unreadable; continuing: {failure}");
+                    source_failures.push(failure.clone());
+                    progress(DaemonIngestProgressEvent {
+                        job_id: job_id.clone(),
+                        endpoint: request.endpoint.clone(),
+                        stage: DaemonIngestStage::SsdIngest,
+                        pipeline_stage: Some(DaemonIngestPipelineStage::SourceRead),
+                        work_bytes_done: state.completed_work_bytes,
+                        work_bytes_total: Some(state.work_bytes_total),
+                        source_bytes_done: Some(state.completed_source_bytes),
+                        source_bytes_total: Some(state.source_bytes_total),
+                        stage_bytes_done: Some(0),
+                        stage_bytes_total: Some(entry.size_bytes),
+                        files_done: state.completed_files,
+                        files_total: Some(state.total_files),
+                        current_object_id: Some(entry.object_id.clone()),
+                        ssd_pressure: Some(state.ssd_pressure),
+                        telemetry: Some(state.telemetry()),
+                        active_hdd_transfers: state.active_hdd_transfer_records(),
+                        resource_policy: None,
+                        message: Some(format!(
+                            "source file unreadable; skipped and continuing: {failure}"
+                        )),
+                    })?;
+                    continue;
+                }
+                Err(IngestPayloadWriteError::DestinationWrite(err))
+                | Err(IngestPayloadWriteError::Progress(err)) => {
+                    let _ = fs::remove_dir_all(&job_paths.job_root);
+                    state.ssd_active = state.ssd_active.saturating_sub(1);
                     return Err(err.into());
                 }
             };
@@ -479,7 +516,8 @@ impl LocalFileIngestExecutor {
         })?;
         drop(settle_tx);
 
-        while state.completed_files < files.len() as u64 {
+        let expected_completed_files = (files.len() - source_failures.len()) as u64;
+        while state.completed_files < expected_completed_files {
             drain_hdd_settlement_events(
                 &event_rx,
                 &mut state,
@@ -498,6 +536,36 @@ impl LocalFileIngestExecutor {
                     "HDD settlement worker panicked".to_string(),
                 )
             })?;
+        }
+
+        if !source_failures.is_empty() {
+            let failed_count = source_failures.len();
+            let failure_summary = source_failures.join("; ");
+            progress(DaemonIngestProgressEvent {
+                job_id: job_id.clone(),
+                endpoint: request.endpoint.clone(),
+                stage: DaemonIngestStage::Failed,
+                pipeline_stage: Some(DaemonIngestPipelineStage::Finalization),
+                work_bytes_done: state.completed_work_bytes,
+                work_bytes_total: Some(total_work_bytes),
+                source_bytes_done: Some(state.completed_source_bytes),
+                source_bytes_total: Some(source_bytes),
+                stage_bytes_done: Some(0),
+                stage_bytes_total: Some(0),
+                files_done: state.completed_files,
+                files_total: Some(files.len() as u64),
+                current_object_id: None,
+                ssd_pressure: Some(state.ssd_pressure),
+                telemetry: Some(state.telemetry()),
+                active_hdd_transfers: Vec::new(),
+                resource_policy: None,
+                message: Some(format!(
+                    "partial ingest: {failed_count} unreadable source file(s); all other files were processed"
+                )),
+            })?;
+            return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "partial ingest completed after skipping {failed_count} unreadable source file(s): {failure_summary}"
+            )));
         }
 
         progress(DaemonIngestProgressEvent {

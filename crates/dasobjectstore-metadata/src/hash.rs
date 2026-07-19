@@ -11,6 +11,44 @@ pub struct HashWriteReport {
     pub content_hash: String,
 }
 
+#[derive(Debug)]
+pub(crate) enum CopyHashError {
+    SourceRead(std::io::Error),
+    DestinationWrite(std::io::Error),
+    Progress(std::io::Error),
+}
+
+pub(crate) fn copy_and_hash_with_classified_error(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+) -> Result<HashWriteReport, CopyHashError> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut bytes_written = 0_u64;
+
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(CopyHashError::SourceRead)?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        writer
+            .write_all(chunk)
+            .map_err(CopyHashError::DestinationWrite)?;
+        hasher.update(chunk);
+        bytes_written += read as u64;
+        progress(bytes_written).map_err(CopyHashError::Progress)?;
+    }
+
+    Ok(HashWriteReport {
+        bytes_written,
+        content_hash: encode_hex(&hasher.finalize()),
+    })
+}
+
 pub(crate) fn copy_and_hash_with_controlled_progress(
     reader: &mut impl Read,
     writer: &mut impl Write,

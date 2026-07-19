@@ -1,4 +1,7 @@
-use crate::hash::{copy_and_hash_with_controlled_progress, hash_file_sha256, SHA256_ALGORITHM};
+use crate::hash::{
+    copy_and_hash_with_classified_error, copy_and_hash_with_controlled_progress, hash_file_sha256,
+    CopyHashError, SHA256_ALGORITHM,
+};
 use crate::initialize::METADATA_DIR_NAME;
 use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
 use dasobjectstore_core::ids::{DiskId, IngestJobId};
@@ -117,6 +120,32 @@ impl IngestJobPaths {
         })
     }
 
+    pub fn write_payload_with_hash_unsynced_classified(
+        &self,
+        reader: &mut impl Read,
+        progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+    ) -> Result<IngestWriteReport, IngestPayloadWriteError> {
+        self.create_directories()
+            .map_err(IngestPayloadWriteError::DestinationWrite)?;
+        let mut file = create_private_file(&self.payload_path)
+            .map_err(IngestPayloadWriteError::DestinationWrite)?;
+        let report =
+            copy_and_hash_with_classified_error(reader, &mut file, progress).map_err(|error| {
+                match error {
+                    CopyHashError::SourceRead(error) => IngestPayloadWriteError::SourceRead(error),
+                    CopyHashError::DestinationWrite(error) => {
+                        IngestPayloadWriteError::DestinationWrite(error)
+                    }
+                    CopyHashError::Progress(error) => IngestPayloadWriteError::Progress(error),
+                }
+            })?;
+        Ok(IngestWriteReport {
+            bytes_written: report.bytes_written,
+            content_hash_algorithm: INGEST_CONTENT_HASH_ALGORITHM.to_string(),
+            content_hash: report.content_hash,
+        })
+    }
+
     pub fn write_payload_unsynced_controlled_progress(
         &self,
         reader: &mut impl Read,
@@ -176,6 +205,25 @@ impl IngestJobPaths {
         file.sync_data()
     }
 }
+
+#[derive(Debug)]
+pub enum IngestPayloadWriteError {
+    SourceRead(std::io::Error),
+    DestinationWrite(std::io::Error),
+    Progress(std::io::Error),
+}
+
+impl Display for IngestPayloadWriteError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SourceRead(error) => write!(formatter, "source read failed: {error}"),
+            Self::DestinationWrite(error) => write!(formatter, "staging write failed: {error}"),
+            Self::Progress(error) => write!(formatter, "ingest progress failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for IngestPayloadWriteError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IngestWriteProgress {
@@ -749,8 +797,8 @@ pub(crate) fn encode_path_component(value: &str) -> String {
 mod tests {
     use super::{
         IngestJournalContentHash, IngestJournalFileRecord, IngestJournalFileState,
-        IngestJournalResumeAction, IngestJournalTransitionError, IngestStagingLayout,
-        INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
+        IngestJournalResumeAction, IngestJournalTransitionError, IngestPayloadWriteError,
+        IngestStagingLayout, INGEST_CONTENT_HASH_ALGORITHM, INGEST_DIR_NAME, INGEST_JOBS_DIR_NAME,
         INGEST_PAYLOAD_FILE_NAME, INGEST_SCRATCH_DIR_NAME,
     };
     #[cfg(unix)]
@@ -760,7 +808,7 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use rusqlite::Connection;
     use std::fs;
-    use std::io::Cursor;
+    use std::io::{self, Cursor, Read};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
@@ -805,6 +853,27 @@ mod tests {
             paths.scratch_dir,
             paths.job_root.join(INGEST_SCRATCH_DIR_NAME)
         );
+    }
+
+    #[test]
+    fn classifies_source_read_failure_separately_from_staging_failures() {
+        struct FailingSource;
+
+        impl Read for FailingSource {
+            fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::from_raw_os_error(5))
+            }
+        }
+
+        let root = temp_root("classified-source-read");
+        let paths = IngestStagingLayout::for_ssd_root(&root)
+            .job_paths(&IngestJobId::new("failed-source").expect("job id"));
+        let error = paths
+            .write_payload_with_hash_unsynced_classified(&mut FailingSource, |_| Ok(()))
+            .expect_err("source read should fail");
+
+        assert!(matches!(error, IngestPayloadWriteError::SourceRead(_)));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

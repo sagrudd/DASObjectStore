@@ -113,6 +113,30 @@ impl IngestCapacityReservations {
         self.reservations.remove(entry.object_id.as_str());
         Ok(())
     }
+
+    pub(super) fn release(
+        &mut self,
+        entry: &FileIngestEntry,
+    ) -> Result<(), DaemonIngestFilesRuntimeError> {
+        let Some(reservation_id) = self.reservations.remove(entry.object_id.as_str()) else {
+            return Ok(());
+        };
+        let Some(provider) = &self.provider else {
+            return Ok(());
+        };
+        let result = match self.subobject_name.as_deref() {
+            Some(subobject) => {
+                provider.release_subobject(&self.store_id, subobject, &reservation_id)
+            }
+            None => provider.release(&self.store_id, &reservation_id),
+        };
+        result.map_err(|error| {
+            DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                "capacity release failed for {} after source read failure: {error}",
+                entry.relative_path.display()
+            ))
+        })
+    }
 }
 
 impl Drop for IngestCapacityReservations {

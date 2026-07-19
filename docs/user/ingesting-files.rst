@@ -19,6 +19,24 @@ This command is not a local filesystem copy into a DAS member disk. The normal
 path sends a daemon request over the packaged local daemon socket. The daemon is
 the only component that should mutate managed SSD/HDD roots.
 
+Recovering readable files from damaged media
+---------------------------------------------
+
+Directory ingest continues when an individual source file returns a read
+error. The daemon records the relative path and operating-system error in its
+journal, skips that file, and continues processing the remaining files. All
+readable files are settled normally with their checksums and required copies.
+
+After every discoverable file has been attempted, the command returns a
+partial-failure summary when one or more files were unreadable. This non-zero
+result is deliberate: it distinguishes a completed recovery pass from a fully
+successful ingest while preserving every object that was recovered.
+
+Only source-open and source-read errors are recoverable in this way. SSD
+staging, HDD placement, verification, catalogue commit, capacity reservation,
+and progress-transport errors remain fail-fast because continuing after those
+failures could misrepresent managed-storage durability.
+
 Example
 -------
 

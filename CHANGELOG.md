@@ -8,6 +8,16 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.114.11 - 2026-07-19
+
+- Continue directory ingest after an individual source file cannot be read,
+  journaling the unreadable path while preserving and settling every readable
+  object; the completed command reports an explicit partial failure instead of
+  silently claiming full recovery.
+- Keep SSD staging, HDD placement, progress-delivery, and metadata-commit
+  failures fail-fast so recovery behavior cannot weaken managed-storage
+  guarantees.
+
 ## 0.114.10 - 2026-07-18
 
 - Align the Monas adapter and Web UI on Prosopikon's persisted authority UUID
