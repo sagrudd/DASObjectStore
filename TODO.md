@@ -316,6 +316,11 @@ completion.
     pool root while preserving folder, drive, and staging overlap rejection.
     The ``epic_collection`` appliance binding dry-run passes; apply it after
     0.118.1 is packaged without interrupting the active recovery ingest.
+  - [x] Remove the obsolete mandatory per-store binding lookup from startup
+    capacity-reservation maintenance. Unbound appliance stores now resolve the
+    shared pool roots, and shared-root multipart scans select only journals
+    belonging to the store under maintenance. Deployment of 0.118.2 remains
+    deferred until the active ``disk_002`` recovery completes.
   - [x] Add a provider-independent completion-commit gate to the daemon remote
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring,

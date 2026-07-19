@@ -656,32 +656,24 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         Ok(report)
     }
 
-    /// Discover durable multipart authorities from registered profile roots,
-    /// then execute one lease pass. Missing profile configuration fails closed:
-    /// expiry must never run when durable active work cannot be enumerated.
+    /// Discover durable multipart authorities from each store's resolved backend,
+    /// then execute one lease pass. Appliance stores intentionally fall back to
+    /// the shared daemon pool roots; they do not require an artificial private
+    /// folder/profile binding merely to participate in lease maintenance.
     pub fn maintain_registered_reservation_leases(
         &self,
         now_unix_seconds: u64,
         lease_seconds: u64,
     ) -> Result<CapacityReservationLeaseReport, DaemonServiceRuntimeError> {
-        let profile_registry_path = self
-            .profile_binding_registry_path
-            .as_ref()
-            .ok_or_else(|| unavailable("profile binding registry is not configured"))?;
         let definitions = read_store_registry(&self.store_registry_path)
             .map_err(DaemonServiceRuntimeError::ObjectService)?;
         let mut protections = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let store_id = definition.store_id;
-            let binding = read_profile_binding(profile_registry_path, store_id.as_str())?
-                .ok_or_else(|| {
-                    unavailable(format!(
-                        "profile binding is missing for object store {store_id}"
-                    ))
-                })?;
+            let (backend_root, _) = self.probe_roots(&store_id)?;
             let reservation_ids =
                 crate::runtime::profile_s3_multipart::discover_multipart_reservation_ids(
-                    &binding.backend_root,
+                    &backend_root,
                     store_id.as_str(),
                 )
                 .map_err(|error| {
@@ -1402,6 +1394,40 @@ mod tests {
         let released = load_capacity_ledger(&ledger_path).expect("released ledger reload");
         assert_eq!(released.reserved_bytes(), 0);
         assert_eq!(released.used_bytes(), 100);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn startup_lease_maintenance_resolves_unbound_store_through_shared_pool() {
+        let root = root("shared-pool-lease-maintenance");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        save_capacity_ledger(
+            ledger_dir.join("codex.json"),
+            &CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0)
+                .expect("ledger"),
+        )
+        .expect("ledger seed");
+        let backend = root.join("backend");
+        let ssd = root.join("ssd");
+        std::fs::create_dir_all(&backend).expect("shared backend");
+        std::fs::create_dir_all(&ssd).expect("shared SSD");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            backend,
+            ssd,
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        )
+        .with_profile_binding_registry_path(root.join("profile-bindings.json"));
+
+        let report = provider
+            .maintain_registered_reservation_leases(1_000, 60)
+            .expect("unbound appliance store uses shared roots");
+        assert_eq!(report.stores_scanned, 1);
         let _ = std::fs::remove_dir_all(root);
     }
 

@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.118.2 - 2026-07-19
+
+- Resolve startup capacity-reservation lease maintenance through the same
+  shared appliance-pool fallback used by capacity readiness, rather than
+  requiring every appliance ObjectStore to have a private profile binding.
+- Scope multipart lease discovery by manifest store identity within a shared
+  appliance root, while continuing to fail closed on malformed journals or
+  reservation-directory identity mismatches.
+
 ## 0.118.1 - 2026-07-19
 
 - Permit multiple ObjectStores to bind to the same named appliance pool root

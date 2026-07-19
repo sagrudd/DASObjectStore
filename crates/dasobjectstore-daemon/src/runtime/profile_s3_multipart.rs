@@ -325,10 +325,13 @@ pub fn discover_multipart_reservation_ids(
         let manifest: JournalManifest = serde_json::from_slice(&bytes)
             .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
         validate_manifest(&manifest)?;
-        if manifest.store_id != expected_store_id
-            || manifest.reservation_id != directory_reservation_id
-        {
+        if manifest.reservation_id != directory_reservation_id {
             return Err(MultipartPartJournalError::IdentityMismatch);
+        }
+        if manifest.store_id != expected_store_id {
+            // A named appliance pool is shared by multiple ObjectStores. The
+            // manifest is valid but belongs to another store's lease scan.
+            continue;
         }
         reservation_ids.push(manifest.reservation_id);
     }
@@ -513,15 +516,20 @@ mod tests {
         let journal = MultipartPartJournal::open(&root, &request).expect("journal");
         journal.persist().expect("persist journal identity");
         drop(journal);
+        let mut other_request = request.clone();
+        other_request.store_id = StoreId::new("other-store").expect("other store");
+        other_request.reservation_id = "reservation-2".to_string();
+        let other = MultipartPartJournal::open(&root, &other_request).expect("other journal");
+        other.persist().expect("persist other journal identity");
+        drop(other);
 
         assert_eq!(
             discover_multipart_reservation_ids(&root, "store-1").expect("discover"),
             vec!["reservation-1".to_string()]
         );
-        assert!(matches!(
-            discover_multipart_reservation_ids(&root, "other-store"),
-            Err(MultipartPartJournalError::IdentityMismatch)
-        ));
+        assert!(discover_multipart_reservation_ids(&root, "other-store")
+            .expect("other store scan")
+            .contains(&"reservation-2".to_string()));
         let _ = std::fs::remove_dir_all(root);
     }
 }
