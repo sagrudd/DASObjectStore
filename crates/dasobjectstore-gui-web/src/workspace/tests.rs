@@ -11,6 +11,7 @@ fn workspace_component_source() -> String {
         include_str!("users_groups.rs"),
         include_str!("../endpoints.rs"),
         include_str!("activity.rs"),
+        include_str!("live_status.rs"),
         include_str!("bioinformatics.rs"),
     ]
     .concat()
@@ -27,6 +28,7 @@ fn web_styles_source() -> String {
         include_str!("../../styles/object-browser.css"),
         include_str!("../../styles/object-stores.css"),
         include_str!("../../styles/activity.css"),
+        include_str!("../../styles/live-status.css"),
         include_str!("../../styles/local-access.css"),
         include_str!("../../styles/endpoints.css"),
         include_str!("../../styles/auth.css"),
@@ -346,6 +348,7 @@ fn primary_navigation_uses_redesign_labels() {
         labels,
         vec![
             "Home",
+            "Live Status",
             "Enclosures",
             "ObjectStores",
             "Connections",
@@ -386,6 +389,10 @@ fn workspace_pages_build_expected_api_paths() {
         "/products/dasobjectstore/api/v1/dashboard/home"
     );
     assert_eq!(
+        WorkspacePage::LiveStatus.api_path(base),
+        "/products/dasobjectstore/api/v1/workspaces/live-status"
+    );
+    assert_eq!(
         WorkspacePage::Enclosures.api_path(base),
         "/products/dasobjectstore/api/v1/dashboard/enclosures"
     );
@@ -413,6 +420,44 @@ fn workspace_pages_build_expected_api_paths() {
         WorkspacePage::Bioinformatics.api_path(base),
         "/products/dasobjectstore/api/v1/workspaces/bioinformatics"
     );
+}
+
+#[test]
+fn live_status_contract_prevents_polling_jitter_and_exposes_progressive_detail() {
+    let source = include_str!("live_status.rs");
+    let css = include_str!("../../styles/live-status.css");
+    let index = include_str!("../../index.html");
+
+    for evidence in [
+        "if *in_flight.borrow()",
+        "snapshot.sequence >= *accepted_sequence.borrow()",
+        "LiveStatusViewState::Stale",
+        "Last good state retained",
+        "key={path.job_id.clone()}",
+        "LIVE_STATUS_REFRESH_MS",
+        "LIVE_STATUS_TRACE_POINTS",
+    ] {
+        assert!(
+            source.contains(evidence),
+            "missing live behavior: {evidence}"
+        );
+    }
+    for selector in [
+        ".dos-live-evidence",
+        ".dos-live-path",
+        ".dos-live-trace",
+        ".dos-live-detail",
+        "font-variant-numeric: tabular-nums",
+        "min-height: 80px",
+        "height: 238px",
+    ] {
+        assert!(
+            css.contains(selector),
+            "missing stable live styling: {selector}"
+        );
+    }
+    assert_eq!(index.matches("styles/live-status.css").count(), 1);
+    assert!(index.find("styles/live-status.css").unwrap() < index.find("styles.css").unwrap());
 }
 
 #[test]

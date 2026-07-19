@@ -28,9 +28,9 @@ use crate::api::{
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
     DiskLockdownRequest, DiskLockdownResponse, DiskRetireRequest, DiskRetireResponse,
     IngestControlRequest, IngestControlResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserRequest, ObjectBrowserResponse,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
-    ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
+    IngestQueueDrainRequest, IngestQueueDrainResponse, LiveStatusRequest, LiveStatusResponse,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
+    ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
     ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
     PrepareEnclosureRequest, PrepareEnclosureResponse, ProfileBindingRequest,
     ProfileBindingResponse, ProfileBrowserRequest, ProfileBrowserResponse,
@@ -440,6 +440,16 @@ where
         }
     }
 
+    pub fn live_status(
+        &self,
+        request: LiveStatusRequest,
+    ) -> Result<LiveStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::LiveStatus(request))? {
+            DaemonApiResponse::LiveStatus(response) => Ok(response),
+            response => Err(unexpected("live_status", response)),
+        }
+    }
+
     pub fn service_lifecycle(
         &self,
         request: DaemonServiceLifecycleRequest,
@@ -806,6 +816,7 @@ fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClie
 
 fn response_name(response: &DaemonApiResponse) -> &'static str {
     match response {
+        DaemonApiResponse::LiveStatus(_) => "live_status",
         DaemonApiResponse::HealthSummary(_) => "health_summary",
         DaemonApiResponse::DiskRetire(_) => "disk_retire",
         DaemonApiResponse::DiskForceRetire(_) => "disk_force_retire",

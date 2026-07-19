@@ -1,0 +1,49 @@
+.dos-live-status { --live-ink: #111111; --live-muted: #5b6770; --live-line: #d9e0e3; --live-accent: var(--dos-interaction-primary); --live-soft: var(--dos-status-info-bg); }
+.dos-live-status, .dos-live-status button { font-variant-numeric: tabular-nums; }
+.dos-live-evidence { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); margin-bottom: 18px; overflow: hidden; border: 1px solid var(--live-line); border-radius: 14px; background: #fff; }
+.dos-live-evidence div { display: grid; min-height: 70px; align-content: center; gap: 4px; padding: 12px 16px; border-inline-start: 1px solid var(--live-line); }
+.dos-live-evidence div:first-child { border-inline-start: 0; }
+.dos-live-evidence span { color: var(--live-muted); font-size: .72rem; font-weight: 700; letter-spacing: .055em; text-transform: uppercase; }
+.dos-live-evidence strong { color: var(--live-ink); font-size: 1.05rem; white-space: nowrap; }
+.dos-live-evidence strong:first-letter { text-transform: uppercase; }
+.dos-live-evidence strong.is-stale { color: var(--dos-status-warning-fg); }
+.dos-live-reconnect { margin: -6px 0 18px; padding: 8px 12px; border-left: 3px solid var(--dos-status-warning-fg); color: var(--dos-status-warning-fg); background: var(--dos-status-warning-bg); }
+.dos-live-primary { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 16px; align-items: start; }
+.dos-live-paths { min-height: 300px; }
+.dos-live-paths h2,.dos-live-hosts h2,.dos-live-waiting h2 { margin: 3px 0 0; font-size: 1.2rem; }
+.dos-live-path-list { display: grid; margin: 14px -18px -18px; }
+.dos-live-path { position: relative; display: grid; grid-template-columns: minmax(170px,1.1fr) minmax(210px,1.5fr) minmax(160px,.7fr); gap: 20px; min-height: 80px; padding: 15px 18px 19px; overflow: hidden; border: 0; border-top: 1px solid var(--live-line); color: var(--live-ink); background: transparent; text-align: left; cursor: pointer; }
+.dos-live-path:hover,.dos-live-path:focus-visible { background: #f5faf9; outline: none; }
+.dos-live-path__route,.dos-live-path__work,.dos-live-path__measure { display: grid; align-content: center; gap: 4px; min-width: 0; }
+.dos-live-path__route { grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
+.dos-live-path__route strong,.dos-live-path__work strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dos-live-path__route span { color: var(--live-accent); }
+.dos-live-path__work span,.dos-live-path__measure span { color: var(--live-muted); font-size: .82rem; }
+.dos-live-path__measure { justify-items: end; }
+.dos-live-progress { position: absolute; inset: auto 18px 9px; height: 3px; overflow: hidden; border-radius: 10px; background: #e4e9e9; }
+.dos-live-progress i { display: block; height: 100%; border-radius: inherit; background: var(--live-accent); transition: width 650ms cubic-bezier(.22,.61,.36,1); }
+.dos-live-detail { position: sticky; top: 12px; width: min(320px,30vw); padding: 20px; border: 1px solid var(--live-line); border-radius: 14px; background: #fff; box-shadow: 0 18px 45px rgba(25,45,48,.12); }
+.dos-live-detail .dos-icon-button { float: right; }
+.dos-live-detail h2 { overflow-wrap: anywhere; }
+.dos-live-detail dl { display: grid; grid-template-columns: 90px minmax(0,1fr); gap: 9px 12px; margin: 18px 0 0; }
+.dos-live-detail dt { color: var(--live-muted); }
+.dos-live-detail dd { margin: 0; overflow-wrap: anywhere; font-weight: 650; }
+.dos-live-traces,.dos-live-lower { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-top: 16px; }
+.dos-live-trace { min-width: 0; height: 238px; }
+.dos-live-trace p { margin: 3px 0 0; color: var(--live-muted); }
+.dos-live-trace svg { display: block; width: 100%; height: 124px; margin-top: 8px; }
+.dos-live-trace__baseline { fill: none; stroke: #dfe6e6; stroke-width: 1; }
+.dos-live-trace__line { fill: none; stroke: var(--live-accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; transition: points 500ms linear; }
+.dos-live-trace__axis { display: flex; justify-content: space-between; color: var(--live-muted); font-size: .76rem; }
+.dos-live-host-list,.dos-live-wait-list { display: grid; margin-top: 14px; }
+.dos-live-host-list > div { display: grid; grid-template-columns: 12px minmax(120px,1fr) minmax(110px,.7fr) auto; gap: 10px; align-items: center; min-height: 44px; border-top: 1px solid var(--live-line); }
+.dos-live-host-list > div:first-child,.dos-live-wait-list > div:first-child { border-top: 0; }
+.dos-live-host-list span,.dos-live-host-list time,.dos-live-wait-list span,.dos-live-wait-list small { color: var(--live-muted); }
+.dos-presence { width: 8px; height: 8px; border-radius: 50%; background: #9aa5aa; }
+.dos-presence[data-state="connected"],.dos-presence[data-state="active"] { background: var(--dos-status-success-fg); box-shadow: 0 0 0 4px var(--dos-status-success-bg); }
+.dos-live-wait-list > div { display: grid; grid-template-columns: minmax(110px,.65fr) minmax(180px,1.4fr) auto; gap: 10px; align-items: center; min-height: 48px; border-top: 1px solid var(--live-line); }
+.dos-live-wait-list [data-state="warning"] strong { color: var(--dos-status-warning-fg); }
+.dos-live-status-message { min-height: 180px; display: grid; place-content: center; text-align: center; }
+@media (max-width: 1050px) { .dos-live-evidence { grid-template-columns: repeat(3,1fr); } .dos-live-evidence div:nth-child(4) { border-top: 1px solid var(--live-line); } .dos-live-primary { grid-template-columns: 1fr; } .dos-live-detail { position: relative; top: auto; width: auto; } }
+@media (max-width: 760px) { .dos-live-evidence { grid-template-columns: repeat(2,1fr); } .dos-live-evidence div { border-top: 1px solid var(--live-line); } .dos-live-evidence div:nth-child(-n+2) { border-top: 0; } .dos-live-traces,.dos-live-lower { grid-template-columns: 1fr; } .dos-live-path { grid-template-columns: 1fr; gap: 8px; } .dos-live-path__measure { justify-items: start; grid-template-columns: auto auto; gap: 10px; } .dos-live-host-list > div,.dos-live-wait-list > div { grid-template-columns: 12px 1fr; padding: 8px 0; } }
+@media (prefers-reduced-motion: reduce) { .dos-live-progress i,.dos-live-trace__line { transition: none; } }

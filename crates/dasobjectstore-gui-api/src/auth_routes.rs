@@ -49,7 +49,8 @@ pub use auth_router::{
 pub(crate) use auth_router::{
     standalone_auth_router_with_state, standalone_dashboard_router_with_state,
     standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
-    standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
+    standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
+    standalone_users_groups_router_with_state,
 };
 use auth_validation::*;
 use axum::{
@@ -240,6 +241,13 @@ async fn standalone_home_dashboard(
     Ok(Json(
         crate::home_aggregator::live_home_dashboard_for_window(query.selected_window()),
     ))
+}
+
+async fn standalone_live_status_workspace(
+    State(daemon_bridge): State<Arc<crate::daemon_bridge::DaemonBridge>>,
+    _actor: AuthenticatedGuiActor,
+) -> Json<crate::LiveStatusWorkspaceView> {
+    Json(crate::live_status::live_status_workspace(daemon_bridge).await)
 }
 
 async fn standalone_cached_home_dashboard(
@@ -890,21 +898,21 @@ mod tests {
     use super::{
         gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
         standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
-        standalone_enclosure_admin_router_with_state, standalone_reporting_router_with_state,
-        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
-        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
-        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
-        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
-        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
-        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
-        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
+        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
+        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
+        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
+        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
+        IngestControlAction, IngestControlRequest, IngestControlResponse,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
+        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
+        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
+        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
+        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
@@ -1687,6 +1695,58 @@ mod tests {
             .expect("request completes");
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn live_status_workspace_requires_an_authenticated_operator() {
+        let root = temp_root("live-status-auth");
+        let app = standalone_live_status_router_with_bridge(
+            registered_auth_store(&root),
+            Arc::new(
+                crate::daemon_bridge::DaemonBridge::with_capacity_and_deadline(
+                    0,
+                    std::time::Duration::from_millis(20),
+                ),
+            ),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/workspaces/live-status")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn live_status_workspace_degrades_without_exposing_transport_failures() {
+        let root = temp_root("live-status-degraded");
+        let auth_store = registered_auth_store_for_user(&root, "operator");
+        let login = auth_store.login("operator", "secret").unwrap();
+        let app = standalone_live_status_router_with_bridge(
+            auth_store,
+            Arc::new(
+                crate::daemon_bridge::DaemonBridge::with_capacity_and_deadline(
+                    0,
+                    std::time::Duration::from_millis(20),
+                ),
+            ),
+        );
+        let encoded = get_json_with_session::<serde_json::Value>(
+            app,
+            "/api/v1/workspaces/live-status",
+            "operator",
+            &login.session_token,
+        )
+        .await;
+        assert_eq!(encoded["availability"], "degraded");
+        assert_eq!(encoded["suggested_refresh_millis"], 1_000);
+        assert_eq!(encoded["warnings"][0]["code"], "live_status_busy");
         cleanup(&root);
     }
 

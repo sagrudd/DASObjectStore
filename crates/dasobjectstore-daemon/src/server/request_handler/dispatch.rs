@@ -21,6 +21,7 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::LiveStatus(_) => Ok(DaemonApiResponse::LiveStatus(handler.live_status())),
         service_request @ (DaemonApiRequest::ServiceStatus(_)
         | DaemonApiRequest::ServiceLifecycle(_)
         | DaemonApiRequest::ServiceProvision(_)

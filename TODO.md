@@ -29,6 +29,13 @@ evidence and detailed source tasks.
 
 ### Current campaign gate status (2026-07-16)
 
+- `[x]` Live Status Web dashboard — daemon-authoritative ingest snapshots,
+  appliance/actor-to-ObjectStore attribution, SSD and HDD progress/throughput,
+  one-second single-flight refresh, bounded 60-second traces, stable keyed
+  rendering, degraded-state retention, privacy filtering, and responsive Yew
+  presentation are delivered in 0.116.0. Attested remote-host names remain an
+  additive transport capability rather than being inferred.
+
 - `[~]` Durable ingest resource admission — bounded auto/explicit concurrent
   transaction budgeting is delivered in 0.115.0. Remaining: transactional
   persistent wait queue, per-store fair scheduling, idempotent submission,

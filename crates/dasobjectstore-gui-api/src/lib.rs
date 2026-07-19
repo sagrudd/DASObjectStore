@@ -14,6 +14,7 @@ mod endpoints_registry;
 mod groups_registry;
 mod home_aggregator;
 pub mod host_auth;
+mod live_status;
 mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
@@ -72,6 +73,11 @@ pub use host_auth::{
     HostAuthenticationAuthority, HostAuthenticationContextVerifier,
     VerifiedHostAuthenticatedContext, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
     MAX_HOST_AUTH_CONTEXT_TTL_SECONDS,
+};
+pub use live_status::{
+    LiveStatusAggregateView, LiveStatusAvailabilityView, LiveStatusHddTransferView,
+    LiveStatusHostView, LiveStatusProgressView, LiveStatusStoreWriterView, LiveStatusWarningView,
+    LiveStatusWorkspaceView, LIVE_STATUS_SUGGESTED_REFRESH_MILLIS, LIVE_STATUS_VIEW_SCHEMA_VERSION,
 };
 pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,

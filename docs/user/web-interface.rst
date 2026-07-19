@@ -1308,3 +1308,37 @@ keeps it in memory and sends it as ``x-dasobjectstore-csrf`` on mutations.
 Monas and Synoptikon composition reject absent or incorrect tokens with HTTP
 403 before product code runs. The token cannot authorize storage operations by
 itself and is cleared when the session becomes invalid or logs out.
+Live Status
+-----------
+
+The ``Live Status`` workspace is the operational view of data currently moving
+through DASObjectStore. It uses the same daemon ingest progress evidence as the
+CLI TUI rather than estimating activity from historical disk counters.
+
+The page shows:
+
+* authenticated appliance connections represented by active work;
+* which ObjectStores each connection is writing;
+* current object and aggregate progress into the SSD staging tier;
+* HDD settlement targets, copy numbers, write/fsync/rename phases, and rates;
+* trailing 60-second SSD and HDD throughput traces;
+* queued work, recent terminal work, warnings, and degraded telemetry state.
+
+The browser requests an atomic snapshot once per second. Requests never
+overlap, snapshots carry a monotonically increasing sequence, and older
+responses are ignored. The last usable snapshot remains visible if the daemon
+bridge briefly degrades. Stable row identities, reserved geometry, tabular
+numbers, and bounded client-side trace buffers prevent the page from jumping as
+values change.
+
+For local Unix-socket ingress, the daemon can prove the appliance and the
+authenticated local actor but the current protocol does not carry an attested
+client-computer hostname. The page therefore identifies such work as local to
+the appliance and never guesses a host from an address. Registered remote-agent
+names can be displayed when those transports publish progress through the same
+live registry.
+
+The API deliberately omits filesystem source paths, complete object namespaces,
+numeric UIDs, credentials, session identifiers, and free-form daemon messages.
+Only the final object name needed for operational recognition crosses the Web
+privacy boundary.

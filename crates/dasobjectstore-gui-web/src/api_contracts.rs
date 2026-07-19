@@ -601,6 +601,104 @@ pub struct ActivityTaskProgressResponse {
     pub message: Option<String>,
 }
 
+/// A monotonic, presentation-ready snapshot of current data movement.
+///
+/// Paths are deliberately absent: the Web surface identifies resources by
+/// stable product IDs and never exposes daemon filesystem topology.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct LiveStatusWorkspaceResponse {
+    pub schema_version: u16,
+    pub availability: String,
+    pub sequence: u64,
+    pub generated_at_utc: Option<String>,
+    pub suggested_refresh_millis: u32,
+    pub aggregate: LiveStatusAggregateResponse,
+    #[serde(default)]
+    pub hosts: Vec<LiveStatusHostResponse>,
+    #[serde(default)]
+    pub store_writers: Vec<LiveStatusStoreWriterResponse>,
+    #[serde(default)]
+    pub ssd_ingests: Vec<LiveStatusProgressResponse>,
+    #[serde(default)]
+    pub hdd_transfers: Vec<LiveStatusHddTransferResponse>,
+    #[serde(default)]
+    pub recent: Vec<LiveStatusProgressResponse>,
+    #[serde(default)]
+    pub warnings: Vec<LiveStatusWarningResponse>,
+    #[serde(skip)]
+    pub ssd_trace: Vec<LiveStatusTracePointResponse>,
+    #[serde(skip)]
+    pub hdd_trace: Vec<LiveStatusTracePointResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusAggregateResponse {
+    pub connected_hosts: u32,
+    pub active_stores: u32,
+    pub active_ingests: u32,
+    pub source_read_bytes_per_second: u64,
+    pub ssd_write_bytes_per_second: u64,
+    pub hdd_write_bytes_per_second: u64,
+    pub active_hdd_transfers: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusHostResponse {
+    pub display_name: String,
+    #[serde(default)]
+    pub actors: Vec<String>,
+    pub active_ingests: u32,
+    pub object_stores: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusStoreWriterResponse {
+    pub store_id: String,
+    pub hosts: Vec<String>,
+    pub active_ingests: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusProgressResponse {
+    pub job_id: String,
+    pub store_id: String,
+    pub host: Option<String>,
+    pub state: String,
+    pub pipeline_stage: Option<String>,
+    pub current_item: Option<String>,
+    pub bytes_done: u64,
+    pub bytes_total: Option<u64>,
+    pub files_done: u64,
+    pub files_total: Option<u64>,
+    pub bytes_per_second: u64,
+    pub updated_at_utc: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusHddTransferResponse {
+    pub job_id: String,
+    pub store_id: String,
+    pub disk_id: String,
+    pub copy_number: u8,
+    pub current_item: String,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub bytes_per_second: u64,
+    pub phase: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct LiveStatusTracePointResponse {
+    pub sequence: u64,
+    pub bytes_per_second: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusWarningResponse {
+    pub code: String,
+    pub message: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[allow(dead_code)]
 pub struct EndpointsWorkspaceResponse {

@@ -57,6 +57,7 @@ const HOME_THROUGHPUT_CHART_TOP: f64 = 24.0;
 #[cfg(any(target_arch = "wasm32", test))]
 const HOME_THROUGHPUT_CHART_BOTTOM: f64 = 144.0;
 pub const ACTIVITY_WORKSPACE_ROUTE: &str = crate::activity::ACTIVITY_WORKSPACE_ROUTE;
+pub const LIVE_STATUS_WORKSPACE_ROUTE: &str = "workspaces/live-status";
 pub const ENDPOINTS_WORKSPACE_ROUTE: &str = crate::endpoints::ENDPOINTS_WORKSPACE_ROUTE;
 pub const BIOINFORMATICS_WORKSPACE_ROUTE: &str = "workspaces/bioinformatics";
 pub const REMOTE_UPLOAD_WORKSPACE_ROUTE: &str = "workspaces/remote-upload";
@@ -65,6 +66,7 @@ pub const USERS_GROUPS_WORKSPACE_ROUTE: &str = crate::users_groups::USERS_GROUPS
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WorkspacePage {
     Home,
+    LiveStatus,
     Enclosures,
     ObjectStores,
     Activity,
@@ -78,6 +80,7 @@ impl WorkspacePage {
     pub const fn id(self) -> &'static str {
         match self {
             Self::Home => "home",
+            Self::LiveStatus => "live-status",
             Self::Enclosures => "enclosures",
             Self::ObjectStores => "objectstores",
             Self::Activity => "activity",
@@ -91,6 +94,7 @@ impl WorkspacePage {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Home => "Home",
+            Self::LiveStatus => "Live Status",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
@@ -104,6 +108,7 @@ impl WorkspacePage {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Home => "Home",
+            Self::LiveStatus => "Live Status",
             Self::Enclosures => "Enclosures",
             Self::ObjectStores => "ObjectStores",
             Self::Activity => "Activity",
@@ -117,6 +122,7 @@ impl WorkspacePage {
     pub fn api_path(self, api_base_path: &str) -> String {
         match self {
             Self::Home => home_workspace_api_path(api_base_path),
+            Self::LiveStatus => live_status_workspace_api_path(api_base_path),
             Self::Enclosures => enclosures_workspace_api_path(api_base_path),
             Self::ObjectStores => objectstores_workspace_api_path(api_base_path),
             Self::Activity => activity_workspace_api_path(api_base_path),
@@ -128,8 +134,9 @@ impl WorkspacePage {
     }
 }
 
-pub const PRIMARY_NAVIGATION: [WorkspacePage; 7] = [
+pub const PRIMARY_NAVIGATION: [WorkspacePage; 8] = [
     WorkspacePage::Home,
+    WorkspacePage::LiveStatus,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
     WorkspacePage::Endpoints,
@@ -138,8 +145,9 @@ pub const PRIMARY_NAVIGATION: [WorkspacePage; 7] = [
     WorkspacePage::Bioinformatics,
 ];
 
-pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 5] = [
+pub const INTEGRATED_PRIMARY_NAVIGATION: [WorkspacePage; 6] = [
     WorkspacePage::Home,
+    WorkspacePage::LiveStatus,
     WorkspacePage::Enclosures,
     WorkspacePage::ObjectStores,
     WorkspacePage::Activity,
@@ -158,6 +166,14 @@ pub fn home_workspace_api_path(api_base_path: &str) -> String {
         "{}/{}",
         api_base_path.trim_end_matches('/'),
         HOME_WORKSPACE_ROUTE
+    )
+}
+
+pub fn live_status_workspace_api_path(api_base_path: &str) -> String {
+    format!(
+        "{}/{}",
+        api_base_path.trim_end_matches('/'),
+        LIVE_STATUS_WORKSPACE_ROUTE
     )
 }
 
@@ -332,6 +348,8 @@ mod enclosures;
 #[cfg(any(target_arch = "wasm32", test))]
 mod home;
 #[cfg(any(target_arch = "wasm32", test))]
+mod live_status;
+#[cfg(any(target_arch = "wasm32", test))]
 mod object_browser;
 #[cfg(any(target_arch = "wasm32", test))]
 mod object_data;
@@ -389,6 +407,8 @@ pub use bioinformatics::BioinformaticsPage;
 pub use enclosures::EnclosuresPage;
 #[cfg(target_arch = "wasm32")]
 pub use home::HomeDashboard;
+#[cfg(target_arch = "wasm32")]
+pub use live_status::LiveStatusPage;
 #[cfg(target_arch = "wasm32")]
 pub use object_stores::ObjectStoresPage;
 #[cfg(target_arch = "wasm32")]

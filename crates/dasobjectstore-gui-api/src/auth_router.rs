@@ -64,11 +64,32 @@ async fn federated_host_session(
 fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(standalone_dashboard_router(auth_store.clone()))
+        .merge(standalone_live_status_router(auth_store.clone()))
         .merge(standalone_easyconnect_router(auth_store.clone()))
         .merge(standalone_users_groups_router(auth_store.clone()))
         .merge(standalone_enclosure_admin_router(auth_store.clone()))
         .merge(crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()))
         .merge(standalone_reporting_router(auth_store))
+}
+
+fn standalone_live_status_router(auth_store: LocalAuthStore) -> Router {
+    standalone_live_status_router_with_bridge(
+        auth_store,
+        crate::daemon_bridge::DaemonBridge::shared_packaged(),
+    )
+}
+
+pub(crate) fn standalone_live_status_router_with_bridge(
+    auth_store: LocalAuthStore,
+    daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
+) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/workspaces/live-status",
+            get(standalone_live_status_workspace),
+        )
+        .layer(Extension(auth_store))
+        .with_state(daemon_bridge)
 }
 
 pub fn standalone_auth_router(auth_store: LocalAuthStore) -> Router {

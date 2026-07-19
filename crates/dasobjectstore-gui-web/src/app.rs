@@ -4,7 +4,7 @@ use crate::mount::{FrontendHost, FrontendMount};
 use crate::session::{AppState, StableState};
 use crate::workspace::{
     primary_navigation_for_host, ActivityPage, BioinformaticsPage, EnclosuresPage, HomeDashboard,
-    ObjectStoresPage, RemoteUploadPage, UsersGroupsPage, WorkspacePage,
+    LiveStatusPage, ObjectStoresPage, RemoteUploadPage, UsersGroupsPage, WorkspacePage,
 };
 use crate::{api, storage};
 use gloo_timers::callback::Interval;
@@ -560,6 +560,9 @@ fn authenticated_workspace(props: &AuthenticatedWorkspaceProps) -> Html {
             { match *active_page {
                 WorkspacePage::Home => html! {
                     <HomeDashboard api_base_path={props.api_base_path.clone()} />
+                },
+                WorkspacePage::LiveStatus => html! {
+                    <LiveStatusPage api_base_path={props.api_base_path.clone()} />
                 },
                 WorkspacePage::Enclosures => html! {
                     <EnclosuresPage api_base_path={props.api_base_path.clone()} />

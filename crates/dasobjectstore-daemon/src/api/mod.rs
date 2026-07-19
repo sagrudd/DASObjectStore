@@ -16,6 +16,7 @@ mod ingest;
 pub(crate) mod ingest_control;
 mod ingest_mutation;
 mod jobs;
+mod live_status;
 mod local_admin;
 mod object_browser;
 mod object_mutation;
@@ -136,6 +137,10 @@ pub use jobs::{
     DaemonJobId, DaemonJobIdError, DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse,
     DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse,
     DaemonJobSummary, DaemonJobValidationError,
+};
+pub use live_status::{
+    LiveStatusActor, LiveStatusAggregate, LiveStatusConnectionOrigin, LiveStatusIngest,
+    LiveStatusRequest, LiveStatusResponse, LIVE_STATUS_SCHEMA_VERSION,
 };
 pub use local_admin::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
@@ -267,6 +272,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "command", content = "payload")]
 pub enum DaemonApiRequest {
+    LiveStatus(LiveStatusRequest),
     HealthSummary(DaemonHealthSummaryRequest),
     DiskRetire(DiskRetireRequest),
     DiskForceRetire(DiskForceRetireRequest),
@@ -336,6 +342,7 @@ pub enum DaemonApiRequest {
 impl DaemonApiRequest {
     pub(crate) fn command_name(&self) -> &'static str {
         match self {
+            Self::LiveStatus(_) => "live_status",
             Self::HealthSummary(_) => "health_summary",
             Self::DiskRetire(_) => "disk_retire",
             Self::DiskForceRetire(_) => "disk_force_retire",
@@ -533,6 +540,7 @@ impl DaemonApiRequest {
                 .validate()
                 .map_err(remote_easyconnect_validation_error),
             Self::HealthSummary(_)
+            | Self::LiveStatus(_)
             | Self::StoreInventory(_)
             | Self::StoreVerify(_)
             | Self::IngestJobStatus(_)
@@ -549,6 +557,7 @@ impl DaemonApiRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "payload")]
 pub enum DaemonApiResponse {
+    LiveStatus(LiveStatusResponse),
     HealthSummary(DaemonHealthSummaryResponse),
     DiskRetire(DiskRetireResponse),
     DiskForceRetire(DiskRetireResponse),

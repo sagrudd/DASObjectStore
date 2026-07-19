@@ -159,6 +159,7 @@ pub struct DaemonRequestHandler<S, C> {
     application_audit_log_path: PathBuf,
     application_upload_capability_path: PathBuf,
     application_capability_replay_path: PathBuf,
+    live_status_registry: Arc<crate::runtime::LiveStatusRegistry>,
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -204,6 +205,7 @@ where
             application_capability_replay_path: crate::runtime::application_capability_replay_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
     pub fn new_with_admin_job_registry(
@@ -248,6 +250,7 @@ where
             application_capability_replay_path: crate::runtime::application_capability_replay_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
     pub fn with_registry_paths(
@@ -285,7 +288,18 @@ where
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
         request.validate()?;
 
-        dispatch::request(self, request, actor, &mut emit_progress)
+        let registry = Arc::clone(&self.live_status_registry);
+        let observed_actor = actor.cloned();
+        let clock = &self.clock;
+        let mut observed_progress = |event: DaemonIngestProgressEvent| {
+            registry.record(event.clone(), observed_actor.as_ref(), clock.now_utc());
+            emit_progress(event)
+        };
+        dispatch::request(self, request, actor, &mut observed_progress)
+    }
+
+    fn live_status(&self) -> crate::api::LiveStatusResponse {
+        self.live_status_registry.snapshot(self.clock.now_utc())
     }
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
         if let Some(registry) = &self.admin_job_registry {
@@ -846,15 +860,16 @@ mod tests {
         DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
-        ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource, ObjectBrowserPageRequest,
-        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
-        ObjectBrowserRequest, ObjectBrowserSort, ObjectDownloadRequest,
-        ObjectFolderDownloadRequest, ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
-        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
-        PrepareEnclosureResponse, ProfileBindingOperation, ProfileBindingRequest,
-        ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileInspectionRequest,
-        ProfileInspectionRootState, ProfileMigrationRequest, ProfileReadinessRequest,
-        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        LiveStatusRequest, ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource,
+        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
+        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
+        ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
+        ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
+        PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
+        ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
+        ProfileDiagnosticsRequest, ProfileInspectionRequest, ProfileInspectionRootState,
+        ProfileMigrationRequest, ProfileReadinessRequest, ProviderStreamChunkHeader,
+        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
@@ -948,6 +963,25 @@ mod tests {
                 .as_slice(),
             &[true]
         );
+    }
+
+    #[test]
+    fn dispatches_empty_live_status_snapshot_with_stable_clock() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        );
+
+        let response = handler
+            .handle(DaemonApiRequest::LiveStatus(LiveStatusRequest))
+            .expect("live status handled");
+        let DaemonApiResponse::LiveStatus(response) = response else {
+            panic!("expected live status response");
+        };
+        assert_eq!(response.generated_at_utc, "2026-07-19T05:00:00Z");
+        assert_eq!(response.sequence, 0);
+        assert!(response.active.is_empty());
+        assert!(response.recent.is_empty());
     }
 
     #[test]

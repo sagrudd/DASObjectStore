@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.116.0 - 2026-07-19
+
+- Add an authenticated Live Status Web workspace backed by the daemon's
+  authoritative ingest progress stream, showing active appliance connections,
+  host-to-ObjectStore writers, SSD ingress, HDD settlement targets and phases,
+  current throughput, queue attention, and recent completion evidence.
+- Publish one privacy-preserving, monotonically sequenced daemon snapshot and
+  refresh it through a single-flight one-second browser loop. The interface
+  rejects out-of-order snapshots, retains the last good state through transient
+  failures, and keeps stable keyed rows and fixed chart geometry to avoid
+  display jitter.
+- Keep client source paths, full object namespaces, Unix UIDs, transport
+  diagnostics, credentials, and session material outside the Web contract.
+
 ## 0.115.0 - 2026-07-19
 
 - Replace the packaged daemon's accidental two-transaction ingest ceiling

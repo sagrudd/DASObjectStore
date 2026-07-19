@@ -301,6 +301,13 @@ pub async fn get_activity_workspace(path: &str) -> Result<ActivityWorkspaceRespo
     get_json(path).await
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn get_live_status_workspace(
+    path: &str,
+) -> Result<LiveStatusWorkspaceResponse, ApiError> {
+    get_json(path).await
+}
+
 #[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 pub fn activity_performance_report_upload_path(api_base_path: &str) -> String {
     format!(

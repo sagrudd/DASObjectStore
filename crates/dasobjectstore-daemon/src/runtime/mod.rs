@@ -20,6 +20,7 @@ mod folder_backend;
 mod folder_catalogue;
 mod folder_paths;
 mod ingest_files;
+mod live_status;
 mod local_admin;
 mod migration_provenance;
 mod migration_worker;
@@ -141,6 +142,7 @@ pub use ingest_files::{
     submit_ingest_files_to_local_store_with_progress, DaemonFileIngestSummary,
     DaemonIngestFilesRuntimeError,
 };
+pub use live_status::LiveStatusRegistry;
 pub use local_admin::{
     LocalAdminCommandOutput, LocalAdminCommandPlan, LocalAdminCommandRunner,
     LocalAdminRuntimeError, LocalGroupAdminController, LocalGroupAdministrationOperation,
