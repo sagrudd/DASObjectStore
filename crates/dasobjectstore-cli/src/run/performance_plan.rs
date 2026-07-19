@@ -817,17 +817,55 @@ pub(super) struct PerformanceTemporaryObjectStore {
 }
 
 impl PerformanceTemporaryObjectStore {
-    pub(super) fn new(ssd_root: PathBuf, hdd_roots: Vec<PathBuf>, keep: bool) -> Self {
-        Self {
+    pub(super) fn new(
+        ssd_root: PathBuf,
+        hdd_roots: Vec<PathBuf>,
+        keep: bool,
+        run_id: &str,
+    ) -> Result<Self, CliError> {
+        let temporary = Self {
             ssd_root,
             hdd_roots,
             keep,
+        };
+        temporary.write_gc_markers(run_id, "active")?;
+        Ok(temporary)
+    }
+
+    fn write_gc_markers(&self, run_id: &str, state: &str) -> Result<(), CliError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_string();
+        let marker = dasobjectstore_daemon::runtime::PerformanceGcMarker {
+            schema: dasobjectstore_daemon::runtime::PERFORMANCE_GC_MARKER_SCHEMA.to_string(),
+            run_id: run_id.to_string(),
+            state: state.to_string(),
+            keep_temp: self.keep,
+            created_at_utc: now.clone(),
+            updated_at_utc: now,
+        };
+        let encoded = serde_json::to_vec_pretty(&marker)?;
+        for root in std::iter::once(&self.ssd_root).chain(self.hdd_roots.iter()) {
+            fs::write(
+                root.join(dasobjectstore_daemon::runtime::PERFORMANCE_GC_MARKER_FILE),
+                &encoded,
+            )?;
         }
+        Ok(())
     }
 }
 
 impl Drop for PerformanceTemporaryObjectStore {
     fn drop(&mut self) {
+        let run_id = self
+            .ssd_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let _ = self.write_gc_markers(&run_id, if self.keep { "retained" } else { "complete" });
         if self.keep {
             return;
         }

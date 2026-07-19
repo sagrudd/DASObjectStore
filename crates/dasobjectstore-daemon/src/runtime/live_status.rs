@@ -1,6 +1,7 @@
 use crate::api::{
     DaemonIngestProgressEvent, DaemonIngestStage, LiveStatusActor, LiveStatusAggregate,
-    LiveStatusConnectionOrigin, LiveStatusIngest, LiveStatusResponse, LIVE_STATUS_SCHEMA_VERSION,
+    LiveStatusConnectionOrigin, LiveStatusGarbageCollection, LiveStatusIngest, LiveStatusResponse,
+    LIVE_STATUS_SCHEMA_VERSION,
 };
 use crate::auth::DaemonLocalActor;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -13,6 +14,7 @@ struct LiveStatusState {
     sequence: u64,
     active: BTreeMap<String, LiveStatusIngest>,
     recent: VecDeque<LiveStatusIngest>,
+    garbage_collection: Option<LiveStatusGarbageCollection>,
 }
 
 #[derive(Debug, Default)]
@@ -21,6 +23,14 @@ pub struct LiveStatusRegistry {
 }
 
 impl LiveStatusRegistry {
+    pub fn record_garbage_collection(&self, report: LiveStatusGarbageCollection) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("live status registry lock poisoned");
+        state.sequence = state.sequence.saturating_add(1);
+        state.garbage_collection = Some(report);
+    }
     pub fn record(
         &self,
         mut progress: DaemonIngestProgressEvent,
@@ -103,6 +113,7 @@ impl LiveStatusRegistry {
             aggregate,
             active,
             recent: state.recent.iter().cloned().collect(),
+            garbage_collection: state.garbage_collection.clone(),
         }
     }
 }
@@ -165,5 +176,29 @@ mod tests {
         assert!(complete.active.is_empty());
         assert_eq!(complete.recent.len(), 1);
         assert_eq!(complete.sequence, 2);
+    }
+
+    #[test]
+    fn garbage_collection_status_is_sequenced_and_path_free() {
+        let registry = LiveStatusRegistry::default();
+        registry.record_garbage_collection(LiveStatusGarbageCollection {
+            reclaimed_bytes: 42,
+            retained_items: 1,
+            retained_reasons: vec![crate::api::LiveStatusGarbageCollectionRetained {
+                category: "reconciliation".to_string(),
+                reason: "incomplete resumable manifest".to_string(),
+                items: 1,
+                bytes: 7,
+            }],
+            ..LiveStatusGarbageCollection::default()
+        });
+        let snapshot = registry.snapshot("2026-01-01T00:00:00Z");
+        assert_eq!(snapshot.sequence, 1);
+        let collection = snapshot.garbage_collection.expect("collection status");
+        assert_eq!(collection.reclaimed_bytes, 42);
+        assert_eq!(collection.retained_reasons[0].category, "reconciliation");
+        assert!(!serde_json::to_string(&collection)
+            .expect("serialize")
+            .contains("/srv/"));
     }
 }

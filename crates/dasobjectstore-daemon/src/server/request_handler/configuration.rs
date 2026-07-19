@@ -19,6 +19,14 @@ where
         self
     }
 
+    pub fn with_live_status_registry(
+        mut self,
+        registry: Arc<crate::runtime::LiveStatusRegistry>,
+    ) -> Self {
+        self.live_status_registry = registry;
+        self
+    }
+
     pub fn with_hdd_root_path(mut self, hdd_root_path: impl Into<PathBuf>) -> Self {
         self.hdd_root_path = hdd_root_path.into();
         self

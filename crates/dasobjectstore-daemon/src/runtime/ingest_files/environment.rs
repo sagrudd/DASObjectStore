@@ -12,7 +12,7 @@ const HDD_ROOT_ENV: &str = "DASOBJECTSTORE_HDD_ROOT";
 const DEFAULT_SSD_ROOT: &str = "/srv/dasobjectstore/ssd";
 const DEFAULT_HDD_ROOT: &str = "/srv/dasobjectstore/hdd";
 
-pub(crate) fn default_ssd_root() -> PathBuf {
+pub fn default_ssd_root() -> PathBuf {
     std::env::var_os(SSD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SSD_ROOT))

@@ -47,9 +47,10 @@ mod source_classification;
 
 use capacity::{reservation_scope, IngestCapacityReservations};
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
+pub use environment::default_ssd_root;
 #[cfg(test)]
 use environment::SSD_ROOT_ENV;
-pub(crate) use environment::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
+pub(crate) use environment::{default_hdd_root, discover_managed_hdd_roots};
 use environment::{default_live_sqlite_path, validate_known_ssd_root};
 use pipeline_events::{drain_hdd_settlement_events, object_progress_event};
 use pipeline_state::{

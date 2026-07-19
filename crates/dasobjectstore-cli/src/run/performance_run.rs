@@ -71,7 +71,8 @@ pub(super) fn run_performance_test(
             .map(|(_, root)| root.clone())
             .collect(),
         args.keep_temp(),
-    );
+        &run_id,
+    )?;
     let report_path = args
         .report()
         .map(Path::to_path_buf)

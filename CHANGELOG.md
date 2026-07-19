@@ -8,6 +8,21 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.118.0 - 2026-07-19
+
+- Add a default asynchronous daemon-start garbage collector for completed
+  reconciliation snapshots, terminal ingest staging, and explicitly marked
+  performance-test payloads. Every apply pass repeats a dry-run inventory and
+  fails closed unless catalogue, placement, ownership, and filesystem safety
+  proofs all pass.
+- Retain incomplete resumable manifests, the newest provider checkpoint,
+  active jobs, requested performance artifacts, and all legacy or ambiguous
+  data. Journal collection evidence and publish path-free retained reasons,
+  reclaimed capacity, and failures through Live Status.
+- Mark new performance-test namespaces with a versioned ownership record so
+  abandoned terminal artifacts can be distinguished safely from unrelated
+  data.
+
 ## 0.117.0 - 2026-07-19
 
 - Implement store-selectable asynchronous ``AfterSsdIngest`` acknowledgement.

@@ -42,6 +42,27 @@ pub struct LiveStatusAggregate {
     pub active_hdd_transfers: u32,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LiveStatusGarbageCollection {
+    pub running: bool,
+    pub last_completed_at_utc: Option<String>,
+    pub scanned_bytes: u64,
+    pub reclaimable_bytes: u64,
+    pub reclaimed_bytes: u64,
+    pub retained_items: u64,
+    /// Path-free, bounded reasons explaining why staging remains allocated.
+    pub retained_reasons: Vec<LiveStatusGarbageCollectionRetained>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LiveStatusGarbageCollectionRetained {
+    pub category: String,
+    pub reason: String,
+    pub items: u64,
+    pub bytes: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LiveStatusResponse {
     pub schema_version: u16,
@@ -50,4 +71,6 @@ pub struct LiveStatusResponse {
     pub aggregate: LiveStatusAggregate,
     pub active: Vec<LiveStatusIngest>,
     pub recent: Vec<LiveStatusIngest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub garbage_collection: Option<LiveStatusGarbageCollection>,
 }

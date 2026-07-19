@@ -140,8 +140,9 @@ pub use jobs::{
     DaemonJobSummary, DaemonJobValidationError,
 };
 pub use live_status::{
-    LiveStatusActor, LiveStatusAggregate, LiveStatusConnectionOrigin, LiveStatusIngest,
-    LiveStatusRequest, LiveStatusResponse, LIVE_STATUS_SCHEMA_VERSION,
+    LiveStatusActor, LiveStatusAggregate, LiveStatusConnectionOrigin, LiveStatusGarbageCollection,
+    LiveStatusGarbageCollectionRetained, LiveStatusIngest, LiveStatusRequest, LiveStatusResponse,
+    LIVE_STATUS_SCHEMA_VERSION,
 };
 pub use local_admin::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,

@@ -20,6 +20,7 @@ mod endpoint_registry;
 mod folder_backend;
 mod folder_catalogue;
 mod folder_paths;
+mod garbage_collection;
 mod ingest_files;
 mod live_status;
 mod local_admin;
@@ -140,7 +141,14 @@ pub use folder_paths::{
     folder_host_paths, user_service_plan, validate_user_service_state_owner, FolderHostPathError,
     FolderHostPaths, UserServicePlan,
 };
-pub(crate) use ingest_files::{default_hdd_root, default_ssd_root, discover_managed_hdd_roots};
+pub use garbage_collection::{
+    persist_garbage_collection_report, run_garbage_collection, GarbageCollectDecision,
+    GarbageCollectError, GarbageCollectItem, GarbageCollectKind, GarbageCollectMode,
+    GarbageCollectReport, GarbageCollectTrigger, GarbageCollectorConfig, PerformanceGcMarker,
+    GARBAGE_COLLECTION_REPORT_SCHEMA, PERFORMANCE_GC_MARKER_FILE, PERFORMANCE_GC_MARKER_SCHEMA,
+};
+pub use ingest_files::default_ssd_root;
+pub(crate) use ingest_files::{default_hdd_root, discover_managed_hdd_roots};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_capacity_provider,
     submit_ingest_files_to_local_store_with_progress, DaemonFileIngestSummary,
@@ -266,6 +274,10 @@ pub use service::{
     provision_garage_store_registry, DaemonServiceRuntimeError, GarageProvisioningSummary,
     GarageServiceController, GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary,
     ServiceCommandOutput, ServiceCommandRunner, SystemServiceCommandRunner,
+};
+pub use service_reconciliation::{
+    garbage_collect_reconciliation_staging, ReconciliationGarbageCollectionDisposition,
+    ReconciliationGarbageCollectionReport, ReconciliationGarbageCollectionSnapshot,
 };
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,

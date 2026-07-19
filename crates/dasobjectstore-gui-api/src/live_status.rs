@@ -82,6 +82,16 @@ pub struct LiveStatusWarningView {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LiveStatusGarbageCollectionView {
+    pub running: bool,
+    pub last_completed_at_utc: Option<String>,
+    pub scanned_bytes: u64,
+    pub reclaimed_bytes: u64,
+    pub retained_items: u64,
+    pub retained_reasons: Vec<LiveStatusWarningView>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LiveStatusWorkspaceView {
     pub schema_version: u16,
@@ -95,6 +105,7 @@ pub struct LiveStatusWorkspaceView {
     pub ssd_ingests: Vec<LiveStatusProgressView>,
     pub hdd_transfers: Vec<LiveStatusHddTransferView>,
     pub recent: Vec<LiveStatusProgressView>,
+    pub garbage_collection: Option<LiveStatusGarbageCollectionView>,
     pub warnings: Vec<LiveStatusWarningView>,
 }
 
@@ -112,6 +123,7 @@ impl LiveStatusWorkspaceView {
             ssd_ingests: Vec::new(),
             hdd_transfers: Vec::new(),
             recent: Vec::new(),
+            garbage_collection: None,
             warnings: vec![LiveStatusWarningView {
                 code: code.into(),
                 message: message.into(),
@@ -170,6 +182,40 @@ pub(crate) fn workspace_from_daemon(snapshot: LiveStatusResponse) -> LiveStatusW
         hdd_transfers.extend(hdd_transfers_from_daemon(ingest));
     }
 
+    let garbage_collection =
+        snapshot
+            .garbage_collection
+            .as_ref()
+            .map(|collection| LiveStatusGarbageCollectionView {
+                running: collection.running,
+                last_completed_at_utc: collection.last_completed_at_utc.clone(),
+                scanned_bytes: collection.scanned_bytes,
+                reclaimed_bytes: collection.reclaimed_bytes,
+                retained_items: collection.retained_items,
+                retained_reasons: collection
+                    .retained_reasons
+                    .iter()
+                    .map(|retained| LiveStatusWarningView {
+                        code: format!("garbage_collection.{}", retained.category),
+                        message: format!(
+                            "{} item(s), {} byte(s): {}",
+                            retained.items, retained.bytes, retained.reason
+                        ),
+                    })
+                    .collect(),
+            });
+    let warnings = snapshot
+        .garbage_collection
+        .as_ref()
+        .and_then(|collection| collection.last_error.as_ref())
+        .map(|message| {
+            vec![LiveStatusWarningView {
+                code: "garbage_collection.failed_closed".to_string(),
+                message: message.clone(),
+            }]
+        })
+        .unwrap_or_default();
+
     LiveStatusWorkspaceView {
         schema_version: LIVE_STATUS_VIEW_SCHEMA_VERSION,
         availability: LiveStatusAvailabilityView::Available,
@@ -209,7 +255,8 @@ pub(crate) fn workspace_from_daemon(snapshot: LiveStatusResponse) -> LiveStatusW
         ssd_ingests,
         hdd_transfers,
         recent: snapshot.recent.iter().map(progress_from_daemon).collect(),
-        warnings: Vec::new(),
+        garbage_collection,
+        warnings,
     }
 }
 
@@ -386,6 +433,7 @@ mod tests {
             },
             active: vec![item],
             recent: Vec::new(),
+            garbage_collection: None,
         });
         assert_eq!(view.availability, LiveStatusAvailabilityView::Available);
         assert_eq!(view.suggested_refresh_millis, 1_000);
@@ -407,6 +455,7 @@ mod tests {
             aggregate: LiveStatusAggregate::default(),
             active: vec![ingest()],
             recent: Vec::new(),
+            garbage_collection: None,
         });
         let encoded = serde_json::to_string(&view).unwrap();
         assert!(!encoded.contains("/secret/source"));

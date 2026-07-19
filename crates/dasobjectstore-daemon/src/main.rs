@@ -1,7 +1,9 @@
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
-    profile_binding_registry_path, run_one_durable_destage, DurableDestageOutcome,
-    DurableDestageWorkerConfig,
+    default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
+    run_garbage_collection, run_one_durable_destage, DurableDestageOutcome,
+    DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger,
+    GarbageCollectorConfig, LiveStatusRegistry,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -11,11 +13,13 @@ use dasobjectstore_daemon::{
     CapacityReservationLeaseReport, DaemonRequestHandler, DaemonRuntimeConfig,
     FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
     FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
-    LinuxProcTelemetryCollector, SystemDaemonClock, SystemServiceCommandRunner,
-    UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
+    LinuxProcTelemetryCollector, LiveStatusGarbageCollection, LiveStatusGarbageCollectionRetained,
+    SystemDaemonClock, SystemServiceCommandRunner, UnixSocketDaemonServer,
+    DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::path::PathBuf;
@@ -101,6 +105,7 @@ fn run() -> Result<(), String> {
             recovery.stores_republished, recovery.stale_journals_removed
         );
     }
+    let live_status_registry = Arc::new(LiveStatusRegistry::default());
     let handler = DaemonRequestHandler::new_with_admin_job_registry(
         garage,
         SystemDaemonClock,
@@ -110,16 +115,196 @@ fn run() -> Result<(), String> {
     .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
-    .with_application_audit_log_path(application_audit_log_path(&config.state_dir));
+    .with_application_audit_log_path(application_audit_log_path(&config.state_dir))
+    .with_live_status_registry(Arc::clone(&live_status_registry));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
-    let _durable_destage_loop = spawn_durable_destage_loop();
+    let _garbage_collection = spawn_startup_garbage_collection(&config, live_status_registry);
     let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
     println!(
         "dasobjectstored listening on {}",
         server.socket_path().display()
     );
     server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn spawn_startup_garbage_collection(
+    config: &DaemonRuntimeConfig,
+    live_status_registry: Arc<LiveStatusRegistry>,
+) -> thread::JoinHandle<()> {
+    let state_dir = config.state_dir.clone();
+    thread::spawn(move || {
+        live_status_registry.record_garbage_collection(LiveStatusGarbageCollection {
+            running: true,
+            ..LiveStatusGarbageCollection::default()
+        });
+        let ssd_root = default_ssd_root();
+        let gc_config = GarbageCollectorConfig::for_daemon_state(&ssd_root, &state_dir);
+        let now_utc = current_utc_timestamp();
+        let run_id = format!("startup-{}", current_unix_seconds());
+        let result = (|| -> Result<_, String> {
+            let inventory = run_garbage_collection(
+                &gc_config,
+                GarbageCollectMode::Inventory,
+                GarbageCollectTrigger::Startup,
+                format!("{run_id}-inventory"),
+                &now_utc,
+                SystemTime::now(),
+            )
+            .map_err(|error| error.to_string())?;
+            let reconciliation_root = ssd_root
+                .join(dasobjectstore_metadata::METADATA_DIR_NAME)
+                .join("remote-s3-reconcile");
+            let reconciliation_inventory = garbage_collect_reconciliation_staging(
+                &reconciliation_root,
+                &gc_config.live_sqlite_path,
+                true,
+            )
+            .map_err(|error| error.to_string())?;
+            let reclaim = run_garbage_collection(
+                &gc_config,
+                GarbageCollectMode::Reclaim,
+                GarbageCollectTrigger::Startup,
+                run_id,
+                &now_utc,
+                SystemTime::now(),
+            )
+            .map_err(|error| error.to_string())?;
+            dasobjectstore_daemon::runtime::persist_garbage_collection_report(
+                &gc_config.report_journal_path,
+                &reclaim,
+            )
+            .map_err(|error| error.to_string())?;
+            let reconciliation_reclaim = garbage_collect_reconciliation_staging(
+                &reconciliation_root,
+                &gc_config.live_sqlite_path,
+                false,
+            )
+            .map_err(|error| error.to_string())?;
+            persist_reconciliation_garbage_collection_report(
+                &state_dir.join("garbage-collection/reconciliation-latest.json"),
+                &reconciliation_reclaim,
+            )?;
+            Ok::<_, String>((
+                inventory,
+                reclaim,
+                reconciliation_inventory,
+                reconciliation_reclaim,
+            ))
+        })();
+        match result {
+            Ok((inventory, reclaim, reconciliation_inventory, reconciliation_reclaim)) => {
+                let scanned_bytes = inventory
+                    .items
+                    .iter()
+                    .map(|item| item.bytes)
+                    .sum::<u64>()
+                    .saturating_add(
+                        reconciliation_inventory
+                            .snapshots
+                            .iter()
+                            .map(|item| item.size_bytes)
+                            .sum::<u64>(),
+                    );
+                let reclaimable_bytes = inventory
+                    .candidate_bytes
+                    .saturating_add(reconciliation_inventory.reclaimable_bytes);
+                let reclaimed_bytes = reclaim
+                    .reclaimed_bytes
+                    .saturating_add(reconciliation_reclaim.reclaimed_bytes);
+                let mut retained = BTreeMap::<(String, String), (u64, u64)>::new();
+                for item in reclaim
+                    .items
+                    .iter()
+                    .filter(|item| item.decision == GarbageCollectDecision::Retained)
+                {
+                    let key = (
+                        format!("{:?}", item.kind).to_lowercase(),
+                        item.reason.clone(),
+                    );
+                    let entry = retained.entry(key).or_default();
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = entry.1.saturating_add(item.bytes);
+                }
+                for item in reconciliation_reclaim.snapshots.iter().filter(|item| {
+                    matches!(item.disposition, dasobjectstore_daemon::runtime::ReconciliationGarbageCollectionDisposition::Retained)
+                }) {
+                    let entry = retained
+                        .entry(("reconciliation".to_string(), item.reason.clone()))
+                        .or_default();
+                    entry.0 = entry.0.saturating_add(1);
+                    entry.1 = entry.1.saturating_add(item.size_bytes);
+                }
+                live_status_registry.record_garbage_collection(LiveStatusGarbageCollection {
+                    running: false,
+                    last_completed_at_utc: Some(current_utc_timestamp()),
+                    scanned_bytes,
+                    reclaimable_bytes,
+                    reclaimed_bytes,
+                    retained_items: retained.values().map(|(items, _)| *items).sum(),
+                    retained_reasons: retained
+                        .into_iter()
+                        .take(32)
+                        .map(|((category, reason), (items, bytes))| {
+                            LiveStatusGarbageCollectionRetained {
+                                category,
+                                reason,
+                                items,
+                                bytes,
+                            }
+                        })
+                        .collect(),
+                    last_error: None,
+                });
+            }
+            Err(error) => {
+                eprintln!("startup garbage collection retained all uncertain data: {error}");
+                live_status_registry.record_garbage_collection(LiveStatusGarbageCollection {
+                    running: false,
+                    last_completed_at_utc: Some(current_utc_timestamp()),
+                    last_error: Some(
+                        "collection failed closed; inspect the daemon journal".to_string(),
+                    ),
+                    ..LiveStatusGarbageCollection::default()
+                });
+            }
+        }
+        // Startup collection owns the initial SSD metadata/removal window. Begin
+        // durable destage only after that pass has either completed or failed closed.
+        let _ = spawn_durable_destage_loop();
+    })
+}
+
+fn persist_reconciliation_garbage_collection_report(
+    path: &std::path::Path,
+    report: &dasobjectstore_daemon::runtime::ReconciliationGarbageCollectionReport,
+) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "reconciliation garbage collection report has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension(format!("tmp-{}", current_unix_seconds()));
+    let encoded = serde_json::to_vec_pretty(report).map_err(|error| error.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    use std::io::Write;
+    file.write_all(&encoded)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, path).map_err(|error| error.to_string())?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| error.to_string())
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
 }
 
 fn spawn_durable_destage_loop() -> thread::JoinHandle<()> {

@@ -305,6 +305,13 @@ completion.
   - [x] Add explicit administrator cancellation tokens for an active
     reconciliation job; cancellation is checked between provider transfers and
     leaves the durable in-progress manifest available for later rediscovery.
+  - [x] Add daemon-start garbage collection for reconciliation, ingest, and
+    marked performance staging. Collection inventories before apply, retains
+    incomplete/newest/unknown state, requires catalogue-backed durability
+    evidence, publishes path-free retained reasons through Live Status, and
+    journals applied reports under daemon state. Live appliance reclaim is
+    deferred until the active recovery ingest can be restarted safely on the
+    packaged version.
   - [x] Add a provider-independent completion-commit gate to the daemon remote
     upload worker; a successful provider transfer is not reported complete when
     the injected manifest/catalogue handoff fails. Concrete catalogue wiring,
