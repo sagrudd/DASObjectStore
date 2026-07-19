@@ -8,6 +8,18 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.119.1 - 2026-07-19
+
+- Reclaim every completed remote-S3 reconciliation snapshot after independent
+  managed-placement proof instead of retaining one payload checkpoint for each
+  unique manifest, which allowed progressive prefix uploads to accumulate
+  unbounded duplicate SSD data.
+- Run the proof-based collector before and after each S3 reconciliation and
+  hard-fail further staging growth when completed, non-resumable data cannot be
+  classified and reclaimed. Incomplete resumable checkpoints remain protected.
+- Add regression coverage for changing progressive upload windows, active and
+  incomplete checkpoints, unproven durability, and the staging growth bound.
+
 ## 0.119.0 - 2026-07-19
 
 - Add an opt-in DASObjectStore-owned, AWS Signature V4 S3 ingress gateway that
@@ -47,7 +59,7 @@ agreement before landing.
   performance-test payloads. Every apply pass repeats a dry-run inventory and
   fails closed unless catalogue, placement, ownership, and filesystem safety
   proofs all pass.
-- Retain incomplete resumable manifests, the newest provider checkpoint,
+- Retain incomplete resumable manifests,
   active jobs, requested performance artifacts, and all legacy or ambiguous
   data. Journal collection evidence and publish path-free retained reasons,
   reclaimed capacity, and failures through Live Status.

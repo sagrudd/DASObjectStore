@@ -20,7 +20,6 @@ use dasobjectstore_object_service::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -63,6 +62,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         .join(".dasobjectstore")
         .join("remote-s3-reconcile")
         .join(store_id.as_str());
+    enforce_reconciliation_staging_bound(&reconciliation_root)?;
     let requested_staging_path = reconciliation_root.join(stage_name);
     let mut staging_path = requested_staging_path.clone();
     let manifest_path = staging_path
@@ -227,7 +227,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("S3 reconciliation ingest failed: {error}"),
     })?;
-    cleanup_duplicate_completed_staging(
+    cleanup_completed_staging(
         &reconciliation_root,
         &staging_path,
         store_id.as_str(),
@@ -244,9 +244,9 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     })
 }
 
-fn cleanup_duplicate_completed_staging(
+fn cleanup_completed_staging(
     root: &Path,
-    retained_staging: &Path,
+    completed_staging: &Path,
     _store_id: &str,
     _prefix: Option<&str>,
     ingest: &crate::api::SubmitIngestFilesResponse,
@@ -270,19 +270,77 @@ fn cleanup_duplicate_completed_staging(
     let live_sqlite_path = crate::runtime::default_ssd_root()
         .join(dasobjectstore_metadata::METADATA_DIR_NAME)
         .join(dasobjectstore_metadata::LIVE_SQLITE_FILE_NAME);
-    let _ = garbage_collect_reconciliation_staging_inner(
-        global_root,
-        &live_sqlite_path,
-        false,
-        Some(retained_staging),
-    )?;
+    let report =
+        garbage_collect_reconciliation_staging_inner(global_root, &live_sqlite_path, false, None)?;
+    if completed_staging.exists() {
+        let reason = report
+            .snapshots
+            .iter()
+            .find(|snapshot| snapshot.staging_path == completed_staging)
+            .map(|snapshot| snapshot.reason.as_str())
+            .unwrap_or("completed staging was not classified by garbage collection");
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "S3 reconciliation cleanup hard fail for {}: {reason}; refusing further staging growth",
+                completed_staging.display()
+            ),
+        });
+    }
     Ok(())
 }
 
-/// Inventory and, when requested, remove redundant completed remote-S3
-/// reconciliation snapshots. The newest matching snapshot is always retained
-/// so it remains available as the provider checkpoint. Incomplete manifests
-/// are never collection candidates.
+fn enforce_reconciliation_staging_bound(
+    reconciliation_root: &Path,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let global_root = reconciliation_root.parent().ok_or_else(|| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!(
+                "reconciliation root has no managed parent: {}",
+                reconciliation_root.display()
+            ),
+        }
+    })?;
+    let live_sqlite_path = crate::runtime::default_ssd_root()
+        .join(dasobjectstore_metadata::METADATA_DIR_NAME)
+        .join(dasobjectstore_metadata::LIVE_SQLITE_FILE_NAME);
+    let report =
+        garbage_collect_reconciliation_staging_inner(global_root, &live_sqlite_path, false, None)?;
+    let (blocked_snapshots, blocked_bytes) =
+        reconciliation_staging_blockers(&report, reconciliation_root);
+    if blocked_snapshots == 0 {
+        return Ok(());
+    }
+    Err(DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!(
+            "S3 reconciliation staging hard fail: {blocked_snapshots} retained non-resumable snapshot(s) use {blocked_bytes} bytes below {}; resolve catalogue/durability proof before accepting another reconciliation",
+            reconciliation_root.display()
+        ),
+    })
+}
+
+fn reconciliation_staging_blockers(
+    report: &ReconciliationGarbageCollectionReport,
+    reconciliation_root: &Path,
+) -> (usize, u64) {
+    let blockers = report
+        .snapshots
+        .iter()
+        .filter(|snapshot| {
+            snapshot.staging_path.starts_with(reconciliation_root)
+                && snapshot.disposition == ReconciliationGarbageCollectionDisposition::Retained
+                && snapshot.reason != "incomplete resumable manifest"
+        })
+        .collect::<Vec<_>>();
+    let blocked_bytes = blockers
+        .iter()
+        .map(|snapshot| snapshot.size_bytes)
+        .sum::<u64>();
+    (blockers.len(), blocked_bytes)
+}
+
+/// Inventory and, when requested, remove completed remote-S3 reconciliation
+/// snapshots after independent managed-placement proof. Incomplete manifests
+/// remain resumable checkpoints and are never collection candidates.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct ReconciliationGarbageCollectionReport {
     pub dry_run: bool,
@@ -317,17 +375,16 @@ pub struct ReconciliationGarbageCollectionSnapshot {
 struct CompletedReconciliationSnapshot {
     staging_path: PathBuf,
     manifest: ReconciliationManifest,
-    signature: String,
     size_bytes: u64,
 }
 
 /// Perform a fail-closed reconciliation staging collection pass.
 ///
 /// `dry_run` performs the exact same discovery and durability proof without
-/// deleting anything. A snapshot is eligible only when it is an older exact
-/// duplicate of another completed manifest and every object is independently
-/// proven durable in the live catalogue. Unknown files, symlinks, malformed
-/// manifests, incomplete transfers, and metadata read failures are retained.
+/// deleting anything. A completed snapshot is eligible only when every object
+/// is independently proven durable in the live catalogue. Unknown files,
+/// symlinks, malformed manifests, incomplete transfers, active protected
+/// snapshots, and metadata read failures are retained.
 pub fn garbage_collect_reconciliation_staging(
     reconciliation_root: &Path,
     live_sqlite_path: &Path,
@@ -362,6 +419,9 @@ fn garbage_collect_reconciliation_staging_inner(
         let store_entry =
             store_entry.map_err(|error| reconciliation_file_error(reconciliation_root, error))?;
         let store_path = store_entry.path();
+        if store_entry.file_name() == dasobjectstore_metadata::METADATA_DIR_NAME {
+            continue;
+        }
         let store_type = store_entry
             .file_type()
             .map_err(|error| reconciliation_file_error(&store_path, error))?;
@@ -445,103 +505,74 @@ fn garbage_collect_reconciliation_staging_inner(
                 );
                 continue;
             }
-            let signature = reconciliation_manifest_signature(&manifest)?;
             completed.push(CompletedReconciliationSnapshot {
                 staging_path,
                 manifest,
-                signature,
                 size_bytes,
             });
         }
     }
 
-    let mut groups = BTreeMap::<String, Vec<CompletedReconciliationSnapshot>>::new();
+    completed.sort_by(|left, right| left.staging_path.cmp(&right.staging_path));
     for snapshot in completed {
-        groups
-            .entry(snapshot.signature.clone())
-            .or_default()
-            .push(snapshot);
-    }
-    for snapshots in groups.values_mut() {
-        snapshots.sort_by(|left, right| {
-            left.manifest
-                .updated_at_unix_seconds
-                .cmp(&right.manifest.updated_at_unix_seconds)
-                .then_with(|| left.staging_path.cmp(&right.staging_path))
-        });
-        let protected_index = protected_staging
-            .and_then(|protected| {
-                snapshots
-                    .iter()
-                    .position(|snapshot| snapshot.staging_path == protected)
-            })
-            .unwrap_or_else(|| snapshots.len().saturating_sub(1));
-        if snapshots.is_empty() {
+        if protected_staging == Some(snapshot.staging_path.as_path()) {
+            retain_reconciliation_snapshot(
+                &mut report,
+                snapshot.staging_path,
+                Some(snapshot.manifest.store_id),
+                snapshot.manifest.entries.len() as u64,
+                snapshot.size_bytes,
+                "active completed provider checkpoint".to_string(),
+            );
             continue;
         }
-        let newest = snapshots.remove(protected_index);
-        let newest_is_protected = protected_staging == Some(newest.staging_path.as_path());
-        retain_reconciliation_snapshot(
-            &mut report,
-            newest.staging_path,
-            Some(newest.manifest.store_id),
-            newest.manifest.entries.len() as u64,
-            newest.size_bytes,
-            if newest_is_protected {
-                "active completed provider checkpoint".to_string()
-            } else {
-                "newest completed provider checkpoint".to_string()
-            },
-        );
-        for snapshot in snapshots.drain(..) {
-            match prove_reconciliation_snapshot_durable(live_sqlite_path, &snapshot.manifest) {
-                Ok(()) => {
-                    report.reclaimable_snapshots = report.reclaimable_snapshots.saturating_add(1);
-                    report.reclaimable_bytes =
-                        report.reclaimable_bytes.saturating_add(snapshot.size_bytes);
-                    let (disposition, reason) = if dry_run {
-                        (
-                            ReconciliationGarbageCollectionDisposition::Reclaimable,
-                            "older duplicate; every object has durable managed placement evidence",
-                        )
-                    } else {
-                        crate::runtime::garbage_collection::reclaim_managed_directory(
-                            reconciliation_root,
-                            &snapshot.staging_path,
-                        )
-                        .map_err(|error| {
-                            DaemonServiceRuntimeError::UnsupportedOperation {
-                                operation: error.to_string(),
-                            }
-                        })?;
-                        report.reclaimed_snapshots = report.reclaimed_snapshots.saturating_add(1);
-                        report.reclaimed_bytes =
-                            report.reclaimed_bytes.saturating_add(snapshot.size_bytes);
-                        (
-                            ReconciliationGarbageCollectionDisposition::Reclaimed,
-                            "older duplicate reclaimed after durable placement proof",
-                        )
-                    };
-                    report
-                        .snapshots
-                        .push(ReconciliationGarbageCollectionSnapshot {
-                            staging_path: snapshot.staging_path,
-                            store_id: Some(snapshot.manifest.store_id),
-                            object_count: snapshot.manifest.entries.len() as u64,
-                            size_bytes: snapshot.size_bytes,
-                            disposition,
-                            reason: reason.to_string(),
-                        });
-                }
-                Err(reason) => retain_reconciliation_snapshot(
-                    &mut report,
-                    snapshot.staging_path,
-                    Some(snapshot.manifest.store_id),
-                    snapshot.manifest.entries.len() as u64,
-                    snapshot.size_bytes,
-                    reason,
-                ),
+        match prove_reconciliation_snapshot_durable(live_sqlite_path, &snapshot.manifest) {
+            Ok(()) => {
+                report.reclaimable_snapshots = report.reclaimable_snapshots.saturating_add(1);
+                report.reclaimable_bytes =
+                    report.reclaimable_bytes.saturating_add(snapshot.size_bytes);
+                let (disposition, reason) = if dry_run {
+                    (
+                        ReconciliationGarbageCollectionDisposition::Reclaimable,
+                        "completed snapshot; every object has durable managed placement evidence",
+                    )
+                } else {
+                    crate::runtime::garbage_collection::reclaim_managed_directory(
+                        reconciliation_root,
+                        &snapshot.staging_path,
+                    )
+                    .map_err(|error| {
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        }
+                    })?;
+                    report.reclaimed_snapshots = report.reclaimed_snapshots.saturating_add(1);
+                    report.reclaimed_bytes =
+                        report.reclaimed_bytes.saturating_add(snapshot.size_bytes);
+                    (
+                        ReconciliationGarbageCollectionDisposition::Reclaimed,
+                        "completed snapshot reclaimed after durable placement proof",
+                    )
+                };
+                report
+                    .snapshots
+                    .push(ReconciliationGarbageCollectionSnapshot {
+                        staging_path: snapshot.staging_path,
+                        store_id: Some(snapshot.manifest.store_id),
+                        object_count: snapshot.manifest.entries.len() as u64,
+                        size_bytes: snapshot.size_bytes,
+                        disposition,
+                        reason: reason.to_string(),
+                    });
             }
+            Err(reason) => retain_reconciliation_snapshot(
+                &mut report,
+                snapshot.staging_path,
+                Some(snapshot.manifest.store_id),
+                snapshot.manifest.entries.len() as u64,
+                snapshot.size_bytes,
+                reason,
+            ),
         }
     }
     report
@@ -569,19 +600,6 @@ fn retain_reconciliation_snapshot(
             disposition: ReconciliationGarbageCollectionDisposition::Retained,
             reason,
         });
-}
-
-fn reconciliation_manifest_signature(
-    manifest: &ReconciliationManifest,
-) -> Result<String, DaemonServiceRuntimeError> {
-    serde_json::to_string(&(
-        manifest.store_id.as_str(),
-        manifest.prefix.as_deref(),
-        &manifest.entries,
-    ))
-    .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
-        operation: format!("failed to fingerprint reconciliation manifest: {error}"),
-    })
 }
 
 fn prove_reconciliation_snapshot_durable(
@@ -1252,7 +1270,8 @@ mod tests {
     use super::{
         append_range_download, discover_reusable_complete_manifest,
         garbage_collect_reconciliation_staging, garbage_collect_reconciliation_staging_inner,
-        reconciliation_download_args, GarageReconciliationProvider, ReconciliationDownloadRequest,
+        reconciliation_download_args, reconciliation_staging_blockers,
+        GarageReconciliationProvider, ReconciliationDownloadRequest,
         ReconciliationGarbageCollectionDisposition, ReconciliationProvider,
     };
     use crate::runtime::reconciliation::{
@@ -1265,10 +1284,19 @@ mod tests {
     use std::sync::Mutex;
 
     fn write_complete_snapshot(root: &std::path::Path, stage_name: &str) -> PathBuf {
+        write_complete_snapshot_with_prefix(root, stage_name, None)
+    }
+
+    fn write_complete_snapshot_with_prefix(
+        root: &std::path::Path,
+        stage_name: &str,
+        prefix: Option<&str>,
+    ) -> PathBuf {
         let stage = root.join("epic_collection").join(stage_name);
         fs::create_dir_all(stage.join(".dasobjectstore")).expect("manifest parent");
         fs::write(stage.join("archive.bin"), b"payload").expect("payload");
-        let mut manifest = ReconciliationManifest::new("epic_collection", None);
+        let mut manifest =
+            ReconciliationManifest::new("epic_collection", prefix.map(str::to_string));
         manifest.entries.insert(
             "archive.bin".to_string(),
             ReconciliationManifestEntry {
@@ -1405,7 +1433,7 @@ mod tests {
     }
 
     #[test]
-    fn garbage_collection_dry_run_reports_only_proven_completed_duplicate() {
+    fn garbage_collection_dry_run_reports_every_proven_completed_snapshot() {
         let root = validation_root("gc-dry-run");
         let reconcile_root = root.join("remote-s3-reconcile");
         let old = write_complete_snapshot(&reconcile_root, "a-old");
@@ -1418,7 +1446,7 @@ mod tests {
                 .expect("dry-run inventory");
 
         assert_eq!(report.scanned_snapshots, 2);
-        assert_eq!(report.reclaimable_snapshots, 1);
+        assert_eq!(report.reclaimable_snapshots, 2);
         assert_eq!(report.reclaimed_snapshots, 0);
         assert!(old.exists());
         assert!(newest.exists());
@@ -1435,7 +1463,7 @@ mod tests {
     }
 
     #[test]
-    fn garbage_collection_reclaims_proven_duplicate_and_retains_newest() {
+    fn garbage_collection_reclaims_every_proven_completed_snapshot() {
         let root = validation_root("gc-apply");
         let reconcile_root = root.join("remote-s3-reconcile");
         let old = write_complete_snapshot(&reconcile_root, "a-old");
@@ -1447,9 +1475,36 @@ mod tests {
             garbage_collect_reconciliation_staging(&reconcile_root, &live_sqlite_path, false)
                 .expect("collection");
 
-        assert_eq!(report.reclaimed_snapshots, 1);
+        assert_eq!(report.reclaimed_snapshots, 2);
         assert!(!old.exists());
-        assert!(newest.exists());
+        assert!(!newest.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn garbage_collection_reclaims_progressive_unique_prefix_snapshots() {
+        let root = validation_root("gc-progressive-prefixes");
+        let reconcile_root = root.join("remote-s3-reconcile");
+        let first = write_complete_snapshot_with_prefix(
+            &reconcile_root,
+            "first-window",
+            Some("EPICv1/GSE000001"),
+        );
+        let second = write_complete_snapshot_with_prefix(
+            &reconcile_root,
+            "second-window",
+            Some("EPICv1/GSE000002"),
+        );
+        let live_sqlite_path = root.join("live.sqlite");
+        write_ssd_acknowledgement(&live_sqlite_path);
+
+        let report =
+            garbage_collect_reconciliation_staging(&reconcile_root, &live_sqlite_path, false)
+                .expect("collection");
+
+        assert_eq!(report.reclaimed_snapshots, 2);
+        assert!(!first.exists());
+        assert!(!second.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -1520,6 +1575,50 @@ mod tests {
             .snapshots
             .iter()
             .any(|snapshot| snapshot.reason == "incomplete resumable manifest"));
+        let (blockers, blocked_bytes) =
+            reconciliation_staging_blockers(&report, &reconcile_root.join("epic_collection"));
+        assert_eq!(blockers, 2);
+        assert!(blocked_bytes >= 14);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn incomplete_resumable_snapshot_does_not_trip_growth_hard_fail() {
+        let root = validation_root("gc-incomplete-bound");
+        let reconcile_root = root.join("remote-s3-reconcile");
+        let incomplete = reconcile_root.join("epic_collection").join("partial");
+        fs::create_dir_all(incomplete.join(".dasobjectstore")).expect("manifest parent");
+        let mut manifest = ReconciliationManifest::new("epic_collection", None);
+        manifest.entries.insert(
+            "partial.bin".to_string(),
+            ReconciliationManifestEntry {
+                source_key: "partial.bin".to_string(),
+                relative_path: Some("partial.bin".to_string()),
+                size_bytes: Some(10),
+                source_revision: None,
+                state: ReconciliationEntryState::InProgress,
+                downloaded_bytes: 4,
+                message: None,
+            },
+        );
+        manifest
+            .save_atomic(
+                &incomplete
+                    .join(".dasobjectstore")
+                    .join("reconciliation-manifest.json"),
+            )
+            .expect("save partial manifest");
+
+        let report = garbage_collect_reconciliation_staging(
+            &reconcile_root,
+            &root.join("missing-live.sqlite"),
+            false,
+        )
+        .expect("fail-closed collection");
+        assert_eq!(
+            reconciliation_staging_blockers(&report, &reconcile_root.join("epic_collection")),
+            (0, 0)
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 

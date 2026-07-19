@@ -312,6 +312,11 @@ completion.
     journals applied reports under daemon state. Live appliance reclaim is
     deferred until the active recovery ingest can be restarted safely on the
     packaged version.
+  - [x] Close the progressive S3 reconciliation leak: completed snapshots are
+    now reclaimed independently rather than grouped by exact manifest, cleanup
+    runs before and after every route, and unresolved completed staging
+    hard-fails further growth. Regression tests cover unique progressive
+    prefixes, incomplete/active checkpoints, and unproven placement evidence.
   - [x] Allow distinct ObjectStores to share one explicitly named appliance
     pool root while preserving folder, drive, and staging overlap rejection.
     The ``epic_collection`` appliance binding dry-run passes; apply it after
