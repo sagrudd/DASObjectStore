@@ -207,6 +207,72 @@ pub fn discover_incomplete_reconciliation_manifest(
         .map(|(_, path)| path))
 }
 
+pub fn discover_complete_reconciliation_manifest(
+    reconciliation_root: &Path,
+    store_id: &str,
+    prefix: Option<&str>,
+) -> Result<Option<PathBuf>, ReconciliationManifestError> {
+    let entries = match fs::read_dir(reconciliation_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(ReconciliationManifestError::Io {
+                path: reconciliation_root.to_path_buf(),
+                message: error.to_string(),
+            });
+        }
+    };
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| ReconciliationManifestError::Io {
+            path: reconciliation_root.to_path_buf(),
+            message: error.to_string(),
+        })?;
+        let entry_type = entry
+            .file_type()
+            .map_err(|error| ReconciliationManifestError::Io {
+                path: entry.path(),
+                message: error.to_string(),
+            })?;
+        if !entry_type.is_dir() || entry_type.is_symlink() {
+            continue;
+        }
+        let manifest_path = entry
+            .path()
+            .join(".dasobjectstore")
+            .join("reconciliation-manifest.json");
+        let manifest_type = match fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(ReconciliationManifestError::Io {
+                    path: manifest_path,
+                    message: error.to_string(),
+                });
+            }
+        };
+        if !manifest_type.is_file() || manifest_type.file_type().is_symlink() {
+            continue;
+        }
+        let manifest = ReconciliationManifest::load(&manifest_path)?;
+        if manifest.store_id != store_id || manifest.prefix.as_deref() != prefix {
+            continue;
+        }
+        if !manifest.entries.is_empty()
+            && manifest
+                .entries
+                .values()
+                .all(|entry| entry.state == ReconciliationEntryState::Complete)
+        {
+            candidates.push((manifest.updated_at_unix_seconds, manifest_path));
+        }
+    }
+    Ok(candidates
+        .into_iter()
+        .max_by(|left, right| left.cmp(right))
+        .map(|(_, path)| path))
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReconciliationManifestEntry {
     pub source_key: String,
@@ -688,6 +754,66 @@ mod tests {
                 .expect("checkpoint");
         assert_eq!(discovered, newer);
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn discovers_newest_complete_manifest_for_exact_store_and_prefix() {
+        let root = validation_root("complete-discovery");
+        let _ = fs::remove_dir_all(&root);
+        let older = root.join("older/.dasobjectstore/reconciliation-manifest.json");
+        let newer = root.join("newer/.dasobjectstore/reconciliation-manifest.json");
+        let wrong = root.join("wrong/.dasobjectstore/reconciliation-manifest.json");
+        for path in [&older, &newer, &wrong] {
+            fs::create_dir_all(path.parent().unwrap()).expect("manifest parent");
+        }
+        let complete = |updated, store: &str, prefix: Option<&str>| {
+            let mut manifest = ReconciliationManifest::new(store, prefix.map(ToString::to_string));
+            manifest.entries.insert(
+                "GSE171074_RAW.tar".into(),
+                ReconciliationManifestEntry {
+                    source_key: "GSE171074_RAW.tar".into(),
+                    relative_path: Some("GSE171074_RAW.tar".into()),
+                    size_bytes: Some(47_488_481_280),
+                    source_revision: Some("\"revision\"".into()),
+                    state: ReconciliationEntryState::Complete,
+                    downloaded_bytes: 47_488_481_280,
+                    message: None,
+                },
+            );
+            manifest.updated_at_unix_seconds = updated;
+            manifest
+        };
+        fs::write(
+            &older,
+            serde_json::to_vec(&complete(10, "epic_collection", Some("GSE171074"))).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &newer,
+            serde_json::to_vec(&complete(20, "epic_collection", Some("GSE171074"))).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &wrong,
+            serde_json::to_vec(&complete(30, "epic_collection", Some("other"))).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            discover_complete_reconciliation_manifest(&root, "epic_collection", Some("GSE171074"))
+                .unwrap(),
+            Some(newer)
+        );
+        assert_eq!(
+            discover_incomplete_reconciliation_manifest(
+                &root,
+                "epic_collection",
+                Some("GSE171074")
+            )
+            .unwrap(),
+            None
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -186,6 +186,26 @@ distributions do not all publish that package. Install official AWS CLI v2 on
 such hosts before enabling S3 provider workflows; the daemon fails provider
 commands explicitly when it is absent.
 
+Completed reconciliation recovery
+---------------------------------
+
+A remote-S3 reconciliation snapshot can finish downloading before its normal
+catalogue acknowledgement commits. A repeated exact store/prefix repair first
+looks for that completed checkpoint, before opening provider credentials or
+listing the bucket. If the catalogue does not yet prove the objects durable,
+the daemon verifies the staged regular files and checksum sidecars, creates
+deterministic managed-SSD hard links, and publishes the usual ``AfterSsdIngest``
+catalogue and HDD-destage records. It does not download the provider payload
+again.
+
+The repair result reports ``completed_snapshot_adopted``,
+``already_durable``, ``retained_unsafe``, or ``reclaimed``. An unsafe,
+ambiguous, changed, malformed, or database-busy checkpoint remains in place
+for inspection and retry. Daemon-owned garbage collection removes the
+reconciliation checkpoint only after every object has an independently
+verified managed SSD acknowledgement or sufficient verified HDD copies. Do
+not manually delete a retained checkpoint.
+
 The hidden ``--local-direct`` ingest mode is a developer/test fallback while the
 daemon implementation is being completed. It is not the normal production
 storage path.

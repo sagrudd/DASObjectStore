@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.123.0 - 2026-07-23
+
+- Adopt complete, unaccepted remote-S3 reconciliation snapshots into the
+  normal managed SSD catalogue by deterministic hard link, without contacting
+  the provider or transferring the payload a second time.
+- Make completed-snapshot recovery restart-safe and idempotent, verify source
+  revisions, sizes, regular-file boundaries, SHA-256 sidecars, immutable ingest
+  identity, and the surviving managed SSD payload before publication.
+- Report completed reconciliation recovery as
+  ``completed_snapshot_adopted``, ``already_durable``, ``retained_unsafe``, or
+  ``reclaimed`` and retain the source checkpoint until independent catalogue
+  durability proof permits daemon-owned garbage collection.
+
 ## 0.122.0 - 2026-07-19
 
 - Make application public-credential enrollment identity-bound: reject

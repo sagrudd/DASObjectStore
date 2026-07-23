@@ -172,6 +172,102 @@ pub fn stage_object_on_ssd_with_controlled_progress(
     sync_staged_object_on_ssd_with_controlled_progress(staged, progress)
 }
 
+/// Adopt an already-complete payload on the managed SSD without copying its
+/// bytes. The source remains present as the recovery checkpoint while a
+/// deterministic hard link is created in the normal managed ingest layout.
+/// Hashing and filesystem validation happen before any catalogue transaction.
+pub fn adopt_object_on_ssd_by_hard_link_with_controlled_progress(
+    request: &ObjectPutRequest,
+    expected_size: u64,
+    mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
+) -> Result<StagedObjectPut, ObjectPutError> {
+    validate_request(request)?;
+    let source_metadata = fs::symlink_metadata(&request.source_path)?;
+    if source_metadata.file_type().is_symlink()
+        || !source_metadata.is_file()
+        || source_metadata.len() != expected_size
+    {
+        return Err(ObjectPutError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "adoption source must be a regular non-symlink file with the declared size",
+        )));
+    }
+    let layout = IngestStagingLayout::for_ssd_root(&request.ssd_root);
+    layout.create_base_directories()?;
+    let job_id = IngestJobId::new(format!("put-{}", request.object_id.as_str()))?;
+    let job_paths = layout.job_paths(&job_id);
+    job_paths.create_directories()?;
+    let linked_checkpoint = match fs::hard_link(&request.source_path, &job_paths.payload_path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let existing = fs::symlink_metadata(&job_paths.payload_path)?;
+            if existing.file_type().is_symlink()
+                || !existing.is_file()
+                || existing.len() != expected_size
+            {
+                return Err(ObjectPutError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "deterministic adoption target conflicts with existing managed payload",
+                )));
+            }
+            false
+        }
+        Err(error) => return Err(ObjectPutError::Io(error)),
+    };
+    #[cfg(unix)]
+    let same_inode = {
+        use std::os::unix::fs::MetadataExt;
+        let source = fs::metadata(&request.source_path)?;
+        let target = fs::metadata(&job_paths.payload_path)?;
+        source.dev() == target.dev() && source.ino() == target.ino()
+    };
+    #[cfg(not(unix))]
+    let same_inode = linked_checkpoint;
+    debug_assert!(!linked_checkpoint || same_inode);
+    File::open(&job_paths.payload_path)?.sync_all()?;
+    let content_hash =
+        crate::hash::hash_file_sha256_with_progress(&job_paths.payload_path, |bytes_written| {
+            progress(ObjectPutProgress {
+                object_id: request.object_id.clone(),
+                stage: ObjectPutProgressStage::SsdIngest,
+                bytes_written,
+            })
+            .map_err(object_put_error_to_io)
+        })
+        .map_err(object_put_error_from_io)?;
+    if !same_inode {
+        let source_hash = crate::hash::hash_file_sha256(&request.source_path)?;
+        if source_hash != content_hash {
+            return Err(ObjectPutError::Io(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "existing managed payload does not match the completed checkpoint",
+            )));
+        }
+    }
+    let final_metadata = fs::symlink_metadata(&job_paths.payload_path)?;
+    if final_metadata.file_type().is_symlink()
+        || !final_metadata.is_file()
+        || final_metadata.len() != expected_size
+    {
+        return Err(ObjectPutError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "adopted payload changed while it was being verified",
+        )));
+    }
+    Ok(StagedObjectPut {
+        object_id: request.object_id.clone(),
+        object_type: request.object_type,
+        source_path: request.source_path.clone(),
+        job_root: job_paths.job_root,
+        staged_payload_path: job_paths.payload_path,
+        bytes_staged: expected_size,
+        content_hash_algorithm: crate::hash::SHA256_ALGORITHM.to_string(),
+        content_hash,
+        disk_roots: request.disk_roots.clone(),
+        copy_count: request.copy_count,
+    })
+}
+
 pub fn stage_object_on_ssd_unsynced_with_controlled_progress(
     request: &ObjectPutRequest,
     mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
@@ -710,6 +806,7 @@ impl From<HddCopyError> for ObjectPutError {
 #[cfg(test)]
 mod tests {
     use super::{
+        adopt_object_on_ssd_by_hard_link_with_controlled_progress,
         put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
         put_object_ssd_first_with_controlled_progress, DirectObjectPutRequest, ObjectPutError,
         ObjectPutRequest,
@@ -764,6 +861,123 @@ mod tests {
             );
         }
 
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn adopts_complete_ssd_payload_by_deterministic_hard_link_idempotently() {
+        let root = temp_root("object-adopt-hard-link");
+        let source_path = root.join("ssd/remote-s3-reconcile/snapshot/payload.bin");
+        let disk_a = root.join("disk-a");
+        let payload = b"already complete provider payload";
+        fs::create_dir_all(source_path.parent().unwrap()).expect("snapshot root");
+        fs::write(&source_path, payload).expect("snapshot payload");
+        let request = ObjectPutRequest::new(
+            ObjectId::new("store/payload.bin").expect("object id"),
+            &source_path,
+            root.join("ssd"),
+            vec![DiskCopyRoot::new(
+                DiskId::new("disk-a").expect("disk id"),
+                disk_a,
+            )],
+            1,
+        );
+
+        let first = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
+            &request,
+            payload.len() as u64,
+            |_| Ok(()),
+        )
+        .expect("first adoption");
+        let second = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
+            &request,
+            payload.len() as u64,
+            |_| Ok(()),
+        )
+        .expect("restart adoption");
+
+        assert_eq!(first.staged_payload_path, second.staged_payload_path);
+        assert_eq!(first.content_hash, hash_file_sha256(&source_path).unwrap());
+        assert_eq!(fs::read(&first.staged_payload_path).unwrap(), payload);
+        fs::remove_file(&source_path).expect("remove checkpoint link");
+        assert_eq!(
+            fs::read(&first.staged_payload_path).expect("managed link survives checkpoint cleanup"),
+            payload
+        );
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn adoption_resumes_an_identical_existing_managed_payload() {
+        let root = temp_root("object-adopt-existing");
+        let source_path = root.join("ssd/remote-s3-reconcile/snapshot/payload.bin");
+        let payload = b"completed provider payload";
+        fs::create_dir_all(source_path.parent().unwrap()).expect("snapshot root");
+        fs::write(&source_path, payload).expect("snapshot payload");
+        let request = ObjectPutRequest::new(
+            ObjectId::new("store/payload.bin").expect("object id"),
+            &source_path,
+            root.join("ssd"),
+            vec![DiskCopyRoot::new(
+                DiskId::new("disk-a").expect("disk id"),
+                root.join("disk-a"),
+            )],
+            1,
+        );
+        let managed = crate::ingest::IngestStagingLayout::for_ssd_root(&request.ssd_root)
+            .job_paths(
+                &dasobjectstore_core::ids::IngestJobId::new("put-store/payload.bin").unwrap(),
+            )
+            .payload_path;
+        fs::create_dir_all(managed.parent().unwrap()).expect("managed parent");
+        fs::write(&managed, payload).expect("existing managed payload");
+
+        let adopted = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
+            &request,
+            payload.len() as u64,
+            |_| Ok(()),
+        )
+        .expect("resume identical payload");
+
+        assert_eq!(adopted.staged_payload_path, managed);
+        assert_eq!(
+            adopted.content_hash,
+            hash_file_sha256(&source_path).unwrap()
+        );
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn adoption_rejects_a_different_existing_managed_payload() {
+        let root = temp_root("object-adopt-existing-conflict");
+        let source_path = root.join("ssd/remote-s3-reconcile/snapshot/payload.bin");
+        fs::create_dir_all(source_path.parent().unwrap()).expect("snapshot root");
+        fs::write(&source_path, b"source").expect("snapshot payload");
+        let request = ObjectPutRequest::new(
+            ObjectId::new("store/payload.bin").expect("object id"),
+            &source_path,
+            root.join("ssd"),
+            vec![DiskCopyRoot::new(
+                DiskId::new("disk-a").expect("disk id"),
+                root.join("disk-a"),
+            )],
+            1,
+        );
+        let managed = crate::ingest::IngestStagingLayout::for_ssd_root(&request.ssd_root)
+            .job_paths(
+                &dasobjectstore_core::ids::IngestJobId::new("put-store/payload.bin").unwrap(),
+            )
+            .payload_path;
+        fs::create_dir_all(managed.parent().unwrap()).expect("managed parent");
+        fs::write(&managed, b"target").expect("conflicting payload");
+
+        let error =
+            adopt_object_on_ssd_by_hard_link_with_controlled_progress(&request, 6, |_| Ok(()))
+                .expect_err("conflict");
+
+        assert!(error
+            .to_string()
+            .contains("does not match the completed checkpoint"));
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 

@@ -5552,6 +5552,8 @@ mod tests {
                 manifest_path: None,
                 ingest_job_id: Some("ingest-reconcile-codex".to_string()),
                 dry_run,
+                completed_snapshot_outcome: crate::api::CompletedSnapshotOutcome::NotApplicable,
+                outcome_detail: None,
             })
         }
 

@@ -191,6 +191,49 @@ fn insert_ingress_job(
         "INSERT OR IGNORE INTO ingest_jobs (ingest_job_id, store_id, object_id, object_type, state, ingest_mode, acknowledgement_policy, priority, staging_path, expected_size_bytes, received_bytes, content_hash, content_hash_algorithm, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,?4,'ssd_accepted',?5,?6,?7,?8,?9,?9,?10,?11,?12,?12)",
         params![job_id, request.store_id.as_str(), request.object_id.as_str(), request.object_type, origin, request.acknowledgement_policy, request.priority, request.relative_path, size, request.content_hash, request.content_hash_algorithm, request.committed_at_utc],
     )?;
+    let identity: (String, String, String, String, String, String, i64, String, String) = tx
+        .query_row(
+            "SELECT store_id, object_id, object_type, ingest_mode, acknowledgement_policy, staging_path, expected_size_bytes, content_hash, content_hash_algorithm FROM ingest_jobs WHERE ingest_job_id=?1",
+            [job_id],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    row.get(7)?,
+                    row.get(8)?,
+                ))
+            },
+        )?;
+    let expected = (
+        request.store_id.as_str(),
+        request.object_id.as_str(),
+        request.object_type,
+        origin,
+        request.acknowledgement_policy,
+        request.relative_path,
+        size,
+        request.content_hash,
+        request.content_hash_algorithm,
+    );
+    if (
+        identity.0.as_str(),
+        identity.1.as_str(),
+        identity.2.as_str(),
+        identity.3.as_str(),
+        identity.4.as_str(),
+        identity.5.as_str(),
+        identity.6,
+        identity.7.as_str(),
+        identity.8.as_str(),
+    ) != expected
+    {
+        return Err(DestageMetadataError::IngestJobConflict(job_id.to_string()));
+    }
     Ok(())
 }
 
@@ -606,6 +649,7 @@ pub enum DestageMetadataError {
     MissingStore(String),
     MissingDisk(String),
     ObjectConflict(String),
+    IngestJobConflict(String),
     ClaimConflict,
     InvalidTransition,
     WouldRemoveOnlyVerifiedCopy,
@@ -631,6 +675,9 @@ impl Display for DestageMetadataError {
             Self::MissingStore(v) => write!(f, "missing store {v}"),
             Self::MissingDisk(v) => write!(f, "missing disk {v}"),
             Self::ObjectConflict(v) => write!(f, "immutable object conflict for {v}"),
+            Self::IngestJobConflict(v) => {
+                write!(f, "immutable ingest job identity conflict for {v}")
+            }
             Self::ClaimConflict => f.write_str("destage lease is not owned by this worker"),
             Self::InvalidTransition => f.write_str("invalid durable destage state transition"),
             Self::WouldRemoveOnlyVerifiedCopy => {
@@ -707,6 +754,91 @@ mod tests {
         assert!(matches!(error, DestageMetadataError::ObjectConflict(_)));
         let connection = Connection::open(&path).expect("reopen");
         assert_eq!(count(&connection, "destage_queue"), 1);
+        cleanup(path);
+    }
+
+    #[test]
+    fn deterministic_ingest_identity_rejects_a_different_object() {
+        let path = database("ingest-identity");
+        prepare(&path, &["store-a"]);
+        let store = StoreId::new("store-a").expect("store");
+        for (object, destage_job) in [("object-a", "job-a"), ("object-b", "job-b")] {
+            let object_id = ObjectId::new(object).expect("object");
+            let result = commit_verified_ssd_and_enqueue(
+                &path,
+                VerifiedSsdCommitRequest {
+                    destage_job_id: destage_job,
+                    store_id: &store,
+                    object_id: &object_id,
+                    object_type: "naive",
+                    relative_path: &format!("ingest/{object}"),
+                    size_bytes: 5,
+                    content_hash_algorithm: "sha256",
+                    content_hash: "abcde",
+                    acknowledgement_policy: "after_ssd_ingest",
+                    required_copy_count: 1,
+                    max_attempts: 3,
+                    priority: 0,
+                    committed_at_utc: "2026-01-01T00:00:00Z",
+                    ingest_job_id: Some("adopt-fixed"),
+                    ingress_origin: Some("remote_s3"),
+                },
+            );
+            if object == "object-a" {
+                result.expect("first identity");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(DestageMetadataError::IngestJobConflict(value))
+                        if value == "adopt-fixed"
+                ));
+            }
+        }
+        let connection = Connection::open(&path).expect("reopen");
+        assert_eq!(count(&connection, "ingest_jobs"), 1);
+        assert_eq!(count(&connection, "objects"), 1);
+        cleanup(path);
+    }
+
+    #[test]
+    fn locked_catalogue_fails_without_partial_adoption_rows() {
+        let path = database("locked-catalogue");
+        prepare(&path, &["store-a"]);
+        let lock = Connection::open(&path).expect("lock connection");
+        lock.execute_batch("BEGIN EXCLUSIVE")
+            .expect("exclusive lock");
+
+        let store = StoreId::new("store-a").expect("store");
+        let object = ObjectId::new("object-a").expect("object");
+        let error = commit_verified_ssd_and_enqueue(
+            &path,
+            VerifiedSsdCommitRequest {
+                destage_job_id: "job-a",
+                store_id: &store,
+                object_id: &object,
+                object_type: "naive",
+                relative_path: "ingest/object-a",
+                size_bytes: 5,
+                content_hash_algorithm: "sha256",
+                content_hash: "abcde",
+                acknowledgement_policy: "after_ssd_ingest",
+                required_copy_count: 1,
+                max_attempts: 3,
+                priority: 0,
+                committed_at_utc: "2026-01-01T00:00:00Z",
+                ingest_job_id: Some("adopt-locked"),
+                ingress_origin: Some("remote_s3"),
+            },
+        )
+        .expect_err("locked publication");
+        assert!(matches!(
+            error,
+            DestageMetadataError::Sqlite(rusqlite::Error::SqliteFailure(_, _))
+        ));
+        lock.execute_batch("ROLLBACK").expect("unlock");
+        let connection = Connection::open(&path).expect("reopen");
+        assert_eq!(count(&connection, "ingest_jobs"), 0);
+        assert_eq!(count(&connection, "objects"), 0);
         cleanup(path);
     }
 

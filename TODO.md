@@ -317,6 +317,14 @@ completion.
     runs before and after every route, and unresolved completed staging
     hard-fails further growth. Regression tests cover unique progressive
     prefixes, incomplete/active checkpoints, and unproven placement evidence.
+  - [x] Recover complete but catalogue-unaccepted remote-S3 snapshots without a
+    second provider transfer. Exact store/prefix discovery now adopts staged
+    regular files into deterministic managed SSD ingest identities by hard
+    link, verifies size/SHA-256 and sidecars outside SQLite transactions,
+    publishes idempotent AfterSsd catalogue/destage state, and reclaims the
+    source checkpoint only after independent durability proof. Operator output
+    distinguishes adoption, already-durable, unsafe-retained, and reclaimed
+    outcomes.
   - [x] Add store-scoped, SHA-256-verifying appliance metadata recovery for
     interrupted legacy ingress. Targeted apply preserves unrelated stores,
     refuses same-size placement disagreement, and reports smaller partial

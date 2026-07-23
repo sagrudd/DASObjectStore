@@ -266,8 +266,8 @@ pub use store_policy::{
     ACKNOWLEDGEMENT_POLICY_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
 };
 pub use store_repair::{
-    StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
-    StoreRepairValidationError, STORE_REPAIR_CONFIRMATION,
+    CompletedSnapshotOutcome, StoreRepairReport, StoreRepairRequest, StoreRepairResponse,
+    StoreRepairS3Reconciliation, StoreRepairValidationError, STORE_REPAIR_CONFIRMATION,
 };
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};

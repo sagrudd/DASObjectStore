@@ -52,6 +52,33 @@ pub struct StoreRepairS3Reconciliation {
     pub manifest_path: Option<String>,
     pub ingest_job_id: Option<String>,
     pub dry_run: bool,
+    #[serde(default)]
+    pub completed_snapshot_outcome: CompletedSnapshotOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_detail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletedSnapshotOutcome {
+    #[default]
+    NotApplicable,
+    CompletedSnapshotAdopted,
+    AlreadyDurable,
+    RetainedUnsafe,
+    Reclaimed,
+}
+
+impl CompletedSnapshotOutcome {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotApplicable => "not_applicable",
+            Self::CompletedSnapshotAdopted => "completed_snapshot_adopted",
+            Self::AlreadyDurable => "already_durable",
+            Self::RetainedUnsafe => "retained_unsafe",
+            Self::Reclaimed => "reclaimed",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

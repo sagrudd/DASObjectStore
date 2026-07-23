@@ -97,6 +97,7 @@ pub use integrity::{
     VerifyLiveMetadataReport, VerifyLiveMetadataRequest,
 };
 pub use local_object_store::{
+    adopt_object_on_ssd_by_hard_link_with_controlled_progress,
     existing_object_payload_candidate_paths, object_payload_path,
     put_object_direct_to_hdd_with_controlled_progress, put_object_ssd_first,
     put_object_ssd_first_with_controlled_progress, put_object_ssd_first_with_progress,
