@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.123.3 - 2026-07-23
+
+- Short-circuit an exact-key reconciliation before provider credentials,
+  listing, or download when the live catalogue already contains that exact
+  object. Verified HDD state reports ``already_durable``; unsettled catalogue
+  state remains ``retained_unsafe`` while destage completes.
+
 ## 0.123.2 - 2026-07-23
 
 - Reclaim an adopted reconciliation checkpoint through a dedicated

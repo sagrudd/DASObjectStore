@@ -78,6 +78,19 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     )? {
         return Ok(adoption);
     }
+    let live_sqlite_path = crate::runtime::default_ssd_root()
+        .join(dasobjectstore_metadata::METADATA_DIR_NAME)
+        .join(dasobjectstore_metadata::LIVE_SQLITE_FILE_NAME);
+    if let Some(catalogued) = completed_exact_prefix_catalogue_response(
+        &live_sqlite_path,
+        &reconciliation_root,
+        &bucket_name,
+        &store_id,
+        prefix.clone(),
+        dry_run,
+    )? {
+        return Ok(catalogued);
+    }
     enforce_reconciliation_staging_bound(&reconciliation_root)?;
     let requested_staging_path = reconciliation_root.join(stage_name);
     let mut staging_path = requested_staging_path.clone();
@@ -631,6 +644,60 @@ fn completed_snapshot_response(
         completed_snapshot_outcome: outcome,
         outcome_detail,
     }
+}
+
+fn completed_exact_prefix_catalogue_response(
+    live_sqlite_path: &Path,
+    reconciliation_root: &Path,
+    bucket_name: &str,
+    store_id: &StoreId,
+    prefix: Option<String>,
+    dry_run: bool,
+) -> Result<Option<StoreRepairS3Reconciliation>, DaemonServiceRuntimeError> {
+    use dasobjectstore_metadata::{read_object_inspect, ObjectInspectError};
+    let Some(exact_prefix) = prefix.as_deref() else {
+        return Ok(None);
+    };
+    let object_id =
+        match dasobjectstore_core::ids::ObjectId::new(format!("{store_id}/{exact_prefix}")) {
+            Ok(object_id) => object_id,
+            Err(_) => return Ok(None),
+        };
+    let object = match read_object_inspect(live_sqlite_path, &object_id) {
+        Ok(object) => object,
+        Err(ObjectInspectError::ObjectNotFound(_)) => return Ok(None),
+        Err(error) => {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "exact-prefix catalogue proof failed before provider access: {error}"
+                ),
+            })
+        }
+    };
+    let (outcome, detail) = if object.store_id == *store_id
+        && object.state == "HddCopyVerified"
+        && !object.placements.is_empty()
+    {
+        (
+            CompletedSnapshotOutcome::AlreadyDurable,
+            "exact provider key already has verified HDD catalogue placement; provider access skipped",
+        )
+    } else {
+        (
+            CompletedSnapshotOutcome::RetainedUnsafe,
+            "exact provider key is already catalogued but not yet HDD durable; provider access skipped",
+        )
+    };
+    Ok(Some(StoreRepairS3Reconciliation {
+        bucket_name: bucket_name.to_string(),
+        prefix,
+        staging_path: reconciliation_root.display().to_string(),
+        manifest_path: None,
+        ingest_job_id: None,
+        dry_run,
+        completed_snapshot_outcome: outcome,
+        outcome_detail: Some(detail.to_string()),
+    }))
 }
 
 fn validate_completed_manifest_entry(
@@ -1952,13 +2019,15 @@ fn emit_reconciliation_key_progress(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_range_download, classify_completed_snapshot_catalogue, deterministic_adoption_id,
+        append_range_download, classify_completed_snapshot_catalogue,
+        completed_exact_prefix_catalogue_response, deterministic_adoption_id,
         discover_reusable_complete_manifest, garbage_collect_reconciliation_staging,
         garbage_collect_reconciliation_staging_inner, reclaim_proven_completed_snapshot,
         reconciliation_download_args, reconciliation_staging_blockers, validate_sha256_sidecars,
         GarageReconciliationProvider, ReconciliationDownloadRequest,
         ReconciliationGarbageCollectionDisposition, ReconciliationProvider, SnapshotCatalogueState,
     };
+    use crate::api::CompletedSnapshotOutcome;
     use crate::runtime::reconciliation::{
         ReconciliationEntryState, ReconciliationManifest, ReconciliationManifestEntry,
         ReconciliationObject,
@@ -2055,6 +2124,37 @@ mod tests {
             },
         )
         .expect("SSD acknowledgement");
+    }
+
+    fn mark_archive_hdd_durable(live_sqlite_path: &std::path::Path) {
+        let connection = rusqlite::Connection::open(live_sqlite_path).expect("catalogue");
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id,pool_id,role,state,size_bytes,created_at_utc,updated_at_utc
+                 ) VALUES ('disk-a','pool-a','Hdd','Active',1000,'now','now')",
+                [],
+            )
+            .expect("disk");
+        connection
+            .execute(
+                "INSERT INTO placements (
+                    placement_id,object_id,disk_id,relative_path,content_hash,
+                    verified_at_utc,created_at_utc
+                 ) VALUES (
+                    'placement-a','epic_collection/archive.bin','disk-a',
+                    'epic_collection/archive.bin',NULL,'now','now'
+                 )",
+                [],
+            )
+            .expect("HDD placement");
+        connection
+            .execute(
+                "UPDATE objects SET state='HddCopyVerified' \
+                 WHERE object_id='epic_collection/archive.bin'",
+                [],
+            )
+            .expect("object state");
     }
 
     struct RecordingRunner(Mutex<Vec<Vec<String>>>);
@@ -2159,6 +2259,85 @@ mod tests {
             classify_completed_snapshot_catalogue(&live_sqlite_path, &stage, &manifest),
             SnapshotCatalogueState::Durable
         ));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn exact_catalogued_prefix_blocks_provider_retry_until_hdd_durable() {
+        let root = validation_root("exact-prefix-catalogued");
+        let live_sqlite_path = root.join("live.sqlite");
+        write_ssd_acknowledgement(&live_sqlite_path);
+        let store_id = dasobjectstore_core::ids::StoreId::new("epic_collection").expect("store id");
+
+        let response = completed_exact_prefix_catalogue_response(
+            &live_sqlite_path,
+            &root.join("remote-s3-reconcile/epic_collection"),
+            "epic-collection",
+            &store_id,
+            Some("archive.bin".to_string()),
+            false,
+        )
+        .expect("catalogue proof")
+        .expect("provider retry must be blocked");
+
+        assert_eq!(
+            response.completed_snapshot_outcome,
+            CompletedSnapshotOutcome::RetainedUnsafe
+        );
+        assert!(response
+            .outcome_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("provider access skipped")));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn absent_exact_prefix_does_not_block_provider_discovery() {
+        let root = validation_root("exact-prefix-absent");
+        let live_sqlite_path = root.join("live.sqlite");
+        write_ssd_acknowledgement(&live_sqlite_path);
+        let store_id = dasobjectstore_core::ids::StoreId::new("epic_collection").expect("store id");
+
+        assert!(completed_exact_prefix_catalogue_response(
+            &live_sqlite_path,
+            &root.join("remote-s3-reconcile/epic_collection"),
+            "epic-collection",
+            &store_id,
+            Some("new-object.bin".to_string()),
+            false,
+        )
+        .expect("catalogue proof")
+        .is_none());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn exact_hdd_durable_prefix_reports_already_durable_without_provider_access() {
+        let root = validation_root("exact-prefix-durable");
+        let live_sqlite_path = root.join("live.sqlite");
+        write_ssd_acknowledgement(&live_sqlite_path);
+        mark_archive_hdd_durable(&live_sqlite_path);
+        let store_id = dasobjectstore_core::ids::StoreId::new("epic_collection").expect("store id");
+
+        let response = completed_exact_prefix_catalogue_response(
+            &live_sqlite_path,
+            &root.join("remote-s3-reconcile/epic_collection"),
+            "epic-collection",
+            &store_id,
+            Some("archive.bin".to_string()),
+            false,
+        )
+        .expect("catalogue proof")
+        .expect("durable provider retry must be blocked");
+
+        assert_eq!(
+            response.completed_snapshot_outcome,
+            CompletedSnapshotOutcome::AlreadyDurable
+        );
+        assert!(response
+            .outcome_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("provider access skipped")));
         fs::remove_dir_all(root).expect("cleanup");
     }
 
