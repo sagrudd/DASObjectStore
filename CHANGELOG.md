@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.123.1 - 2026-07-23
+
+- Place adopted snapshot objects under their deterministic reconciliation
+  ingest identities instead of the legacy object-derived staging identity.
+  This safely bypasses retained, incomplete legacy ingest payloads while
+  preserving them for the existing ingest garbage collector.
+
 ## 0.123.0 - 2026-07-23
 
 - Adopt complete, unaccepted remote-S3 reconciliation snapshots into the

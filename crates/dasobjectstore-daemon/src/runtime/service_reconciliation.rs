@@ -458,9 +458,17 @@ fn adopt_completed_reconciliation_snapshot(
             required_copies,
         )
         .with_object_type(ObjectType::Naive);
+        let per_object_job = format!("{adoption_id}-{}", short_hash(&relative));
+        let managed_ingest_job_id = dasobjectstore_core::ids::IngestJobId::new(
+            per_object_job.clone(),
+        )
+        .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("invalid deterministic adoption identity: {error}"),
+        })?;
         let staged =
             dasobjectstore_metadata::adopt_object_on_ssd_by_hard_link_with_controlled_progress(
                 &put_request,
+                &managed_ingest_job_id,
                 expected_size,
                 |progress| {
                     emit_reconciliation_key_progress(
@@ -484,7 +492,7 @@ fn adopt_completed_reconciliation_snapshot(
                 operation: format!("completed snapshot adoption failed: {error}"),
             })?;
         verified_hashes.insert(relative.clone(), staged.content_hash.clone());
-        staged_objects.insert(relative, staged);
+        staged_objects.insert(relative, (per_object_job, staged));
     }
     validate_sha256_sidecars(&staging_path, &verified_hashes)?;
     save_adoption_journal(
@@ -503,7 +511,7 @@ fn adopt_completed_reconciliation_snapshot(
             verified_hashes: verified_hashes.clone(),
         },
     )?;
-    for (relative, staged) in &staged_objects {
+    for (per_object_job, staged) in staged_objects.values() {
         let placement_relative = staged
             .staged_payload_path
             .strip_prefix(crate::runtime::default_ssd_root())
@@ -512,7 +520,6 @@ fn adopt_completed_reconciliation_snapshot(
             })?
             .to_string_lossy()
             .into_owned();
-        let per_object_job = format!("{adoption_id}-{}", short_hash(relative));
         let result = dasobjectstore_metadata::commit_verified_ssd_and_enqueue(
             &live_sqlite_path,
             dasobjectstore_metadata::VerifiedSsdCommitRequest {
@@ -529,7 +536,7 @@ fn adopt_completed_reconciliation_snapshot(
                 max_attempts: 8,
                 priority: 0,
                 committed_at_utc: accepted_at_utc,
-                ingest_job_id: Some(&per_object_job),
+                ingest_job_id: Some(per_object_job),
                 ingress_origin: Some("remote_s3"),
             },
         );

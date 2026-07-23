@@ -178,6 +178,7 @@ pub fn stage_object_on_ssd_with_controlled_progress(
 /// Hashing and filesystem validation happen before any catalogue transaction.
 pub fn adopt_object_on_ssd_by_hard_link_with_controlled_progress(
     request: &ObjectPutRequest,
+    ingest_job_id: &IngestJobId,
     expected_size: u64,
     mut progress: impl FnMut(ObjectPutProgress) -> Result<(), ObjectPutError>,
 ) -> Result<StagedObjectPut, ObjectPutError> {
@@ -194,8 +195,7 @@ pub fn adopt_object_on_ssd_by_hard_link_with_controlled_progress(
     }
     let layout = IngestStagingLayout::for_ssd_root(&request.ssd_root);
     layout.create_base_directories()?;
-    let job_id = IngestJobId::new(format!("put-{}", request.object_id.as_str()))?;
-    let job_paths = layout.job_paths(&job_id);
+    let job_paths = layout.job_paths(ingest_job_id);
     job_paths.create_directories()?;
     let linked_checkpoint = match fs::hard_link(&request.source_path, &job_paths.payload_path) {
         Ok(()) => true,
@@ -813,7 +813,7 @@ mod tests {
     };
     use crate::evacuation::DiskCopyRoot;
     use crate::hash::hash_file_sha256;
-    use dasobjectstore_core::ids::{DiskId, ObjectId};
+    use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId};
     use dasobjectstore_core::object_type::ObjectType;
     use std::fs;
     use std::path::PathBuf;
@@ -885,12 +885,14 @@ mod tests {
 
         let first = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
             &request,
+            &IngestJobId::new("reconcile-adopt-payload").unwrap(),
             payload.len() as u64,
             |_| Ok(()),
         )
         .expect("first adoption");
         let second = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
             &request,
+            &IngestJobId::new("reconcile-adopt-payload").unwrap(),
             payload.len() as u64,
             |_| Ok(()),
         )
@@ -925,15 +927,14 @@ mod tests {
             1,
         );
         let managed = crate::ingest::IngestStagingLayout::for_ssd_root(&request.ssd_root)
-            .job_paths(
-                &dasobjectstore_core::ids::IngestJobId::new("put-store/payload.bin").unwrap(),
-            )
+            .job_paths(&IngestJobId::new("reconcile-adopt-existing").unwrap())
             .payload_path;
         fs::create_dir_all(managed.parent().unwrap()).expect("managed parent");
         fs::write(&managed, payload).expect("existing managed payload");
 
         let adopted = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
             &request,
+            &IngestJobId::new("reconcile-adopt-existing").unwrap(),
             payload.len() as u64,
             |_| Ok(()),
         )
@@ -964,16 +965,18 @@ mod tests {
             1,
         );
         let managed = crate::ingest::IngestStagingLayout::for_ssd_root(&request.ssd_root)
-            .job_paths(
-                &dasobjectstore_core::ids::IngestJobId::new("put-store/payload.bin").unwrap(),
-            )
+            .job_paths(&IngestJobId::new("reconcile-adopt-existing-conflict").unwrap())
             .payload_path;
         fs::create_dir_all(managed.parent().unwrap()).expect("managed parent");
         fs::write(&managed, b"target").expect("conflicting payload");
 
-        let error =
-            adopt_object_on_ssd_by_hard_link_with_controlled_progress(&request, 6, |_| Ok(()))
-                .expect_err("conflict");
+        let error = adopt_object_on_ssd_by_hard_link_with_controlled_progress(
+            &request,
+            &IngestJobId::new("reconcile-adopt-existing-conflict").unwrap(),
+            6,
+            |_| Ok(()),
+        )
+        .expect_err("conflict");
 
         assert!(error
             .to_string()
