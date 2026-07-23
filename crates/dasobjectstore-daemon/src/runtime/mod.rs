@@ -4,6 +4,7 @@ mod admin_jobs;
 mod appliance_telemetry;
 mod application_audit;
 mod application_capability_replay;
+mod application_delete;
 mod application_identity_registry;
 mod application_key_registry;
 mod application_upload_capabilities;
@@ -77,6 +78,10 @@ pub use application_capability_replay::{
     release_upload_completion_capability, UploadCompletionCapabilityOutcome,
     APPLICATION_CAPABILITY_REPLAY_ENV, APPLICATION_CAPABILITY_REPLAY_FILE_NAME,
     APPLICATION_CAPABILITY_REPLAY_SCHEMA,
+};
+pub use application_delete::{
+    ApplicationObjectDeletion, ApplicationObjectDeletionOutcome,
+    GarageApplicationObjectDeletionAuthority,
 };
 pub use application_identity_registry::{
     application_identity_registry_path, deactivate_application_identity,

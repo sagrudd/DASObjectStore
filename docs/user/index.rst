@@ -31,4 +31,5 @@ stabilized in the current MVP.
    direct-s3-ingress
    remote-client
    programmatic-access
+   application-object-deletion
    store-repair

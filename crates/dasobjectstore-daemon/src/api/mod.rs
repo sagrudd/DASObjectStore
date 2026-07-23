@@ -1,6 +1,7 @@
 //! Transport-neutral daemon API contracts.
 
 mod appliance_telemetry;
+mod application_delete;
 mod application_identity;
 mod application_mtls;
 mod application_token;
@@ -49,6 +50,11 @@ pub use appliance_telemetry::{
     ApplianceTelemetryResponse, ApplianceTelemetrySeries, ApplianceTelemetrySessionPoint,
     ApplianceTelemetrySessionSummary, ApplianceTelemetryState, ApplianceTelemetryWindow,
     ApplianceTelemetryWindowAvailability,
+};
+pub use application_delete::{
+    ApplicationObjectDeleteOutcome, ApplicationObjectDeleteReason, ApplicationObjectDeleteRequest,
+    ApplicationObjectDeleteResponse, APPLICATION_OBJECT_DELETE_ROUTE,
+    APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
 };
 pub use application_identity::{
     ApplicationCredentialEnrollmentRecord, ApplicationCredentialRevocationRequest,
@@ -309,6 +315,7 @@ pub enum DaemonApiRequest {
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeRequest),
     IssueApplicationUploadCapability(ApplicationUploadCapabilityIssueRequest),
     CompleteApplicationUpload(ApplicationUploadCompletionRequest),
+    DeleteApplicationObject(ApplicationObjectDeleteRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
     RegisterProfileBinding(ProfileBindingRequest),
@@ -381,6 +388,7 @@ impl DaemonApiRequest {
             Self::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
             Self::IssueApplicationUploadCapability(_) => "issue_application_upload_capability",
             Self::CompleteApplicationUpload(_) => "complete_application_upload",
+            Self::DeleteApplicationObject(_) => "delete_application_object",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
@@ -476,6 +484,9 @@ impl DaemonApiRequest {
                 .validate()
                 .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
             Self::CompleteApplicationUpload(request) => request
+                .validate()
+                .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
+            Self::DeleteApplicationObject(request) => request
                 .validate()
                 .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
             Self::PrepareEnclosure(request) => request
@@ -643,6 +654,7 @@ pub enum DaemonApiResponse {
     RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadResponse),
     ApplicationUploadCapabilityIssued(ApplicationUploadCapabilityIssueResponse),
     ApplicationUploadCompleted(ApplicationUploadCompletionResponse),
+    ApplicationObjectDeleted(ApplicationObjectDeleteResponse),
     IngestProgress(DaemonIngestProgressEvent),
     Error(DaemonApiErrorResponse),
 }

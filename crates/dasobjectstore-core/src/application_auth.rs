@@ -15,7 +15,7 @@ pub const APPLICATION_AUTH_SCHEMA_VERSION: &str = "dasobjectstore.application_au
 pub const MAX_ACCESS_TOKEN_TTL_SECONDS: u64 = 15 * 60;
 pub const MAX_UPLOAD_COMPLETION_TTL_SECONDS: u64 = 15 * 60;
 pub const MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS: u64 = 24 * 60 * 60;
-pub const APPLICATION_AUTH_CONTRACT_REVISION: &str = "1.1";
+pub const APPLICATION_AUTH_CONTRACT_REVISION: &str = "1.2";
 pub const GOVERNED_BINDING_SCHEMA_VERSION: &str = "ergasterion.object-store-binding.v1";
 pub const GOVERNED_CAPABILITY_RENEWAL_WINDOW_SECONDS: u64 = 5 * 60;
 pub const GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS: u64 = 30;
@@ -191,6 +191,7 @@ pub enum ApplicationOperation {
     List,
     Verify,
     CompleteUpload,
+    Delete,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -364,6 +365,53 @@ impl ApplicationIdentity {
                 .scope
                 .operations
                 .contains(&ApplicationOperation::CompleteUpload)
+            || self
+                .scope
+                .max_object_bytes
+                .is_some_and(|limit| object_size_bytes > limit)
+            || (!self.scope.prefixes.is_empty()
+                && !self
+                    .scope
+                    .prefixes
+                    .iter()
+                    .any(|prefix| prefix_contains(prefix, object_key)))
+        {
+            return Err(ApplicationAuthValidationError::ScopeNotContained);
+        }
+        validate_logical_path("object_key", object_key)
+    }
+
+    /// Authorize deletion of one exact logical object through the daemon.
+    ///
+    /// This check grants no provider credentials and performs no mutation. The
+    /// daemon must still verify immutable object evidence, retention policy,
+    /// provider removal, catalogue withdrawal, and audit before acknowledging
+    /// deletion.
+    pub fn authorize_object_delete(
+        &self,
+        store_id: &StoreId,
+        object_key: &str,
+        object_size_bytes: u64,
+        now_unix_seconds: u64,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        self.validate()?;
+        if !self.active {
+            return Err(ApplicationAuthValidationError::InactiveIdentity);
+        }
+        if now_unix_seconds < self.issued_at_unix_seconds
+            || now_unix_seconds >= self.expires_at_unix_seconds
+        {
+            return Err(ApplicationAuthValidationError::LifetimeOutsideIdentity);
+        }
+        if !self
+            .scope
+            .store_ids
+            .iter()
+            .any(|allowed| allowed == store_id)
+            || !self
+                .scope
+                .operations
+                .contains(&ApplicationOperation::Delete)
             || self
                 .scope
                 .max_object_bytes
@@ -935,6 +983,7 @@ mod tests {
             operations: vec![
                 ApplicationOperation::Write,
                 ApplicationOperation::CompleteUpload,
+                ApplicationOperation::Delete,
             ],
             ingress_origin: IngressOrigin::Synoptikon,
             max_object_bytes: Some(10_000),
@@ -992,6 +1041,33 @@ mod tests {
         );
         assert_eq!(
             identity.authorize_upload_completion(&store, "analysis/large.fastq", 10_001, 2_000),
+            Err(ApplicationAuthValidationError::ScopeNotContained)
+        );
+    }
+
+    #[test]
+    fn application_identity_authorizes_only_scoped_exact_object_deletion() {
+        let identity = identity();
+        let store = StoreId::new("codex").expect("store");
+        identity
+            .authorize_object_delete(&store, "analysis/one.fastq", 10_000, 2_000)
+            .expect("scoped deletion");
+        assert_eq!(
+            identity.authorize_object_delete(&store, "other/one.fastq", 1, 2_000),
+            Err(ApplicationAuthValidationError::ScopeNotContained)
+        );
+        assert_eq!(
+            identity.authorize_object_delete(&store, "analysis/large.fastq", 10_001, 2_000),
+            Err(ApplicationAuthValidationError::ScopeNotContained)
+        );
+
+        let mut without_delete = identity;
+        without_delete
+            .scope
+            .operations
+            .retain(|operation| *operation != ApplicationOperation::Delete);
+        assert_eq!(
+            without_delete.authorize_object_delete(&store, "analysis/one.fastq", 10_000, 2_000),
             Err(ApplicationAuthValidationError::ScopeNotContained)
         );
     }

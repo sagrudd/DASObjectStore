@@ -655,6 +655,20 @@ where
         })
     }
 
+    fn delete_application_object(
+        &self,
+        deletion: &crate::runtime::ApplicationObjectDeletion,
+        environment: Vec<(String, String)>,
+        live_sqlite_path: PathBuf,
+    ) -> Result<crate::runtime::ApplicationObjectDeletionOutcome, DaemonServiceRuntimeError> {
+        crate::runtime::GarageApplicationObjectDeletionAuthority::new(
+            &self.runner,
+            environment,
+            live_sqlite_path,
+        )
+        .delete(deletion)
+    }
+
     fn reconcile_store_s3(
         &self,
         store_id: StoreId,

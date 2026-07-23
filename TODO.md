@@ -68,6 +68,12 @@ evidence and detailed source tasks.
   upload capability issuance, verify-before-commit ordering, replay, and
   catalogue-failure recovery. Physical DAS, live Garage/shared-SQLite,
   production CA, x86_64, multi-HDD, and performance acceptance remain blocked.
+  Application-authorized exact-object deletion now has a distinct scoped
+  ``delete`` operation, strict evidence-bound daemon contract, Garage
+  verify/delete/absence sequence, atomic authoritative catalogue withdrawal,
+  idempotent absence, and redacted audit. The Pinakotheke helper transport,
+  capacity-ledger reconciliation, and live synthetic deletion remain the
+  integration closure steps.
 
 ## Current External Blockers (2026-07-13)
 

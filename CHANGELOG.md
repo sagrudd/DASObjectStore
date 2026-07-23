@@ -8,6 +8,17 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.124.0 - 2026-07-23
+
+- Add a distinct application ``delete`` operation and a strict exact-object
+  deletion request/response contract for paired integrations.
+- Verify ObjectStore, object ID/version, size, SHA-256, Garage bucket/key, and
+  provider metadata before deletion; verify provider absence before atomically
+  withdrawing the matching authoritative catalogue row.
+- Treat exact provider/catalogue absence as idempotent success, reject stale or
+  uncatalogued provider evidence before mutation, and emit a redacted
+  application audit event.
+
 ## 0.123.3 - 2026-07-23
 
 - Short-circuit an exact-key reconciliation before provider credentials,

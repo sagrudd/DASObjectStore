@@ -83,7 +83,8 @@ where
         | DaemonApiRequest::RemoteEasyconnectUploadAdmission(_)
         | DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(_)
         | DaemonApiRequest::IssueApplicationUploadCapability(_)
-        | DaemonApiRequest::CompleteApplicationUpload(_)) => {
+        | DaemonApiRequest::CompleteApplicationUpload(_)
+        | DaemonApiRequest::DeleteApplicationObject(_)) => {
             easyconnect::request(handler, easyconnect_request, actor)
         }
         request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

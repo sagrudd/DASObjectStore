@@ -124,6 +124,18 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn delete_application_object(
+        &self,
+        _deletion: &crate::runtime::ApplicationObjectDeletion,
+        _environment: Vec<(String, String)>,
+        _live_sqlite_path: PathBuf,
+    ) -> Result<crate::runtime::ApplicationObjectDeletionOutcome, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "application object deletion requires an object-service command runner"
+                .to_string(),
+        })
+    }
+
     fn reconcile_store_s3(
         &self,
         _store_id: StoreId,

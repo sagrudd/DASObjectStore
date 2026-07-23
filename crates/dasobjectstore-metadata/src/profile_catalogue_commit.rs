@@ -39,6 +39,175 @@ pub struct ProfileCatalogueWithdrawalReport {
     pub transactions_removed: usize,
 }
 
+pub struct ProfileCatalogueObjectWithdrawalRequest<'a> {
+    pub profile_namespace: &'a str,
+    pub store_id: &'a StoreId,
+    pub object_id: &'a str,
+    pub object_version: u64,
+    pub expected_size_bytes: u64,
+    pub expected_checksum: &'a str,
+    pub expected_provider: &'a str,
+    pub expected_provider_object_key: &'a str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProfileCatalogueObjectWithdrawalReport {
+    pub removed: bool,
+    pub already_absent: bool,
+}
+
+/// Verify one exact provider-backed catalogue row without mutating it.
+///
+/// `false` means the row is already absent. Any changed immutable evidence is
+/// a conflict rather than a miss.
+pub fn profile_catalogue_object_matches(
+    live_sqlite_path: impl AsRef<Path>,
+    request: &ProfileCatalogueObjectWithdrawalRequest<'_>,
+) -> Result<bool, ProfileCatalogueCommitError> {
+    validate_object_withdrawal_request(request)?;
+    let connection = Connection::open(live_sqlite_path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let object_json = connection
+        .query_row(
+            "SELECT object_json FROM profile_catalogue_objects
+             WHERE profile_namespace = ?1 AND store_id = ?2
+               AND object_id = ?3 AND object_version = ?4",
+            params![
+                request.profile_namespace,
+                request.store_id.as_str(),
+                request.object_id,
+                request.object_version
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(object_json) = object_json else {
+        return Ok(false);
+    };
+    validate_object_withdrawal_evidence(request, &object_json)?;
+    Ok(true)
+}
+
+/// Atomically withdraw one exact provider-backed object after provider removal.
+///
+/// Immutable evidence is checked against the authoritative catalogue row
+/// before mutation. An absent row is idempotent success; a changed row fails
+/// closed so callers cannot use a stale deletion plan to remove new metadata.
+pub fn withdraw_profile_catalogue_object(
+    live_sqlite_path: impl AsRef<Path>,
+    request: ProfileCatalogueObjectWithdrawalRequest<'_>,
+) -> Result<ProfileCatalogueObjectWithdrawalReport, ProfileCatalogueCommitError> {
+    validate_object_withdrawal_request(&request)?;
+    let mut connection = Connection::open(live_sqlite_path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let transaction = connection.transaction()?;
+    let object_json = transaction
+        .query_row(
+            "SELECT object_json FROM profile_catalogue_objects
+             WHERE profile_namespace = ?1 AND store_id = ?2
+               AND object_id = ?3 AND object_version = ?4",
+            params![
+                request.profile_namespace,
+                request.store_id.as_str(),
+                request.object_id,
+                request.object_version
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(object_json) = object_json else {
+        transaction.commit()?;
+        return Ok(ProfileCatalogueObjectWithdrawalReport {
+            removed: false,
+            already_absent: true,
+        });
+    };
+    validate_object_withdrawal_evidence(&request, &object_json)?;
+    let removed = transaction.execute(
+        "DELETE FROM profile_catalogue_objects
+         WHERE profile_namespace = ?1 AND store_id = ?2
+           AND object_id = ?3 AND object_version = ?4",
+        params![
+            request.profile_namespace,
+            request.store_id.as_str(),
+            request.object_id,
+            request.object_version
+        ],
+    )?;
+    if removed != 1 {
+        return Err(ProfileCatalogueCommitError::ObjectEvidenceConflict {
+            object_id: request.object_id.to_string(),
+            version: request.object_version,
+        });
+    }
+    transaction.commit()?;
+    Ok(ProfileCatalogueObjectWithdrawalReport {
+        removed: true,
+        already_absent: false,
+    })
+}
+
+fn validate_object_withdrawal_request(
+    request: &ProfileCatalogueObjectWithdrawalRequest<'_>,
+) -> Result<(), ProfileCatalogueCommitError> {
+    for (field, value) in [
+        ("profile_namespace", request.profile_namespace),
+        ("object_id", request.object_id),
+        ("expected_checksum", request.expected_checksum),
+        ("expected_provider", request.expected_provider),
+        (
+            "expected_provider_object_key",
+            request.expected_provider_object_key,
+        ),
+    ] {
+        if value.trim().is_empty() {
+            return Err(ProfileCatalogueCommitError::BlankField(field));
+        }
+    }
+    if request.object_version == 0 {
+        return Err(ProfileCatalogueCommitError::InvalidObjectEvidence(
+            "object_version must be greater than zero".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_object_withdrawal_evidence(
+    request: &ProfileCatalogueObjectWithdrawalRequest<'_>,
+    object_json: &str,
+) -> Result<(), ProfileCatalogueCommitError> {
+    let object: dasobjectstore_core::object_catalogue::PortableObjectVersion =
+        serde_json::from_str(object_json)
+            .map_err(|error| ProfileCatalogueCommitError::InvalidCatalogue(error.to_string()))?;
+    let checksum_matches = object.checksum.algorithm == "sha256"
+        && object
+            .checksum
+            .value
+            .eq_ignore_ascii_case(request.expected_checksum.trim_start_matches("sha256:"));
+    let provider_matches = object.placements.iter().any(|placement| {
+        matches!(
+            &placement.location,
+            dasobjectstore_core::object_catalogue::PortablePlacementLocation::Provider {
+                provider,
+                object_key,
+            } if provider == request.expected_provider
+                && object_key == request.expected_provider_object_key
+        )
+    });
+    if object.object_id.to_string() != request.object_id
+        || object.version != request.object_version
+        || object.size_bytes != request.expected_size_bytes
+        || !checksum_matches
+        || !provider_matches
+    {
+        return Err(ProfileCatalogueCommitError::ObjectEvidenceConflict {
+            object_id: request.object_id.to_string(),
+            version: request.object_version,
+        });
+    }
+    Ok(())
+}
+
 /// Atomically withdraw one profile namespace from shared discovery metadata.
 /// Private profile data is deliberately outside this transaction and retained.
 pub fn withdraw_profile_catalogue(
@@ -349,6 +518,11 @@ pub enum ProfileCatalogueCommitError {
         object_id: String,
         version: u64,
     },
+    InvalidObjectEvidence(String),
+    ObjectEvidenceConflict {
+        object_id: String,
+        version: u64,
+    },
 }
 
 impl Display for ProfileCatalogueCommitError {
@@ -379,6 +553,13 @@ impl Display for ProfileCatalogueCommitError {
             Self::ObjectVersionConflict { object_id, version } => write!(
                 formatter,
                 "object {object_id} version {version} conflicts with existing metadata"
+            ),
+            Self::InvalidObjectEvidence(message) => {
+                write!(formatter, "invalid object evidence: {message}")
+            }
+            Self::ObjectEvidenceConflict { object_id, version } => write!(
+                formatter,
+                "object {object_id} version {version} does not match deletion evidence"
             ),
         }
     }
@@ -643,6 +824,83 @@ mod tests {
             )
             .expect("remaining object count");
         assert_eq!(remaining, 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn exact_provider_object_withdrawal_is_evidence_bound_and_idempotent() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-object-withdrawal-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let db = root.join("live.sqlite");
+        let connection = Connection::open(&db).expect("db");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools VALUES ('pool-a', 'Clean', 'now', 'now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('store-a', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("store");
+        drop(connection);
+        let store_id = StoreId::new("store-a").expect("store id");
+        let mut catalogue = sample_catalogue();
+        catalogue.objects[0].placements[0].location = PortablePlacementLocation::Provider {
+            provider: "garage".into(),
+            object_key: "bucket-a/media/object-a".into(),
+        };
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-provider",
+                profile_namespace: "provider:garage",
+                store_id: &store_id,
+                catalogue: &catalogue,
+                source_retained: true,
+                exact_snapshot: false,
+                committed_at_utc: "2026-07-23T00:00:00Z",
+            },
+        )
+        .expect("catalogue commit");
+
+        let request = || ProfileCatalogueObjectWithdrawalRequest {
+            profile_namespace: "provider:garage",
+            store_id: &store_id,
+            object_id: "object-a",
+            object_version: 1,
+            expected_size_bytes: 3,
+            expected_checksum: "sha256:abc",
+            expected_provider: "garage",
+            expected_provider_object_key: "bucket-a/media/object-a",
+        };
+        let mut stale = request();
+        stale.expected_checksum = "sha256:def";
+        assert!(matches!(
+            withdraw_profile_catalogue_object(&db, stale),
+            Err(ProfileCatalogueCommitError::ObjectEvidenceConflict { .. })
+        ));
+        assert_eq!(
+            withdraw_profile_catalogue_object(&db, request()).expect("withdraw"),
+            ProfileCatalogueObjectWithdrawalReport {
+                removed: true,
+                already_absent: false,
+            }
+        );
+        assert_eq!(
+            withdraw_profile_catalogue_object(&db, request()).expect("idempotent replay"),
+            ProfileCatalogueObjectWithdrawalReport {
+                removed: false,
+                already_absent: true,
+            }
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

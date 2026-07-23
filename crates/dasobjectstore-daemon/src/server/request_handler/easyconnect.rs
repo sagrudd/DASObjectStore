@@ -1,5 +1,9 @@
 use super::*;
-use crate::api::CapacityAdmissionDecision;
+use crate::api::{
+    ApplicationObjectDeleteOutcome, ApplicationObjectDeleteReason, ApplicationObjectDeleteRequest,
+    ApplicationObjectDeleteResponse, CapacityAdmissionDecision,
+    APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
+};
 use ring::rand::{SecureRandom, SystemRandom};
 use std::sync::Arc;
 
@@ -147,6 +151,16 @@ where
                 Ok(response) => Ok(DaemonApiResponse::ApplicationUploadCompleted(response)),
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "application_upload_completion_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
+        DaemonApiRequest::DeleteApplicationObject(request) => {
+            let now_utc = handler.clock.now_utc();
+            match handler.delete_application_object(request, &now_utc) {
+                Ok(response) => Ok(DaemonApiResponse::ApplicationObjectDeleted(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "application_object_delete_failed",
                     error.to_string(),
                 ))),
             }
@@ -431,6 +445,121 @@ where
                     ApplicationUploadCompletionOutcome::AlreadyCommitted
                 }
             },
+        })
+    }
+
+    fn delete_application_object(
+        &self,
+        request: ApplicationObjectDeleteRequest,
+        now_utc: &str,
+    ) -> Result<ApplicationObjectDeleteResponse, DaemonServiceRuntimeError> {
+        request.validate().map_err(upload_error)?;
+        let now = parse_utc_timestamp_seconds(now_utc)
+            .ok_or_else(|| upload_error("daemon clock is not a supported UTC timestamp"))?
+            as u64;
+        if request.provider != "garage"
+            || self
+                .service_orchestrator
+                .application_upload_endpoint()
+                .as_deref()
+                != Some(request.endpoint_url.as_str())
+        {
+            return Err(upload_error(
+                "only the configured Garage provider endpoint is supported",
+            ));
+        }
+        let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            &self.remote_easyconnect_session_store_path,
+        );
+        let grant = session_store
+            .authorize_completion(
+                &request.session_id,
+                &request.renewal_token,
+                &request.object_store,
+                now_utc,
+            )
+            .map_err(|error| upload_error(error.to_string()))?;
+        if grant.bucket != request.bucket {
+            return Err(upload_error(
+                "requested bucket is outside the paired session grant",
+            ));
+        }
+        let store_id = StoreId::new(request.object_store.clone())
+            .map_err(|error| upload_error(error.to_string()))?;
+        let identity = read_application_identity(
+            &self.application_identity_registry_path,
+            &request.application_id,
+        )?
+        .ok_or_else(|| upload_error("application identity is not registered"))?;
+        identity
+            .authorize_object_delete(
+                &store_id,
+                &request.object_key,
+                request.expected_size_bytes,
+                now,
+            )
+            .map_err(|error| upload_error(error.to_string()))?;
+        let credentials =
+            read_managed_credential_registry(&self.credential_registry_path, now_utc)?
+                .credentials
+                .into_iter()
+                .find(|credential| {
+                    credential.store_id.as_str() == store_id.as_str()
+                        && credential.bucket_name == request.bucket
+                })
+                .ok_or_else(|| {
+                    upload_error("no daemon-managed credential exists for object deletion")
+                })?;
+        let environment = vec![
+            ("AWS_ACCESS_KEY_ID".to_string(), credentials.access_key_id),
+            (
+                "AWS_SECRET_ACCESS_KEY".to_string(),
+                credentials.secret_access_key,
+            ),
+        ];
+        let deletion = crate::runtime::ApplicationObjectDeletion {
+            store_id,
+            object_id: request.object_id,
+            object_version: request.object_version,
+            object_key: request.object_key,
+            expected_size_bytes: request.expected_size_bytes,
+            expected_checksum: request.expected_checksum,
+            provider: request.provider,
+            bucket: request.bucket,
+            endpoint_url: request.endpoint_url,
+        };
+        let outcome = self.service_orchestrator.delete_application_object(
+            &deletion,
+            environment,
+            self.live_sqlite_path.clone(),
+        )?;
+        let reason = match request.reason {
+            ApplicationObjectDeleteReason::UserRequested => "user_requested",
+            ApplicationObjectDeleteReason::SourceRemoved => "source_removed",
+            ApplicationObjectDeleteReason::PolicyRequired => "policy_required",
+        };
+        let audit = record_application_audit_event(
+            &self.application_audit_log_path,
+            now_utc,
+            "delete_object",
+            &request.application_id,
+            None,
+            None,
+            reason,
+            false,
+        )?;
+        Ok(ApplicationObjectDeleteResponse {
+            schema_version: APPLICATION_OBJECT_DELETE_SCHEMA_VERSION.to_string(),
+            request_id: request.request_id,
+            outcome: match outcome {
+                crate::runtime::ApplicationObjectDeletionOutcome::Deleted => {
+                    ApplicationObjectDeleteOutcome::Deleted
+                }
+                crate::runtime::ApplicationObjectDeletionOutcome::AlreadyAbsent => {
+                    ApplicationObjectDeleteOutcome::AlreadyAbsent
+                }
+            },
+            audit_event_id: audit.event_id,
         })
     }
     fn create_remote_easyconnect_pairing(

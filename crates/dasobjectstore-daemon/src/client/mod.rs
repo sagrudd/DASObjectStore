@@ -14,7 +14,8 @@ use crate::api::{
     ApplicationCredentialRevocationResponse, ApplicationIdentityRegistrationRequest,
     ApplicationIdentityRegistrationResponse, ApplicationKeyRegistrationRequest,
     ApplicationKeyRegistrationResponse, ApplicationMtlsAuthorizationRequest,
-    ApplicationMtlsAuthorizationResponse, ApplicationUploadCapabilityIssueRequest,
+    ApplicationMtlsAuthorizationResponse, ApplicationObjectDeleteRequest,
+    ApplicationObjectDeleteResponse, ApplicationUploadCapabilityIssueRequest,
     ApplicationUploadCapabilityIssueResponse, ApplicationUploadCompletionRequest,
     ApplicationUploadCompletionResponse, AssignLocalUserToLocalGroupRequest,
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
@@ -529,6 +530,23 @@ where
         }
     }
 
+    pub fn delete_application_object(
+        &self,
+        request: ApplicationObjectDeleteRequest,
+    ) -> Result<ApplicationObjectDeleteResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::DeleteApplicationObject(request))? {
+            DaemonApiResponse::ApplicationObjectDeleted(response) => {
+                response.validate().map_err(|error| {
+                    DaemonClientError::Transport(format!(
+                        "invalid application object deletion response: {error}"
+                    ))
+                })?;
+                Ok(response)
+            }
+            response => Err(unexpected("application_object_deleted", response)),
+        }
+    }
+
     pub fn complete_application_upload(
         &self,
         request: ApplicationUploadCompletionRequest,
@@ -926,6 +944,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
             "application_upload_capability_issued"
         }
         DaemonApiResponse::ApplicationUploadCompleted(_) => "application_upload_completed",
+        DaemonApiResponse::ApplicationObjectDeleted(_) => "application_object_deleted",
         DaemonApiResponse::IngestProgress(_) => "ingest_progress",
         DaemonApiResponse::Error(_) => "error",
     }

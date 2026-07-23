@@ -16,7 +16,7 @@ bearer access tokens are not.
 | Credential | Lifetime and use | Authority |
 | --- | --- | --- |
 | Application identity key or certificate | Long-lived, rotatable identity used only for token exchange | Identifies an application; grants no storage operation by itself |
-| Short-lived access token | Target of a token exchange; normally 5–15 minutes | Grants narrowly scoped reads, writes, listings, or verification |
+| Short-lived access token | Target of a token exchange; normally 5–15 minutes | Grants narrowly scoped reads, writes, listings, verification, or exact-object deletion |
 | Upload completion capability | Single-use and upload-scoped | Allows one provider completion claim after daemon verification |
 | Renewal token | Used only at the renewal endpoint | Cannot read, write, complete uploads, or mutate policy |
 
@@ -137,6 +137,25 @@ transfer-only terminal semantics during migration; release integrations must
 use the completion-bearing contract.
 
 Renewal tokens are not accepted as bearer credentials for this operation.
+
+### Exact-object deletion
+
+Deletion is a separate application operation and is never implied by write or
+upload-completion scope. The daemon requires an active paired ObjectStore
+session plus a registered application identity whose `delete` operation,
+ObjectStore, prefix, byte limit, and lifetime contain the request. It then
+matches object ID, version, size, SHA-256, provider, bucket, and key against the
+authoritative catalogue before provider mutation.
+
+Garage deletion uses only daemon-managed credentials. The daemon verifies the
+current provider object, deletes the exact key, verifies absence, atomically
+withdraws the matching catalogue row, and records a redacted audit event.
+Changed evidence or an uncatalogued provider object fails closed before
+mutation. Exact absence is idempotent success. Applications must not substitute
+raw S3 deletion or remove their projection before the authoritative response.
+The v1 request is defined at
+`/api/v1/application-auth/object-deletions`; its first consumer helper and live
+synthetic deployment remain separate integration work.
 
 ## Development self-signing mode
 
