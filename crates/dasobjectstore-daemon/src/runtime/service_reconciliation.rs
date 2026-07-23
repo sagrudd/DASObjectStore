@@ -367,17 +367,7 @@ fn adopt_completed_reconciliation_snapshot(
                     ),
                 )));
             }
-            let global_root = reconciliation_root.parent().ok_or_else(|| {
-                DaemonServiceRuntimeError::UnsupportedOperation {
-                    operation: "reconciliation root has no managed parent".to_string(),
-                }
-            })?;
-            garbage_collect_reconciliation_staging_inner(
-                global_root,
-                &live_sqlite_path,
-                false,
-                None,
-            )?;
+            reclaim_proven_completed_snapshot(reconciliation_root, &staging_path)?;
             return Ok(Some(completed_snapshot_response(
                 bucket_name,
                 prefix,
@@ -585,12 +575,7 @@ fn adopt_completed_reconciliation_snapshot(
             )),
         )));
     }
-    let global_root = reconciliation_root.parent().ok_or_else(|| {
-        DaemonServiceRuntimeError::UnsupportedOperation {
-            operation: "reconciliation root has no managed parent".to_string(),
-        }
-    })?;
-    garbage_collect_reconciliation_staging_inner(global_root, &live_sqlite_path, false, None)?;
+    reclaim_proven_completed_snapshot(reconciliation_root, &staging_path)?;
     Ok(Some(completed_snapshot_response(
         bucket_name,
         prefix,
@@ -609,6 +594,21 @@ fn adopt_completed_reconciliation_snapshot(
 fn reconciliation_adoption_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn reclaim_proven_completed_snapshot(
+    reconciliation_root: &Path,
+    staging_path: &Path,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let global_root = reconciliation_root.parent().ok_or_else(|| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "reconciliation root has no managed parent".to_string(),
+        }
+    })?;
+    crate::runtime::garbage_collection::reclaim_managed_directory(global_root, staging_path)
+        .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("proven completed snapshot reclaim failed: {error}"),
+        })
 }
 
 fn completed_snapshot_response(
@@ -1954,10 +1954,10 @@ mod tests {
     use super::{
         append_range_download, classify_completed_snapshot_catalogue, deterministic_adoption_id,
         discover_reusable_complete_manifest, garbage_collect_reconciliation_staging,
-        garbage_collect_reconciliation_staging_inner, reconciliation_download_args,
-        reconciliation_staging_blockers, validate_sha256_sidecars, GarageReconciliationProvider,
-        ReconciliationDownloadRequest, ReconciliationGarbageCollectionDisposition,
-        ReconciliationProvider, SnapshotCatalogueState,
+        garbage_collect_reconciliation_staging_inner, reclaim_proven_completed_snapshot,
+        reconciliation_download_args, reconciliation_staging_blockers, validate_sha256_sidecars,
+        GarageReconciliationProvider, ReconciliationDownloadRequest,
+        ReconciliationGarbageCollectionDisposition, ReconciliationProvider, SnapshotCatalogueState,
     };
     use crate::runtime::reconciliation::{
         ReconciliationEntryState, ReconciliationManifest, ReconciliationManifestEntry,
@@ -2311,6 +2311,26 @@ mod tests {
         assert_eq!(report.reclaimed_snapshots, 1);
         assert!(active.exists());
         assert!(!otherwise_newest.exists());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn adoption_reclaims_only_the_proven_hard_linked_checkpoint() {
+        let root = validation_root("adoption-reclaim-hard-link");
+        let reconcile_root = root.join("remote-s3-reconcile");
+        let stage = write_complete_snapshot(&reconcile_root, "snapshot-a");
+        let managed = root.join("managed/payload");
+        fs::create_dir_all(managed.parent().unwrap()).expect("managed parent");
+        fs::hard_link(stage.join("archive.bin"), &managed).expect("managed hard link");
+
+        reclaim_proven_completed_snapshot(&reconcile_root.join("epic_collection"), &stage)
+            .expect("reclaim checkpoint");
+
+        assert!(!stage.exists());
+        assert_eq!(
+            fs::read(&managed).expect("managed payload survives"),
+            b"payload"
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 

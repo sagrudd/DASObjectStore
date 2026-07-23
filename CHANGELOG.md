@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.123.2 - 2026-07-23
+
+- Reclaim an adopted reconciliation checkpoint through a dedicated
+  proof-gated daemon path. Generic garbage collection continues to reject
+  hard-linked trees, while completed-snapshot adoption may unlink its source
+  checkpoint only after verifying the surviving managed SSD link.
+
 ## 0.123.1 - 2026-07-23
 
 - Place adopted snapshot objects under their deterministic reconciliation
