@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.126.3 - 2026-07-24
+
+- Classify arbitrary EasyConnect S3 payloads as the canonical ``naive``
+  object type rather than confusing an ObjectStore retention class with an
+  object format.
+- Recover already queued S3 payloads carrying the legacy store-class value as
+  ``naive`` so they can durably destage instead of remaining indefinitely on
+  SSD.
+
 ## 0.126.2 - 2026-07-24
 
 - Apply managed-pool capacity resolution consistently to direct S3 HEAD,

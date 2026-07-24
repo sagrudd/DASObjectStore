@@ -130,7 +130,11 @@ pub(crate) fn live_remote_upload_workspace_for_user_targeted(
                 admin_group: None,
                 public_read: definition.public,
                 writable: true,
-                object_type: definition.policy.class.name().to_string(),
+                // EasyConnect accepts arbitrary S3 object keys and payloads;
+                // a store retention class is not a biological object type.
+                object_type: dasobjectstore_core::object_type::ObjectType::Naive
+                    .name()
+                    .to_string(),
             })
         })
         .collect::<Vec<_>>();
@@ -378,7 +382,7 @@ mod tests {
             can_read: true,
             can_write,
             writer_group: Some("mnemosyne".to_string()),
-            object_type: "generated_data".to_string(),
+            object_type: "naive".to_string(),
         }
     }
 }

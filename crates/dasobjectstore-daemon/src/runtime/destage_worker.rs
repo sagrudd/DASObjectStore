@@ -157,12 +157,7 @@ fn settle_claimed_record(
             actual: metadata.len(),
         });
     }
-    let object_type = record.object_type.parse::<ObjectType>().map_err(|error| {
-        DurableDestageWorkerError::InvalidObjectType {
-            value: record.object_type.clone(),
-            message: error.to_string(),
-        }
-    })?;
+    let object_type = parse_queued_object_type(&record.object_type)?;
     let roots = discover_managed_hdd_roots(&config.hdd_root)?;
     if roots.len() < record.required_copy_count as usize {
         return Err(DurableDestageWorkerError::InsufficientHddRoots {
@@ -242,6 +237,27 @@ fn settle_claimed_record(
     // left to the separate eviction pass so a cleanup failure can never turn
     // a successfully settled queue row back into a failed destage attempt.
     Ok(u8::try_from(placements.len()).unwrap_or(u8::MAX))
+}
+
+fn parse_queued_object_type(value: &str) -> Result<ObjectType, DurableDestageWorkerError> {
+    match value.parse::<ObjectType>() {
+        Ok(object_type) => Ok(object_type),
+        Err(_)
+            if value
+                .parse::<dasobjectstore_core::store::StoreClass>()
+                .is_ok() =>
+        {
+            // Builds before 0.126.3 accidentally queued the ObjectStore
+            // retention class for arbitrary EasyConnect S3 payloads. They
+            // carry no stronger semantic type and are safely recovered as
+            // the canonical naive type instead of remaining on SSD forever.
+            Ok(ObjectType::Naive)
+        }
+        Err(error) => Err(DurableDestageWorkerError::InvalidObjectType {
+            value: value.to_string(),
+            message: error.to_string(),
+        }),
+    }
 }
 
 fn safe_relative_path(value: &str) -> Option<PathBuf> {
@@ -390,7 +406,11 @@ impl From<std::io::Error> for DurableDestageWorkerError {
 
 #[cfg(test)]
 mod tests {
-    use super::{remove_managed_ssd_job_root, retry_delay_seconds, safe_relative_path};
+    use super::{
+        parse_queued_object_type, remove_managed_ssd_job_root, retry_delay_seconds,
+        safe_relative_path,
+    };
+    use dasobjectstore_core::object_type::ObjectType;
     use std::fs;
 
     #[test]
@@ -398,6 +418,19 @@ mod tests {
         assert_eq!(retry_delay_seconds(1), 30);
         assert_eq!(retry_delay_seconds(2), 60);
         assert_eq!(retry_delay_seconds(99), 3600);
+    }
+
+    #[test]
+    fn legacy_store_class_queue_values_recover_as_naive_objects() {
+        assert_eq!(
+            parse_queued_object_type("generated_data").expect("legacy class"),
+            ObjectType::Naive
+        );
+        assert_eq!(
+            parse_queued_object_type("pod5").expect("typed object"),
+            ObjectType::Pod5
+        );
+        assert!(parse_queued_object_type("not-a-type-or-class").is_err());
     }
 
     #[test]
