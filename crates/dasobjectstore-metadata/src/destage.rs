@@ -283,13 +283,13 @@ pub fn claim_next_destage(
     tx.execute("UPDATE destage_queue SET state='needs_review', lease_owner=NULL, lease_expires_at_utc=NULL, updated_at_utc=?1 WHERE attempt_count>=max_attempts AND state IN ('destage_failed','hdd_copying') AND (lease_owner IS NULL OR lease_expires_at_utc<=?1)",[now_utc])?;
     let excluded = previously_served_store.map(StoreId::as_str).unwrap_or("");
     let object_id: Option<String> = tx.query_row(
-        "SELECT object_id FROM destage_queue WHERE state IN ('queued_for_hdd','destage_failed','hdd_copying') AND attempt_count < max_attempts AND cancellation_requested=0 AND (next_retry_at_utc IS NULL OR next_retry_at_utc<=?1) AND (lease_owner IS NULL OR lease_expires_at_utc<=?1) ORDER BY CASE WHEN store_id=?2 THEN 1 ELSE 0 END, priority DESC, created_at_utc, destage_job_id LIMIT 1",
-        params![now_utc, excluded], |row| row.get(0)).optional()?;
+        "SELECT object_id FROM destage_queue WHERE state IN ('queued_for_hdd','destage_failed','hdd_copying') AND attempt_count < max_attempts AND cancellation_requested=0 AND (next_retry_at_utc IS NULL OR next_retry_at_utc<=?1) AND (lease_owner IS NULL OR lease_expires_at_utc<=?1 OR lease_owner=?3) ORDER BY CASE WHEN store_id=?2 THEN 1 ELSE 0 END, priority DESC, created_at_utc, destage_job_id LIMIT 1",
+        params![now_utc, excluded, worker], |row| row.get(0)).optional()?;
     let Some(object_id) = object_id else {
         tx.commit()?;
         return Ok(None);
     };
-    let changed = tx.execute("UPDATE destage_queue SET state='hdd_copying', lease_owner=?1, lease_expires_at_utc=?2, attempt_count=attempt_count+1, updated_at_utc=?3 WHERE object_id=?4 AND attempt_count < max_attempts AND (lease_owner IS NULL OR lease_expires_at_utc<=?3)", params![worker, lease_expires_at_utc, now_utc, object_id])?;
+    let changed = tx.execute("UPDATE destage_queue SET state='hdd_copying', lease_owner=?1, lease_expires_at_utc=?2, attempt_count=attempt_count+1, updated_at_utc=?3 WHERE object_id=?4 AND attempt_count < max_attempts AND (lease_owner IS NULL OR lease_expires_at_utc<=?3 OR lease_owner=?1)", params![worker, lease_expires_at_utc, now_utc, object_id])?;
     if changed != 1 {
         return Err(DestageMetadataError::ClaimConflict);
     }
@@ -1040,6 +1040,37 @@ mod tests {
                 .state,
             DestageState::NeedsReview
         );
+        cleanup(path);
+    }
+
+    #[test]
+    fn restarted_logical_worker_reclaims_its_unexpired_lease() {
+        let path = database("same-worker-restart");
+        prepare(&path, &["store-a"]);
+        commit(&path, "store-a", "object-a", "job-a", 5).expect("commit");
+        let first = claim_next_destage(
+            &path,
+            "appliance-destage",
+            "2026-01-01T01:01:00Z",
+            "2026-01-01T00:01:00Z",
+            None,
+        )
+        .expect("claim")
+        .expect("work");
+
+        let reclaimed = claim_next_destage(
+            &path,
+            "appliance-destage",
+            "2026-01-01T01:02:00Z",
+            "2026-01-01T00:02:00Z",
+            None,
+        )
+        .expect("restart reclaim")
+        .expect("work");
+
+        assert_eq!(reclaimed.object_id, first.object_id);
+        assert_eq!(reclaimed.attempt_count, first.attempt_count + 1);
+        assert_eq!(reclaimed.lease_owner.as_deref(), Some("appliance-destage"));
         cleanup(path);
     }
 

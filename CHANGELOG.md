@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.128.1 - 2026-07-24
+
+- Allow a restarted daemon to reclaim an unexpired destage lease owned by the
+  same logical appliance worker, while retaining lease exclusion between
+  distinct workers.
+
 ## 0.128.0 - 2026-07-24
 
 - Make direct-S3 multipart completion restart-safe and idempotent with durable
