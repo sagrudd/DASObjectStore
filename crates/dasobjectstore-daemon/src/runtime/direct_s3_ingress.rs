@@ -336,6 +336,23 @@ pub fn direct_s3_profile_backend(
     Ok((root, manifest))
 }
 
+/// Translate an appliance or drive store's intentionally unbounded logical
+/// quota into a finite implementation limit for the private folder-shaped S3
+/// backend. Physical admission remains authoritative at the managed pool; the
+/// maximum value only prevents the internal folder ledger from inventing a
+/// per-store quota that the persisted store policy does not define.
+pub fn direct_s3_profile_capacity(
+    binding: &super::BackendProfileBinding,
+    mut capacity: dasobjectstore_core::store::CapacityPolicy,
+) -> dasobjectstore_core::store::CapacityPolicy {
+    if binding.manifest.deployment_profile != DeploymentProfile::Folder
+        && capacity.logical_limit_bytes.is_none()
+    {
+        capacity.logical_limit_bytes = Some(u64::MAX);
+    }
+    capacity
+}
+
 fn create_private_directory_chain(
     root: &Path,
     directory: &Path,
@@ -687,6 +704,11 @@ mod tests {
         assert_eq!(manifest.deployment_profile, DeploymentProfile::Folder);
         assert!(matches!(manifest.backend, BackendReference::Folder { .. }));
         assert!(!profile_root.to_string_lossy().contains("epic_collection"));
+        let internal_capacity = direct_s3_profile_capacity(
+            &binding,
+            dasobjectstore_core::store::CapacityPolicy::default(),
+        );
+        assert_eq!(internal_capacity.logical_limit_bytes, Some(u64::MAX));
         fs::remove_dir_all(root).ok();
     }
 

@@ -524,7 +524,10 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let capacity = definition.policy.capacity.clone();
+            let capacity = crate::runtime::direct_s3_profile_capacity(
+                &binding,
+                definition.policy.capacity.clone(),
+            );
             let mut backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0)
             {
                 Ok(backend) => backend,
@@ -685,7 +688,10 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
-            let capacity = definition.policy.capacity.clone();
+            let capacity = crate::runtime::direct_s3_profile_capacity(
+                &binding,
+                definition.policy.capacity.clone(),
+            );
             let journal = match crate::runtime::MultipartPartJournal::open_for_completion(
                 &backend_root,
                 request.store_id.as_str(),

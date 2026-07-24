@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.126.1 - 2026-07-24
+
+- Let direct S3 ingress on appliance and drive profiles use the authoritative
+  managed-pool capacity provider when the store intentionally has no logical
+  quota, instead of rejecting multipart completion as an unbounded folder.
+
 ## 0.126.0 - 2026-07-24
 
 - Replace EasyConnect's unsafe managed-Garage credential passthrough with
