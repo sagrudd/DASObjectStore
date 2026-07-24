@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.125.1 - 2026-07-24
+
+- Authorize the dedicated packaged Web/S3 Unix peer for path-free,
+  store-scoped profile operations after the adapter has authenticated and
+  resolved the exact bucket credential. Ordinary local users continue to
+  require the configured reader/writer groups.
+
 ## 0.125.0 - 2026-07-24
 
 - Unify native ingest and the public S3 namespace with an additive live

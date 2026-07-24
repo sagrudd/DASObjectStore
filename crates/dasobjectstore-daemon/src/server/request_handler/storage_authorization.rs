@@ -85,7 +85,6 @@ where
                 store_id: store_id.clone(),
                 store_registry_path: self.store_registry_path.clone(),
             })?;
-
         let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
         if let Some(reader_group) = store.reader_group {
             policy = policy.with_reader_group(reader_group);
@@ -170,6 +169,14 @@ where
                 store_id: store_id.clone(),
                 store_registry_path: self.store_registry_path.clone(),
             })?;
+        // The packaged Web/S3 process is a trusted local adapter: the Unix
+        // peer credential proves this dedicated service identity, while the
+        // adapter has already bound the request to one authenticated bucket
+        // credential. It is also the only non-root peer permitted to delegate
+        // end-user actors, so this does not introduce a new trust principal.
+        if actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER) {
+            return Ok(store_id);
+        }
 
         let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
         if let Some(reader_group) = store.reader_group {
@@ -212,6 +219,17 @@ where
                 store_id: store_id.clone(),
                 store_registry_path: self.store_registry_path.clone(),
             })?;
+        if actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER) {
+            let subobject = read_subobject_registry(&self.subobject_registry_path)?
+                .into_iter()
+                .find(|definition| definition.name == endpoint.as_str())
+                .map(|definition| (definition.name, definition.path.join("/")));
+            return Ok(AuthorizedEndpointWrite {
+                store_id,
+                subobject: subobject.as_ref().map(|(name, _)| name.clone()),
+                object_prefix: subobject.map(|(_, path)| path),
+            });
+        }
 
         let mut policy = DaemonStoreAccessPolicy::new(store.store_id.clone());
         if let Some(reader_group) = store.reader_group {

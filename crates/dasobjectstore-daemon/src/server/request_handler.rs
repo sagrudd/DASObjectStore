@@ -1248,7 +1248,9 @@ mod tests {
                 .with_registry_paths(store_registry, subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
                 .with_hdd_root_path(hdd_root);
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups(["dasobjectstore"]);
 
         let list = handler
             .handle_with_progress_for_actor(
