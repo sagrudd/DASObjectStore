@@ -8,6 +8,11 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.128.2 - 2026-07-24
+
+- Resume an unexpired same-worker destage lease without consuming another
+  retry, including when the interrupted attempt is already at its retry limit.
+
 ## 0.128.1 - 2026-07-24
 
 - Allow a restarted daemon to reclaim an unexpired destage lease owned by the
