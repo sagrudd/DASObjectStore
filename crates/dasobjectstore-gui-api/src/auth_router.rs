@@ -110,6 +110,10 @@ fn standalone_session_auth_router_with_state(state: StandaloneAuthRouteState) ->
         .route("/api/register", post(register))
         .route("/api/login", post(login))
         .route("/api/v1/remote/authenticate", post(remote_authenticate))
+        .route(
+            "/api/v1/remote/easyconnect/sessions/{session_id}/renew",
+            post(remote_easyconnect_renew),
+        )
         .route("/api/logout", post(logout))
         .route("/api/session", post(session))
         .with_state(state)

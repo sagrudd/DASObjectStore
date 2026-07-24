@@ -10,7 +10,7 @@ use crate::auth_routes::profile_multipart::{
 };
 use crate::auth_routes::profile_upload::stream_profile_s3_put;
 use crate::auth_routes::provider_stream_download;
-use crate::s3_gateway_auth::{verify_s3_sigv4, S3SigV4Request};
+use crate::s3_gateway_auth::{verify_s3_sigv4, S3Credential, S3SigV4Request};
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
@@ -22,10 +22,14 @@ use dasobjectstore_daemon::api::{
     ProfileS3MultipartAbortRequest, ProfileS3MultipartCompletionRequest,
     ProfileS3MultipartPartRequest, ProviderStreamMultipartPartUploadOpenRequest,
 };
+use dasobjectstore_daemon::runtime::{
+    remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,
+    RemoteEasyconnectPairedSessionStore,
+};
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonRuntimeConfig, ProfileS3HeadRequest, ProfileS3ListRequest,
-    ProviderStreamUploadOpenRequest, UnixSocketDaemonTransport, PROVIDER_STREAM_MAX_CHUNK_BYTES,
-    PROVIDER_STREAM_SCHEMA_VERSION,
+    DaemonClient, DaemonClock, DaemonRuntimeConfig, ProfileS3HeadRequest, ProfileS3ListRequest,
+    ProviderStreamUploadOpenRequest, SystemDaemonClock, UnixSocketDaemonTransport,
+    PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
 };
 use dasobjectstore_object_service::{
     default_garage_credential_registry_path, read_managed_credential_registry,
@@ -38,6 +42,8 @@ use tokio::sync::Semaphore;
 #[derive(Clone)]
 pub struct S3GatewayState {
     credential_registry_path: PathBuf,
+    session_registry_path: PathBuf,
+    appliance_certificate_path: PathBuf,
     upload_permits: Arc<Semaphore>,
 }
 
@@ -45,14 +51,24 @@ impl S3GatewayState {
     pub fn packaged(max_concurrent_uploads: usize) -> Self {
         Self {
             credential_registry_path: default_garage_credential_registry_path(),
+            session_registry_path: remote_easyconnect_session_store_path(
+                DaemonRuntimeConfig::default_packaged().state_dir,
+            ),
+            appliance_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
             upload_permits: Arc::new(Semaphore::new(max_concurrent_uploads)),
         }
     }
 
     #[cfg(test)]
     fn with_registry(path: PathBuf, max_concurrent_uploads: usize) -> Self {
+        let session_registry_path = path.with_file_name("remote-easyconnect-sessions.json");
+        let appliance_certificate_path = path.with_file_name("appliance-ca.pem");
         Self {
             credential_registry_path: path,
+            session_registry_path,
+            appliance_certificate_path,
             upload_permits: Arc::new(Semaphore::new(max_concurrent_uploads)),
         }
     }
@@ -64,6 +80,10 @@ pub fn s3_gateway_router(max_concurrent_uploads: usize) -> Router {
 
 fn s3_gateway_router_with_state(state: S3GatewayState) -> Router {
     Router::new()
+        .route(
+            "/.well-known/dasobjectstore/appliance-ca.pem",
+            get(appliance_ca_certificate),
+        )
         .route("/{bucket}", get(s3_list_objects))
         .route(
             "/{bucket}/{*key}",
@@ -76,6 +96,47 @@ fn s3_gateway_router_with_state(state: S3GatewayState) -> Router {
         .with_state(state)
 }
 
+async fn appliance_ca_certificate(State(state): State<S3GatewayState>) -> Response {
+    let certificate = match tokio::fs::read(&state.appliance_certificate_path).await {
+        Ok(certificate)
+            if certificate
+                .windows(b"-----BEGIN CERTIFICATE-----".len())
+                .any(|window| window == b"-----BEGIN CERTIFICATE-----")
+                && !certificate
+                    .windows(b"PRIVATE KEY".len())
+                    .any(|window| window == b"PRIVATE KEY") =>
+        {
+            certificate
+        }
+        _ => {
+            return s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "appliance trust certificate is unavailable",
+            )
+        }
+    };
+    let fingerprint = format!("{:x}", Sha256::digest(&certificate));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/x-pem-file")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"dasobjectstore-appliance-ca.pem\"",
+        )
+        .header("x-dasobjectstore-certificate-sha256", fingerprint)
+        .header("x-dasobjectstore-tls-server-name", "localhost")
+        .body(Body::from(certificate))
+        .unwrap_or_else(|_| {
+            s3_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "InternalError",
+                "failed to construct appliance CA response",
+            )
+        })
+}
+
 async fn verified_credential(
     state: &S3GatewayState,
     bucket: &str,
@@ -83,7 +144,7 @@ async fn verified_credential(
     method: &Method,
     headers: &HeaderMap,
 ) -> Result<crate::s3_gateway_auth::VerifiedS3Credential, Response> {
-    let credentials =
+    let managed =
         read_managed_credential_registry(&state.credential_registry_path, "direct-s3-request")
             .map_err(|_| {
                 s3_error(
@@ -93,6 +154,48 @@ async fn verified_credential(
                 )
             })?
             .credentials;
+    let mut credentials = managed
+        .into_iter()
+        .map(|credential| S3Credential {
+            store_id: credential.store_id,
+            bucket_name: credential.bucket_name,
+            credential_reference: credential.credential_reference,
+            access_key_id: credential.access_key_id,
+            secret_access_key: credential.secret_access_key,
+            session_token: None,
+            can_read: true,
+            can_write: true,
+        })
+        .collect::<Vec<_>>();
+    let sessions =
+        FileBackedRemoteEasyconnectPairedSessionStore::new(state.session_registry_path.clone())
+            .active_s3_credentials(&SystemDaemonClock.now_utc())
+            .map_err(|_| {
+                s3_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "ServiceUnavailable",
+                    "temporary S3 session authority is unavailable",
+                )
+            })?;
+    for session in sessions {
+        let store_id = dasobjectstore_core::ids::StoreId::new(session.store_id).map_err(|_| {
+            s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "temporary S3 session authority contains an invalid store identity",
+            )
+        })?;
+        credentials.push(S3Credential {
+            store_id,
+            bucket_name: session.bucket,
+            credential_reference: format!("easyconnect-session:{}", session.session_id),
+            access_key_id: session.access_key_id,
+            secret_access_key: session.secret_access_key,
+            session_token: Some(session.session_token),
+            can_read: session.can_read,
+            can_write: session.can_write,
+        });
+    }
     verify_s3_sigv4(
         S3SigV4Request {
             method,
@@ -713,6 +816,41 @@ mod tests {
     fn gateway_state_enforces_a_nonzero_upload_budget() {
         let state = S3GatewayState::with_registry(PathBuf::from("/tmp/credentials"), 1);
         assert_eq!(state.upload_permits.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn appliance_ca_endpoint_exports_only_public_certificate_material() {
+        let root =
+            std::env::temp_dir().join(format!("dasobjectstore-ca-endpoint-{}", std::process::id()));
+        let registry = root.join("credentials.json");
+        std::fs::create_dir_all(&root).expect("test root");
+        let mut state = S3GatewayState::with_registry(registry, 1);
+        state.appliance_certificate_path = root.join("server.crt");
+        let pem = b"-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n";
+        std::fs::write(&state.appliance_certificate_path, pem).expect("certificate");
+
+        let response = appliance_ca_certificate(State(state)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/x-pem-file"
+        );
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-dasobjectstore-certificate-sha256")
+                .unwrap(),
+            format!("{:x}", Sha256::digest(pem)).as_str()
+        );
+        let body = to_bytes(response.into_body(), 4_096)
+            .await
+            .expect("certificate body");
+        assert_eq!(body.as_ref(), pem);
+        std::fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

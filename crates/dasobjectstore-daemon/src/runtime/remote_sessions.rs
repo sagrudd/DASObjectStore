@@ -8,6 +8,8 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};
 
 pub const REMOTE_EASYCONNECT_SESSION_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_SESSION_FILE_NAME: &str = "sessions.json";
@@ -60,6 +62,24 @@ pub trait RemoteEasyconnectPairedSessionStore: Send + Sync {
         object_store: &str,
         now_utc: &str,
     ) -> Result<RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectPairedSessionStoreError>;
+
+    fn active_s3_credentials(
+        &self,
+        now_utc: &str,
+    ) -> Result<Vec<RemoteEasyconnectS3Credential>, RemoteEasyconnectPairedSessionStoreError>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RemoteEasyconnectS3Credential {
+    pub session_id: String,
+    pub store_id: String,
+    pub bucket: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub session_token: String,
+    pub can_read: bool,
+    pub can_write: bool,
+    pub expires_at_utc: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -132,6 +152,7 @@ pub struct RemoteEasyconnectPairedSessionRenewalRequest {
     pub expires_at_utc: String,
     pub renew_after_utc: String,
     pub rotated_renewal_token: String,
+    pub rotated_credentials: RemoteEasyconnectSessionCredentials,
 }
 
 #[derive(Debug)]
@@ -214,6 +235,22 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
         require_non_blank("expires_at_utc", &request.expires_at_utc)?;
         require_non_blank("renew_after_utc", &request.renew_after_utc)?;
         require_non_blank("rotated_renewal_token", &request.rotated_renewal_token)?;
+        require_non_blank(
+            "rotated_credentials.access_key_id",
+            &request.rotated_credentials.access_key_id,
+        )?;
+        require_non_blank(
+            "rotated_credentials.secret_access_key",
+            &request.rotated_credentials.secret_access_key,
+        )?;
+        require_non_blank(
+            "rotated_credentials.session_token",
+            request
+                .rotated_credentials
+                .session_token
+                .as_deref()
+                .unwrap_or_default(),
+        )?;
         let _guard = self
             .lock
             .lock()
@@ -232,10 +269,19 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
                 },
             );
         }
+        if request.renewed_at_utc.as_str() < session.renew_after_utc.as_str() {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::SessionNotRenewable {
+                    session_id: request.session_id,
+                    renew_after_utc: session.renew_after_utc.clone(),
+                },
+            );
+        }
         session.issued_at_utc = request.renewed_at_utc;
         session.expires_at_utc = request.expires_at_utc;
         session.renew_after_utc = request.renew_after_utc;
         session.renewal_token = request.rotated_renewal_token;
+        session.credentials = request.rotated_credentials;
         let renewed = session.clone();
         write_store(&self.path, &store)?;
         Ok(renewed)
@@ -346,6 +392,41 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
         }
         Ok(grant.clone())
     }
+
+    fn active_s3_credentials(
+        &self,
+        now_utc: &str,
+    ) -> Result<Vec<RemoteEasyconnectS3Credential>, RemoteEasyconnectPairedSessionStoreError> {
+        require_non_blank("now_utc", now_utc)?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let store = read_store(&self.path)?;
+        let mut credentials = Vec::new();
+        for session in &store.sessions {
+            if session.revoked_at_utc.is_some() || session.expires_at_utc.as_str() <= now_utc {
+                continue;
+            }
+            let Some(session_token) = session.credentials.session_token.clone() else {
+                continue;
+            };
+            for grant in &session.object_stores {
+                credentials.push(RemoteEasyconnectS3Credential {
+                    session_id: session.session_id.clone(),
+                    store_id: grant.object_store.clone(),
+                    bucket: grant.bucket.clone(),
+                    access_key_id: session.credentials.access_key_id.clone(),
+                    secret_access_key: session.credentials.secret_access_key.clone(),
+                    session_token: session_token.clone(),
+                    can_read: grant.can_read,
+                    can_write: grant.can_write,
+                    expires_at_utc: session.expires_at_utc.clone(),
+                });
+            }
+        }
+        Ok(credentials)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -418,6 +499,10 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
     RenewalTokenMismatch {
         session_id: String,
     },
+    SessionNotRenewable {
+        session_id: String,
+        renew_after_utc: String,
+    },
     ActorMismatch {
         session_id: String,
         expected_actor: String,
@@ -470,6 +555,13 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
             Self::RenewalTokenMismatch { session_id } => write!(
                 formatter,
                 "paired easyconnect session {session_id} renewal token did not match"
+            ),
+            Self::SessionNotRenewable {
+                session_id,
+                renew_after_utc,
+            } => write!(
+                formatter,
+                "paired easyconnect session {session_id} is not renewable before {renew_after_utc}"
             ),
             Self::ActorMismatch {
                 session_id,
@@ -535,6 +627,13 @@ fn write_store(
         path: parent.to_path_buf(),
         message: error.to_string(),
     })?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
+        RemoteEasyconnectPairedSessionStoreError::Io {
+            path: parent.to_path_buf(),
+            message: error.to_string(),
+        }
+    })?;
     let encoded = serde_json::to_vec_pretty(store).map_err(|error| {
         RemoteEasyconnectPairedSessionStoreError::Json {
             path: path.to_path_buf(),
@@ -552,14 +651,17 @@ fn write_store(
             .map(|duration| duration.as_nanos())
             .unwrap_or_default()
     ));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
-            path: temporary.clone(),
-            message: error.to_string(),
-        })?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file =
+        options
+            .open(&temporary)
+            .map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
+                path: temporary.clone(),
+                message: error.to_string(),
+            })?;
     use std::io::Write;
     file.write_all(&encoded)
         .and_then(|_| file.sync_all())
@@ -571,6 +673,13 @@ fn write_store(
     fs::rename(&temporary, path).map_err(|error| RemoteEasyconnectPairedSessionStoreError::Io {
         path: path.to_path_buf(),
         message: error.to_string(),
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|error| {
+        RemoteEasyconnectPairedSessionStoreError::Io {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
     })?;
     File::open(parent)
         .and_then(|directory| directory.sync_all())
@@ -622,6 +731,8 @@ mod tests {
         RemoteEasyconnectSessionCredentials,
     };
     use crate::auth::DaemonLocalActor;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     #[test]
@@ -672,6 +783,49 @@ mod tests {
     }
 
     #[test]
+    fn gateway_credentials_include_only_active_store_scoped_sessions() {
+        let root = temp_root("gateway-credentials");
+        let path = remote_easyconnect_session_store_path(&root);
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        store.upsert(session("session-1")).expect("session stored");
+
+        let credentials = store
+            .active_s3_credentials("2026-07-09T17:00:00Z")
+            .expect("credentials resolved");
+        assert_eq!(credentials.len(), 2);
+        assert!(credentials.iter().all(|credential| {
+            credential.access_key_id == "AKIAEXAMPLE"
+                && credential.session_token == "session-token"
+                && credential.expires_at_utc == "2026-07-10T00:10:00Z"
+        }));
+        assert!(store
+            .active_s3_credentials("2026-07-10T00:10:00Z")
+            .expect("expired credentials filtered")
+            .is_empty());
+
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                std::fs::metadata(path.parent().expect("parent"))
+                    .expect("parent metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("file metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+        cleanup(&root);
+    }
+
+    #[test]
     fn revoke_blocks_later_write_authorization() {
         let root = temp_root("revoke");
         let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
@@ -711,10 +865,15 @@ mod tests {
             .renew(RemoteEasyconnectPairedSessionRenewalRequest {
                 session_id: "session-1".to_string(),
                 renewal_token: "renewal-token-1".to_string(),
-                renewed_at_utc: "2026-07-09T20:10:00Z".to_string(),
+                renewed_at_utc: "2026-07-09T23:10:00Z".to_string(),
                 expires_at_utc: "2026-07-10T04:10:00Z".to_string(),
                 renew_after_utc: "2026-07-10T03:10:00Z".to_string(),
                 rotated_renewal_token: "renewal-token-2".to_string(),
+                rotated_credentials: RemoteEasyconnectSessionCredentials {
+                    access_key_id: "DOSTROTATED".to_string(),
+                    secret_access_key: "rotated-secret".to_string(),
+                    session_token: Some("rotated-session-token".to_string()),
+                },
             })
             .expect("session renewed");
 
@@ -723,10 +882,15 @@ mod tests {
         let stale = store.renew(RemoteEasyconnectPairedSessionRenewalRequest {
             session_id: "session-1".to_string(),
             renewal_token: "renewal-token-1".to_string(),
-            renewed_at_utc: "2026-07-09T20:15:00Z".to_string(),
+            renewed_at_utc: "2026-07-09T23:15:00Z".to_string(),
             expires_at_utc: "2026-07-10T04:15:00Z".to_string(),
             renew_after_utc: "2026-07-10T03:15:00Z".to_string(),
             rotated_renewal_token: "renewal-token-3".to_string(),
+            rotated_credentials: RemoteEasyconnectSessionCredentials {
+                access_key_id: "DOSTROTATED2".to_string(),
+                secret_access_key: "rotated-secret-2".to_string(),
+                session_token: Some("rotated-session-token-2".to_string()),
+            },
         });
         assert!(matches!(
             stale.expect_err("stale token rejected"),

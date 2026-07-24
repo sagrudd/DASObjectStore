@@ -248,6 +248,37 @@ pub(super) async fn remote_authenticate(
     }))
 }
 
+pub(super) async fn remote_easyconnect_renew(
+    Path(session_id): Path<String>,
+    Json(request): Json<RemoteEasyconnectRenewSessionRequest>,
+) -> Result<Json<RemoteEasyconnectRenewSessionResponse>, (StatusCode, Json<AuthRouteError>)> {
+    if session_id != request.session_id {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "remote_session_identity_mismatch",
+            "session identity in the route and renewal request must match",
+        ));
+    }
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_remote_session_renewal",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .remote_easyconnect_renew_session(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(remote_auth_bridge_error)
+}
+
 fn validate_remote_authenticate_request(
     request: &RemoteAuthenticateRequest,
 ) -> Result<(), (StatusCode, Json<AuthRouteError>)> {

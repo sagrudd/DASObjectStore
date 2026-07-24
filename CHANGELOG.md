@@ -8,6 +8,23 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.126.0 - 2026-07-24
+
+- Replace EasyConnect's unsafe managed-Garage credential passthrough with
+  daemon-generated, eight-hour temporary S3 credentials scoped to one exact
+  ObjectStore and bucket.
+- Enforce the signed S3 session token, expiry, revocation, read/write grant,
+  and bucket scope at the direct S3 gateway; renewal atomically rotates both
+  S3 credentials and the renewal-only token.
+- Persist temporary session material with ``0700`` directory and ``0600`` file
+  permissions, while leaving the daemon-custodied Garage secret undisclosed.
+- Add password-authenticated standalone-local-user session issuance and
+  renewal routes, and securely persist the issued remote-client context.
+- Export the public appliance certificate through the direct gateway, with a
+  SHA-256 fingerprint, interactive first-use verification, and per-appliance
+  certificate pinning before the remote client requests or transmits a
+  password.
+
 ## 0.125.2 - 2026-07-24
 
 - Register the standalone server configuration as a Debian conffile so APT

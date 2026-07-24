@@ -138,8 +138,7 @@ pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
     create_object_store_with_capacity, ensure_profile_backend, prepare_profile_provision_root,
     register_profile_binding, resolve_authorization_store_id,
-    rollback_empty_profile_provision_root, rotated_easyconnect_renewal_token,
-    stable_easyconnect_id, validate_profile_provision_claim,
+    rollback_empty_profile_provision_root, stable_easyconnect_id, validate_profile_provision_claim,
 };
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
@@ -3986,7 +3985,7 @@ mod tests {
             .expect("session stored");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
-            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+            FixedDaemonClock::new("2026-07-09T23:20:00Z"),
         )
         .with_remote_easyconnect_session_store_path(&session_store_path);
 
@@ -4004,20 +4003,22 @@ mod tests {
             panic!("expected remote easyconnect renew response");
         };
         assert_eq!(response.session.session_id, "session-1");
-        assert_eq!(response.session.issued_at_utc, "2026-07-09T16:20:00Z");
-        assert_eq!(response.session.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert_eq!(response.session.issued_at_utc, "2026-07-09T23:20:00Z");
+        assert_eq!(response.session.expires_at_utc, "2026-07-10T07:20:00Z");
         assert_eq!(
             response.session.renewal.renew_after_utc,
-            "2026-07-09T23:20:00Z"
+            "2026-07-10T06:20:00Z"
         );
-        assert_eq!(response.session.credentials.access_key_id, "AKIAEXAMPLE");
+        assert_ne!(response.session.credentials.access_key_id, "AKIAEXAMPLE");
+        assert_ne!(response.session.credentials.secret_access_key, "secret");
+        assert!(response.session.credentials.session_token.is_some());
         assert_ne!(response.session.renewal.renewal_token, "renewal-token-1");
 
         let stored = session_store
             .get("session-1")
             .expect("session loaded")
             .expect("session exists");
-        assert_eq!(stored.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert_eq!(stored.expires_at_utc, "2026-07-10T07:20:00Z");
         assert_eq!(stored.renewal_token, response.session.renewal.renewal_token);
 
         cleanup(&root);
@@ -4106,11 +4107,12 @@ mod tests {
 
         assert_eq!(exchange.session.issued_at_utc, "2026-07-09T16:20:00Z");
         assert_eq!(exchange.session.expires_at_utc, "2026-07-10T00:20:00Z");
-        assert_eq!(exchange.session.credentials.access_key_id, "DOSMANAGEDKEY");
-        assert_eq!(
+        assert_ne!(exchange.session.credentials.access_key_id, "DOSMANAGEDKEY");
+        assert_ne!(
             exchange.session.credentials.secret_access_key,
             "managed-secret"
         );
+        assert!(exchange.session.credentials.session_token.is_some());
         assert_eq!(exchange.object_stores[0].object_store, "zymo_fecal_2025.05");
         let stored = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_store_path)
             .get(&exchange.session.session_id)

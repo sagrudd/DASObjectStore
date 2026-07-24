@@ -1,14 +1,17 @@
 use crate::auth::{
     request_s3_credentials, RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials,
 };
-use crate::authenticate::{authenticate, RemoteAuthenticateError, RemoteConnectionContext};
+use crate::authenticate::{
+    authenticate, prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
+};
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs,
     StoresCommand, UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
-    RemoteConfigOverrides, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
+    RemoteConfigOverrides, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionCredentials,
+    RemoteSessionRenewalMetadata, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
 };
 use crate::easyconnect::{
     define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
@@ -34,7 +37,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
-        RemoteCommand::Authenticate(args) => run_authenticate(args, writer),
+        RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
@@ -48,6 +51,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
 }
 
 fn run_authenticate(
+    cli: &RemoteCli,
     args: &AuthenticateArgs,
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
@@ -58,23 +62,113 @@ fn run_authenticate(
         .ok_or_else(|| {
             RemoteRunError::UploadRouting("username is required; pass --username".to_string())
         })?;
-    let password = rpassword::prompt_password("DASObjectStore password: ")?;
-    let context = authenticate(
+    let trust = prepare_appliance_trust(
         args.host_or_ip(),
         args.https_port(),
         args.ca_cert(),
         args.tls_server_name(),
+    )?;
+    let password = rpassword::prompt_password("DASObjectStore password: ")?;
+    let context = authenticate(
+        args.host_or_ip(),
+        args.https_port(),
+        Some(&trust.ca_cert),
+        trust.tls_server_name.as_deref(),
         &username,
         &password,
         args.object_store(),
         args.session_lifetime_seconds(),
     )?;
+    persist_authenticated_context(cli, &username, &context)?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &context)?;
         writer.write_all(b"\n")?;
     } else {
         write_redacted_connection_context(&context, writer)?;
     }
+    Ok(())
+}
+
+fn persist_authenticated_context(
+    cli: &RemoteCli,
+    username: &str,
+    context: &RemoteConnectionContext,
+) -> Result<(), RemoteRunError> {
+    let path = config_path(cli)?;
+    let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    config.endpoint_url = context.endpoint_url.clone();
+    config.region = context.region.clone();
+    config.auth_authority = RemoteAuthAuthority::LocalPassword;
+    config.username = Some(username.to_string());
+    let appliance_id = format!("standalone:{}", context.appliance_host);
+    config.default_appliance_id = Some(appliance_id.clone());
+    let session = RemoteUploadSession {
+        session_id: context.session_id.clone(),
+        issued_at: context.issued_at_utc.clone(),
+        expires_at: context.expires_at_utc.clone(),
+        credentials: RemoteSessionCredentials {
+            access_key_id: context.access_key_id.clone(),
+            secret_access_key: context.secret_access_key.clone(),
+            session_token: context.session_token.clone(),
+        },
+        renewal: Some(RemoteSessionRenewalMetadata {
+            renew_url: context.renew_url.clone(),
+            renew_after: context.renew_after_utc.clone(),
+            renewal_token: Some(context.renewal_token.clone()),
+            last_renewed_at: None,
+        }),
+    };
+    let grant = RemoteObjectStoreGrant {
+        object_store: context.object_store.clone(),
+        bucket: context.bucket.clone(),
+        can_read: true,
+        can_write: true,
+        writer_group: None,
+        object_type: "store_scoped_session".to_string(),
+    };
+    if let Some(existing) = config
+        .paired_appliances
+        .iter_mut()
+        .find(|appliance| appliance.appliance_id == appliance_id)
+    {
+        existing.appliance_base_url = format!(
+            "https://{}:{}",
+            context.appliance_host,
+            crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT
+        );
+        existing.discovery_url = format!(
+            "{}/products/dasobjectstore/api/v1/remote/easyconnect/discovery",
+            existing.appliance_base_url
+        );
+        existing.auth_authority = RemoteAuthAuthority::LocalPassword;
+        existing.paired_actor = Some(username.to_string());
+        existing.default_object_store = Some(context.object_store.clone());
+        existing.session = Some(session);
+        existing
+            .object_stores
+            .retain(|entry| entry.object_store != context.object_store);
+        existing.object_stores.push(grant);
+    } else {
+        let appliance_base_url = format!(
+            "https://{}:{}",
+            context.appliance_host,
+            crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT
+        );
+        config.paired_appliances.push(RemotePairedAppliance {
+            appliance_id,
+            display_name: format!("DASObjectStore {}", context.appliance_host),
+            discovery_url: format!(
+                "{appliance_base_url}/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+            ),
+            appliance_base_url,
+            auth_authority: RemoteAuthAuthority::LocalPassword,
+            paired_actor: Some(username.to_string()),
+            default_object_store: Some(context.object_store.clone()),
+            session: Some(session),
+            object_stores: vec![grant],
+        });
+    }
+    write_config(&path, &config)?;
     Ok(())
 }
 

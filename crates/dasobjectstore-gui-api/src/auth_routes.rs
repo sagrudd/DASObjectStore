@@ -112,6 +112,7 @@ use dasobjectstore_daemon::{
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,

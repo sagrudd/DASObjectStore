@@ -6,7 +6,6 @@
 
 use axum::http::{HeaderMap, Method};
 use dasobjectstore_core::ids::StoreId;
-use dasobjectstore_object_service::ManagedStoreCredentialRecord;
 use ring::hmac;
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
@@ -23,6 +22,18 @@ pub(crate) struct VerifiedS3Credential {
     pub access_key_id: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct S3Credential {
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub credential_reference: String,
+    pub access_key_id: String,
+    pub secret_access_key: String,
+    pub session_token: Option<String>,
+    pub can_read: bool,
+    pub can_write: bool,
+}
+
 pub(crate) struct S3SigV4Request<'a> {
     pub method: &'a Method,
     /// The encoded URI path exactly as received by the HTTP server.
@@ -36,7 +47,7 @@ pub(crate) struct S3SigV4Request<'a> {
 
 pub(crate) fn verify_s3_sigv4(
     request: S3SigV4Request<'_>,
-    credentials: &[ManagedStoreCredentialRecord],
+    credentials: &[S3Credential],
 ) -> Result<VerifiedS3Credential, S3SigV4Error> {
     reject_duplicate_header(request.headers, "authorization")?;
     let authorization = required_header(request.headers, "authorization")?;
@@ -52,6 +63,10 @@ pub(crate) fn verify_s3_sigv4(
     if credential.bucket_name != request.bucket {
         return Err(S3SigV4Error::CredentialScopeMismatch);
     }
+    let is_read = matches!(*request.method, Method::GET | Method::HEAD);
+    if (is_read && !credential.can_read) || (!is_read && !credential.can_write) {
+        return Err(S3SigV4Error::OperationNotAllowed);
+    }
 
     let amz_date = unique_signed_header(request.headers, "x-amz-date", &parsed.signed_headers)?;
     validate_amz_date(amz_date, parsed.date)?;
@@ -63,6 +78,17 @@ pub(crate) fn verify_s3_sigv4(
     validate_payload_hash(payload_hash)?;
     if !parsed.signed_headers.iter().any(|header| header == "host") {
         return Err(S3SigV4Error::MissingRequiredSignedHeader("host"));
+    }
+    if let Some(expected_token) = credential.session_token.as_deref() {
+        let supplied_token = unique_signed_header(
+            request.headers,
+            "x-amz-security-token",
+            &parsed.signed_headers,
+        )?;
+        let token_key = hmac::Key::new(hmac::HMAC_SHA256, b"dasobjectstore-s3-session-token");
+        let expected_mac = hmac::sign(&token_key, expected_token.as_bytes());
+        hmac::verify(&token_key, supplied_token.as_bytes(), expected_mac.as_ref())
+            .map_err(|_| S3SigV4Error::SessionTokenMismatch)?;
     }
 
     let canonical_headers = canonical_headers(request.headers, &parsed.signed_headers)?;
@@ -398,6 +424,8 @@ pub(crate) enum S3SigV4Error {
     UnknownCredential,
     AmbiguousCredential,
     CredentialScopeMismatch,
+    OperationNotAllowed,
+    SessionTokenMismatch,
     InvalidAmzDate,
     UnsupportedPayloadHash,
     MalformedUri,
@@ -427,6 +455,10 @@ impl Display for S3SigV4Error {
             Self::CredentialScopeMismatch => {
                 formatter.write_str("S3 credential is not authorized for this bucket")
             }
+            Self::OperationNotAllowed => {
+                formatter.write_str("S3 session is not authorized for this operation")
+            }
+            Self::SessionTokenMismatch => formatter.write_str("S3 authentication failed"),
             Self::InvalidAmzDate => formatter.write_str("invalid S3 request date"),
             Self::UnsupportedPayloadHash => formatter.write_str("unsupported S3 payload hash form"),
             Self::MalformedUri => formatter.write_str("malformed S3 request target"),
@@ -616,6 +648,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn temporary_session_requires_a_matching_signed_security_token() {
+        let mut credential = credential();
+        credential.session_token = Some("temporary-session-token".to_string());
+        let mut headers = base_headers();
+        headers.insert(
+            "x-amz-security-token",
+            HeaderValue::from_static("temporary-session-token"),
+        );
+        sign(
+            &mut headers,
+            &Method::GET,
+            "/dos-store",
+            "list-type=2",
+            "host;x-amz-content-sha256;x-amz-date;x-amz-security-token",
+        );
+        assert!(verify_s3_sigv4(
+            request(
+                &Method::GET,
+                "/dos-store",
+                Some("list-type=2"),
+                &headers,
+                "dos-store"
+            ),
+            &[credential.clone()]
+        )
+        .is_ok());
+
+        let mut wrong = headers;
+        wrong.insert(
+            "x-amz-security-token",
+            HeaderValue::from_static("wrong-session-token"),
+        );
+        assert_eq!(
+            verify_s3_sigv4(
+                request(
+                    &Method::GET,
+                    "/dos-store",
+                    Some("list-type=2"),
+                    &wrong,
+                    "dos-store"
+                ),
+                &[credential]
+            ),
+            Err(S3SigV4Error::SessionTokenMismatch)
+        );
+    }
+
+    #[test]
+    fn read_only_session_rejects_mutating_s3_operations() {
+        let mut credential = credential();
+        credential.can_write = false;
+        let mut headers = base_headers();
+        sign(
+            &mut headers,
+            &Method::POST,
+            "/dos-store/key",
+            "uploads=",
+            "host;x-amz-content-sha256;x-amz-date",
+        );
+        assert_eq!(
+            verify_s3_sigv4(
+                request(
+                    &Method::POST,
+                    "/dos-store/key",
+                    Some("uploads="),
+                    &headers,
+                    "dos-store"
+                ),
+                &[credential]
+            ),
+            Err(S3SigV4Error::OperationNotAllowed)
+        );
+    }
+
     fn request<'a>(
         method: &'a Method,
         path: &'a str,
@@ -643,16 +750,16 @@ mod tests {
         headers
     }
 
-    fn credential() -> ManagedStoreCredentialRecord {
-        ManagedStoreCredentialRecord {
+    fn credential() -> S3Credential {
+        S3Credential {
             store_id: StoreId::new("store-a").unwrap(),
             bucket_name: "dos-store".to_string(),
             credential_reference: "secret://store-a".to_string(),
             access_key_id: ACCESS.to_string(),
             secret_access_key: SECRET.to_string(),
-            issued_at_utc: "2026-07-19T00:00:00Z".to_string(),
-            rotated_at_utc: None,
-            revision: 1,
+            session_token: None,
+            can_read: true,
+            can_write: true,
         }
     }
 

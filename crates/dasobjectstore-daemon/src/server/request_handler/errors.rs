@@ -67,7 +67,6 @@ pub(super) enum RemoteEasyconnectExchangeDispatchError {
     InvalidClock { value: String },
     PairingStore(RemoteEasyconnectPairingStoreError),
     SessionStore(RemoteEasyconnectPairedSessionStoreError),
-    ObjectService(ObjectServiceError),
 }
 
 impl Display for RemoteEasyconnectExchangeDispatchError {
@@ -80,7 +79,6 @@ impl Display for RemoteEasyconnectExchangeDispatchError {
             ),
             Self::PairingStore(error) => Display::fmt(error, formatter),
             Self::SessionStore(error) => Display::fmt(error, formatter),
-            Self::ObjectService(error) => Display::fmt(error, formatter),
         }
     }
 }

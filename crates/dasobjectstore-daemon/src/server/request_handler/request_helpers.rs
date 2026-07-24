@@ -293,12 +293,3 @@ pub(super) fn stable_easyconnect_id(prefix: &str, subject: &str, timestamp: &str
         format!("{prefix}-{suffix}")
     }
 }
-
-pub(super) fn rotated_easyconnect_renewal_token(session_id: &str, renewed_at_utc: &str) -> String {
-    let suffix = renewed_at_utc
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .collect::<String>()
-        .to_ascii_lowercase();
-    format!("renewal-{session_id}-{suffix}")
-}

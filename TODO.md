@@ -2918,6 +2918,12 @@ list until every temporary size-budget exception has been removed.
   passwords in memory longer than required.
 - [x] Support standalone local-user authentication for easyconnect first, while
   keeping the API shape ready for Synoptikon/Mneion identity providers.
+  Standalone password authentication now issues a cryptographically random,
+  eight-hour, one-store S3 session rather than exporting the daemon-custodied
+  provider secret. The direct gateway enforces signed session tokens, exact
+  bucket/grant scope, expiry and revocation; renewal rotates all bearer
+  material. Public appliance-certificate export and verified local pinning
+  establish trust before the password is sent.
 - [x] Add permission checks so remote upload sessions can list only the
   ObjectStores available to the authenticated user and can write only to stores
   where writer-group policy allows ingest.

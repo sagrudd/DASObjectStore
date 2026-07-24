@@ -97,20 +97,24 @@ returns a single-store, eight-hour Garage context:
 
 .. code-block:: console
 
-   dasobjectstore-remote authenticate 192.168.1.192 porkchop \
-     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem \
-     --tls-server-name localhost --json
+   dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
+     --username stephen
 
-The JSON output contains the path-style S3 endpoint, ``garage`` region,
-derived bucket, temporary credentials, expiry, and renewal metadata. Secrets
-are emitted only with explicit ``--json``; normal output is redacted. The
-password is never stored, sent to Garage, or included in process arguments.
-The client verifies HTTPS certificates using the system trust store or the
-explicit PEM passed with ``--ca-cert``; it has no insecure TLS bypass.
-The packaged development certificate is commonly self-signed for ``localhost``
-and therefore requires both the certificate file and
-``--tls-server-name localhost`` when connecting by IP. Production deployments
-should use a CA-issued certificate whose DNS name matches the appliance host.
+The command establishes trust before asking for the password. On first
+connection it downloads the public certificate from
+``http://HOST:3900/.well-known/dasobjectstore/appliance-ca.pem``, displays its
+SHA-256 fingerprint for comparison with the appliance console or an SSH
+session, and asks whether to pin it. The pin is stored below
+``~/.config/dasobjectstore/trusted-appliances`` with private permissions.
+Certificate changes fail closed and require deliberate, out-of-band
+verification. The client has no insecure TLS bypass. Managed deployments may
+continue to pass ``--ca-cert`` and ``--tls-server-name`` explicitly.
+
+Normal output is redacted, while the full temporary connection context is
+stored in the mode-``0600`` remote client configuration for uploads and
+renewal. ``--json`` may be used when a process must consume the temporary
+context directly. The password is never stored, sent to the S3 service, or
+included in process arguments.
 
 The server-side easyconnect contract is defined as stable daemon/API DTOs for
 the following operations:
@@ -131,20 +135,20 @@ The API shape also reserves ``synoptikon`` and ``mneion`` providers for later
 integrated-host deployments, but those providers are not active in standalone
 mode.
 
-Session exchange responses carry temporary S3 credentials, accessible
-ObjectStore grants, expiry time, and renewal metadata. Those credentials are
-intended for the paired ``dasobjectstore-remote`` process only and must not be
-pasted into terminal commands or support tickets.
+Session exchange responses carry a daemon-generated access key, secret,
+mandatory session token, one exact ObjectStore/bucket grant, expiry time, and
+renewal metadata. They are unrelated to the persistent Garage provider
+credential, which remains daemon-custodied and is never returned or copied into
+the client configuration. The S3 gateway checks the signed session token,
+bucket, read/write grant, expiry, and revocation on every request.
 
 The accessible ObjectStore list is filtered by the daemon before a remote
 session is issued. A remote user can only see ObjectStores that the same
 authenticated local account may read through public-read, reader-group,
-writer-group, or configured administrator-group policy. The currently issued
-Garage session uses a provisioned managed read/write key, so the account must
-also satisfy the daemon writer authorization policy, usually by membership in
-the ObjectStore writer group. Public-read or reader-group access alone does not
-receive an S3 session until Garage read-only credential provisioning is
-available.
+writer-group, or configured administrator-group policy. Write access requires
+the daemon writer authorization policy, usually membership in the ObjectStore
+writer group. A temporary session cannot be reused for another bucket or
+ObjectStore.
 
 Remote upload sessions default to eight hours. The appliance advertises that
 default in discovery and the remote client treats renewal as an explicit
@@ -152,9 +156,11 @@ session operation rather than a password replay. For the default eight-hour
 session, renewal becomes eligible one hour before expiry. Shorter test or
 operator-limited sessions become renewable halfway through their lifetime so a
 long upload can refresh credentials before interruption. Renewal uses a
-daemon-issued renewal token, rotates that token after a successful renewal, and
-does not require ``dasobjectstore-remote`` to keep the login password in memory
-after the browser-approved pairing has completed.
+daemon-issued renewal-only token and is accepted only after the advertised
+``renew_after`` time. A successful renewal atomically rotates the access key,
+secret, session token, and renewal token, immediately invalidating the previous
+values. It does not require ``dasobjectstore-remote`` to keep the login password
+in memory.
 
 Use ``--contract`` to inspect the readable product contract without launching a
 browser, or ``--json`` when another tool should consume the contract:
