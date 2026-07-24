@@ -17,10 +17,38 @@ use std::sync::{
     Arc,
 };
 
-pub const PROVIDER_STREAM_SCHEMA_VERSION: &str = "dasobjectstore.provider_stream.v1";
+pub const PROVIDER_STREAM_SCHEMA_VERSION_V1: &str = "dasobjectstore.provider_stream.v1";
+pub const PROVIDER_STREAM_SCHEMA_VERSION: &str = "dasobjectstore.provider_stream.v2";
 pub const PROVIDER_STREAM_MAX_CHUNK_BYTES: u32 = 1024 * 1024;
 pub const PROVIDER_STREAM_MAX_HEADER_BYTES: u32 = 4096;
 const PROVIDER_STREAM_FRAME_MAGIC: &[u8; 4] = b"DPS1";
+
+fn supported_schema_version(schema_version: &str) -> bool {
+    matches!(
+        schema_version,
+        PROVIDER_STREAM_SCHEMA_VERSION | PROVIDER_STREAM_SCHEMA_VERSION_V1
+    )
+}
+
+pub fn provider_stream_requires_upload_ready(schema_version: &str) -> bool {
+    schema_version == PROVIDER_STREAM_SCHEMA_VERSION
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderStreamUploadReadyResponse {
+    pub schema_version: String,
+    pub request_id: String,
+}
+
+impl ProviderStreamUploadReadyResponse {
+    pub fn new(request_id: impl Into<String>) -> Self {
+        Self {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: request_id.into(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -96,7 +124,7 @@ pub struct ProviderStreamMultipartPartUploadResponse {
 
 impl ProviderStreamMultipartPartUploadOpenRequest {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
-        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+        if !supported_schema_version(&self.schema_version) {
             return Err(ProviderStreamValidationError::UnsupportedSchema {
                 schema_version: self.schema_version.clone(),
             });
@@ -122,7 +150,7 @@ impl ProviderStreamMultipartPartUploadOpenRequest {
 
 impl ProviderStreamMultipartPartUploadResponse {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
-        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+        if !supported_schema_version(&self.schema_version) {
             return Err(ProviderStreamValidationError::UnsupportedSchema {
                 schema_version: self.schema_version.clone(),
             });
@@ -173,7 +201,7 @@ impl ProviderStreamUploadResponse {
 
 impl ProviderStreamUploadOpenRequest {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
-        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+        if !supported_schema_version(&self.schema_version) {
             return Err(ProviderStreamValidationError::UnsupportedSchema {
                 schema_version: self.schema_version.clone(),
             });
@@ -193,7 +221,7 @@ impl ProviderStreamUploadOpenRequest {
 
 impl ProviderStreamOpenRequest {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
-        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+        if !supported_schema_version(&self.schema_version) {
             return Err(ProviderStreamValidationError::UnsupportedSchema {
                 schema_version: self.schema_version.clone(),
             });
@@ -277,7 +305,7 @@ pub struct ProviderStreamChunkHeader {
 
 impl ProviderStreamChunkHeader {
     pub fn validate(&self) -> Result<(), ProviderStreamValidationError> {
-        if self.schema_version != PROVIDER_STREAM_SCHEMA_VERSION {
+        if !supported_schema_version(&self.schema_version) {
             return Err(ProviderStreamValidationError::UnsupportedSchema {
                 schema_version: self.schema_version.clone(),
             });

@@ -37,6 +37,7 @@ pub enum GarbageCollectTrigger {
 pub enum GarbageCollectKind {
     IngestJob,
     PerformanceTest,
+    MultipartUpload,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -120,6 +121,9 @@ pub fn run_garbage_collection(
     if items.len() < config.maximum_items_per_run {
         scan_performance_runs(config, &root, mode, now, &mut items)?;
     }
+    if items.len() < config.maximum_items_per_run {
+        scan_aborted_direct_s3_multipart(config, &root, mode, &mut items)?;
+    }
     items.truncate(config.maximum_items_per_run);
     let candidate_bytes = items
         .iter()
@@ -153,6 +157,112 @@ pub fn run_garbage_collection(
         retained_bytes,
         items,
     })
+}
+
+fn scan_aborted_direct_s3_multipart(
+    config: &GarbageCollectorConfig,
+    root: &Path,
+    mode: GarbageCollectMode,
+    items: &mut Vec<GarbageCollectItem>,
+) -> Result<(), GarbageCollectError> {
+    let stores = root.join(".dasobjectstore/stores");
+    let entries = match fs::read_dir(&stores) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    for store in entries {
+        if items.len() >= config.maximum_items_per_run {
+            break;
+        }
+        let store = store?;
+        let metadata = fs::symlink_metadata(store.path())?;
+        let namespace = match store.file_name().into_string() {
+            Ok(namespace)
+                if namespace.len() == 64
+                    && namespace.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+            {
+                namespace
+            }
+            _ => continue,
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let multipart = store
+            .path()
+            .join("direct-s3/profile/.dasobjectstore/multipart");
+        let uploads = match fs::read_dir(&multipart) {
+            Ok(uploads) => uploads,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        for upload in uploads {
+            if items.len() >= config.maximum_items_per_run {
+                break;
+            }
+            let upload = upload?;
+            let path = upload.path();
+            let relative = managed_relative(root, &path)?;
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                items.push(GarbageCollectItem {
+                    kind: GarbageCollectKind::MultipartUpload,
+                    managed_path: relative,
+                    bytes: 0,
+                    decision: GarbageCollectDecision::Retained,
+                    reason: "unsafe_or_unknown_multipart_entry".to_string(),
+                    evidence: Vec::new(),
+                });
+                continue;
+            }
+            let namespace_matches =
+                crate::runtime::profile_s3_multipart::multipart_journal_matches_store_namespace(
+                    &path, &namespace,
+                );
+            let reclaimable =
+                crate::runtime::profile_s3_multipart::multipart_journal_is_reclaimable(&path);
+            let proof = match (namespace_matches, reclaimable) {
+                (Ok(true), Ok(true)) => Proof::reclaim(
+                    "multipart_explicitly_aborted",
+                    vec![format!("store_namespace={namespace}")],
+                ),
+                (Ok(true), Ok(false)) => Proof::retain("multipart_active_or_resumable"),
+                (Ok(false), _) => Proof::retain("multipart_store_namespace_mismatch"),
+                (Err(error), _) | (_, Err(error)) => Proof {
+                    reclaimable: false,
+                    reason: "multipart_manifest_unsafe_or_unsupported".to_string(),
+                    evidence: vec![error.to_string()],
+                    mark_ssd_evicted: None,
+                },
+            };
+            let bytes = match checked_managed_tree_size(root, &path) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    items.push(GarbageCollectItem {
+                        kind: GarbageCollectKind::MultipartUpload,
+                        managed_path: relative,
+                        bytes: 0,
+                        decision: GarbageCollectDecision::Retained,
+                        reason: "multipart_tree_unsafe".to_string(),
+                        evidence: vec![error.to_string()],
+                    });
+                    continue;
+                }
+            };
+            items.push(finish_candidate(
+                config,
+                root,
+                &path,
+                relative,
+                GarbageCollectKind::MultipartUpload,
+                bytes,
+                proof,
+                mode,
+            )?);
+        }
+    }
+    Ok(())
 }
 
 pub fn persist_garbage_collection_report(

@@ -279,6 +279,20 @@ Force AWS CLI multipart with a generated payload larger than its configured
 threshold, interrupt one upload, resume it, complete it, repeat completion, and
 explicitly abort another upload. Verify that only complete objects become
 visible and that abandoned retained bytes are explained by resumable state.
+Provider-stream v2 reserves a daemon provider-upload lane before the gateway
+polls the HTTP request body. Genuine saturation therefore returns S3
+``SlowDown`` (HTTP 503) with ``Retry-After: 1`` without consuming payload
+bytes. Ordinary ingest, provider upload, normal control, and priority
+cancellation use separate bounded lanes; the provider lane is derived from the
+daemon ingest resource policy rather than a hard-coded connection count.
+
+Multipart abort is daemon-owned. An abort first serializes against active part
+writers and marks the journal aborted; garbage collection may then reclaim it
+only when the store namespace matches and no active lease remains. Receiving,
+resumable, legacy, malformed, symlinked, hard-linked, or otherwise ambiguous
+journals remain retained for operator review. Never remove multipart
+directories directly.
+
 Also exercise zero-byte, sidecar (payload, ``.manifest.json``, ``.sha256``),
 length/checksum mismatch, capacity exhaustion, daemon restart during receive,
 restart during publication, and both acknowledgement policies.

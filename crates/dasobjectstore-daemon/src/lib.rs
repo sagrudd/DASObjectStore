@@ -201,8 +201,8 @@ pub use runtime::{
 };
 pub use server::{
     DaemonApiHandler, DaemonClock, DaemonRequestHandler, DaemonRequestHandlerError,
-    DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock, UnixSocketDaemonServer,
-    UnixSocketDaemonServerError,
+    DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock, UnixSocketAdmissionPolicy,
+    UnixSocketDaemonServer, UnixSocketDaemonServerError,
 };
 
 /// Returns the daemon crate version.

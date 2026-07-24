@@ -22,7 +22,7 @@ use dasobjectstore_daemon::{
 };
 use serde::Deserialize;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 
 const UPLOAD_CHANNEL_CAPACITY: usize = 2;
@@ -82,7 +82,23 @@ pub(crate) async fn stream_profile_s3_put(
     body: Body,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let (sender, receiver) = mpsc::channel(UPLOAD_CHANNEL_CAPACITY);
-    let upload_task = tokio::spawn(upload_to_daemon(request.clone(), receiver));
+    let (admitted_sender, admitted_receiver) = oneshot::channel();
+    let mut upload_task =
+        tokio::spawn(upload_to_daemon(request.clone(), admitted_sender, receiver));
+    tokio::select! {
+        admitted = admitted_receiver => {
+            if admitted.is_err() {
+                return Err(upload_task_ended_before_body(
+                    upload_task.await,
+                    "profile_s3_upload_failed",
+                ));
+            }
+        },
+        result = &mut upload_task => return Err(upload_task_ended_before_body(
+            result,
+            "profile_s3_upload_failed",
+        )),
+    }
     let mut body_stream = body.into_data_stream();
     let mut offset = 0_u64;
     while let Some(result) = body_stream.next().await {
@@ -132,11 +148,9 @@ pub(crate) async fn stream_profile_s3_put(
                 ));
             }
             if sender.send(Ok((header, payload))).await.is_err() {
-                let _ = upload_task.await;
-                return Err(route_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "profile_s3_daemon_unavailable",
-                    "daemon upload stream closed before body completion",
+                return Err(upload_task_ended_before_body(
+                    upload_task.await,
+                    "profile_s3_upload_failed",
                 ));
             }
             start = end;
@@ -165,11 +179,9 @@ pub(crate) async fn stream_profile_s3_put(
         sha256: Some(request.expected_sha256.clone()),
     };
     if sender.send(Ok((terminal, Vec::new()))).await.is_err() {
-        let _ = upload_task.await;
-        return Err(route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "profile_s3_daemon_unavailable",
-            "daemon upload stream closed before acknowledgement",
+        return Err(upload_task_ended_before_body(
+            upload_task.await,
+            "profile_s3_upload_failed",
         ));
     }
     drop(sender);
@@ -181,12 +193,12 @@ pub(crate) async fn stream_profile_s3_put(
             error.to_string(),
         )
     })?;
-    let response = response
-        .map_err(|error| admin_daemon_bridge_error_with_code(error, "profile_s3_upload_failed"))?;
+    let response =
+        response.map_err(|error| daemon_stream_bridge_error(error, "profile_s3_upload_failed"))?;
     match response {
         DaemonApiResponse::ProviderStreamUpload(response) => Ok(Json(response).into_response()),
         DaemonApiResponse::Error(error) => Err(route_error(
-            StatusCode::BAD_GATEWAY,
+            daemon_stream_status(&error.code),
             error.code,
             error.message,
         )),
@@ -200,6 +212,7 @@ pub(crate) async fn stream_profile_s3_put(
 
 async fn upload_to_daemon(
     request: ProviderStreamUploadOpenRequest,
+    admitted_sender: oneshot::Sender<()>,
     mut receiver: mpsc::Receiver<Result<(ProviderStreamChunkHeader, Vec<u8>), String>>,
 ) -> Result<DaemonApiResponse, crate::daemon_bridge::DaemonBridgeError> {
     let bridge = crate::daemon_bridge::DaemonBridge::shared_packaged();
@@ -207,14 +220,81 @@ async fn upload_to_daemon(
     bridge
         .call_message_with_deadline(UPLOAD_DAEMON_DEADLINE, move || {
             UnixSocketDaemonTransport::new(socket_path)
-                .upload_provider(request, || match receiver.blocking_recv() {
-                    Some(Ok(frame)) => Ok(Some(frame)),
-                    Some(Err(error)) => Err(DaemonClientError::Transport(error)),
-                    None => Ok(None),
-                })
+                .upload_provider_after_admission(
+                    request,
+                    || {
+                        admitted_sender.send(()).map_err(|_| {
+                            DaemonClientError::Transport(
+                                "HTTP upload request ended before daemon admission".to_string(),
+                            )
+                        })
+                    },
+                    || match receiver.blocking_recv() {
+                        Some(Ok(frame)) => Ok(Some(frame)),
+                        Some(Err(error)) => Err(DaemonClientError::Transport(error)),
+                        None => Ok(None),
+                    },
+                )
                 .map_err(|error| error.to_string())
         })
         .await
+}
+
+pub(super) fn daemon_stream_status(code: &str) -> StatusCode {
+    if code == "server_busy" {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::BAD_GATEWAY
+    }
+}
+
+pub(super) fn daemon_stream_bridge_error(
+    error: crate::daemon_bridge::DaemonBridgeError,
+    fallback_code: &'static str,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match &error {
+        crate::daemon_bridge::DaemonBridgeError::Client(client)
+            if client.message.contains("server_busy") =>
+        {
+            let message = client
+                .message
+                .strip_prefix("daemon returned server_busy error: ")
+                .unwrap_or(&client.message)
+                .to_string();
+            route_error(StatusCode::SERVICE_UNAVAILABLE, "server_busy", message)
+        }
+        crate::daemon_bridge::DaemonBridgeError::Busy => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server_busy",
+            "daemon upload bridge capacity is saturated; retry shortly",
+        ),
+        _ => admin_daemon_bridge_error_with_code(error, fallback_code),
+    }
+}
+
+fn upload_task_ended_before_body(
+    result: Result<
+        Result<DaemonApiResponse, crate::daemon_bridge::DaemonBridgeError>,
+        tokio::task::JoinError,
+    >,
+    fallback_code: &'static str,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match result {
+        Ok(Ok(DaemonApiResponse::Error(error))) => {
+            route_error(daemon_stream_status(&error.code), error.code, error.message)
+        }
+        Ok(Ok(response)) => route_error(
+            StatusCode::BAD_GATEWAY,
+            "profile_s3_unexpected_response",
+            format!("daemon upload ended before body admission: {response:?}"),
+        ),
+        Ok(Err(error)) => daemon_stream_bridge_error(error, fallback_code),
+        Err(error) => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "profile_s3_daemon_upload_join_failed",
+            error.to_string(),
+        ),
+    }
 }
 
 pub(super) fn required_content_length(
@@ -324,5 +404,22 @@ mod tests {
             result.expect_err("invalid checksum").0,
             StatusCode::BAD_REQUEST
         );
+    }
+
+    #[test]
+    fn preserves_daemon_server_busy_as_retryable_service_unavailable() {
+        let error = crate::object_browser_routes::StandaloneObjectBrowserClientError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "daemon_bridge_client_failed".to_string(),
+            message: "daemon returned server_busy error: provider stream capacity is saturated"
+                .to_string(),
+        };
+        let (status, Json(error)) = daemon_stream_bridge_error(
+            crate::daemon_bridge::DaemonBridgeError::Client(error),
+            "profile_s3_upload_failed",
+        );
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "server_busy");
+        assert_eq!(error.message, "provider stream capacity is saturated");
     }
 }

@@ -295,6 +295,14 @@ async fn s3_upload_part(
             }
             response
         }
+        Err((status, error)) if is_upload_capacity_error(status, &error.0.code) => {
+            s3_retryable_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SlowDown",
+                &error.0.message,
+                1,
+            )
+        }
         Err((status, error)) => s3_error(status, &error.0.code, &error.0.message),
     }
 }
@@ -554,10 +562,11 @@ async fn s3_put_object(
     let permit = match state.upload_permits.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
-            return s3_error(
+            return s3_retryable_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "SlowDown",
                 "upload budget is full",
+                1,
             )
         }
     };
@@ -655,6 +664,14 @@ async fn s3_put_object(
             }
             response
         }
+        Err((status, error)) if is_upload_capacity_error(status, &error.0.code) => {
+            s3_retryable_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "SlowDown",
+                &error.0.message,
+                1,
+            )
+        }
         Err((status, error)) => s3_error(status, &error.0.code, &error.0.message),
     }
 }
@@ -668,6 +685,31 @@ fn s3_error(status: StatusCode, code: &str, message: &str) -> Response {
             xml_escape(message)
         ),
     )
+}
+
+fn s3_retryable_error(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    retry_after_seconds: u64,
+) -> Response {
+    let mut response = s3_error(status, code, message);
+    if let Ok(value) = retry_after_seconds.to_string().parse() {
+        response.headers_mut().insert(header::RETRY_AFTER, value);
+    }
+    response
+}
+
+fn is_upload_capacity_error(status: StatusCode, code: &str) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS
+        || (status == StatusCode::SERVICE_UNAVAILABLE
+            && matches!(
+                code,
+                "server_busy"
+                    | "daemon_admin_job_busy"
+                    | "provider_stream_upload_busy"
+                    | "provider_stream_multipart_busy"
+            ))
 }
 
 fn s3_xml(status: StatusCode, xml: String) -> Response {
@@ -810,6 +852,35 @@ mod tests {
             String::from_utf8(body.to_vec()).expect("UTF-8 XML"),
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>Bad&lt;Key</Code><Message>a&amp;b</Message></Error>"
         );
+    }
+
+    #[tokio::test]
+    async fn retryable_errors_include_s3_slowdown_and_retry_after() {
+        let response = s3_retryable_error(StatusCode::SERVICE_UNAVAILABLE, "SlowDown", "busy", 1);
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers().get(header::RETRY_AFTER).unwrap(), "1");
+        let body = to_bytes(response.into_body(), 4_096)
+            .await
+            .expect("error body");
+        assert!(String::from_utf8(body.to_vec())
+            .expect("UTF-8 XML")
+            .contains("<Code>SlowDown</Code>"));
+    }
+
+    #[test]
+    fn only_capacity_failures_are_mapped_to_slowdown() {
+        assert!(is_upload_capacity_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server_busy"
+        ));
+        assert!(is_upload_capacity_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "daemon_admin_job_busy"
+        ));
+        assert!(!is_upload_capacity_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "profile_s3_daemon_unavailable"
+        ));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use dasobjectstore_metadata::{
 };
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_DESTAGE_LEASE_SECONDS: u64 = 60 * 60;
@@ -125,8 +125,23 @@ fn evict_one_settled_ssd_copy(
     let job_root = payload.parent().ok_or_else(|| {
         DurableDestageWorkerError::UnsafeSsdPlacement(candidate.relative_path.clone())
     })?;
-    if job_root.exists() {
-        remove_managed_ssd_job_root(&config.ssd_root, job_root)?;
+    match fs::symlink_metadata(&payload) {
+        Ok(_)
+            if job_root.parent()
+                == Some(
+                    config
+                        .ssd_root
+                        .join(".dasobjectstore/ingest/jobs")
+                        .as_path(),
+                ) =>
+        {
+            remove_managed_ssd_job_root(&config.ssd_root, job_root)?;
+        }
+        Ok(_) => {
+            remove_managed_direct_s3_payload(&config.ssd_root, &candidate.store_id, &payload)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     mark_ssd_evicted(&config.live_sqlite_path, &candidate.object_id, now_utc)?;
     Ok(DurableDestageOutcome::Evicted {
@@ -289,6 +304,98 @@ fn remove_managed_ssd_job_root(
     Ok(())
 }
 
+/// Remove one settled direct-S3 payload without ever treating its key parent
+/// as an ingest job. Object keys may share arbitrarily deep prefixes, so the
+/// file is unlinked exactly and only empty parents are pruned.
+fn remove_managed_direct_s3_payload(
+    ssd_root: &Path,
+    store_id: &dasobjectstore_core::ids::StoreId,
+    payload: &Path,
+) -> Result<(), DurableDestageWorkerError> {
+    let namespace = format!("{:x}", Sha256::digest(store_id.as_str().as_bytes()));
+    let objects_root = ssd_root
+        .join(".dasobjectstore/stores")
+        .join(namespace)
+        .join("direct-s3/profile/.dasobjectstore/objects");
+    let relative = payload
+        .strip_prefix(&objects_root)
+        .map_err(|_| DurableDestageWorkerError::UnsafeSsdEviction(payload.to_path_buf()))?;
+    if relative.as_os_str().is_empty()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(DurableDestageWorkerError::UnsafeSsdEviction(
+            payload.to_path_buf(),
+        ));
+    }
+    let root_metadata = fs::symlink_metadata(&objects_root)?;
+    let payload_metadata = fs::symlink_metadata(payload)?;
+    if root_metadata.file_type().is_symlink()
+        || !root_metadata.is_dir()
+        || payload_metadata.file_type().is_symlink()
+        || !payload_metadata.is_file()
+    {
+        return Err(DurableDestageWorkerError::UnsafeSsdEviction(
+            payload.to_path_buf(),
+        ));
+    }
+    let mut current = objects_root.clone();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        let metadata = fs::symlink_metadata(&current)?;
+        let final_component = current == payload;
+        if metadata.file_type().is_symlink()
+            || (!final_component && !metadata.is_dir())
+            || (final_component && !metadata.is_file())
+        {
+            return Err(DurableDestageWorkerError::UnsafeSsdEviction(
+                payload.to_path_buf(),
+            ));
+        }
+    }
+    fs::remove_file(payload)?;
+    sync_directory(
+        payload
+            .parent()
+            .ok_or_else(|| DurableDestageWorkerError::UnsafeSsdEviction(payload.to_path_buf()))?,
+    )?;
+
+    let mut parent = payload.parent();
+    while let Some(directory) = parent {
+        if directory == objects_root {
+            break;
+        }
+        match fs::remove_dir(directory) {
+            Ok(()) => {
+                let ancestor = directory.parent().ok_or_else(|| {
+                    DurableDestageWorkerError::UnsafeSsdEviction(directory.to_path_buf())
+                })?;
+                sync_directory(ancestor)?;
+                parent = Some(ancestor);
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::DirectoryNotEmpty | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                break;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+fn sync_directory(path: &Path) -> Result<(), DurableDestageWorkerError> {
+    File::open(path)?.sync_all()?;
+    Ok(())
+}
+
 fn retry_delay_seconds(attempt_count: u32) -> u64 {
     let exponent = attempt_count.saturating_sub(1).min(10);
     (30_u64.saturating_mul(1_u64 << exponent)).min(MAX_DESTAGE_RETRY_SECONDS)
@@ -407,10 +514,12 @@ impl From<std::io::Error> for DurableDestageWorkerError {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_queued_object_type, remove_managed_ssd_job_root, retry_delay_seconds,
-        safe_relative_path,
+        parse_queued_object_type, remove_managed_direct_s3_payload, remove_managed_ssd_job_root,
+        retry_delay_seconds, safe_relative_path,
     };
+    use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::object_type::ObjectType;
+    use sha2::Digest;
     use std::fs;
 
     #[test]
@@ -455,5 +564,53 @@ mod tests {
         assert!(safe_relative_path(".dasobjectstore/ingest/jobs/a/payload").is_some());
         assert!(safe_relative_path("../escape").is_none());
         assert!(safe_relative_path("/absolute").is_none());
+    }
+
+    #[test]
+    fn direct_s3_eviction_unlinks_only_the_exact_store_bound_payload() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-direct-s3-eviction-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let store = StoreId::new("epic_collection").expect("store");
+        let namespace = format!("{:x}", sha2::Sha256::digest(store.as_str().as_bytes()));
+        let objects = root
+            .join(".dasobjectstore/stores")
+            .join(namespace)
+            .join("direct-s3/profile/.dasobjectstore/objects");
+        let payload = objects.join("shared/prefix/object-a.tar");
+        let sibling = objects.join("shared/prefix/object-b.tar");
+        fs::create_dir_all(payload.parent().expect("parent")).expect("objects");
+        fs::write(&payload, b"a").expect("payload");
+        fs::write(&sibling, b"b").expect("sibling");
+
+        remove_managed_direct_s3_payload(&root, &store, &payload).expect("exact eviction");
+        assert!(!payload.exists());
+        assert_eq!(fs::read(&sibling).expect("sibling retained"), b"b");
+        assert!(objects.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn direct_s3_eviction_rejects_another_store_namespace() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-direct-s3-cross-store-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let expected = StoreId::new("expected").expect("store");
+        let other = StoreId::new("other").expect("store");
+        let namespace = format!("{:x}", sha2::Sha256::digest(other.as_str().as_bytes()));
+        let payload = root
+            .join(".dasobjectstore/stores")
+            .join(namespace)
+            .join("direct-s3/profile/.dasobjectstore/objects/object.tar");
+        fs::create_dir_all(payload.parent().expect("parent")).expect("objects");
+        fs::write(&payload, b"payload").expect("payload");
+
+        assert!(remove_managed_direct_s3_payload(&root, &expected, &payload).is_err());
+        assert!(payload.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

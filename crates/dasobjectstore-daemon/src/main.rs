@@ -1,3 +1,4 @@
+use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
@@ -14,8 +15,8 @@ use dasobjectstore_daemon::{
     FileBackedAdminJobRegistry, FileBackedApplianceTelemetrySink,
     FileBackedCapacityAdmissionProvider, GarageServiceController, GarageServiceRuntimeConfig,
     LinuxProcTelemetryCollector, LiveStatusGarbageCollection, LiveStatusGarbageCollectionRetained,
-    SystemDaemonClock, SystemServiceCommandRunner, UnixSocketDaemonServer,
-    DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
+    SystemDaemonClock, SystemServiceCommandRunner, UnixSocketAdmissionPolicy,
+    UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
@@ -131,7 +132,16 @@ fn run() -> Result<(), String> {
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
     let _garbage_collection = spawn_startup_garbage_collection(&config, live_status_registry);
-    let server = UnixSocketDaemonServer::new(&config.socket_path, handler);
+    let available_cpu_cores = std::thread::available_parallelism()
+        .map(|cores| cores.get().min(u16::MAX as usize) as u16)
+        .unwrap_or(1);
+    let data_stream_connections =
+        DaemonIngestResourceBudget::from_policy(config.ingest_resource_policy, available_cpu_cores)
+            .concurrent_transaction_limit()
+            .max(1) as usize;
+    let server = UnixSocketDaemonServer::new(&config.socket_path, handler).with_admission_policy(
+        UnixSocketAdmissionPolicy::from_data_stream_budget(data_stream_connections),
+    );
     println!(
         "dasobjectstored listening on {}",
         server.socket_path().display()

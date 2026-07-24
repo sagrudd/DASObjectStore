@@ -1,8 +1,8 @@
 use crate::api::{
-    write_provider_stream_frame, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    ProviderStreamChunkHeader, ProviderStreamFrameError,
+    provider_stream_requires_upload_ready, write_provider_stream_frame, DaemonApiErrorResponse,
+    DaemonApiRequest, DaemonApiResponse, ProviderStreamChunkHeader, ProviderStreamFrameError,
     ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamOpenRequest,
-    ProviderStreamUploadOpenRequest, ProviderStreamVerifier,
+    ProviderStreamUploadOpenRequest, ProviderStreamUploadReadyResponse, ProviderStreamVerifier,
 };
 use crate::auth::DaemonLocalActor;
 use crate::runtime::DaemonIngestFilesRuntimeError;
@@ -21,12 +21,40 @@ use std::thread;
 const SOCKET_MODE: u32 = 0o660;
 const MAX_CONTROL_CONNECTIONS: usize = 8;
 const MAX_PRIORITY_CONTROL_CONNECTIONS: usize = 2;
-const MAX_INGEST_CONNECTIONS: usize = 2;
+const DEFAULT_ORDINARY_INGEST_CONNECTIONS: usize = 2;
+const DEFAULT_PROVIDER_UPLOAD_CONNECTIONS: usize = 8;
 const MAX_REQUEST_LINE_BYTES: usize = 64 * 1024;
 
 pub struct UnixSocketDaemonServer<H> {
     socket_path: PathBuf,
     handler: H,
+    admission_policy: UnixSocketAdmissionPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UnixSocketAdmissionPolicy {
+    pub ordinary_ingest_connections: usize,
+    pub provider_upload_connections: usize,
+}
+
+impl UnixSocketAdmissionPolicy {
+    pub fn from_data_stream_budget(data_stream_connections: usize) -> Self {
+        let data_stream_connections = data_stream_connections.max(1);
+        Self {
+            ordinary_ingest_connections: data_stream_connections
+                .min(DEFAULT_ORDINARY_INGEST_CONNECTIONS),
+            provider_upload_connections: data_stream_connections,
+        }
+    }
+}
+
+impl Default for UnixSocketAdmissionPolicy {
+    fn default() -> Self {
+        Self {
+            ordinary_ingest_connections: DEFAULT_ORDINARY_INGEST_CONNECTIONS,
+            provider_upload_connections: DEFAULT_PROVIDER_UPLOAD_CONNECTIONS,
+        }
+    }
 }
 
 impl<H> UnixSocketDaemonServer<H>
@@ -37,7 +65,13 @@ where
         Self {
             socket_path: socket_path.into(),
             handler,
+            admission_policy: UnixSocketAdmissionPolicy::default(),
         }
+    }
+
+    pub fn with_admission_policy(mut self, admission_policy: UnixSocketAdmissionPolicy) -> Self {
+        self.admission_policy = admission_policy;
+        self
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -51,7 +85,8 @@ where
         let listener = bind_listener(&self.socket_path)?;
         let control_connections = AtomicUsize::new(0);
         let priority_control_connections = AtomicUsize::new(0);
-        let ingest_connections = AtomicUsize::new(0);
+        let ordinary_ingest_connections = AtomicUsize::new(0);
+        let provider_upload_connections = AtomicUsize::new(0);
 
         thread::scope(|scope| {
             for stream in listener.incoming() {
@@ -59,15 +94,22 @@ where
                 let Some(pending) = receive_stream(stream)? else {
                     continue;
                 };
-                let active_connections = if pending.request.is_ingest_submission() {
-                    (&ingest_connections, MAX_INGEST_CONNECTIONS)
-                } else if pending.request.is_priority_control_request() {
-                    (
+                let active_connections = match pending.request.connection_class() {
+                    RequestConnectionClass::OrdinaryIngest => (
+                        &ordinary_ingest_connections,
+                        self.admission_policy.ordinary_ingest_connections,
+                    ),
+                    RequestConnectionClass::ProviderUpload => (
+                        &provider_upload_connections,
+                        self.admission_policy.provider_upload_connections,
+                    ),
+                    RequestConnectionClass::PriorityControl => (
                         &priority_control_connections,
                         MAX_PRIORITY_CONTROL_CONNECTIONS,
-                    )
-                } else {
-                    (&control_connections, MAX_CONTROL_CONNECTIONS)
+                    ),
+                    RequestConnectionClass::Control => {
+                        (&control_connections, MAX_CONTROL_CONNECTIONS)
+                    }
                 };
                 let Some(permit) =
                     ConnectionPermit::try_acquire(active_connections.0, active_connections.1)
@@ -771,6 +813,11 @@ fn handle_pending_stream(
                 crate::api::read_provider_stream_frame(&mut pending.stream)
                     .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
             };
+            if provider_stream_requires_upload_ready(&request.schema_version) {
+                emit_response(DaemonApiResponse::ProviderStreamUploadReady(
+                    ProviderStreamUploadReadyResponse::new(request.request_id.clone()),
+                ))?;
+            }
             match handler.handle_provider_stream_upload_for_actor(
                 request,
                 pending.actor.as_ref(),
@@ -806,6 +853,11 @@ fn handle_pending_stream(
                 crate::api::read_provider_stream_frame(&mut pending.stream)
                     .map_err(UnixSocketDaemonServerError::ProviderStreamFrame)
             };
+            if provider_stream_requires_upload_ready(&request.schema_version) {
+                emit_response(DaemonApiResponse::ProviderStreamUploadReady(
+                    ProviderStreamUploadReadyResponse::new(request.request_id.clone()),
+                ))?;
+            }
             match handler.handle_provider_stream_multipart_part_upload_for_actor(
                 request,
                 pending.actor.as_ref(),
@@ -835,12 +887,12 @@ fn handle_pending_stream(
 }
 
 trait DaemonApiRequestClass {
-    fn is_ingest_submission(&self) -> bool;
+    fn is_ordinary_ingest_submission(&self) -> bool;
     fn is_priority_control_request(&self) -> bool;
 }
 
 impl DaemonApiRequestClass for DaemonApiRequest {
-    fn is_ingest_submission(&self) -> bool {
+    fn is_ordinary_ingest_submission(&self) -> bool {
         matches!(
             self,
             Self::SubmitIngestFiles(_) | Self::RemoteEasyconnectSubmitAwsCliUpload(_)
@@ -853,23 +905,28 @@ impl DaemonApiRequestClass for DaemonApiRequest {
 }
 
 impl PendingRequest {
-    fn is_ingest_submission(&self) -> bool {
+    fn connection_class(&self) -> RequestConnectionClass {
         match self {
-            Self::Api(request) => request.is_ingest_submission(),
-            Self::ProviderStream(_) => false,
-            Self::ProviderStreamUpload(_) => true,
-            Self::ProviderStreamMultipartPartUpload(_) => true,
+            Self::Api(request) if request.is_priority_control_request() => {
+                RequestConnectionClass::PriorityControl
+            }
+            Self::Api(request) if request.is_ordinary_ingest_submission() => {
+                RequestConnectionClass::OrdinaryIngest
+            }
+            Self::ProviderStreamUpload(_) | Self::ProviderStreamMultipartPartUpload(_) => {
+                RequestConnectionClass::ProviderUpload
+            }
+            Self::Api(_) | Self::ProviderStream(_) => RequestConnectionClass::Control,
         }
     }
+}
 
-    fn is_priority_control_request(&self) -> bool {
-        match self {
-            Self::Api(request) => request.is_priority_control_request(),
-            Self::ProviderStream(_) => false,
-            Self::ProviderStreamUpload(_) => false,
-            Self::ProviderStreamMultipartPartUpload(_) => false,
-        }
-    }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestConnectionClass {
+    Control,
+    PriorityControl,
+    OrdinaryIngest,
+    ProviderUpload,
 }
 
 #[cfg(target_os = "linux")]
@@ -901,14 +958,16 @@ fn write_response_frame(
 
 #[cfg(test)]
 mod tests {
-    use super::{DaemonApiHandler, DaemonApiRequestClass, UnixSocketDaemonServer};
+    use super::{
+        DaemonApiHandler, DaemonApiRequestClass, UnixSocketAdmissionPolicy, UnixSocketDaemonServer,
+    };
     use crate::api::read_provider_stream_frame;
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonIngestPipelineStage, DaemonIngestProgressEvent,
         DaemonIngestStage, DaemonJobCancelRequest, DaemonJobId, DaemonServiceStatusResponse,
         ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         StoreInventoryRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-        PROVIDER_STREAM_SCHEMA_VERSION,
+        PROVIDER_STREAM_SCHEMA_VERSION, PROVIDER_STREAM_SCHEMA_VERSION_V1,
     };
     use dasobjectstore_core::backend::BackendObjectKey;
     use dasobjectstore_core::ids::{IngestJobId, StoreId};
@@ -927,11 +986,11 @@ mod tests {
             reason: Some("operator requested cancellation".to_string()),
         });
         assert!(cancellation.is_priority_control_request());
-        assert!(!cancellation.is_ingest_submission());
+        assert!(!cancellation.is_ordinary_ingest_submission());
 
         let status = DaemonApiRequest::StoreInventory(StoreInventoryRequest::default());
         assert!(!status.is_priority_control_request());
-        assert!(!status.is_ingest_submission());
+        assert!(!status.is_ordinary_ingest_submission());
     }
 
     #[test]
@@ -1174,7 +1233,7 @@ mod tests {
         serde_json::to_writer(
             &mut client,
             &ProviderStreamUploadOpenRequest {
-                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION_V1.to_string(),
                 request_id: "upload-stream-1".to_string(),
                 upload_id: "capability-1".to_string(),
                 store_id: StoreId::new("stream-store").expect("store id"),
@@ -1280,7 +1339,7 @@ mod tests {
         serde_json::to_writer(
             &mut client,
             &crate::api::ProviderStreamMultipartPartUploadOpenRequest {
-                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION_V1.to_string(),
                 request_id: "multipart-frame-1".to_string(),
                 reservation_id: "reservation-1".to_string(),
                 reservation_size_bytes: 5,
@@ -1365,7 +1424,7 @@ mod tests {
         serde_json::to_writer(
             &mut client,
             &ProviderStreamUploadOpenRequest {
-                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION_V1.to_string(),
                 request_id: "invalid-upload-stream".to_string(),
                 upload_id: "capability-invalid".to_string(),
                 store_id: StoreId::new("stream-store").expect("store id"),
@@ -1662,7 +1721,11 @@ mod tests {
                 entered: entered_sender,
                 release: Mutex::new(release_receiver),
             },
-        );
+        )
+        .with_admission_policy(UnixSocketAdmissionPolicy {
+            ordinary_ingest_connections: 1,
+            provider_upload_connections: 1,
+        });
         thread::spawn(move || server.serve_forever().expect("server runs"));
         for _ in 0..20 {
             if socket_path.exists() {
@@ -1725,6 +1788,66 @@ mod tests {
                 state: ServiceState::Running,
                 ..
             })
+        ));
+
+        let mut saturated_ingest = connect_with_retry().expect("second ingest connects");
+        serde_json::to_writer(
+            &mut saturated_ingest,
+            &DaemonApiRequest::SubmitIngestFiles(SubmitIngestFilesRequest {
+                endpoint: StoreId::new("zymo").expect("store id"),
+                source_path: "/tmp/other-source".into(),
+                object_type: ObjectType::Naive,
+                copies: None,
+                hdd_workers: None,
+                ingress_origin: crate::api::DaemonIngressOrigin::LocalServer,
+                conflict_policy: crate::api::DaemonIngestConflictPolicy::Force,
+                dry_run: false,
+                client_request_id: None,
+            }),
+        )
+        .expect("second ingest request encoded");
+        saturated_ingest
+            .write_all(b"\n")
+            .expect("second ingest request newline");
+        let mut line = String::new();
+        BufReader::new(saturated_ingest)
+            .read_line(&mut line)
+            .expect("busy response");
+        assert!(matches!(
+            serde_json::from_str::<DaemonApiResponse>(&line).expect("busy response decoded"),
+            DaemonApiResponse::Error(error) if error.code == "server_busy"
+        ));
+
+        let mut provider = connect_with_retry().expect("provider upload connects");
+        serde_json::to_writer(
+            &mut provider,
+            &ProviderStreamUploadOpenRequest {
+                schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                request_id: "provider-during-ingest".to_string(),
+                upload_id: "provider-capability".to_string(),
+                store_id: StoreId::new("zymo").expect("store id"),
+                object: BackendObjectKey {
+                    object_id: "acceptance/provider.bin".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 0,
+                expected_sha256:
+                    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                        .to_string(),
+                chunk_size_bytes: 1024,
+            },
+        )
+        .expect("provider request encoded");
+        provider.write_all(b"\n").expect("provider request newline");
+        let mut line = String::new();
+        BufReader::new(provider)
+            .read_line(&mut line)
+            .expect("provider admission response");
+        assert!(matches!(
+            serde_json::from_str::<DaemonApiResponse>(&line)
+                .expect("provider admission response decoded"),
+            DaemonApiResponse::ProviderStreamUploadReady(response)
+                if response.request_id == "provider-during-ingest"
         ));
 
         release_sender.send(()).expect("release ingest");

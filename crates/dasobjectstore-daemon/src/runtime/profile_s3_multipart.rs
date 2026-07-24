@@ -13,10 +13,13 @@ use crate::api::{
 use dasobjectstore_core::backend::BackendObjectKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Condvar, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const JOURNAL_SCHEMA_VERSION: &str = "dasobjectstore.profile_s3.multipart_journal.v1";
 const NAMESPACE: &str = ".dasobjectstore";
@@ -31,6 +34,20 @@ struct JournalManifest {
     object: BackendObjectKey,
     reservation_size_bytes: u64,
     parts: Vec<JournalPart>,
+    #[serde(default)]
+    lifecycle: MultipartLifecycle,
+    #[serde(default)]
+    created_at_unix_seconds: u64,
+    #[serde(default)]
+    updated_at_unix_seconds: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum MultipartLifecycle {
+    #[default]
+    Receiving,
+    Aborted,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -51,6 +68,7 @@ pub struct MultipartPartRecord {
 pub struct MultipartPartJournal {
     directory: PathBuf,
     manifest: JournalManifest,
+    _active: ActiveMultipartPart,
 }
 
 impl MultipartPartJournal {
@@ -65,6 +83,7 @@ impl MultipartPartJournal {
             .join(MULTIPART_DIR)
             .join(&request.reservation_id);
         fs::create_dir_all(&directory).map_err(io_error)?;
+        let active = ActiveMultipartPart::acquire(&directory)?;
         let manifest_path = directory.join(MANIFEST_FILE);
         let manifest = if manifest_path.exists() {
             let bytes = fs::read(&manifest_path).map_err(io_error)?;
@@ -86,11 +105,15 @@ impl MultipartPartJournal {
                 object: request.object.clone(),
                 reservation_size_bytes: request.reservation_size_bytes,
                 parts: Vec::new(),
+                lifecycle: MultipartLifecycle::Receiving,
+                created_at_unix_seconds: now_unix_seconds(),
+                updated_at_unix_seconds: now_unix_seconds(),
             }
         };
         Ok(Self {
             directory,
             manifest,
+            _active: active,
         })
     }
 
@@ -173,6 +196,26 @@ impl MultipartPartJournal {
             || request.object != self.manifest.object
         {
             return Err(MultipartPartJournalError::IdentityMismatch);
+        }
+        let manifest_path = self.directory.join(MANIFEST_FILE);
+        if !self.directory.exists() {
+            return Err(MultipartPartJournalError::Aborted);
+        }
+        if manifest_path.exists() {
+            let bytes = fs::read(&manifest_path).map_err(io_error)?;
+            let persisted: JournalManifest = serde_json::from_slice(&bytes)
+                .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
+            validate_manifest(&persisted)?;
+            if persisted.store_id != self.manifest.store_id
+                || persisted.reservation_id != self.manifest.reservation_id
+                || persisted.object != self.manifest.object
+            {
+                return Err(MultipartPartJournalError::IdentityMismatch);
+            }
+            self.manifest = persisted;
+        }
+        if self.manifest.lifecycle == MultipartLifecycle::Aborted {
+            return Err(MultipartPartJournalError::Aborted);
         }
         let temp_path = self
             .directory
@@ -258,6 +301,7 @@ impl MultipartPartJournal {
             file_name: final_name,
         });
         self.manifest.parts.sort_by_key(|part| part.part_number);
+        self.manifest.updated_at_unix_seconds = now_unix_seconds();
         self.persist().map_err(|error| {
             let _ = fs::remove_file(&final_path);
             error
@@ -275,7 +319,13 @@ impl MultipartPartJournal {
         Ok(File::open(self.directory.join(&part.file_name)).map_err(io_error)?)
     }
 
-    pub fn remove(self) -> Result<(), MultipartPartJournalError> {
+    /// Abort and reclaim a multipart journal. The in-process activity lease is
+    /// checked before the abort marker is persisted, so an S3 abort racing an
+    /// UploadPart can never remove a file being written.
+    pub fn remove(mut self) -> Result<(), MultipartPartJournalError> {
+        self.manifest.lifecycle = MultipartLifecycle::Aborted;
+        self.manifest.updated_at_unix_seconds = now_unix_seconds();
+        self.persist()?;
         fs::remove_dir_all(self.directory).map_err(io_error)
     }
 
@@ -302,6 +352,85 @@ impl MultipartPartJournal {
         }
         Ok(())
     }
+}
+
+static ACTIVE_MULTIPART_PARTS: OnceLock<(Mutex<BTreeSet<PathBuf>>, Condvar)> = OnceLock::new();
+
+struct ActiveMultipartPart {
+    directory: PathBuf,
+}
+
+impl ActiveMultipartPart {
+    fn acquire(directory: &Path) -> Result<Self, MultipartPartJournalError> {
+        let (active, available) =
+            ACTIVE_MULTIPART_PARTS.get_or_init(|| (Mutex::new(BTreeSet::new()), Condvar::new()));
+        let mut active = active
+            .lock()
+            .map_err(|_| MultipartPartJournalError::ActivityRegistry)?;
+        while active.contains(directory) {
+            active = available
+                .wait(active)
+                .map_err(|_| MultipartPartJournalError::ActivityRegistry)?;
+        }
+        active.insert(directory.to_path_buf());
+        Ok(Self {
+            directory: directory.to_path_buf(),
+        })
+    }
+}
+
+impl Drop for ActiveMultipartPart {
+    fn drop(&mut self) {
+        let (active, available) =
+            ACTIVE_MULTIPART_PARTS.get_or_init(|| (Mutex::new(BTreeSet::new()), Condvar::new()));
+        if let Ok(mut active) = active.lock() {
+            active.remove(&self.directory);
+            available.notify_all();
+        }
+    }
+}
+
+fn multipart_is_active(directory: &Path) -> Result<bool, MultipartPartJournalError> {
+    ACTIVE_MULTIPART_PARTS
+        .get_or_init(|| (Mutex::new(BTreeSet::new()), Condvar::new()))
+        .0
+        .lock()
+        .map(|active| active.contains(directory))
+        .map_err(|_| MultipartPartJournalError::ActivityRegistry)
+}
+
+fn now_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// Return true only for an explicitly aborted journal that no active daemon
+/// stream can still mutate. Missing lifecycle state from v1 journals remains
+/// `receiving` and therefore fails closed.
+pub(crate) fn multipart_journal_is_reclaimable(
+    directory: &Path,
+) -> Result<bool, MultipartPartJournalError> {
+    if multipart_is_active(directory)? {
+        return Ok(false);
+    }
+    let bytes = fs::read(directory.join(MANIFEST_FILE)).map_err(io_error)?;
+    let manifest: JournalManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
+    validate_manifest(&manifest)?;
+    Ok(manifest.lifecycle == MultipartLifecycle::Aborted)
+}
+
+pub(crate) fn multipart_journal_matches_store_namespace(
+    directory: &Path,
+    namespace: &str,
+) -> Result<bool, MultipartPartJournalError> {
+    let bytes = fs::read(directory.join(MANIFEST_FILE)).map_err(io_error)?;
+    let manifest: JournalManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
+    validate_manifest(&manifest)?;
+    Ok(format!("{:x}", Sha256::digest(manifest.store_id.as_bytes())) == namespace)
 }
 
 /// Discover durable multipart reservations that must retain their capacity
@@ -418,6 +547,9 @@ pub enum MultipartPartJournalError {
     PartNotFound,
     ReservationExceeded,
     SizeOverflow,
+    Active,
+    Aborted,
+    ActivityRegistry,
 }
 
 impl Display for MultipartPartJournalError {
@@ -435,6 +567,11 @@ impl Display for MultipartPartJournalError {
             Self::PartNotFound => formatter.write_str("multipart part is not staged"),
             Self::ReservationExceeded => formatter.write_str("multipart reservation size exceeded"),
             Self::SizeOverflow => formatter.write_str("multipart part size overflowed"),
+            Self::Active => formatter.write_str("multipart upload is active"),
+            Self::Aborted => formatter.write_str("multipart upload was aborted"),
+            Self::ActivityRegistry => {
+                formatter.write_str("multipart activity registry is unavailable")
+            }
         }
     }
 }
@@ -543,6 +680,51 @@ mod tests {
         assert!(discover_multipart_reservation_ids(&root, "other-store")
             .expect("other store scan")
             .contains(&"reservation-2".to_string()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn garbage_collection_refuses_an_active_multipart_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-active-abort-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        let directory = journal.directory.clone();
+        assert!(!multipart_journal_is_reclaimable(&directory).expect("active classification"));
+        assert!(directory.exists());
+        journal.remove().expect("exclusive owner abort");
+        assert!(!directory.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn garbage_collection_requires_an_explicit_aborted_lifecycle() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-gc-lifecycle-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        assert!(!multipart_journal_is_reclaimable(&journal.directory).expect("classification"));
+        journal.manifest.lifecycle = MultipartLifecycle::Aborted;
+        journal.persist().expect("aborted marker");
+        let directory = journal.directory.clone();
+        drop(journal);
+        assert!(multipart_journal_is_reclaimable(&directory).expect("classification"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

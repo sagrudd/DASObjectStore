@@ -214,13 +214,14 @@ pub use profile_s3::{
     PROFILE_S3_ROUTE_PREFIX, PROFILE_S3_SCHEMA_VERSION,
 };
 pub use provider_stream::{
-    read_provider_stream_frame, write_provider_stream_frame, ProviderStreamCancellation,
-    ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamFrameError,
-    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
-    ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamUploadOpenRequest,
+    provider_stream_requires_upload_ready, read_provider_stream_frame, write_provider_stream_frame,
+    ProviderStreamCancellation, ProviderStreamChunkHeader, ProviderStreamCondition,
+    ProviderStreamFrameError, ProviderStreamMultipartPartUploadOpenRequest,
+    ProviderStreamMultipartPartUploadResponse, ProviderStreamOpenRequest, ProviderStreamRange,
+    ProviderStreamUploadOpenRequest, ProviderStreamUploadReadyResponse,
     ProviderStreamUploadResponse, ProviderStreamValidationError, ProviderStreamVerificationError,
     ProviderStreamVerifier, PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
-    PROVIDER_STREAM_SCHEMA_VERSION,
+    PROVIDER_STREAM_SCHEMA_VERSION, PROVIDER_STREAM_SCHEMA_VERSION_V1,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
@@ -591,6 +592,7 @@ pub enum DaemonApiResponse {
     DiskForceRetire(DiskRetireResponse),
     DiskLockdown(DiskLockdownResponse),
     ProviderStreamUpload(ProviderStreamUploadResponse),
+    ProviderStreamUploadReady(ProviderStreamUploadReadyResponse),
     ProviderStreamMultipartPartUpload(ProviderStreamMultipartPartUploadResponse),
     StoreInventory(StoreInventoryResponse),
     StoreDrain(StoreDrainResponse),

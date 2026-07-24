@@ -1054,6 +1054,11 @@ hardware acceptance.
   temporary unavailability, immutable key conflicts fail closed, and a
   regression proves HDD-only native payloads are visible through the S3
   contract.
+  Release 0.127.0 adds provider-stream v2 pre-body admission, resource-derived
+  provider capacity independent of ordinary NOMISS ingest and control lanes,
+  exact S3 ``SlowDown``/``Retry-After`` backpressure, leased multipart journal
+  mutation and fail-closed aborted-upload collection, plus store-private
+  exact-file SSD eviction for successfully destaged direct-S3 objects.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative

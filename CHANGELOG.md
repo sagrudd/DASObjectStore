@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.127.0 - 2026-07-24
+
+- Add provider-stream protocol v2 admission acknowledgements so direct-S3 PUT
+  and multipart bodies are not consumed until the daemon has reserved a data
+  lane; retain v1 upload compatibility.
+- Derive provider-upload socket capacity from the daemon ingest resource
+  policy, isolate it from ordinary ingest, control, and priority cancellation
+  lanes, and preserve the daemon's ``server_busy`` response as S3 ``SlowDown``
+  with ``Retry-After``.
+- Serialize multipart journal mutation with reservation leases and let daemon
+  garbage collection reclaim only explicitly aborted, inactive,
+  store-matched uploads while retaining resumable and ambiguous state.
+- Safely evict settled direct-S3 SSD objects by unlinking only the exact
+  store-private payload and pruning empty parents within its validated objects
+  root, without applying ingest-job directory deletion to profile objects.
+
 ## 0.126.4 - 2026-07-24
 
 - Persist direct S3 catalogue objects with the canonical ``naive`` object type

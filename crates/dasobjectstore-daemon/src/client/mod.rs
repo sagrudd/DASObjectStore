@@ -867,6 +867,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::DiskForceRetire(_) => "disk_force_retire",
         DaemonApiResponse::DiskLockdown(_) => "disk_lockdown",
         DaemonApiResponse::ProviderStreamUpload(_) => "provider_stream_upload",
+        DaemonApiResponse::ProviderStreamUploadReady(_) => "provider_stream_upload_ready",
         DaemonApiResponse::ProviderStreamMultipartPartUpload(_) => {
             "provider_stream_multipart_part_upload"
         }

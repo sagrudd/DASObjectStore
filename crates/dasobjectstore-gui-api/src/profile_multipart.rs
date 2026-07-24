@@ -28,7 +28,7 @@ use dasobjectstore_daemon::{
 };
 use serde::Deserialize;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_stream::StreamExt;
 
 const PART_UPLOAD_CHANNEL_CAPACITY: usize = 2;
@@ -103,7 +103,20 @@ pub(crate) async fn stream_profile_s3_multipart_part(
     body: Body,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let (sender, receiver) = mpsc::channel(PART_UPLOAD_CHANNEL_CAPACITY);
-    let upload_task = tokio::spawn(upload_multipart_part_to_daemon(request.clone(), receiver));
+    let (admitted_sender, admitted_receiver) = oneshot::channel();
+    let mut upload_task = tokio::spawn(upload_multipart_part_to_daemon(
+        request.clone(),
+        admitted_sender,
+        receiver,
+    ));
+    tokio::select! {
+        admitted = admitted_receiver => {
+            if admitted.is_err() {
+                return Err(upload_task_ended_before_body(upload_task.await));
+            }
+        },
+        result = &mut upload_task => return Err(upload_task_ended_before_body(result)),
+    }
     let mut body_stream = body.into_data_stream();
     let mut offset = 0_u64;
     while let Some(result) = body_stream.next().await {
@@ -142,13 +155,9 @@ pub(crate) async fn stream_profile_s3_multipart_part(
                     "multipart part body exceeds Content-Length",
                 ));
             }
-            sender.send(Ok((header, payload))).await.map_err(|_| {
-                route_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "profile_s3_daemon_unavailable",
-                    "daemon multipart stream closed before body completion",
-                )
-            })?;
+            if sender.send(Ok((header, payload))).await.is_err() {
+                return Err(upload_task_ended_before_body(upload_task.await));
+            }
             start = end;
         }
     }
@@ -171,13 +180,9 @@ pub(crate) async fn stream_profile_s3_multipart_part(
         total_size: Some(offset),
         sha256: Some(request.expected_sha256.clone()),
     };
-    sender.send(Ok((terminal, Vec::new()))).await.map_err(|_| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "profile_s3_daemon_unavailable",
-            "daemon multipart stream closed before acknowledgement",
-        )
-    })?;
+    if sender.send(Ok((terminal, Vec::new()))).await.is_err() {
+        return Err(upload_task_ended_before_body(upload_task.await));
+    }
     drop(sender);
 
     let response = upload_task.await.map_err(|error| {
@@ -188,14 +193,14 @@ pub(crate) async fn stream_profile_s3_multipart_part(
         )
     })?;
     let response = response.map_err(|error| {
-        admin_daemon_bridge_error_with_code(error, "profile_s3_multipart_failed")
+        super::profile_upload::daemon_stream_bridge_error(error, "profile_s3_multipart_failed")
     })?;
     match response {
         DaemonApiResponse::ProviderStreamMultipartPartUpload(response) => {
             Ok(Json(response).into_response())
         }
         DaemonApiResponse::Error(error) => Err(route_error(
-            StatusCode::BAD_GATEWAY,
+            super::profile_upload::daemon_stream_status(&error.code),
             error.code,
             error.message,
         )),
@@ -209,6 +214,7 @@ pub(crate) async fn stream_profile_s3_multipart_part(
 
 async fn upload_multipart_part_to_daemon(
     request: ProviderStreamMultipartPartUploadOpenRequest,
+    admitted_sender: oneshot::Sender<()>,
     mut receiver: mpsc::Receiver<Result<(ProviderStreamChunkHeader, Vec<u8>), String>>,
 ) -> Result<DaemonApiResponse, crate::daemon_bridge::DaemonBridgeError> {
     let bridge = crate::daemon_bridge::DaemonBridge::shared_packaged();
@@ -216,14 +222,52 @@ async fn upload_multipart_part_to_daemon(
     bridge
         .call_message_with_deadline(PART_UPLOAD_DAEMON_DEADLINE, move || {
             UnixSocketDaemonTransport::new(socket_path)
-                .upload_multipart_part(request, || match receiver.blocking_recv() {
-                    Some(Ok(frame)) => Ok(Some(frame)),
-                    Some(Err(error)) => Err(DaemonClientError::Transport(error)),
-                    None => Ok(None),
-                })
+                .upload_multipart_part_after_admission(
+                    request,
+                    || {
+                        admitted_sender.send(()).map_err(|_| {
+                            DaemonClientError::Transport(
+                                "HTTP multipart request ended before daemon admission".to_string(),
+                            )
+                        })
+                    },
+                    || match receiver.blocking_recv() {
+                        Some(Ok(frame)) => Ok(Some(frame)),
+                        Some(Err(error)) => Err(DaemonClientError::Transport(error)),
+                        None => Ok(None),
+                    },
+                )
                 .map_err(|error| error.to_string())
         })
         .await
+}
+
+fn upload_task_ended_before_body(
+    result: Result<
+        Result<DaemonApiResponse, crate::daemon_bridge::DaemonBridgeError>,
+        tokio::task::JoinError,
+    >,
+) -> (StatusCode, Json<AuthRouteError>) {
+    match result {
+        Ok(Ok(DaemonApiResponse::Error(error))) => route_error(
+            super::profile_upload::daemon_stream_status(&error.code),
+            error.code,
+            error.message,
+        ),
+        Ok(Ok(response)) => route_error(
+            StatusCode::BAD_GATEWAY,
+            "profile_s3_unexpected_response",
+            format!("daemon multipart upload ended before body admission: {response:?}"),
+        ),
+        Ok(Err(error)) => {
+            super::profile_upload::daemon_stream_bridge_error(error, "profile_s3_multipart_failed")
+        }
+        Err(error) => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "profile_s3_daemon_upload_join_failed",
+            error.to_string(),
+        ),
+    }
 }
 
 fn required_u64_header(
