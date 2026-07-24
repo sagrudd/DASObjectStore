@@ -98,6 +98,7 @@ cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"
 install -m 0755 "$packaging_debian/postrm" "$build_root/DEBIAN/postrm"
+printf '%s\n' '/opt/dasobjectstore/config.json' >"$build_root/DEBIAN/conffiles"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
 

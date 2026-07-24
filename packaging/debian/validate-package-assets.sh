@@ -188,6 +188,7 @@ require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control
 require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_deb" 'DEBIAN/postinst'
+require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
 require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin'

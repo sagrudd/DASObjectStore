@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.125.2 - 2026-07-24
+
+- Register the standalone server configuration as a Debian conffile so APT
+  upgrades preserve operator-owned listener, TLS, authentication, and direct
+  S3 gateway settings instead of silently restoring packaged defaults.
+
 ## 0.125.1 - 2026-07-24
 
 - Authorize the dedicated packaged Web/S3 Unix peer for path-free,
