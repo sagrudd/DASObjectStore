@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.126.2 - 2026-07-24
+
+- Apply managed-pool capacity resolution consistently to direct S3 HEAD,
+  verification, health, and provider-stream discovery after an appliance
+  multipart upload is accepted.
+
 ## 0.126.1 - 2026-07-24
 
 - Let direct S3 ingress on appliance and drive profiles use the authoritative

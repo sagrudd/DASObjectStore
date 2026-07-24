@@ -901,6 +901,7 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
+            let capacity = crate::runtime::direct_s3_profile_capacity(&binding, capacity);
             let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
                 Ok(backend) => backend,
                 Err(error) => {
@@ -974,6 +975,7 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
+            let capacity = crate::runtime::direct_s3_profile_capacity(&binding, capacity);
             let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
                 Ok(backend) => backend,
                 Err(error) => {
@@ -1050,6 +1052,7 @@ where
                     "profile S3 capacity policy is unavailable",
                 )));
             };
+            let capacity = crate::runtime::direct_s3_profile_capacity(&binding, capacity);
             let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
                 Ok(backend) => backend,
                 Err(error) => {
@@ -1180,6 +1183,7 @@ fn advertise_provider_stream_downloads<S, C>(
     else {
         return;
     };
+    let capacity = crate::runtime::direct_s3_profile_capacity(&binding, capacity);
     let Ok(backend) = FolderBackend::open(backend_root, backend_manifest, capacity, 0) else {
         return;
     };
