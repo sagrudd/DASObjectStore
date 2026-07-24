@@ -56,6 +56,17 @@ where
         record: &dasobjectstore_core::backend::BackendObjectRecord,
         upload_id: &str,
     ) -> Result<(), String> {
+        // AfterSsdIngest is an acknowledgement boundary, not permission to
+        // create an undrainable SSD backlog. Prove that the configured copy
+        // count fits on distinct managed HDDs before publishing catalogue
+        // acceptance. The worker repeats the same selection immediately
+        // before copying so a subsequent capacity race remains fail-closed.
+        crate::runtime::select_managed_hdd_roots_with_capacity(
+            &self.hdd_root_path,
+            definition.policy.copies,
+            record.size_bytes,
+        )
+        .map_err(|error| error.to_string())?;
         self.publish_profile_s3_catalogue(&definition.store_id, backend)
             .map_err(|error| error.to_string())?;
         let object_id = match dasobjectstore_metadata::read_s3_object_binding(
@@ -441,7 +452,10 @@ where
                 )));
             }
         }
-        let capacity = definition.policy.capacity.clone();
+        let capacity = crate::runtime::direct_s3_profile_capacity(
+            &binding,
+            definition.policy.capacity.clone(),
+        );
         let mut backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
             Ok(backend) => backend,
             Err(error) => {
@@ -723,6 +737,7 @@ where
                 "profile capacity policy is unavailable",
             )));
         };
+        let capacity = crate::runtime::direct_s3_profile_capacity(&binding, capacity);
         let backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
             Ok(backend) => backend,
             Err(error) => {

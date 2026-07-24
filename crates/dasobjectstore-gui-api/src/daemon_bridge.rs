@@ -294,6 +294,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn completion_specific_deadline_allows_work_beyond_two_seconds() {
+        let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_secs(2));
+        let result = bridge
+            .call_message_with_deadline(Duration::from_secs(3), || {
+                std::thread::sleep(Duration::from_millis(2_100));
+                Ok::<_, String>("committed")
+            })
+            .await;
+        assert_eq!(
+            result.expect("completion survives control deadline"),
+            "committed"
+        );
+    }
+
+    #[tokio::test]
     async fn opens_circuit_after_repeated_blocking_worker_failures() {
         let bridge = DaemonBridge::with_capacity_and_deadline(1, Duration::from_millis(20));
         for _ in 0..3 {

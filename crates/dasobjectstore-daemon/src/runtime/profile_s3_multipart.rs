@@ -40,6 +40,10 @@ struct JournalManifest {
     created_at_unix_seconds: u64,
     #[serde(default)]
     updated_at_unix_seconds: u64,
+    #[serde(default)]
+    completion_intent: Option<MultipartCompletionIntent>,
+    #[serde(default)]
+    completion_receipt: Option<MultipartCompletionReceipt>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -47,7 +51,30 @@ struct JournalManifest {
 enum MultipartLifecycle {
     #[default]
     Receiving,
+    Completing,
+    Committed,
     Aborted,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct MultipartCompletionIntent {
+    object: BackendObjectKey,
+    expected_size_bytes: u64,
+    parts: Vec<MultipartPartRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MultipartCompletionReceipt {
+    pub object: BackendObjectKey,
+    pub size_bytes: u64,
+    pub checksum: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MultipartCompletionClaim {
+    Started,
+    Resuming,
+    Committed(MultipartCompletionReceipt),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -58,7 +85,7 @@ struct JournalPart {
     file_name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MultipartPartRecord {
     pub part_number: u32,
     pub size_bytes: u64,
@@ -108,6 +135,8 @@ impl MultipartPartJournal {
                 lifecycle: MultipartLifecycle::Receiving,
                 created_at_unix_seconds: now_unix_seconds(),
                 updated_at_unix_seconds: now_unix_seconds(),
+                completion_intent: None,
+                completion_receipt: None,
             }
         };
         Ok(Self {
@@ -214,8 +243,12 @@ impl MultipartPartJournal {
             }
             self.manifest = persisted;
         }
-        if self.manifest.lifecycle == MultipartLifecycle::Aborted {
-            return Err(MultipartPartJournalError::Aborted);
+        match self.manifest.lifecycle {
+            MultipartLifecycle::Receiving => {}
+            MultipartLifecycle::Completing | MultipartLifecycle::Committed => {
+                return Err(MultipartPartJournalError::CompletionStarted);
+            }
+            MultipartLifecycle::Aborted => return Err(MultipartPartJournalError::Aborted),
         }
         let temp_path = self
             .directory
@@ -319,14 +352,148 @@ impl MultipartPartJournal {
         Ok(File::open(self.directory.join(&part.file_name)).map_err(io_error)?)
     }
 
-    /// Abort and reclaim a multipart journal. The in-process activity lease is
-    /// checked before the abort marker is persisted, so an S3 abort racing an
-    /// UploadPart can never remove a file being written.
-    pub fn remove(mut self) -> Result<(), MultipartPartJournalError> {
+    /// Durably claim this reservation for one immutable completion request.
+    /// A retry with the same intent resumes; a different intent fails closed.
+    pub fn begin_completion(
+        &mut self,
+        object: BackendObjectKey,
+        expected_size_bytes: u64,
+        parts: Vec<MultipartPartRecord>,
+    ) -> Result<MultipartCompletionClaim, MultipartPartJournalError> {
+        let intent = MultipartCompletionIntent {
+            object,
+            expected_size_bytes,
+            parts,
+        };
+        if self
+            .manifest
+            .completion_intent
+            .as_ref()
+            .is_some_and(|existing| existing != &intent)
+        {
+            return Err(MultipartPartJournalError::CompletionConflict);
+        }
+        match self.manifest.lifecycle {
+            MultipartLifecycle::Receiving => {
+                self.manifest.lifecycle = MultipartLifecycle::Completing;
+                self.manifest.completion_intent = Some(intent);
+                self.manifest.updated_at_unix_seconds = now_unix_seconds();
+                self.persist()?;
+                Ok(MultipartCompletionClaim::Started)
+            }
+            MultipartLifecycle::Completing => {
+                if self.manifest.completion_intent.as_ref() != Some(&intent) {
+                    return Err(MultipartPartJournalError::CompletionConflict);
+                }
+                Ok(MultipartCompletionClaim::Resuming)
+            }
+            MultipartLifecycle::Committed => {
+                if self.manifest.completion_intent.as_ref() != Some(&intent) {
+                    return Err(MultipartPartJournalError::CompletionConflict);
+                }
+                self.manifest
+                    .completion_receipt
+                    .clone()
+                    .map(MultipartCompletionClaim::Committed)
+                    .ok_or_else(|| {
+                        MultipartPartJournalError::Manifest(
+                            "committed multipart journal has no receipt".to_string(),
+                        )
+                    })
+            }
+            MultipartLifecycle::Aborted => Err(MultipartPartJournalError::Aborted),
+        }
+    }
+
+    /// Re-verify the immutable staged parts and derive the assembled object
+    /// checksum without moving or rewriting payload data. This is used only to
+    /// recover a `Completing` journal after a daemon restart or interrupted
+    /// receipt write.
+    pub fn assembled_checksum(&self) -> Result<String, MultipartPartJournalError> {
+        let mut assembled = Sha256::new();
+        for part in &self.manifest.parts {
+            let mut file = File::open(self.directory.join(&part.file_name)).map_err(io_error)?;
+            let mut part_hasher = Sha256::new();
+            let mut size_bytes = 0_u64;
+            let mut buffer = [0_u8; 1024 * 1024];
+            loop {
+                let read = std::io::Read::read(&mut file, &mut buffer).map_err(io_error)?;
+                if read == 0 {
+                    break;
+                }
+                size_bytes = size_bytes
+                    .checked_add(read as u64)
+                    .ok_or(MultipartPartJournalError::SizeOverflow)?;
+                part_hasher.update(&buffer[..read]);
+                assembled.update(&buffer[..read]);
+            }
+            let checksum = format!("sha256:{:x}", part_hasher.finalize());
+            if size_bytes != part.size_bytes || checksum != part.checksum {
+                return Err(MultipartPartJournalError::PartConflict);
+            }
+        }
+        Ok(format!("sha256:{:x}", assembled.finalize()))
+    }
+
+    pub fn mark_committed(
+        &mut self,
+        receipt: MultipartCompletionReceipt,
+    ) -> Result<(), MultipartPartJournalError> {
+        if self.manifest.lifecycle != MultipartLifecycle::Completing {
+            return Err(MultipartPartJournalError::CompletionConflict);
+        }
+        if self
+            .manifest
+            .completion_intent
+            .as_ref()
+            .is_none_or(|intent| {
+                intent.object != receipt.object || intent.expected_size_bytes != receipt.size_bytes
+            })
+        {
+            return Err(MultipartPartJournalError::CompletionConflict);
+        }
+        self.manifest.lifecycle = MultipartLifecycle::Committed;
+        self.manifest.completion_receipt = Some(receipt);
+        self.manifest.updated_at_unix_seconds = now_unix_seconds();
+        self.persist()?;
+        // The durable receipt is the idempotency checkpoint. Once it exists,
+        // staged parts are redundant and must not remain as a second full-size
+        // copy of the committed object.
+        for part in &self.manifest.parts {
+            match fs::remove_file(self.directory.join(&part.file_name)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error(error)),
+            }
+        }
+        File::open(&self.directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(io_error)
+    }
+
+    /// Abort and reclaim a receiving multipart journal. The exclusive activity
+    /// lease serializes this decision with part upload and completion. Once
+    /// completion starts, abort must never turn an ambiguous success into loss.
+    pub fn abort(mut self) -> Result<(), MultipartPartJournalError> {
+        match self.manifest.lifecycle {
+            MultipartLifecycle::Receiving => {}
+            MultipartLifecycle::Completing => {
+                return Err(MultipartPartJournalError::CompletionStarted);
+            }
+            MultipartLifecycle::Committed => {
+                return Err(MultipartPartJournalError::AlreadyCommitted);
+            }
+            MultipartLifecycle::Aborted => return Ok(()),
+        }
         self.manifest.lifecycle = MultipartLifecycle::Aborted;
         self.manifest.updated_at_unix_seconds = now_unix_seconds();
         self.persist()?;
         fs::remove_dir_all(self.directory).map_err(io_error)
+    }
+
+    /// Backwards-compatible alias for daemon-owned abort cleanup.
+    pub fn remove(self) -> Result<(), MultipartPartJournalError> {
+        self.abort()
     }
 
     fn persist(&self) -> Result<(), MultipartPartJournalError> {
@@ -475,7 +642,12 @@ pub fn discover_multipart_reservation_ids(
             // manifest is valid but belongs to another store's lease scan.
             continue;
         }
-        reservation_ids.push(manifest.reservation_id);
+        if matches!(
+            manifest.lifecycle,
+            MultipartLifecycle::Receiving | MultipartLifecycle::Completing
+        ) {
+            reservation_ids.push(manifest.reservation_id);
+        }
     }
     reservation_ids.sort();
     Ok(reservation_ids)
@@ -528,6 +700,26 @@ fn validate_manifest(manifest: &JournalManifest) -> Result<(), MultipartPartJour
     if total > manifest.reservation_size_bytes {
         return Err(MultipartPartJournalError::ReservationExceeded);
     }
+    match manifest.lifecycle {
+        MultipartLifecycle::Receiving | MultipartLifecycle::Aborted
+            if manifest.completion_intent.is_none() && manifest.completion_receipt.is_none() => {}
+        MultipartLifecycle::Completing
+            if manifest.completion_intent.is_some() && manifest.completion_receipt.is_none() => {}
+        MultipartLifecycle::Committed
+            if manifest
+                .completion_intent
+                .as_ref()
+                .zip(manifest.completion_receipt.as_ref())
+                .is_some_and(|(intent, receipt)| {
+                    intent.object == receipt.object
+                        && intent.expected_size_bytes == receipt.size_bytes
+                }) => {}
+        _ => {
+            return Err(MultipartPartJournalError::Manifest(
+                "multipart lifecycle evidence is inconsistent".to_string(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -549,6 +741,9 @@ pub enum MultipartPartJournalError {
     SizeOverflow,
     Active,
     Aborted,
+    CompletionStarted,
+    AlreadyCommitted,
+    CompletionConflict,
     ActivityRegistry,
 }
 
@@ -569,6 +764,13 @@ impl Display for MultipartPartJournalError {
             Self::SizeOverflow => formatter.write_str("multipart part size overflowed"),
             Self::Active => formatter.write_str("multipart upload is active"),
             Self::Aborted => formatter.write_str("multipart upload was aborted"),
+            Self::CompletionStarted => {
+                formatter.write_str("multipart completion is already in progress")
+            }
+            Self::AlreadyCommitted => formatter.write_str("multipart upload is already committed"),
+            Self::CompletionConflict => {
+                formatter.write_str("multipart completion conflicts with the durable intent")
+            }
             Self::ActivityRegistry => {
                 formatter.write_str("multipart activity registry is unavailable")
             }
@@ -725,6 +927,156 @@ mod tests {
         let directory = journal.directory.clone();
         drop(journal);
         assert!(multipart_journal_is_reclaimable(&directory).expect("classification"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn completion_receipt_is_durable_and_retry_is_idempotent() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-receipt-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        let staged_part = journal.directory.join("part-00000001.bin");
+        std::fs::write(&staged_part, b"0123456789").expect("staged part");
+        journal.manifest.parts.push(JournalPart {
+            part_number: 1,
+            size_bytes: 10,
+            checksum: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                .to_string(),
+            file_name: "part-00000001.bin".to_string(),
+        });
+        journal.persist().expect("manifest");
+        let parts = vec![MultipartPartRecord {
+            part_number: 1,
+            size_bytes: 10,
+            checksum: "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                .to_string(),
+        }];
+        assert_eq!(
+            journal
+                .begin_completion(request.object.clone(), 10, parts.clone())
+                .expect("begin"),
+            MultipartCompletionClaim::Started
+        );
+        let receipt = MultipartCompletionReceipt {
+            object: request.object.clone(),
+            size_bytes: 10,
+            checksum: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
+        };
+        journal
+            .mark_committed(receipt.clone())
+            .expect("committed receipt");
+        assert!(!staged_part.exists());
+        drop(journal);
+
+        let mut reopened = MultipartPartJournal::open_for_completion(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            request.object.clone(),
+            10,
+        )
+        .expect("reopen committed journal");
+        assert_eq!(
+            reopened
+                .begin_completion(request.object, 10, parts)
+                .expect("idempotent retry"),
+            MultipartCompletionClaim::Committed(receipt)
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn abort_cannot_race_a_claimed_completion() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-abort-race-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        journal
+            .begin_completion(request.object, 10, Vec::new())
+            .expect("claim completion");
+        let directory = journal.directory.clone();
+        assert!(matches!(
+            journal.abort(),
+            Err(MultipartPartJournalError::CompletionStarted)
+        ));
+        assert!(directory.exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn completing_journal_resumes_after_restart_with_verified_assembled_checksum() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-restart-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        let header = ProviderStreamChunkHeader {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: request.request_id.clone(),
+            offset: 0,
+            payload_len: 5,
+            final_chunk: true,
+            total_size: Some(5),
+            sha256: Some(request.expected_sha256.clone()),
+        };
+        let mut frame = Vec::new();
+        write_provider_stream_frame(&mut frame, &header, b"hello").expect("frame");
+        let part = journal
+            .stage_part(&request, &mut || {
+                crate::api::read_provider_stream_frame(&mut Cursor::new(frame.clone()))
+                    .map_err(|error| MultipartPartJournalError::Io(error.to_string()))
+            })
+            .expect("stage");
+        assert_eq!(
+            journal
+                .begin_completion(request.object.clone(), 5, vec![part.clone()])
+                .expect("begin"),
+            MultipartCompletionClaim::Started
+        );
+        drop(journal);
+
+        let mut resumed = MultipartPartJournal::open_for_completion(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            request.object.clone(),
+            5,
+        )
+        .expect("reopen");
+        assert_eq!(
+            resumed
+                .begin_completion(request.object, 5, vec![part])
+                .expect("resume"),
+            MultipartCompletionClaim::Resuming
+        );
+        assert_eq!(
+            resumed.assembled_checksum().expect("assembled checksum"),
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        drop(resumed);
         let _ = std::fs::remove_dir_all(root);
     }
 }

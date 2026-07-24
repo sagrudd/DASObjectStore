@@ -7,7 +7,7 @@ use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Display},
 };
 
@@ -137,6 +137,7 @@ pub fn read_store_contents(
     }
 
     if table_exists(&connection, "profile_catalogue_objects")? {
+        let s3_bindings = read_s3_projection_bindings(&connection, &request.store_id)?;
         let mut statement = connection.prepare(
             "SELECT object_id, object_version, object_json, committed_at_utc
              FROM profile_catalogue_objects
@@ -158,6 +159,17 @@ pub fn read_store_contents(
                     object_id: row_object_id,
                     object_version: row_version,
                 });
+            }
+            if let Some(binding) = s3_bindings.get(&(object_id.clone(), object.version)) {
+                validate_s3_projection(binding, &object)?;
+                if seen_object_ids.contains(&binding.object_id) {
+                    // Direct-S3 acceptance intentionally retains the portable
+                    // profile catalogue as backend evidence while publishing a
+                    // native object identity for placement and lifecycle work.
+                    // The S3 binding is the authoritative correspondence
+                    // between those identities, so expose only the native row.
+                    continue;
+                }
             }
             let path = relative_object_path(&request.store_id, &object_id);
             if request
@@ -208,6 +220,83 @@ pub fn read_store_contents(
         prefix: request.prefix.clone(),
         objects,
     })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct S3ProjectionBinding {
+    object_id: String,
+    size_bytes: u64,
+    content_hash_algorithm: String,
+    content_hash: String,
+    native_size_bytes: Option<u64>,
+    native_content_hash: Option<String>,
+}
+
+fn read_s3_projection_bindings(
+    connection: &Connection,
+    store_id: &StoreId,
+) -> Result<BTreeMap<(String, u64), S3ProjectionBinding>, StoreContentsReadError> {
+    if !table_exists(connection, "s3_object_bindings")? {
+        return Ok(BTreeMap::new());
+    }
+    let mut statement = connection.prepare(
+        "SELECT b.object_key, b.object_version, b.object_id, b.size_bytes,
+                b.content_hash_algorithm, b.content_hash,
+                o.size_bytes, o.content_hash
+         FROM s3_object_bindings b
+         JOIN objects o ON o.object_id = b.object_id AND o.store_id = b.store_id
+         WHERE b.store_id = ?1
+         ORDER BY b.object_key, b.object_version",
+    )?;
+    let rows = statement.query_map(params![store_id.as_str()], |row| {
+        Ok((
+            (
+                row.get::<_, String>(0)?,
+                checked_object_version(row.get::<_, i64>(1)?)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+            ),
+            S3ProjectionBinding {
+                object_id: row.get(2)?,
+                size_bytes: checked_size_bytes(row.get::<_, i64>(3)?)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                content_hash_algorithm: row.get(4)?,
+                content_hash: row.get(5)?,
+                native_size_bytes: row
+                    .get::<_, Option<i64>>(6)?
+                    .map(checked_size_bytes)
+                    .transpose()
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?,
+                native_content_hash: row.get(7)?,
+            },
+        ))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(Into::into)
+}
+
+fn validate_s3_projection(
+    binding: &S3ProjectionBinding,
+    profile: &PortableObjectVersion,
+) -> Result<(), StoreContentsReadError> {
+    let checksum_matches = binding
+        .content_hash_algorithm
+        .eq_ignore_ascii_case(&profile.checksum.algorithm)
+        && binding
+            .content_hash
+            .trim_start_matches("sha256:")
+            .eq_ignore_ascii_case(profile.checksum.value.trim_start_matches("sha256:"));
+    let native_matches = binding.native_size_bytes == Some(binding.size_bytes)
+        && binding.native_content_hash.as_deref().is_some_and(|hash| {
+            hash.trim_start_matches("sha256:")
+                .eq_ignore_ascii_case(binding.content_hash.trim_start_matches("sha256:"))
+        });
+    if binding.size_bytes != profile.size_bytes || !checksum_matches || !native_matches {
+        return Err(StoreContentsReadError::S3ProjectionConflict {
+            object_id: profile.object_id.to_string(),
+            object_version: profile.version,
+        });
+    }
+    Ok(())
 }
 
 fn table_exists(connection: &Connection, table_name: &str) -> Result<bool, StoreContentsReadError> {
@@ -279,6 +368,10 @@ pub enum StoreContentsReadError {
         object_id: String,
         object_version: u64,
     },
+    S3ProjectionConflict {
+        object_id: String,
+        object_version: u64,
+    },
 }
 
 impl Display for StoreContentsReadError {
@@ -310,6 +403,13 @@ impl Display for StoreContentsReadError {
             } => write!(
                 formatter,
                 "profile catalogue row identity does not match object `{object_id}` version {object_version}"
+            ),
+            Self::S3ProjectionConflict {
+                object_id,
+                object_version,
+            } => write!(
+                formatter,
+                "S3 binding conflicts with profile catalogue object `{object_id}` version {object_version}"
             ),
         }
     }
@@ -411,6 +511,76 @@ mod tests {
         assert_eq!(snapshot.objects[0].object_type, "image");
         assert_eq!(snapshot.objects[0].size_bytes, 128);
 
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn s3_binding_projects_prefixed_native_identity_over_portable_profile_identity() {
+        let root = temp_root("contents-s3-native-projection");
+        let live_sqlite_path = create_live_sqlite(&root);
+        let key = "GSE224365_RAW.tar";
+        let native_object_id = format!("zymo_fecal_2025.05/{key}");
+        insert_object(&live_sqlite_path, &native_object_id, 512, "naive");
+        set_object_hash(&live_sqlite_path, &native_object_id, &"a".repeat(64));
+        insert_profile_object(&live_sqlite_path, key, 1, 512);
+        insert_s3_binding(
+            &live_sqlite_path,
+            key,
+            1,
+            &native_object_id,
+            512,
+            &"a".repeat(64),
+        );
+
+        let snapshot = read_store_contents(&StoreContentsRequest::new(
+            &live_sqlite_path,
+            StoreId::new("zymo_fecal_2025.05").expect("store id"),
+        ))
+        .expect("deduplicated S3 projection");
+
+        assert_eq!(snapshot.objects.len(), 1);
+        assert_eq!(snapshot.objects[0].object_id, native_object_id);
+        assert_eq!(snapshot.objects[0].path, key);
+        assert_eq!(snapshot.objects[0].object_type, "naive");
+
+        let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
+        let profile_rows: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM profile_catalogue_objects WHERE object_id=?1",
+                [key],
+                |row| row.get(0),
+            )
+            .expect("profile evidence remains");
+        assert_eq!(
+            profile_rows, 1,
+            "projection never deletes portable evidence"
+        );
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn s3_binding_projection_fails_closed_on_profile_evidence_conflict() {
+        let root = temp_root("contents-s3-projection-conflict");
+        let live_sqlite_path = create_live_sqlite(&root);
+        let key = "GSE224365_RAW.tar";
+        let native_object_id = format!("zymo_fecal_2025.05/{key}");
+        insert_object(&live_sqlite_path, &native_object_id, 512, "naive");
+        insert_profile_object(&live_sqlite_path, key, 1, 513);
+        insert_s3_binding(
+            &live_sqlite_path,
+            key,
+            1,
+            &native_object_id,
+            512,
+            &"a".repeat(64),
+        );
+
+        let error = read_store_contents(&StoreContentsRequest::new(
+            &live_sqlite_path,
+            StoreId::new("zymo_fecal_2025.05").expect("store id"),
+        ))
+        .expect_err("changed portable evidence must fail closed");
+        assert!(error.to_string().contains("S3 binding conflicts"));
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
@@ -631,6 +801,44 @@ mod tests {
                 ],
             )
             .expect("profile object inserts");
+    }
+
+    fn set_object_hash(live_sqlite_path: &Path, object_id: &str, content_hash: &str) {
+        Connection::open(live_sqlite_path)
+            .expect("open sqlite")
+            .execute(
+                "UPDATE objects SET content_hash=?1 WHERE object_id=?2",
+                params![content_hash, object_id],
+            )
+            .expect("object hash update");
+    }
+
+    fn insert_s3_binding(
+        live_sqlite_path: &Path,
+        key: &str,
+        version: i64,
+        object_id: &str,
+        size_bytes: u64,
+        content_hash: &str,
+    ) {
+        Connection::open(live_sqlite_path)
+            .expect("open sqlite")
+            .execute(
+                "INSERT INTO s3_object_bindings (
+                    store_id, object_key, object_version, object_id, size_bytes,
+                    content_hash_algorithm, content_hash, created_at_utc, updated_at_utc
+                 ) VALUES (?1,?2,?3,?4,?5,'sha256',?6,?7,?7)",
+                params![
+                    "zymo_fecal_2025.05",
+                    key,
+                    version,
+                    object_id,
+                    size_bytes,
+                    content_hash,
+                    "2026-01-05T00:00:00Z"
+                ],
+            )
+            .expect("S3 binding insert");
     }
 
     fn temp_root(name: &str) -> PathBuf {

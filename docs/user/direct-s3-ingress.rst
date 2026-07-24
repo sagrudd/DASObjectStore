@@ -293,6 +293,20 @@ resumable, legacy, malformed, symlinked, hard-linked, or otherwise ambiguous
 journals remain retained for operator review. Never remove multipart
 directories directly.
 
+Completion persists an immutable intent before assembling the object and a
+committed receipt before discarding redundant part files. A matching retry
+returns that receipt, including after an HTTP wait timeout or daemon restart;
+it does not rebuild or abort the object. Completion uses a size-aware deadline
+rather than the normal two-second control request deadline. Once completion
+has started, abort fails closed.
+
+Before acknowledging direct-S3 SSD acceptance, the daemon proves that the
+complete object fits on the required number of distinct managed HDDs. Eligible
+HDDs are ranked by the largest fractional free capacity, not discovery order
+or absolute free bytes. Disk identity is only a deterministic tie-break for
+equal fractions. The worker repeats this selection immediately before copying
+so a disk that filled after admission is skipped without losing the SSD copy.
+
 Also exercise zero-byte, sidecar (payload, ``.manifest.json``, ``.sha256``),
 length/checksum mismatch, capacity exhaustion, daemon restart during receive,
 restart during publication, and both acknowledgement policies.

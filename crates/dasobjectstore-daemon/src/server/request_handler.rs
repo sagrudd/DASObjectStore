@@ -1322,6 +1322,14 @@ mod tests {
         cleanup(&root);
         let backend_root = root.join("backend");
         fs::create_dir_all(&backend_root).expect("backend root");
+        let hdd_root = root.join("hdd");
+        let hdd_disk = hdd_root.join("disk-a");
+        fs::create_dir_all(hdd_disk.join(".dasobjectstore")).expect("HDD marker directory");
+        fs::write(
+            hdd_disk.join(".dasobjectstore/device.env"),
+            "role=hdd:disk-a\n",
+        )
+        .expect("HDD marker");
         let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
             &root,
             "upload-store",
@@ -1359,6 +1367,7 @@ mod tests {
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-14T09:00:00Z"))
                 .with_registry_paths(&store_registry, &subobject_registry)
                 .with_live_sqlite_path(&live_sqlite)
+                .with_hdd_root_path(&hdd_root)
                 .with_profile_binding_registry_path(&profile_registry);
         let actor = DaemonLocalActor::new(0)
             .with_username("root")

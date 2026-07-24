@@ -336,18 +336,16 @@ pub fn direct_s3_profile_backend(
     Ok((root, manifest))
 }
 
-/// Translate an appliance or drive store's intentionally unbounded logical
-/// quota into a finite implementation limit for the private folder-shaped S3
-/// backend. Physical admission remains authoritative at the managed pool; the
-/// maximum value only prevents the internal folder ledger from inventing a
-/// per-store quota that the persisted store policy does not define.
+/// Translate an intentionally unbounded logical quota into a finite
+/// implementation limit for the private folder-shaped S3 backend. Physical
+/// admission remains authoritative at the managed pool; the maximum value only
+/// prevents the internal folder ledger from inventing a per-store quota that
+/// the persisted store policy does not define.
 pub fn direct_s3_profile_capacity(
-    binding: &super::BackendProfileBinding,
+    _binding: &super::BackendProfileBinding,
     mut capacity: dasobjectstore_core::store::CapacityPolicy,
 ) -> dasobjectstore_core::store::CapacityPolicy {
-    if binding.manifest.deployment_profile != DeploymentProfile::Folder
-        && capacity.logical_limit_bytes.is_none()
-    {
+    if capacity.logical_limit_bytes.is_none() {
         capacity.logical_limit_bytes = Some(u64::MAX);
     }
     capacity
@@ -708,6 +706,33 @@ mod tests {
             &binding,
             dasobjectstore_core::store::CapacityPolicy::default(),
         );
+        assert_eq!(internal_capacity.logical_limit_bytes, Some(u64::MAX));
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn unbounded_folder_policy_uses_the_same_internal_capacity_as_multipart() {
+        let root = root("unbounded-folder-profile");
+        let binding = super::super::BackendProfileBinding {
+            manifest: ObjectStoreManifest {
+                schema_version: dasobjectstore_core::manifest::OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                store_id: StoreId::new("epic_collection").expect("store"),
+                deployment_profile: DeploymentProfile::Folder,
+                host_mode: dasobjectstore_core::deployment::HostMode::System,
+                protection: dasobjectstore_core::protection::ProtectionPolicy::LocalOnly,
+                backend: BackendReference::Folder {
+                    root_identity: "epic-folder".to_string(),
+                },
+            },
+            backend_root: fs::canonicalize(&root).expect("canonical root"),
+            ssd_staging_root: None,
+        };
+
+        let internal_capacity = direct_s3_profile_capacity(
+            &binding,
+            dasobjectstore_core::store::CapacityPolicy::default(),
+        );
+
         assert_eq!(internal_capacity.logical_limit_bytes, Some(u64::MAX));
         fs::remove_dir_all(root).ok();
     }

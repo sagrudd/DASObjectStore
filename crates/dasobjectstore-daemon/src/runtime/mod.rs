@@ -128,6 +128,7 @@ pub use config::{
     DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
     LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
 };
+pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;
 pub use destage_worker::{
     run_one_durable_destage, DurableDestageOutcome, DurableDestageWorkerConfig,
 };
@@ -236,8 +237,8 @@ pub use profile_s3::{
     PROFILE_S3_MAX_KEYS, PROFILE_S3_MAX_MULTIPART_PARTS,
 };
 pub use profile_s3_multipart::{
-    discover_multipart_reservation_ids, MultipartPartJournal, MultipartPartJournalError,
-    MultipartPartRecord,
+    discover_multipart_reservation_ids, MultipartCompletionClaim, MultipartCompletionReceipt,
+    MultipartPartJournal, MultipartPartJournalError, MultipartPartRecord,
 };
 pub use reconciliation::{
     normalize_key, plan_reconciliation, ReconciliationAction, ReconciliationEntryState,

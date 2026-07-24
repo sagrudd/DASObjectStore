@@ -33,6 +33,9 @@ use tokio_stream::StreamExt;
 
 const PART_UPLOAD_CHANNEL_CAPACITY: usize = 2;
 const PART_UPLOAD_DAEMON_DEADLINE: Duration = Duration::from_secs(300);
+const COMPLETION_MINIMUM_DEADLINE: Duration = Duration::from_secs(60);
+const COMPLETION_MAXIMUM_DEADLINE: Duration = Duration::from_secs(6 * 60 * 60);
+const COMPLETION_MINIMUM_BYTES_PER_SECOND: u64 = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct ProfileS3MultipartCompleteBody {
@@ -331,8 +334,9 @@ pub(crate) async fn complete_profile_s3_multipart(
     axum::Json<ProfileS3MultipartCompletionResponse>,
     (StatusCode, axum::Json<AuthRouteError>),
 > {
+    let deadline = multipart_completion_deadline(request.expected_size_bytes);
     crate::daemon_bridge::DaemonBridge::shared_packaged()
-        .call_message(move || {
+        .call_message_with_deadline(deadline, move || {
             let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             ));
@@ -345,4 +349,32 @@ pub(crate) async fn complete_profile_s3_multipart(
         .map_err(|error| {
             admin_daemon_bridge_error_with_code(error, "profile_s3_multipart_complete_failed")
         })
+}
+
+fn multipart_completion_deadline(size_bytes: u64) -> Duration {
+    let copy_seconds = size_bytes.saturating_add(COMPLETION_MINIMUM_BYTES_PER_SECOND - 1)
+        / COMPLETION_MINIMUM_BYTES_PER_SECOND;
+    COMPLETION_MINIMUM_DEADLINE
+        .saturating_add(Duration::from_secs(copy_seconds))
+        .min(COMPLETION_MAXIMUM_DEADLINE)
+}
+
+#[cfg(test)]
+mod completion_deadline_tests {
+    use super::*;
+
+    #[test]
+    fn ten_gib_completion_has_a_size_aware_deadline() {
+        let deadline = multipart_completion_deadline(10 * 1024 * 1024 * 1024);
+        assert!(deadline > Duration::from_secs(2));
+        assert_eq!(deadline, Duration::from_secs(60 + 1_280));
+    }
+
+    #[test]
+    fn completion_deadline_is_bounded() {
+        assert_eq!(
+            multipart_completion_deadline(u64::MAX),
+            COMPLETION_MAXIMUM_DEADLINE
+        );
+    }
 }

@@ -606,11 +606,21 @@ where
             );
             let aborted = match journal {
                 Ok(journal) => {
-                    if let Err(error) = journal.remove() {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_multipart_abort_failed",
-                            error.to_string(),
-                        )));
+                    match journal.abort() {
+                        Ok(()) => {}
+                        Err(crate::runtime::MultipartPartJournalError::CompletionStarted)
+                        | Err(crate::runtime::MultipartPartJournalError::AlreadyCommitted) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                "profile_s3_multipart_completion_active",
+                                "multipart completion has started and cannot be aborted",
+                            )));
+                        }
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                "profile_s3_multipart_abort_failed",
+                                error.to_string(),
+                            )));
+                        }
                     }
                     if let Some(provider) = handler.service_orchestrator.capacity_provider() {
                         match authorized.subobject.as_deref() {
@@ -692,7 +702,7 @@ where
                 &binding,
                 definition.policy.capacity.clone(),
             );
-            let journal = match crate::runtime::MultipartPartJournal::open_for_completion(
+            let mut journal = match crate::runtime::MultipartPartJournal::open_for_completion(
                 &backend_root,
                 request.store_id.as_str(),
                 &request.reservation_id,
@@ -725,6 +735,106 @@ where
                     "multipart completion does not match all verified staged parts",
                 )));
             }
+            let completion_claim = match journal.begin_completion(
+                qualified_key.clone(),
+                request.expected_size_bytes,
+                requested_parts,
+            ) {
+                Ok(receipt) => receipt,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_completion_conflict",
+                        error.to_string(),
+                    )));
+                }
+            };
+            if let crate::runtime::MultipartCompletionClaim::Committed(receipt) = &completion_claim
+            {
+                return Ok(DaemonApiResponse::ProfileS3MultipartComplete(
+                    crate::api::ProfileS3MultipartCompletionResponse {
+                        schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                        store_id,
+                        reservation_id: request.reservation_id,
+                        key: receipt.object.clone(),
+                        committed: true,
+                    },
+                ));
+            }
+            let mut backend =
+                match FolderBackend::open(&backend_root, backend_manifest, capacity, 0) {
+                    Ok(backend) => backend,
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            error.to_string(),
+                        )));
+                    }
+                };
+            if completion_claim == crate::runtime::MultipartCompletionClaim::Resuming {
+                let recovered = match backend.records() {
+                    Ok(records) => records
+                        .into_iter()
+                        .find(|record| record.key == qualified_key),
+                    Err(error) => {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_recovery_failed",
+                            error.to_string(),
+                        )));
+                    }
+                };
+                if let Some(record) = recovered {
+                    let assembled_checksum = match journal.assembled_checksum() {
+                        Ok(checksum) => checksum,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                "profile_s3_multipart_recovery_failed",
+                                error.to_string(),
+                            )));
+                        }
+                    };
+                    if record.size_bytes != request.expected_size_bytes
+                        || record.checksum != assembled_checksum
+                    {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_completion_conflict",
+                            "published backend object conflicts with the durable multipart intent",
+                        )));
+                    }
+                    if let Err(error) = handler.commit_profile_s3_acceptance(
+                        &definition,
+                        &binding,
+                        &backend,
+                        &record,
+                        &request.reservation_id,
+                    ) {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_publication_failed",
+                            error,
+                        )));
+                    }
+                    if let Err(error) =
+                        journal.mark_committed(crate::runtime::MultipartCompletionReceipt {
+                            object: record.key.clone(),
+                            size_bytes: record.size_bytes,
+                            checksum: record.checksum.clone(),
+                        })
+                    {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_multipart_receipt_failed",
+                            error.to_string(),
+                        )));
+                    }
+                    return Ok(DaemonApiResponse::ProfileS3MultipartComplete(
+                        crate::api::ProfileS3MultipartCompletionResponse {
+                            schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                            store_id,
+                            reservation_id: request.reservation_id,
+                            key: record.key,
+                            committed: true,
+                        },
+                    ));
+                }
+            }
             let mut sources = Vec::with_capacity(request.parts.len());
             for part in &request.parts {
                 let reader = match journal.open_part(part.part_number) {
@@ -745,16 +855,6 @@ where
                     reader: Box::new(reader),
                 });
             }
-            let mut backend =
-                match FolderBackend::open(&backend_root, backend_manifest, capacity, 0) {
-                    Ok(backend) => backend,
-                    Err(error) => {
-                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                            "profile_s3_unavailable",
-                            error.to_string(),
-                        )));
-                    }
-                };
             let Some(provider) = handler.service_orchestrator.capacity_provider() else {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_multipart_unavailable",
@@ -804,6 +904,16 @@ where
                     error,
                 )));
             }
+            if let Err(error) = journal.mark_committed(crate::runtime::MultipartCompletionReceipt {
+                object: record.key.clone(),
+                size_bytes: record.size_bytes,
+                checksum: record.checksum.clone(),
+            }) {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "profile_s3_multipart_receipt_failed",
+                    error.to_string(),
+                )));
+            }
             let response = crate::api::ProfileS3MultipartCompletionResponse {
                 schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
                 store_id,
@@ -811,7 +921,6 @@ where
                 key: record.key,
                 committed: true,
             };
-            let _ = journal.remove();
             Ok(DaemonApiResponse::ProfileS3MultipartComplete(response))
         }
         DaemonApiRequest::ProfileS3Head(request) => {

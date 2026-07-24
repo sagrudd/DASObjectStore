@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.128.0 - 2026-07-24
+
+- Make direct-S3 multipart completion restart-safe and idempotent with durable
+  completion intent and receipt state, a size-aware gateway deadline, and
+  abort exclusion after completion starts.
+- Apply one authoritative unbounded-capacity adapter to multipart and direct
+  PUT, including tiny sidecars.
+- Reject SSD acknowledgement when required HDD copies cannot fit, and rank
+  eligible HDD targets by greatest fractional free capacity rather than
+  lexical discovery order or absolute free bytes.
+- Project matching portable profile and native direct-S3 catalogue evidence as
+  one authoritative object while retaining both metadata and payload evidence.
+
 ## 0.127.1 - 2026-07-24
 
 - Route direct-S3 multipart abort requests into the daemon storage handler so

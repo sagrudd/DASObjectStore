@@ -1053,7 +1053,14 @@ hardware acceptance.
   mirroring multi-TiB payloads into Garage. Known but unreadable objects return
   temporary unavailability, immutable key conflicts fail closed, and a
   regression proves HDD-only native payloads are visible through the S3
-  contract.
+  contract. Release 0.128.0 makes multipart completion restart-safe and
+  idempotent with durable intent/receipt state and a size-aware wait, blocks
+  abort once completion begins, applies the same unbounded logical-capacity
+  adapter to direct PUT and multipart, and selects sufficient HDD targets by
+  greatest fractional free capacity before both SSD acknowledgement and
+  destage. Direct-S3 portable/native catalogue evidence is projected as one
+  object only after a three-way size/checksum agreement, without deleting
+  either evidence layer or payload data.
   Release 0.127.0 adds provider-stream v2 pre-body admission, resource-derived
   provider capacity independent of ordinary NOMISS ingest and control lanes,
   exact S3 ``SlowDown``/``Retry-After`` backpressure, leased multipart journal

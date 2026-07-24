@@ -6,7 +6,7 @@ use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::utc::add_seconds_to_utc_timestamp;
 use dasobjectstore_metadata::{
     claim_next_destage, fail_destage, list_ssd_eviction_candidates, mark_ssd_evicted,
-    promote_hdd_settlement, read_ssd_placement,
+    measure_ssd_capacity, promote_hdd_settlement, read_ssd_placement,
     settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
     DestageQueueRecord, HddSettlementPromotionRequest, ObjectPutError, StagedObjectPut,
     VerifiedHddPlacement,
@@ -173,13 +173,11 @@ fn settle_claimed_record(
         });
     }
     let object_type = parse_queued_object_type(&record.object_type)?;
-    let roots = discover_managed_hdd_roots(&config.hdd_root)?;
-    if roots.len() < record.required_copy_count as usize {
-        return Err(DurableDestageWorkerError::InsufficientHddRoots {
-            required: record.required_copy_count,
-            available: roots.len(),
-        });
-    }
+    let roots = select_managed_hdd_roots_with_capacity(
+        &config.hdd_root,
+        record.required_copy_count,
+        record.expected_size_bytes,
+    )?;
     let job_root = payload_path
         .parent()
         .ok_or_else(|| DurableDestageWorkerError::UnsafeSsdPlacement(ssd.relative_path.clone()))?
@@ -252,6 +250,79 @@ fn settle_claimed_record(
     // left to the separate eviction pass so a cleanup failure can never turn
     // a successfully settled queue row back into a failed destage attempt.
     Ok(u8::try_from(placements.len()).unwrap_or(u8::MAX))
+}
+
+/// Select distinct managed HDD roots that can hold a complete copy before
+/// beginning a destage write. Discovery order is not a placement policy:
+/// roots are first filtered by complete-file capacity, then ranked by their
+/// exact fractional free capacity. Disk identity is only a deterministic
+/// tiebreaker when two fractions are equal.
+pub(crate) fn select_managed_hdd_roots_with_capacity(
+    hdd_root: &Path,
+    required_copies: u8,
+    required_bytes: u64,
+) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    select_hdd_roots_with_capacity(
+        discover_managed_hdd_roots(hdd_root)?,
+        required_copies,
+        required_bytes,
+        |root| {
+            measure_ssd_capacity(&root.root_path)
+                .map(|capacity| (capacity.available_bytes, capacity.total_bytes))
+                .map_err(|error| error.to_string())
+        },
+    )
+}
+
+fn select_hdd_roots_with_capacity(
+    roots: Vec<dasobjectstore_metadata::DiskCopyRoot>,
+    required_copies: u8,
+    required_bytes: u64,
+    mut capacity: impl FnMut(&dasobjectstore_metadata::DiskCopyRoot) -> Result<(u64, u64), String>,
+) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    if roots.len() < usize::from(required_copies) {
+        return Err(DurableDestageWorkerError::InsufficientHddRoots {
+            required: required_copies,
+            available: roots.len(),
+        });
+    }
+    let measured = roots
+        .into_iter()
+        .filter_map(|root| {
+            capacity(&root)
+                .ok()
+                .and_then(|(available, total)| (total > 0).then_some((root, available, total)))
+        })
+        .collect::<Vec<_>>();
+    let greatest_available_bytes = measured
+        .iter()
+        .map(|(_, available, _)| *available)
+        .max()
+        .unwrap_or(0);
+    let mut eligible = measured
+        .into_iter()
+        .filter(|(_, available, _)| *available >= required_bytes)
+        .collect::<Vec<_>>();
+    eligible.sort_by(
+        |(left_root, left_available, left_total), (right_root, right_available, right_total)| {
+            (u128::from(*right_available) * u128::from(*left_total))
+                .cmp(&(u128::from(*left_available) * u128::from(*right_total)))
+                .then_with(|| left_root.disk_id.cmp(&right_root.disk_id))
+        },
+    );
+    if eligible.len() < usize::from(required_copies) {
+        return Err(DurableDestageWorkerError::InsufficientHddCapacity {
+            required_copies,
+            required_bytes,
+            eligible_roots: eligible.len(),
+            greatest_available_bytes,
+        });
+    }
+    Ok(eligible
+        .into_iter()
+        .take(usize::from(required_copies))
+        .map(|(root, _, _)| root)
+        .collect())
 }
 
 fn parse_queued_object_type(value: &str) -> Result<ObjectType, DurableDestageWorkerError> {
@@ -434,6 +505,12 @@ pub enum DurableDestageWorkerError {
         required: u8,
         available: usize,
     },
+    InsufficientHddCapacity {
+        required_copies: u8,
+        required_bytes: u64,
+        eligible_roots: usize,
+        greatest_available_bytes: u64,
+    },
     UnknownPlacementDisk(String),
     UnsafeHddPlacement(PathBuf),
 }
@@ -475,6 +552,15 @@ impl Display for DurableDestageWorkerError {
                 formatter,
                 "destage requires {required} HDD roots, found {available}"
             ),
+            Self::InsufficientHddCapacity {
+                required_copies,
+                required_bytes,
+                eligible_roots,
+                greatest_available_bytes,
+            } => write!(
+                formatter,
+                "HDD capacity blocked: destage requires {required_copies} distinct copy/copies of {required_bytes} bytes, found {eligible_roots} eligible root(s); greatest available capacity is {greatest_available_bytes} bytes"
+            ),
             Self::UnknownPlacementDisk(disk_id) => {
                 write!(formatter, "destage returned unknown disk {disk_id}")
             }
@@ -515,11 +601,13 @@ impl From<std::io::Error> for DurableDestageWorkerError {
 mod tests {
     use super::{
         parse_queued_object_type, remove_managed_direct_s3_payload, remove_managed_ssd_job_root,
-        retry_delay_seconds, safe_relative_path,
+        retry_delay_seconds, safe_relative_path, select_hdd_roots_with_capacity,
     };
-    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_core::ids::{DiskId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
+    use dasobjectstore_metadata::DiskCopyRoot;
     use sha2::Digest;
+    use std::collections::BTreeMap;
     use std::fs;
 
     #[test]
@@ -564,6 +652,99 @@ mod tests {
         assert!(safe_relative_path(".dasobjectstore/ingest/jobs/a/payload").is_some());
         assert!(safe_relative_path("../escape").is_none());
         assert!(safe_relative_path("/absolute").is_none());
+    }
+
+    #[test]
+    fn destage_skips_a_full_first_disk_and_selects_capacity_eligible_roots() {
+        let roots = ["disk-a", "disk-b", "disk-c"]
+            .into_iter()
+            .map(|id| {
+                DiskCopyRoot::new(DiskId::new(id).expect("disk id"), format!("/managed/{id}"))
+            })
+            .collect::<Vec<_>>();
+        let capacity = BTreeMap::from([
+            ("disk-a", (19_u64, 1_000_u64)),
+            ("disk-b", (1_000_u64, 2_000_u64)),
+            ("disk-c", (900_u64, 1_000_u64)),
+        ]);
+        let selected = select_hdd_roots_with_capacity(roots, 1, 500, |root| {
+            Ok(capacity[root.disk_id.as_str()])
+        })
+        .expect("capacity-eligible root");
+        assert_eq!(selected[0].disk_id.as_str(), "disk-c");
+    }
+
+    #[test]
+    fn destage_reports_capacity_block_before_copy_when_no_root_can_fit() {
+        let roots = ["disk-a", "disk-b"]
+            .into_iter()
+            .map(|id| {
+                DiskCopyRoot::new(DiskId::new(id).expect("disk id"), format!("/managed/{id}"))
+            })
+            .collect::<Vec<_>>();
+        let error = select_hdd_roots_with_capacity(roots, 1, 500, |_| Ok((499, 1_000)))
+            .expect_err("capacity block");
+        assert!(matches!(
+            error,
+            super::DurableDestageWorkerError::InsufficientHddCapacity {
+                required_copies: 1,
+                required_bytes: 500,
+                eligible_roots: 0,
+                greatest_available_bytes: 499,
+            }
+        ));
+        assert!(error.to_string().contains("HDD capacity blocked"));
+    }
+
+    #[test]
+    fn destage_selects_distinct_roots_for_every_required_copy() {
+        let roots = ["disk-a", "disk-b", "disk-c"]
+            .into_iter()
+            .map(|id| {
+                DiskCopyRoot::new(DiskId::new(id).expect("disk id"), format!("/managed/{id}"))
+            })
+            .collect::<Vec<_>>();
+        let capacity = BTreeMap::from([
+            ("disk-a", (1_000_u64, 2_000_u64)),
+            ("disk-b", (900_u64, 1_000_u64)),
+            ("disk-c", (100_u64, 1_000_u64)),
+        ]);
+        let selected = select_hdd_roots_with_capacity(roots, 2, 500, |root| {
+            Ok(capacity[root.disk_id.as_str()])
+        })
+        .expect("two eligible roots");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|root| root.disk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["disk-b", "disk-a"]
+        );
+    }
+
+    #[test]
+    fn destage_uses_disk_id_only_to_break_an_exact_free_fraction_tie() {
+        let roots = ["disk-b", "disk-a"]
+            .into_iter()
+            .map(|id| {
+                DiskCopyRoot::new(DiskId::new(id).expect("disk id"), format!("/managed/{id}"))
+            })
+            .collect::<Vec<_>>();
+        let selected = select_hdd_roots_with_capacity(roots, 2, 10, |root| {
+            Ok(match root.disk_id.as_str() {
+                "disk-a" => (500, 1_000),
+                "disk-b" => (1_000, 2_000),
+                _ => unreachable!(),
+            })
+        })
+        .expect("ratio-tied roots");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|root| root.disk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["disk-a", "disk-b"]
+        );
     }
 
     #[test]
