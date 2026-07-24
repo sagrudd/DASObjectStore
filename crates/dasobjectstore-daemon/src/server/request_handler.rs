@@ -4285,6 +4285,31 @@ mod tests {
     }
 
     #[test]
+    fn routes_profile_s3_multipart_abort_to_storage_handler() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+
+        let response = handler
+            .handle(DaemonApiRequest::ProfileS3MultipartAbort(
+                crate::api::ProfileS3MultipartAbortRequest {
+                    store_id: StoreId::new("epic_collection").expect("store id"),
+                    reservation_id: "multipart-reservation".to_string(),
+                    key: BackendObjectKey {
+                        object_id: "GSE224365_RAW.tar".to_string(),
+                        version: 1,
+                    },
+                },
+            ))
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code != "not_implemented"
+        ));
+    }
+
+    #[test]
     fn system_clock_returns_nonblank_timestamp() {
         assert!(!SystemDaemonClock.now_utc().trim().is_empty());
     }

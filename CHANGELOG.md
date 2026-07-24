@@ -8,6 +8,11 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.127.1 - 2026-07-24
+
+- Route direct-S3 multipart abort requests into the daemon storage handler so
+  aborted reservations transition durably before daemon-owned reclamation.
+
 ## 0.127.0 - 2026-07-24
 
 - Add provider-stream protocol v2 admission acknowledgements so direct-S3 PUT
