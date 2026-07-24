@@ -100,7 +100,7 @@ where
                 destage_job_id: &destage_job_id,
                 store_id: &definition.store_id,
                 object_id: &object_id,
-                object_type: definition.policy.class.name(),
+                object_type: dasobjectstore_core::object_type::ObjectType::Naive.name(),
                 relative_path: &relative_path,
                 size_bytes: record.size_bytes,
                 content_hash_algorithm: "sha256",

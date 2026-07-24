@@ -226,13 +226,25 @@ fn object_summary_from_row(
 }
 
 fn parse_object_type(value: String) -> Result<ObjectType, rusqlite::Error> {
-    value.parse().map_err(|source| {
-        rusqlite::Error::FromSqlConversionFailure(
+    match value.parse() {
+        Ok(object_type) => Ok(object_type),
+        Err(_)
+            if value
+                .parse::<dasobjectstore_core::store::StoreClass>()
+                .is_ok() =>
+        {
+            // EasyConnect S3 builds before 0.126.4 wrote the store retention
+            // class into this object-format column. Such arbitrary payloads
+            // have no stronger type and remain readable as canonical naive
+            // objects during the compatibility window.
+            Ok(ObjectType::Naive)
+        }
+        Err(source) => Err(rusqlite::Error::FromSqlConversionFailure(
             3,
             Type::Text,
             Box::new(ObjectInspectError::InvalidObjectType { value, source }),
-        )
-    })
+        )),
+    }
 }
 
 fn read_object_placements(
@@ -297,7 +309,9 @@ fn optional_u64(field: &'static str, value: Option<i64>) -> Result<Option<u64>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{read_object_inspect, read_store_object_inspects, ObjectInspectError};
+    use super::{
+        parse_object_type, read_object_inspect, read_store_object_inspects, ObjectInspectError,
+    };
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -305,6 +319,15 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn legacy_store_class_object_type_is_read_as_naive() {
+        assert_eq!(
+            parse_object_type("generated_data".to_string()).expect("legacy S3 metadata"),
+            ObjectType::Naive
+        );
+        assert!(parse_object_type("invalid-type".to_string()).is_err());
+    }
 
     #[test]
     fn reads_object_summary_with_verified_placements() {

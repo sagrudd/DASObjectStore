@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.126.4 - 2026-07-24
+
+- Persist direct S3 catalogue objects with the canonical ``naive`` object type
+  and retain read compatibility for the invalid store-class values written by
+  earlier EasyConnect builds.
+
 ## 0.126.3 - 2026-07-24
 
 - Classify arbitrary EasyConnect S3 payloads as the canonical ``naive``
