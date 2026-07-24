@@ -57,6 +57,11 @@ pub struct VerifiedSsdCommitRequest<'a> {
     /// transaction as catalogue visibility and the destage queue.
     pub ingest_job_id: Option<&'a str>,
     pub ingress_origin: Option<&'a str>,
+    /// Stable northbound S3 key. When present, this binding is committed in
+    /// the same transaction as the native object, verified SSD placement, and
+    /// HDD destage work.
+    pub s3_key: Option<&'a str>,
+    pub s3_version: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -154,6 +159,7 @@ pub fn commit_verified_ssd_and_enqueue(
             ));
         }
         insert_ingress_job(&tx, &request, size)?;
+        bind_s3_identity(&tx, &request)?;
         let job_id: String = tx.query_row(
             "SELECT destage_job_id FROM destage_queue WHERE object_id = ?1",
             [request.object_id.as_str()],
@@ -168,6 +174,7 @@ pub fn commit_verified_ssd_and_enqueue(
     }
 
     tx.execute("INSERT INTO objects (object_id, store_id, object_type, state, size_bytes, content_hash, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'PlacementPlanned',?4,?5,?6,?6)", params![request.object_id.as_str(), request.store_id.as_str(), request.object_type, size, request.content_hash, request.committed_at_utc])?;
+    bind_s3_identity(&tx, &request)?;
     insert_ingress_job(&tx, &request, size)?;
     tx.execute("INSERT INTO ssd_object_placements (object_id, store_id, relative_path, size_bytes, content_hash_algorithm, content_hash, verified_at_utc, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?7)", params![request.object_id.as_str(), request.store_id.as_str(), request.relative_path, size, request.content_hash_algorithm, request.content_hash, request.committed_at_utc])?;
     tx.execute("INSERT INTO destage_queue (destage_job_id, store_id, object_id, state, expected_size_bytes, content_hash_algorithm, content_hash, acknowledgement_policy, required_copy_count, priority, max_attempts, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'queued_for_hdd',?4,?5,?6,?7,?8,?9,?10,?11,?11)", params![request.destage_job_id, request.store_id.as_str(), request.object_id.as_str(), size, request.content_hash_algorithm, request.content_hash, request.acknowledgement_policy, request.required_copy_count, request.priority, request.max_attempts, request.committed_at_utc])?;
@@ -177,6 +184,27 @@ pub fn commit_verified_ssd_and_enqueue(
         state: DestageState::QueuedForHdd,
         idempotent: false,
     })
+}
+
+fn bind_s3_identity(
+    tx: &Transaction<'_>,
+    request: &VerifiedSsdCommitRequest<'_>,
+) -> Result<(), DestageMetadataError> {
+    let Some(key) = request.s3_key else {
+        return Ok(());
+    };
+    crate::s3_access::bind_s3_object_in_transaction(
+        tx,
+        request.store_id,
+        key,
+        request.s3_version,
+        request.object_id,
+        request.size_bytes,
+        request.content_hash_algorithm,
+        request.content_hash,
+        request.committed_at_utc,
+    )
+    .map_err(|error| DestageMetadataError::S3Binding(error.to_string()))
 }
 
 fn insert_ingress_job(
@@ -650,6 +678,7 @@ pub enum DestageMetadataError {
     MissingDisk(String),
     ObjectConflict(String),
     IngestJobConflict(String),
+    S3Binding(String),
     ClaimConflict,
     InvalidTransition,
     WouldRemoveOnlyVerifiedCopy,
@@ -678,6 +707,7 @@ impl Display for DestageMetadataError {
             Self::IngestJobConflict(v) => {
                 write!(f, "immutable ingest job identity conflict for {v}")
             }
+            Self::S3Binding(v) => write!(f, "S3 identity publication failed: {v}"),
             Self::ClaimConflict => f.write_str("destage lease is not owned by this worker"),
             Self::InvalidTransition => f.write_str("invalid durable destage state transition"),
             Self::WouldRemoveOnlyVerifiedCopy => {
@@ -748,6 +778,8 @@ mod tests {
                 committed_at_utc: "2026-01-01T00:01:00Z",
                 ingest_job_id: None,
                 ingress_origin: None,
+                s3_key: None,
+                s3_version: 1,
             },
         )
         .expect_err("conflict");
@@ -782,6 +814,8 @@ mod tests {
                     committed_at_utc: "2026-01-01T00:00:00Z",
                     ingest_job_id: Some("adopt-fixed"),
                     ingress_origin: Some("remote_s3"),
+                    s3_key: None,
+                    s3_version: 1,
                 },
             );
             if object == "object-a" {
@@ -828,6 +862,8 @@ mod tests {
                 committed_at_utc: "2026-01-01T00:00:00Z",
                 ingest_job_id: Some("adopt-locked"),
                 ingress_origin: Some("remote_s3"),
+                s3_key: None,
+                s3_version: 1,
             },
         )
         .expect_err("locked publication");
@@ -1081,6 +1117,8 @@ mod tests {
                 committed_at_utc: "2026-01-01T00:00:00Z",
                 ingest_job_id: None,
                 ingress_origin: None,
+                s3_key: None,
+                s3_version: 1,
             },
         )
     }

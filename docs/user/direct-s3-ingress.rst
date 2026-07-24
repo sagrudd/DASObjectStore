@@ -1,9 +1,12 @@
 Direct S3 Ingress
 =================
 
-Direct S3 ingress is an opt-in appliance mode that accepts AWS CLI-compatible
-uploads directly into an ObjectStore's managed SSD. It removes the legacy
-Garage-to-SSD full-copy step while preserving Garage for existing objects and
+Direct S3 ingress is an opt-in appliance mode that presents one AWS
+CLI-compatible endpoint over DASObjectStore's native catalogue. Uploads land
+on managed SSD, native file ingests and direct uploads share the same logical
+namespace, and reads stream from a verified SSD or HDD placement. This removes
+the legacy Garage-to-SSD full-copy step without creating a second authoritative
+copy. Garage remains available privately for existing objects and
 ``store repair --reconcile-s3`` recovery.
 
 The mode is feature-gated. ``garage_legacy`` remains the default and the safe
@@ -24,6 +27,27 @@ The gateway authenticates AWS Signature Version 4 against the daemon-managed,
 store-scoped credential registry. The access key and bucket select the target
 ObjectStore. A client cannot supply a managed path, profile, enclosure, or
 placement target.
+
+The live catalogue is the sole namespace authority. Native ingest commits the
+S3 bucket/key/version binding atomically with SSD acknowledgement and HDD
+destage work. LIST and HEAD are derived from those bindings; GET and range GET
+open only a currently readable, verified placement. A catalogued key whose
+placement cannot be proven is reported as temporarily unavailable, never as a
+misleading missing key and never by silently falling back to a stale provider
+copy.
+
+On daemon startup, legacy native catalogue rows are backfilled only when their
+store and key identity are unambiguous. Conflicting or malformed rows remain
+unpublished and are reported for operator repair. The backfill does not copy,
+hash, move, or delete payload bytes. A retry of an existing key is idempotent
+only when size and SHA-256 agree; different content at the same immutable key
+fails closed.
+
+S3 DELETE also fails closed for catalogue-native objects. Removal must use the
+evidence-bound DASObjectStore deletion workflow so verified HDD copies,
+destage state, catalogue identity, and retention policy are handled together;
+the gateway will not make an object disappear from S3 while durable native
+copies remain authoritative.
 
 ``AfterSsdIngest`` returns success only after the complete file is synchronized
 on managed SSD and catalogue visibility plus a durable HDD destage job are
@@ -46,8 +70,8 @@ gateway acceptance surface. Multipart must pass initiate, part, resume,
 complete, duplicate-complete, and abort tests before an operator enables this
 mode for clients whose AWS CLI automatically selects multipart.
 
-Legacy Garage payloads are not deleted or silently migrated. They remain
-recoverable with:
+Legacy Garage payloads are not deleted, mirrored, or silently migrated. They
+remain recoverable with:
 
 .. code-block:: console
 

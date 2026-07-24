@@ -12,7 +12,7 @@ use dasobjectstore_core::store::AcknowledgementPolicy;
 use dasobjectstore_metadata::{
     commit_verified_ssd_and_enqueue, read_destage, DestageState, VerifiedSsdCommitRequest,
 };
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::time::{Duration, Instant};
 
 const AFTER_HDD_ACK_DEADLINE: Duration = Duration::from_secs(300);
@@ -58,8 +58,22 @@ where
     ) -> Result<(), String> {
         self.publish_profile_s3_catalogue(&definition.store_id, backend)
             .map_err(|error| error.to_string())?;
-        let object_id =
-            ObjectId::new(record.key.object_id.clone()).map_err(|error| error.to_string())?;
+        let object_id = match dasobjectstore_metadata::read_s3_object_binding(
+            &self.live_sqlite_path,
+            &definition.store_id,
+            &record.key.object_id,
+            record.key.version,
+        )
+        .map_err(|error| error.to_string())?
+        {
+            Some(existing) => existing.object_id,
+            None => ObjectId::new(format!(
+                "{}/{}",
+                definition.store_id.as_str(),
+                record.key.object_id
+            ))
+            .map_err(|error| error.to_string())?,
+        };
         let managed_ssd_root = binding
             .ssd_staging_root
             .as_deref()
@@ -98,6 +112,8 @@ where
                 committed_at_utc: &self.clock.now_utc(),
                 ingest_job_id: Some(&format!("ingest-direct-s3-{upload_id}")),
                 ingress_origin: Some("remote_s3"),
+                s3_key: Some(&record.key.object_id),
+                s3_version: record.key.version,
             },
         )
         .map_err(|error| error.to_string())?;
@@ -388,6 +404,43 @@ where
                 "profile capacity policy is unavailable",
             )));
         };
+        match dasobjectstore_metadata::read_s3_object_binding(
+            &self.live_sqlite_path,
+            &store_id,
+            &request.object.object_id,
+            request.object.version,
+        ) {
+            Ok(Some(existing))
+                if existing.size_bytes == request.expected_size_bytes
+                    && existing
+                        .checksum
+                        .eq_ignore_ascii_case(&request.expected_sha256) =>
+            {
+                return emit_response(DaemonApiResponse::ProviderStreamUpload(
+                    ProviderStreamUploadResponse {
+                        schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                        upload_id: request.upload_id,
+                        store_id,
+                        object: request.object,
+                        size_bytes: existing.size_bytes,
+                        sha256: existing.checksum,
+                    },
+                ));
+            }
+            Ok(Some(_)) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_object_conflict",
+                    "the authoritative S3 key already exists with different content",
+                )));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_preflight_failed",
+                    error.to_string(),
+                )));
+            }
+        }
         let capacity = definition.policy.capacity.clone();
         let mut backend = match FolderBackend::open(backend_root, backend_manifest, capacity, 0) {
             Ok(backend) => backend,
@@ -526,6 +579,120 @@ where
                 )))
             }
         };
+        let native = dasobjectstore_metadata::read_s3_object_binding(
+            &self.live_sqlite_path,
+            &store_id,
+            &request.object.object_id,
+            request.object.version,
+        )
+        .map_err(|error| {
+            DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "provider_stream_unavailable",
+                error.to_string(),
+            ))
+        })?;
+        if let Some(native) = native {
+            if request
+                .condition
+                .if_match_sha256
+                .as_deref()
+                .is_some_and(|checksum| !checksum.eq_ignore_ascii_case(&native.checksum))
+            {
+                return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_precondition_failed",
+                    "if_match_sha256 does not match the catalogue checksum",
+                )));
+            }
+            if request
+                .condition
+                .if_none_match_sha256
+                .as_deref()
+                .is_some_and(|checksum| checksum.eq_ignore_ascii_case(&native.checksum))
+            {
+                return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_not_modified",
+                    "if_none_match_sha256 matches the catalogue checksum",
+                )));
+            }
+            let resolved = resolve_object_download_with_hdd_root(
+                &self.live_sqlite_path,
+                &self.hdd_root_path,
+                &store_id,
+                &ObjectDownloadRequest {
+                    endpoint: store_id.clone(),
+                    object_id: native.object_id,
+                    delegated_actor: request.delegated_actor.clone(),
+                },
+            )
+            .map_err(|error| {
+                DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    format!("catalogued object has no readable verified placement: {error}"),
+                ))
+            })?;
+            let mut options = fs::OpenOptions::new();
+            options.read(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NOFOLLOW);
+            }
+            let mut file = options.open(&resolved.source_path).map_err(|error| {
+                DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    format!("verified placement could not be opened: {error}"),
+                ))
+            })?;
+            let actual_size = file
+                .metadata()
+                .map_err(|error| {
+                    DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_unavailable",
+                        format!("verified placement could not be inspected: {error}"),
+                    ))
+                })?
+                .len();
+            if actual_size != native.size_bytes {
+                return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "provider_stream_unavailable",
+                    "verified placement size no longer matches the authoritative catalogue",
+                )));
+            }
+            if let Some(range) = request.range {
+                if range.start > native.size_bytes {
+                    return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_invalid_range",
+                        "provider stream range starts beyond the catalogue object",
+                    )));
+                }
+                let end = range
+                    .end_exclusive
+                    .unwrap_or(native.size_bytes)
+                    .min(native.size_bytes);
+                if end < range.start {
+                    return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_invalid_range",
+                        "provider stream range ends before it starts",
+                    )));
+                }
+                file.seek(SeekFrom::Start(range.start)).map_err(|error| {
+                    DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "provider_stream_unavailable",
+                        format!("verified placement range could not be opened: {error}"),
+                    ))
+                })?;
+                return Ok(ProviderStreamSource {
+                    reader: Box::new(file.take(end - range.start)),
+                    expected_size_bytes: end - range.start,
+                    expected_checksum: None,
+                });
+            }
+            return Ok(ProviderStreamSource {
+                reader: Box::new(file),
+                expected_size_bytes: native.size_bytes,
+                expected_checksum: Some(native.checksum),
+            });
+        }
         let binding =
             match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
                 Ok(Some(binding)) => binding,

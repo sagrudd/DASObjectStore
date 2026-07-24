@@ -541,6 +541,11 @@ fn adopt_completed_reconciliation_snapshot(
                 committed_at_utc: accepted_at_utc,
                 ingest_job_id: Some(per_object_job),
                 ingress_origin: Some("remote_s3"),
+                s3_key: staged
+                    .object_id
+                    .as_str()
+                    .strip_prefix(&format!("{}/", store_id.as_str())),
+                s3_version: 1,
             },
         );
         if let Err(error) = result {
@@ -2121,6 +2126,8 @@ mod tests {
                 committed_at_utc: "2026-07-19T00:00:00Z",
                 ingest_job_id: None,
                 ingress_origin: None,
+                s3_key: Some("archive.bin"),
+                s3_version: 1,
             },
         )
         .expect("SSD acknowledgement");

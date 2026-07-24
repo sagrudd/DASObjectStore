@@ -470,6 +470,26 @@ where
                     )));
                 }
             };
+            match dasobjectstore_metadata::read_s3_object_binding(
+                &handler.live_sqlite_path,
+                &store_id,
+                &request.key.object_id,
+                request.key.version,
+            ) {
+                Ok(Some(_)) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_native_delete_requires_management",
+                        "catalogue-native objects cannot be removed through S3 DELETE; use the evidence-bound DASObjectStore deletion workflow",
+                    )));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_delete_failed",
+                        error.to_string(),
+                    )));
+                }
+            }
             let binding = match read_profile_binding(
                 &handler.profile_binding_registry_path,
                 store_id.as_str(),
@@ -798,6 +818,48 @@ where
                     )));
                 }
             };
+            match dasobjectstore_metadata::read_s3_object_binding(
+                &handler.live_sqlite_path,
+                &store_id,
+                &request.key.object_id,
+                request.key.version,
+            ) {
+                Ok(Some(object)) => {
+                    if let Err(error) = resolve_object_download_with_hdd_root(
+                        &handler.live_sqlite_path,
+                        &handler.hdd_root_path,
+                        &store_id,
+                        &ObjectDownloadRequest {
+                            endpoint: store_id.clone(),
+                            object_id: object.object_id,
+                            delegated_actor: None,
+                        },
+                    ) {
+                        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                            "profile_s3_unavailable",
+                            format!(
+                                "catalogued object has no readable verified placement: {error}"
+                            ),
+                        )));
+                    }
+                    return Ok(DaemonApiResponse::ProfileS3Head(ProfileS3HeadResponse {
+                        schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                        store_id,
+                        object: ProfileS3ObjectView {
+                            key: request.key,
+                            size_bytes: object.size_bytes,
+                            checksum: object.checksum,
+                        },
+                    }));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_head_failed",
+                        error.to_string(),
+                    )));
+                }
+            }
             let binding = match read_profile_binding(
                 &handler.profile_binding_registry_path,
                 store_id.as_str(),

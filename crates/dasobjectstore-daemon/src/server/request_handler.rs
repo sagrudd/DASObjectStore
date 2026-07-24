@@ -1101,7 +1101,8 @@ mod tests {
             FixedDaemonClock::new("2026-07-14T09:00:00Z"),
         )
         .with_registry_paths(&store_registry, &subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry);
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         let binding_request =
             profile_binding_request_for_auth_test("stream-store", backend_root.clone());
@@ -1183,6 +1184,134 @@ mod tests {
             .read_to_end(&mut ranged_bytes)
             .expect("read ranged provider source");
         assert_eq!(ranged_bytes, b"ell");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn native_catalogue_objects_are_listed_headed_and_streamed_through_s3() {
+        let root = temp_root("native-s3-read");
+        cleanup(&root);
+        let (store_registry, subobject_registry) =
+            write_test_store_registry_with_read_policy(&root, "allele-anchor", None, None, true);
+        let live_sqlite = create_live_sqlite(&root.join("metadata"), "allele-anchor");
+        let hdd_root = root.join("hdd");
+        let disk_root = hdd_root.join("qnap-1057");
+        write_hdd_marker(&disk_root, "qnap-1057");
+        let payload = b"catalogue-authoritative allele payload";
+        let object_id = "allele-anchor/results/sample.vcf.gz";
+        let object_key = "results/sample.vcf.gz";
+        let source_path = disk_root.join(object_id);
+        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source parent");
+        fs::write(&source_path, payload).expect("write native payload");
+        let digest = Sha256::digest(payload)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let connection = Connection::open(&live_sqlite).expect("open live sqlite");
+        connection
+            .execute(
+                "INSERT INTO objects (
+                    object_id, store_id, object_type, state, size_bytes, content_hash,
+                    created_at_utc, updated_at_utc
+                 )
+                 VALUES (?1, 'allele-anchor', 'vcf', 'Protected', ?2, ?3,
+                    '2026-07-24T00:00:00Z', '2026-07-24T00:01:00Z')",
+                params![object_id, payload.len() as i64, digest],
+            )
+            .expect("object inserts");
+        connection
+            .execute(
+                "INSERT INTO placements (
+                    placement_id, object_id, disk_id, relative_path, content_hash,
+                    verified_at_utc, created_at_utc
+                 )
+                 VALUES ('placement-native-s3', ?1, 'qnap-1057', ?1, ?2,
+                    '2026-07-24T00:02:00Z', '2026-07-24T00:01:30Z')",
+                params![object_id, digest],
+            )
+            .expect("placement inserts");
+        connection
+            .execute(
+                "INSERT INTO s3_object_bindings (
+                    store_id, object_key, object_version, object_id, size_bytes,
+                    content_hash_algorithm, content_hash, created_at_utc, updated_at_utc
+                 )
+                 VALUES ('allele-anchor', ?1, 1, ?2, ?3, 'sha256', ?4,
+                    '2026-07-24T00:01:00Z', '2026-07-24T00:01:00Z')",
+                params![object_key, object_id, payload.len() as i64, digest],
+            )
+            .expect("S3 binding inserts");
+        drop(connection);
+
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite)
+                .with_hdd_root_path(hdd_root);
+        let actor = DaemonLocalActor::new(0).with_username("root");
+
+        let list = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileS3List(crate::api::ProfileS3ListRequest {
+                    store_id: StoreId::new("allele-anchor").expect("store id"),
+                    prefix: Some("results/".to_string()),
+                    offset: 0,
+                    limit: 100,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("list handled");
+        let DaemonApiResponse::ProfileS3List(list) = list else {
+            panic!("expected profile S3 list, got {list:?}");
+        };
+        assert_eq!(list.objects.len(), 1);
+        assert_eq!(list.objects[0].key.object_id, object_key);
+        assert_eq!(list.objects[0].size_bytes, payload.len() as u64);
+
+        let key = BackendObjectKey {
+            object_id: object_key.to_string(),
+            version: 1,
+        };
+        let head = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ProfileS3Head(crate::api::ProfileS3HeadRequest {
+                    store_id: StoreId::new("allele-anchor").expect("store id"),
+                    key: key.clone(),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("head handled");
+        let DaemonApiResponse::ProfileS3Head(head) = head else {
+            panic!("expected profile S3 head");
+        };
+        assert_eq!(head.object.key, key);
+        assert_eq!(head.object.size_bytes, payload.len() as u64);
+
+        let request = ProviderStreamOpenRequest {
+            schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+            request_id: "native-s3-get".to_string(),
+            store_id: StoreId::new("allele-anchor").expect("store id"),
+            object: key,
+            delegated_actor: None,
+            range: Some(crate::api::ProviderStreamRange {
+                start: 10,
+                end_exclusive: Some(23),
+            }),
+            condition: Default::default(),
+            chunk_size_bytes: 1024,
+        };
+        let mut source = handler
+            .open_provider_stream(&request, Some(&actor))
+            .expect("native provider stream");
+        let mut bytes = Vec::new();
+        source
+            .reader
+            .read_to_end(&mut bytes)
+            .expect("read native provider stream");
+        assert_eq!(bytes, &payload[10..23]);
+
         cleanup(&root);
     }
 
@@ -1349,7 +1478,7 @@ mod tests {
         assert_eq!(published.2, 1);
         let destage = dasobjectstore_metadata::read_destage(
             &live_sqlite,
-            &ObjectId::new("objects/hello.txt").expect("object id"),
+            &ObjectId::new("upload-store/objects/hello.txt").expect("object id"),
         )
         .expect("destage query")
         .expect("durable destage row");
@@ -1400,10 +1529,10 @@ mod tests {
                 |_| Ok(()),
             )
             .expect("delete dispatch");
-        let DaemonApiResponse::ProfileS3Delete(delete) = delete else {
-            panic!("expected profile delete response: {delete:?}");
+        let DaemonApiResponse::Error(delete) = delete else {
+            panic!("native S3 delete must fail closed: {delete:?}");
         };
-        assert!(delete.deleted);
+        assert_eq!(delete.code, "profile_s3_native_delete_requires_management");
         let connection = Connection::open(&live_sqlite).expect("open shared catalogue");
         let remaining = connection
             .query_row(
@@ -1414,6 +1543,17 @@ mod tests {
             )
             .expect("shared object count");
         assert_eq!(remaining, 0);
+        assert!(
+            dasobjectstore_metadata::read_s3_object_binding(
+                &live_sqlite,
+                &StoreId::new("upload-store").expect("store id"),
+                "objects/hello.txt",
+                1,
+            )
+            .expect("native S3 binding query")
+            .is_some(),
+            "fail-closed S3 deletion must retain the native catalogue identity"
+        );
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::StoreDrain(StoreDrainRequest {

@@ -351,6 +351,11 @@ async fn s3_head_object(
             }
             response
         }
+        Err(error) if format!("{error:?}").contains("profile_s3_unavailable") => s3_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            &format!("{error:?}"),
+        ),
         Err(error) => s3_error(StatusCode::NOT_FOUND, "NoSuchKey", &format!("{error:?}")),
     }
 }

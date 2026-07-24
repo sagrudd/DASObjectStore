@@ -196,6 +196,7 @@ fn download_start_error(error: &DaemonClientError) -> DownloadStartError {
                 "provider_stream_precondition_failed" => StatusCode::PRECONDITION_FAILED,
                 "provider_stream_invalid_range" => StatusCode::RANGE_NOT_SATISFIABLE,
                 "provider_stream_head_failed" => StatusCode::NOT_FOUND,
+                "provider_stream_unavailable" => StatusCode::SERVICE_UNAVAILABLE,
                 _ => StatusCode::BAD_GATEWAY,
             },
             error.code.clone(),

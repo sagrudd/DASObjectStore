@@ -206,12 +206,16 @@ password in shell history or a credentials file:
 
 The command prompts for the password with terminal echo disabled and sends it
 only over verified HTTPS to the standalone appliance API. The response is a
-store-scoped JSON connection context with an eight-hour session, Garage
-endpoint/region/path-style settings, derived bucket, temporary S3 credentials,
-expiry, and renewal metadata. Do not log or persist the JSON unless the
-calling process has an explicit secret-storage policy. Read-only grants are
-not issued by this command until Garage read-only credential provisioning is
-available; this prevents a managed read/write key from being escalated.
+store-scoped JSON connection context with an eight-hour session, S3
+endpoint/region/path-style settings, derived bucket, temporary credentials,
+expiry, and renewal metadata. The public endpoint is the DASObjectStore S3
+gateway when direct mode is enabled; Garage is then a private legacy/recovery
+provider rather than a separate namespace authority. Native CLI ingest and S3
+ingest are both immediately addressable through the same bucket/key catalogue
+after acknowledgement. Do not log or persist the JSON unless the calling
+process has an explicit secret-storage policy. Read-only grants are not issued
+by this command until read-only credential provisioning is available; this
+prevents a managed read/write key from being escalated.
 
 For a configured AWS CLI profile, the remote client can list stores or render
 an upload plan without exposing secret values:

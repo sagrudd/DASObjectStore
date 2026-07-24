@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.125.0 - 2026-07-24
+
+- Unify native ingest and the public S3 namespace with an additive live
+  catalogue binding from ObjectStore/key/version to the immutable native
+  object identity.
+- Publish the binding atomically with verified SSD acknowledgement and HDD
+  destage work, and safely backfill only unambiguous historic native objects
+  during daemon startup without copying payload bytes.
+- Serve S3 LIST, HEAD, GET, and range GET from catalogue-authorized verified
+  SSD/HDD placements; known unavailable objects return a retryable service
+  error, while immutable key conflicts fail closed instead of falling through
+  to Garage or creating a second authoritative copy.
+- Fail S3 deletion of catalogue-native objects closed and direct operators to
+  the evidence-bound DASObjectStore deletion workflow, preventing namespace
+  withdrawal while authoritative native copies or destage state remain.
+
 ## 0.124.0 - 2026-07-23
 
 - Add a distinct application ``delete`` operation and a strict exact-object

@@ -756,6 +756,8 @@ impl LocalFileIngestExecutor {
                 .into_owned();
             let destage_job_id = format!("destage-{}", entry.object_id.as_str());
             let object_type = request.object_type.to_string();
+            let store_prefix = format!("{}/", summary.store_id.as_str());
+            let s3_key = entry.object_id.as_str().strip_prefix(&store_prefix);
             let report = match commit_verified_ssd_and_enqueue(
                 &self.live_sqlite_path,
                 VerifiedSsdCommitRequest {
@@ -774,6 +776,8 @@ impl LocalFileIngestExecutor {
                     committed_at_utc: accepted_at_utc,
                     ingest_job_id: None,
                     ingress_origin: None,
+                    s3_key,
+                    s3_version: 1,
                 },
             ) {
                 Ok(report) => report,

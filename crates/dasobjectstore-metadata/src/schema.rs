@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 5);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 6);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -151,6 +151,25 @@ ON destage_queue (state, next_retry_at_utc, priority DESC, created_at_utc);
 CREATE INDEX IF NOT EXISTS idx_destage_queue_store
 ON destage_queue (store_id, state, priority DESC, created_at_utc);
 
+-- Stable external S3 identity is distinct from the daemon's internal object
+-- identity. The binding is committed atomically with native SSD acceptance so
+-- catalogue visibility and S3 visibility cannot diverge.
+CREATE TABLE IF NOT EXISTS s3_object_bindings (
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_key TEXT NOT NULL,
+    object_version INTEGER NOT NULL CHECK (object_version > 0),
+    object_id TEXT NOT NULL UNIQUE REFERENCES objects(object_id),
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    content_hash_algorithm TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY (store_id, object_key, object_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_s3_object_bindings_list
+ON s3_object_bindings (store_id, object_key, object_version);
+
 -- Profile-neutral catalogue handoffs are deliberately isolated from the
 -- legacy objects/placements tables.  The latter derive appliance paths from
 -- disk rows; these rows retain the portable namespace, transaction, and
@@ -193,7 +212,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 5);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 6);
     }
 
     #[test]
@@ -219,6 +238,7 @@ mod tests {
                 "pools",
                 "profile_catalogue_objects",
                 "profile_catalogue_transactions",
+                "s3_object_bindings",
                 "ssd_object_placements",
                 "stores",
             ]

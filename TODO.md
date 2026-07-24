@@ -1046,6 +1046,14 @@ hardware acceptance.
   acceptance: deploy after the active `disk_002` recovery ingest is quiescent,
   run signed single/multipart/restart/rollback smoke on the appliance, and
   record before/after write-amplification measurements.
+  Release 0.125.0 unifies native and S3 reads under the live catalogue:
+  native SSD acknowledgement atomically publishes a stable store/key/version
+  binding, startup backfills only unambiguous historic identities, and S3
+  LIST/HEAD/GET/range stream from verified SSD or HDD placements without
+  mirroring multi-TiB payloads into Garage. Known but unreadable objects return
+  temporary unavailability, immutable key conflicts fail closed, and a
+  regression proves HDD-only native payloads are visible through the S3
+  contract.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative

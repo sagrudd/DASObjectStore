@@ -26,6 +26,7 @@ pub mod profile_catalogue_commit;
 pub mod queue;
 pub mod recovery;
 pub mod repair_activity;
+pub mod s3_access;
 pub mod schema;
 mod secure_fs;
 pub mod snapshot;
@@ -141,6 +142,10 @@ pub use recovery::{
 pub use repair_activity::{
     read_pool_repair_activity, PoolRepairActivityEvent, PoolRepairActivityReadError,
     PoolRepairActivitySnapshot,
+};
+pub use s3_access::{
+    backfill_s3_object_bindings, list_s3_object_bindings, read_s3_object_binding,
+    store_has_s3_object_bindings, S3AccessError, S3BindingBackfillReport, S3ObjectBinding,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{

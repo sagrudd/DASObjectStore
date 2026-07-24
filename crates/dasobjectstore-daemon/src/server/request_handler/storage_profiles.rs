@@ -155,6 +155,45 @@ where
         Ok(store_id) => store_id,
         Err(error) => return Ok(api_error(error.code(), error.to_string())),
     };
+    match dasobjectstore_metadata::store_has_s3_object_bindings(
+        &handler.live_sqlite_path,
+        &store_id,
+    ) {
+        Ok(true) => {
+            let (objects, next_offset) = match dasobjectstore_metadata::list_s3_object_bindings(
+                &handler.live_sqlite_path,
+                &store_id,
+                request.prefix.as_deref(),
+                request.offset,
+                request.limit,
+            ) {
+                Ok(page) => page,
+                Err(error) => return Ok(api_error("profile_s3_list_failed", error.to_string())),
+            };
+            return Ok(DaemonApiResponse::ProfileS3List(
+                crate::api::ProfileS3ListResponse {
+                    schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    objects: objects
+                        .into_iter()
+                        .map(|object| ProfileS3ObjectView {
+                            key: dasobjectstore_core::backend::BackendObjectKey {
+                                object_id: object.object_key,
+                                version: object.object_version,
+                            },
+                            size_bytes: object.size_bytes,
+                            checksum: object.checksum,
+                        })
+                        .collect(),
+                    next_offset,
+                },
+            ));
+        }
+        Ok(false) => {}
+        Err(error) => {
+            return Ok(api_error("profile_s3_list_failed", error.to_string()));
+        }
+    }
     let binding =
         match read_profile_binding(&handler.profile_binding_registry_path, store_id.as_str()) {
             Ok(Some(binding)) => binding,

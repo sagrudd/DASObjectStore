@@ -70,6 +70,17 @@ fn run() -> Result<(), String> {
         eprintln!("marked {interrupted} interrupted daemon job(s) failed after restart");
     }
     let profile_registry = profile_binding_registry_path(&config.state_dir);
+    let s3_backfill = dasobjectstore_metadata::backfill_s3_object_bindings(
+        profile_catalogue_live_sqlite_path(),
+        &current_utc_timestamp(),
+    )
+    .map_err(|error| format!("native S3 binding startup recovery failed: {error}"))?;
+    if s3_backfill.bindings_created > 0 || s3_backfill.objects_retained_unmapped > 0 {
+        eprintln!(
+            "native S3 binding recovery created {} binding(s); retained {} ambiguous object(s) unmapped",
+            s3_backfill.bindings_created, s3_backfill.objects_retained_unmapped
+        );
+    }
     let retirement_recovery =
         recover_profile_retirements(&profile_registry, profile_catalogue_live_sqlite_path())
             .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
