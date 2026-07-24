@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.129.0 - 2026-07-24
+
+- Add daemon-owned idle storage assurance for verified evacuation, fractional
+  enclosure rebalancing, and periodic checksum scrubbing.
+- Keep relocation crash-safe through copy/hash/fsync before transactional
+  placement promotion and source removal; yield to primary ingest work.
+- Withdraw verification and mark the object degraded and disk suspect when a
+  background scrub finds a checksum mismatch.
+
 ## 0.128.2 - 2026-07-24
 
 - Resume an unexpired same-worker destage lease without consuming another

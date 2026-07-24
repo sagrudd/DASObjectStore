@@ -42,6 +42,7 @@ mod remote_sessions;
 mod remote_upload;
 mod service;
 mod service_reconciliation;
+mod storage_assurance;
 mod subobject_capacity_persistence;
 
 pub use admin_jobs::{
@@ -290,6 +291,10 @@ pub use service::{
 pub use service_reconciliation::{
     garbage_collect_reconciliation_staging, ReconciliationGarbageCollectionDisposition,
     ReconciliationGarbageCollectionReport, ReconciliationGarbageCollectionSnapshot,
+};
+pub use storage_assurance::{
+    run_one_storage_assurance, spawn_storage_assurance_loop, StorageAssuranceAction,
+    StorageAssuranceConfig, StorageAssuranceError, StorageAssuranceReport,
 };
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,

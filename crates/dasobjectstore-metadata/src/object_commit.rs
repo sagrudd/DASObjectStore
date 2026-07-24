@@ -127,7 +127,7 @@ fn relative_object_path(path: &Path) -> Result<String, ObjectMetadataCommitError
     ))
 }
 
-fn placement_id(object_id: &str, disk_id: &str, relative_path: &str) -> String {
+pub fn placement_id(object_id: &str, disk_id: &str, relative_path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(object_id.as_bytes());
     hasher.update([0]);

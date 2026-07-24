@@ -2072,6 +2072,11 @@ list until every temporary size-budget exception has been removed.
 - [x] Add health summary, verbose, and JSON output.
 - [x] Add tests for suspect disk evacuation.
 - [x] Add tests for insufficient capacity during drain.
+- [x] Add daemon-owned idle storage assurance: continuous-idle admission,
+  draining/suspect evacuation, fractional-capacity rebalancing, age-based
+  checksum scrub, transactionally promoted placement swaps, source retention
+  on uncertainty, durable latest-run reporting, and checksum-failure
+  degradation of both placement and disk health.
 
 ## Milestone 11: macOS Development and Read/Export Path
 

@@ -1,5 +1,6 @@
 //! Portable metadata boundary for DASObjectStore pools.
 
+pub mod assurance;
 pub mod attach;
 pub mod capacity;
 pub mod contents;
@@ -32,6 +33,12 @@ mod secure_fs;
 pub mod snapshot;
 pub mod store;
 
+pub use assurance::{
+    assurance_primary_work_pending, commit_assurance_relocation, list_assurance_disk_states,
+    list_assurance_placement_candidates, record_assurance_hash_failure,
+    record_assurance_verification, AssuranceDiskState, AssuranceMetadataError,
+    AssurancePlacementCandidate,
+};
 pub use attach::{
     attach_clean_pool_read_only, import_dirty_pool_read_only, ReadOnlyAttachError,
     ReadOnlyAttachOptions, ReadOnlyAttachReport,
@@ -48,8 +55,9 @@ pub use contents::{
 pub use copy::{
     verify_hdd_copy_hash, write_hdd_copy_with_inline_hash,
     write_hdd_copy_with_inline_hash_with_controlled_progress, write_verified_hdd_copy,
-    write_verified_hdd_copy_with_progress, HddCopyError, HddCopyReport, HddCopyRequest,
-    HddInlineHashCopyRequest, HDD_COPY_CONTENT_HASH_ALGORITHM,
+    write_verified_hdd_copy_with_controlled_progress, write_verified_hdd_copy_with_progress,
+    HddCopyError, HddCopyReport, HddCopyRequest, HddInlineHashCopyRequest,
+    HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use destage::{
     cancel_destage, claim_next_destage, commit_verified_ssd_and_enqueue, destage_queue_diagnostics,

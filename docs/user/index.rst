@@ -26,6 +26,7 @@ stabilized in the current MVP.
    ingesting-files
    performance-test
    garbage-collection
+   storage-assurance
    remote-upload
    remote-s3-uploads
    direct-s3-ingress

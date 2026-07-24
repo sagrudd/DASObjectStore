@@ -2,9 +2,9 @@ use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
-    run_garbage_collection, run_one_durable_destage, DurableDestageOutcome,
-    DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger,
-    GarbageCollectorConfig, LiveStatusRegistry,
+    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
+    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
+    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -131,7 +131,17 @@ fn run() -> Result<(), String> {
     .with_live_status_registry(Arc::clone(&live_status_registry));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
-    let _garbage_collection = spawn_startup_garbage_collection(&config, live_status_registry);
+    let assurance_config = StorageAssuranceConfig::from_environment(&config.state_dir)
+        .map_err(|error| error.to_string())?;
+    let _assurance_loop = assurance_config.enabled.then(|| {
+        spawn_storage_assurance_loop(
+            assurance_config,
+            Arc::clone(&live_status_registry),
+            current_utc_timestamp,
+        )
+    });
+    let _garbage_collection =
+        spawn_startup_garbage_collection(&config, Arc::clone(&live_status_registry));
     let available_cpu_cores = std::thread::available_parallelism()
         .map(|cores| cores.get().min(u16::MAX as usize) as u16)
         .unwrap_or(1);
