@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 6);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 7);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -197,6 +197,166 @@ CREATE TABLE IF NOT EXISTS profile_catalogue_objects (
 
 CREATE INDEX IF NOT EXISTS idx_profile_catalogue_objects_transaction
 ON profile_catalogue_objects (transaction_id);
+
+-- Mutable compute workspaces are deliberately separate from immutable objects
+-- and placements. Capacity is reserved per disk in the same transaction as
+-- the workspace row, while provider paths remain daemon-private.
+CREATE TABLE IF NOT EXISTS compute_workspaces (
+    workspace_id TEXT PRIMARY KEY NOT NULL,
+    schema_version INTEGER NOT NULL CHECK (schema_version > 0),
+    request_id TEXT NOT NULL UNIQUE,
+    request_digest TEXT NOT NULL,
+    pool_id TEXT NOT NULL REFERENCES pools(pool_id),
+    promotion_store_id TEXT REFERENCES stores(store_id),
+    state TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    project TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    workflow_id TEXT,
+    workflow_run_id TEXT,
+    repository_revision TEXT,
+    requested_capacity_bytes INTEGER NOT NULL CHECK (requested_capacity_bytes > 0),
+    reserved_capacity_bytes INTEGER NOT NULL CHECK (reserved_capacity_bytes > 0),
+    quota_bytes INTEGER NOT NULL CHECK (quota_bytes > 0),
+    bytes_written INTEGER NOT NULL DEFAULT 0 CHECK (bytes_written >= 0),
+    bytes_reclaimable INTEGER NOT NULL DEFAULT 0 CHECK (bytes_reclaimable >= 0),
+    minimum_free_bytes_per_disk INTEGER NOT NULL CHECK (minimum_free_bytes_per_disk >= 0),
+    aggregation_provider TEXT NOT NULL,
+    aggregate_mount_identity TEXT,
+    close_cleanup_policy_json TEXT NOT NULL,
+    failure_reason TEXT,
+    generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    expires_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspaces_pool_state
+ON compute_workspaces (pool_id, state, expires_at_utc);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_branches (
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    disk_id TEXT NOT NULL REFERENCES disks(disk_id),
+    branch_id TEXT NOT NULL,
+    branch_relative_path TEXT,
+    reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
+    state TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    released_at_utc TEXT,
+    PRIMARY KEY (workspace_id, disk_id),
+    UNIQUE (branch_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspace_branches_active_disk
+ON compute_workspace_branches (disk_id, state);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_attachments (
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL,
+    address_or_cidr TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    export_options_json TEXT NOT NULL,
+    state TEXT NOT NULL,
+    attached_at_utc TEXT,
+    detached_at_utc TEXT,
+    PRIMARY KEY (workspace_id, client_id)
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_operations (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    operation_kind TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    stage TEXT NOT NULL,
+    completed_bytes INTEGER NOT NULL DEFAULT 0 CHECK (completed_bytes >= 0),
+    total_bytes INTEGER CHECK (total_bytes >= 0),
+    completed_units INTEGER NOT NULL DEFAULT 0 CHECK (completed_units >= 0),
+    total_units INTEGER CHECK (total_units >= 0),
+    cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
+    retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    lease_owner TEXT,
+    lease_expires_at_utc TEXT,
+    failure_code TEXT,
+    failure_message TEXT,
+    result_json TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (workspace_id, operation_kind, request_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspace_operations_runnable
+ON compute_workspace_operations (state, lease_expires_at_utc, created_at_utc);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_materializations (
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL UNIQUE REFERENCES compute_workspace_operations(operation_id),
+    source_object_id TEXT NOT NULL REFERENCES objects(object_id),
+    source_placement_id TEXT NOT NULL REFERENCES placements(placement_id),
+    destination_relative_path TEXT NOT NULL,
+    expected_size_bytes INTEGER NOT NULL CHECK (expected_size_bytes >= 0),
+    expected_sha256 TEXT NOT NULL,
+    observed_sha256 TEXT,
+    state TEXT NOT NULL,
+    completed_at_utc TEXT,
+    PRIMARY KEY (workspace_id, destination_relative_path)
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_checkpoints (
+    checkpoint_id TEXT PRIMARY KEY NOT NULL,
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    relative_prefix TEXT NOT NULL,
+    role TEXT NOT NULL,
+    reproducibility_class TEXT NOT NULL,
+    logical_bytes INTEGER CHECK (logical_bytes >= 0),
+    checkpoint_manifest_id TEXT,
+    removable_after_promotion INTEGER NOT NULL CHECK (removable_after_promotion IN (0, 1)),
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    retention_deadline_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_promotions (
+    promotion_id TEXT PRIMARY KEY NOT NULL,
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    operation_id TEXT NOT NULL UNIQUE REFERENCES compute_workspace_operations(operation_id),
+    target_store_id TEXT NOT NULL REFERENCES stores(store_id),
+    manifest_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (workspace_id, target_store_id, manifest_digest)
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_promotion_members (
+    promotion_id TEXT NOT NULL REFERENCES compute_workspace_promotions(promotion_id) ON DELETE CASCADE,
+    source_relative_path TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    object_type TEXT NOT NULL,
+    required INTEGER NOT NULL CHECK (required IN (0, 1)),
+    size_bytes INTEGER CHECK (size_bytes >= 0),
+    sha256 TEXT,
+    state TEXT NOT NULL,
+    accepted_at_utc TEXT,
+    PRIMARY KEY (promotion_id, object_id)
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_audit_events (
+    event_id TEXT PRIMARY KEY NOT NULL,
+    workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    application_id TEXT,
+    operation TEXT NOT NULL,
+    request_digest TEXT,
+    decision TEXT NOT NULL,
+    result TEXT NOT NULL,
+    reference_id TEXT,
+    recorded_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspace_audit_events_workspace
+ON compute_workspace_audit_events (workspace_id, recorded_at_utc);
 "#;
 
 #[cfg(test)]
@@ -212,7 +372,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 6);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 7);
     }
 
     #[test]
@@ -227,6 +387,15 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "compute_workspace_attachments",
+                "compute_workspace_audit_events",
+                "compute_workspace_branches",
+                "compute_workspace_checkpoints",
+                "compute_workspace_materializations",
+                "compute_workspace_operations",
+                "compute_workspace_promotion_members",
+                "compute_workspace_promotions",
+                "compute_workspaces",
                 "destage_queue",
                 "disks",
                 "ingest_jobs",

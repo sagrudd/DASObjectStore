@@ -24,6 +24,7 @@ pub mod risk;
 pub mod store;
 pub mod subobject_capacity;
 pub mod utc;
+pub mod workspace;
 
 pub use application_auth::{
     AccessTokenClaims, AccessTokenExchangeRequest, ApplicationAuthValidationError,
@@ -64,6 +65,12 @@ pub use subobject_capacity::{
     ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,
     SubObjectCapacityLedgerSnapshot, SubObjectCapacityReservationScope,
     SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
+};
+pub use workspace::{
+    plan_workspace_capacity, ComputeClientIdentity, ComputeWorkspace, ComputeWorkspaceState,
+    WorkspaceBranch, WorkspaceCapacityCandidate, WorkspaceCapacityPlan, WorkspaceCapacityPlanError,
+    WorkspaceCheckpoint, WorkspaceMaterialization, WorkspacePromotedOutput,
+    WorkspaceTransitionError, COMPUTE_WORKSPACE_SCHEMA_VERSION,
 };
 
 /// Current core crate version.

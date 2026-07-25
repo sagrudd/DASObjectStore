@@ -8,6 +8,16 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.132.0 - 2026-07-25
+
+- Establish the first-class managed compute workspace architecture with a
+  distinct mutable lifecycle, aggregate healthy-disk capacity planning, and
+  additive live SQLite schema 0.7 for reservations, durable operations,
+  attachments, materializations, checkpoints, promotions, and audit events.
+- Document the privileged Linux host-broker, version-gated mergerfs, NFSv4,
+  project-quota, restart-recovery, security, promotion, and cleanup boundaries
+  that must be satisfied before workspace mutation is enabled.
+
 ## 0.131.1 - 2026-07-25
 
 - Select the Rustls ring provider explicitly at standalone-server startup so

@@ -3710,3 +3710,31 @@ browser and appliance acceptance remain external validation gates.
 - [x] Treat current Synoptikon/Mneion conventions as mutable design inputs when
   DASObjectStore requires deeper integration, provided affected software,
   schemas, migrations, tests, and docs are updated coherently.
+## Managed compute workspaces
+
+- [x] Establish the distinct mutable-workspace domain, explicit lifecycle,
+  aggregate capacity planner, additive live-metadata 0.7 schema, security
+  boundaries, and dependency-ordered architecture.
+- [ ] Add the transactional SQLite repository for idempotent aggregate
+  reservation, generation-based state mutation, durable operations, and
+  path-redacted inspect/list reports.
+- [ ] Introduce shared per-disk physical claims across workspaces, ingest,
+  destage, repair, and evacuation before enabling workspace mutation.
+- [ ] Implement marker-owned branch provisioning, project quotas, rollback,
+  and restart reconciliation through a narrow privileged Linux host broker.
+- [ ] Implement the mergerfs aggregation provider and fail-closed health and
+  readiness checks.
+- [ ] Implement managed host-restricted NFSv4 attach/detach/recovery with
+  root-squash policy and machine-readable attachment contracts.
+- [ ] Implement durable, resumable, verified object materialization without
+  exposing placement paths.
+- [ ] Implement bounded checkpoint registration, accounting, capacity, and
+  workspace health reports.
+- [ ] Implement verified idempotent single and bundle promotion through the
+  normal immutable ingest/catalogue/destage pipeline with complete lineage.
+- [ ] Implement governed closure, expiry reporting/application, safe cleanup,
+  audit, cancellation, and dry-run repair.
+- [ ] Complete CLI/API/authentication contracts, synthetic unit/failure tests,
+  and the opt-in privileged Linux mergerfs/NFS integration test.
+- [ ] Complete synthetic end-to-end acceptance and then the governed
+  AlleleAnchor HG002 acceptance without accessing held-out HG005.

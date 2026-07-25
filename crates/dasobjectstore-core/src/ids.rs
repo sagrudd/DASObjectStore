@@ -86,6 +86,7 @@ domain_id!(StoreId);
 domain_id!(ObjectId);
 domain_id!(IngestJobId);
 domain_id!(PlacementId);
+domain_id!(WorkspaceId);
 
 #[cfg(test)]
 mod tests {
