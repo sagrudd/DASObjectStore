@@ -6,16 +6,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
-use std::io::{self, Write};
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-#[cfg(unix)]
-use std::{os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};
 
 pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
-pub const DEFAULT_APPLIANCE_S3_PORT: u16 = 3900;
-const APPLIANCE_CA_ROUTE: &str = "/.well-known/dasobjectstore/appliance-ca.pem";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct RemoteAuthenticateRequest {
@@ -28,11 +23,16 @@ struct RemoteAuthenticateRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct RemoteAuthenticateResponse {
     schema_version: String,
-    endpoint_port: u16,
+    store_id: String,
+    s3: RemoteAuthenticatedS3Descriptor,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct RemoteAuthenticatedS3Descriptor {
+    endpoint_url: String,
+    bucket: String,
     region: String,
     addressing_style: String,
-    object_store: String,
-    bucket: String,
     session: RemoteEasyconnectSession,
 }
 
@@ -161,80 +161,18 @@ pub fn prepare_appliance_trust(
         });
     }
 
-    let response = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|error| RemoteAuthenticateError::Http(format!("build CA client: {error}")))?
-        .get(format!(
-            "http://{host}:{DEFAULT_APPLIANCE_S3_PORT}{APPLIANCE_CA_ROUTE}"
-        ))
-        .send()
-        .map_err(|error| {
-            RemoteAuthenticateError::Http(format!(
-                "fetch appliance CA certificate before authentication: {error}"
-            ))
-        })?;
-    if !response.status().is_success() {
-        return Err(RemoteAuthenticateError::Server {
-            status: response.status().as_u16(),
-            message: "appliance CA certificate endpoint is unavailable".to_string(),
-        });
-    }
-    let advertised_fingerprint = response
-        .headers()
-        .get("x-dasobjectstore-certificate-sha256")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_ascii_lowercase);
-    let tls_server_name = response
-        .headers()
-        .get("x-dasobjectstore-tls-server-name")
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .or_else(|| Some("localhost".to_string()));
-    let certificate = response
-        .bytes()
-        .map_err(|error| RemoteAuthenticateError::Http(format!("read appliance CA: {error}")))?
-        .to_vec();
-    validate_public_certificate(&certificate)?;
-    let fingerprint = hex_sha256(&certificate);
-    if advertised_fingerprint
-        .as_deref()
-        .is_some_and(|advertised| advertised != fingerprint)
-    {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance CA fingerprint header does not match the downloaded certificate".to_string(),
-        ));
-    }
-
     let path = appliance_trust_path(&host, https_port)?;
-    if path.exists() {
-        let pinned = fs::read(&path)?;
-        if pinned != certificate {
-            return Err(RemoteAuthenticateError::Http(format!(
-                "the appliance certificate for {host}:{https_port} changed; refusing authentication until the new SHA-256 fingerprint is verified out of band and the pin at {} is deliberately replaced",
-                path.display()
-            )));
-        }
-    } else {
-        eprintln!(
-            "First connection to DASObjectStore {host}:{https_port}.\nAppliance certificate SHA-256: {fingerprint}\nVerify this fingerprint through the appliance console or SSH before continuing."
-        );
-        eprint!("Trust and pin this appliance certificate? [y/N] ");
-        io::stderr().flush()?;
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer)?;
-        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            return Err(RemoteAuthenticateError::Http(
-                "appliance certificate was not trusted; no password was requested or sent"
-                    .to_string(),
-            ));
-        }
-        write_pinned_certificate(&path, &certificate)?;
+    if !path.exists() {
+        return Err(RemoteAuthenticateError::Http(format!(
+            "no pinned appliance CA exists for {host}:{https_port}; pass --ca-cert with a verified PEM certificate (DASObjectStore no longer guesses an S3 listener for certificate discovery)"
+        )));
     }
+    let certificate = fs::read(&path)?;
+    validate_public_certificate(&certificate)?;
     Ok(ApplianceTrust {
         ca_cert: path,
-        tls_server_name,
-        fingerprint_sha256: fingerprint,
+        tls_server_name: explicit_tls_server_name.map(str::to_string),
+        fingerprint_sha256: hex_sha256(&certificate),
     })
 }
 
@@ -335,24 +273,73 @@ pub fn authenticate(
                 "invalid appliance authentication response: {error}"
             ))
         })?;
+    validate_descriptor(&response, object_store)?;
+    let s3 = response.s3;
     Ok(RemoteConnectionContext {
         schema_version: response.schema_version,
         appliance_host: host.clone(),
-        endpoint_url: format!("http://{host}:{}", response.endpoint_port),
-        region: response.region,
-        addressing_style: response.addressing_style,
-        object_store: response.object_store,
-        bucket: response.bucket,
-        access_key_id: response.session.credentials.access_key_id,
-        secret_access_key: response.session.credentials.secret_access_key,
-        session_token: response.session.credentials.session_token,
-        session_id: response.session.session_id,
-        issued_at_utc: response.session.issued_at_utc,
-        expires_at_utc: response.session.expires_at_utc,
-        renew_url: absolute_renew_url(&host, https_port, &response.session.renewal.renew_url),
-        renew_after_utc: response.session.renewal.renew_after_utc,
-        renewal_token: response.session.renewal.renewal_token,
+        endpoint_url: s3.endpoint_url,
+        region: s3.region,
+        addressing_style: s3.addressing_style,
+        object_store: response.store_id,
+        bucket: s3.bucket,
+        access_key_id: s3.session.credentials.access_key_id,
+        secret_access_key: s3.session.credentials.secret_access_key,
+        session_token: s3.session.credentials.session_token,
+        session_id: s3.session.session_id,
+        issued_at_utc: s3.session.issued_at_utc,
+        expires_at_utc: s3.session.expires_at_utc,
+        renew_url: absolute_renew_url(&host, https_port, &s3.session.renewal.renew_url),
+        renew_after_utc: s3.session.renewal.renew_after_utc,
+        renewal_token: s3.session.renewal.renewal_token,
     })
+}
+
+fn validate_descriptor(
+    response: &RemoteAuthenticateResponse,
+    requested_store: &str,
+) -> Result<(), RemoteAuthenticateError> {
+    if response.store_id != requested_store {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance returned an S3 descriptor for a different ObjectStore".to_string(),
+        ));
+    }
+    let s3 = &response.s3;
+    let endpoint = reqwest::Url::parse(&s3.endpoint_url).map_err(|_| {
+        RemoteAuthenticateError::Http("appliance returned a malformed S3 endpoint URL".to_string())
+    })?;
+    if !matches!(endpoint.scheme(), "http" | "https")
+        || endpoint.host_str().is_none()
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+        || endpoint.path() != "/"
+    {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance S3 endpoint must be an HTTP(S) origin without credentials, path, query, or fragment".to_string(),
+        ));
+    }
+    if s3.bucket.trim().is_empty()
+        || s3.bucket.len() > 63
+        || s3.region.trim().is_empty()
+        || !matches!(s3.addressing_style.as_str(), "path" | "virtual")
+        || s3.session.credentials.access_key_id.trim().is_empty()
+        || s3.session.credentials.secret_access_key.is_empty()
+        || s3
+            .session
+            .credentials
+            .session_token
+            .as_deref()
+            .unwrap_or("")
+            .is_empty()
+        || s3.session.expires_at_utc.trim().is_empty()
+    {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance returned an incomplete or unsupported S3 connection descriptor".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
@@ -415,31 +402,6 @@ fn hex_sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn write_pinned_certificate(
-    path: &Path,
-    certificate: &[u8],
-) -> Result<(), RemoteAuthenticateError> {
-    let parent = path.parent().ok_or_else(|| {
-        RemoteAuthenticateError::Http("appliance trust path has no parent".to_string())
-    })?;
-    fs::create_dir_all(parent)?;
-    #[cfg(unix)]
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
-    let temporary = path.with_extension(format!("pem.tmp-{}", std::process::id()));
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(&temporary)?;
-    file.write_all(certificate)?;
-    file.sync_all()?;
-    drop(file);
-    fs::rename(&temporary, path)?;
-    #[cfg(unix)]
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
 fn redact(value: &str) -> String {
     let prefix = value.chars().take(4).collect::<String>();
     format!("{prefix}...redacted")
@@ -479,7 +441,7 @@ mod tests {
         let context = RemoteConnectionContext {
             schema_version: "v1".to_string(),
             appliance_host: "host".to_string(),
-            endpoint_url: "http://host:3900".to_string(),
+            endpoint_url: "https://objects.example:9443".to_string(),
             region: "garage".to_string(),
             addressing_style: "path".to_string(),
             object_store: "store".to_string(),

@@ -519,6 +519,7 @@ mod tests {
             credential_helper: None,
             default_appliance_id: None,
             paired_appliances: Vec::new(),
+            s3_profiles: Vec::new(),
         }
     }
 

@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.131.0 - 2026-07-25
+
+- Make password-authenticated remote access consume a complete,
+  server-authoritative S3 connection descriptor instead of reconstructing an
+  endpoint from the authentication host or assuming port 3900.
+- Add optional safe AWS profile installation to
+  ``dasobjectstore-remote authenticate`` with conflict protection, environment
+  path support, locked atomic writes, profile-level endpoints, bounded bucket
+  verification, and non-secret ``s3 status`` diagnostics.
+- Remove credentials from all authenticate JSON/text output and require
+  explicit verified CA material for first contact instead of probing an
+  inferred S3 listener.
+
 ## 0.130.1 - 2026-07-25
 
 - Stop DEB/RPM package upgrades from recursively rewriting live SSD/HDD payload

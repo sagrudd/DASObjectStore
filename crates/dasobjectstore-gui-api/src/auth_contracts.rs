@@ -31,11 +31,23 @@ pub struct RemoteAuthenticateRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteAuthenticateResponse {
     pub schema_version: String,
+    pub store_id: String,
+    pub s3: RemoteAuthenticatedS3Descriptor,
+    /// Deprecated v1 compatibility fields. New clients must consume `s3`.
     pub endpoint_port: u16,
     pub region: String,
     pub addressing_style: String,
     pub object_store: String,
     pub bucket: String,
+    pub session: RemoteEasyconnectSession,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteAuthenticatedS3Descriptor {
+    pub endpoint_url: String,
+    pub bucket: String,
+    pub region: String,
+    pub addressing_style: String,
     pub session: RemoteEasyconnectSession,
 }
 

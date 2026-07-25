@@ -6,6 +6,14 @@ use super::*;
 pub(crate) struct StandaloneAuthRouteState {
     pub(super) auth_store: LocalAuthStore,
     pub(super) local_password_authenticator: Arc<dyn LocalPasswordAuthenticator>,
+    pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StandaloneS3ConnectionDescriptor {
+    pub endpoint_url: String,
+    pub region: String,
+    pub addressing_style: String,
 }
 
 #[derive(Clone)]
@@ -19,6 +27,7 @@ impl StandaloneAuthRouteState {
         Self {
             auth_store,
             local_password_authenticator: Arc::new(SystemLocalPasswordAuthenticator::default()),
+            s3_descriptor: None,
         }
     }
 }
@@ -190,6 +199,13 @@ pub(super) async fn remote_authenticate(
             "remote S3 sessions currently require a writable ObjectStore grant",
         ));
     }
+    let s3_descriptor = state.s3_descriptor.as_ref().ok_or_else(|| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "s3_connection_descriptor_unavailable",
+            "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
+        )
+    })?;
 
     let grant = RemoteEasyconnectObjectStoreGrant {
         object_store: store.store_id.clone(),
@@ -241,11 +257,29 @@ pub(super) async fn remote_authenticate(
         .await
         .map_err(remote_auth_bridge_error)?;
 
+    let endpoint_port = reqwest::Url::parse(&s3_descriptor.endpoint_url)
+        .ok()
+        .and_then(|url| url.port_or_known_default())
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "s3_connection_descriptor_invalid",
+                "the configured public S3 endpoint has no usable port",
+            )
+        })?;
     Ok(Json(RemoteAuthenticateResponse {
-        schema_version: "dasobjectstore.remote_authenticate.v1".to_string(),
-        endpoint_port: 3900,
-        region: "garage".to_string(),
-        addressing_style: "path".to_string(),
+        schema_version: "dasobjectstore.remote_authenticate.v2".to_string(),
+        store_id: request.object_store.clone(),
+        s3: RemoteAuthenticatedS3Descriptor {
+            endpoint_url: s3_descriptor.endpoint_url.clone(),
+            region: s3_descriptor.region.clone(),
+            addressing_style: s3_descriptor.addressing_style.clone(),
+            bucket: store.bucket.clone(),
+            session: session.clone(),
+        },
+        endpoint_port,
+        region: s3_descriptor.region.clone(),
+        addressing_style: s3_descriptor.addressing_style.clone(),
         object_store: request.object_store,
         bucket: store.bucket.clone(),
         session,

@@ -19,6 +19,7 @@ flate2.workspace = true
 libc.workspace = true
 prosopikon-core = { workspace = true, features = ["auth", "pam"] }
 rcgen.workspace = true
+reqwest.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
 ring.workspace = true

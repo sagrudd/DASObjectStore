@@ -36,12 +36,14 @@ pub(crate) mod profile_multipart;
 pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
+pub use auth_identity_routes::StandaloneS3ConnectionDescriptor;
 use auth_identity_routes::*;
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
     federated_gui_api_router, gui_api_router_for_host_mode,
-    gui_api_router_for_host_mode_with_application_auth, standalone_auth_router,
+    gui_api_router_for_host_mode_with_application_auth,
+    gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
     standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,
     standalone_reporting_router, standalone_users_groups_router,
 };
@@ -1072,6 +1074,7 @@ mod tests {
             local_password_authenticator: Arc::new(FixedPasswordAuthenticator {
                 accepted_credentials: vec![("user".to_string(), "secret".to_string())],
             }),
+            s3_descriptor: None,
         };
         let response = post_json_response(
             standalone_auth_router_with_state(state),
@@ -3580,6 +3583,11 @@ mod tests {
                     .into_iter()
                     .map(|(username, password)| (username.to_string(), password.to_string()))
                     .collect(),
+            }),
+            s3_descriptor: Some(super::StandaloneS3ConnectionDescriptor {
+                endpoint_url: "https://objects.example.test:9443".to_string(),
+                region: "test-region".to_string(),
+                addressing_style: "path".to_string(),
             }),
         })
     }

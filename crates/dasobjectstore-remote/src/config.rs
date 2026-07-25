@@ -1,9 +1,10 @@
 use crate::auth::RemoteAuthAuthority;
+use crate::aws_profile::AwsProfileAssociation;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_REGION: &str = "garage";
@@ -26,6 +27,8 @@ pub struct RemoteConfig {
     pub default_appliance_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paired_appliances: Vec<RemotePairedAppliance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub s3_profiles: Vec<AwsProfileAssociation>,
 }
 
 impl RemoteConfig {
@@ -54,6 +57,7 @@ impl RemoteConfig {
                 .or_else(|| self.credential_helper.clone()),
             default_appliance_id: self.default_appliance_id.clone(),
             paired_appliances: self.paired_appliances.clone(),
+            s3_profiles: self.s3_profiles.clone(),
         }
     }
 
@@ -103,6 +107,7 @@ impl RemoteConfig {
                 .iter()
                 .map(RemotePairedAppliance::redacted)
                 .collect(),
+            s3_profiles: self.s3_profiles.clone(),
         }
     }
 }
@@ -245,6 +250,8 @@ pub struct RedactedRemoteConfig {
     pub default_appliance_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paired_appliances: Vec<RedactedRemotePairedAppliance>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub s3_profiles: Vec<AwsProfileAssociation>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -329,12 +336,34 @@ pub fn read_optional_config(path: &Path) -> Result<Option<RemoteConfig>, RemoteC
 }
 
 pub fn write_config(path: &Path, config: &RemoteConfig) -> Result<(), RemoteConfigError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = path.parent().ok_or_else(|| {
+        RemoteConfigError::Invalid("remote configuration path has no parent".to_string())
+    })?;
+    fs::create_dir_all(parent)?;
+    let lock_path = parent.join(".remote.json.lock");
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    lock.lock()?;
     let raw = serde_json::to_vec_pretty(config)?;
-    fs::write(path, raw)?;
+    let temporary = parent.join(format!(".remote-{}.tmp", std::process::id()));
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    file.write_all(&raw)?;
+    file.sync_all()?;
+    fs::rename(&temporary, path)?;
     restrict_config_permissions(path)?;
+    if let Ok(directory) = fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
     Ok(())
 }
 
@@ -443,6 +472,7 @@ mod tests {
                 session: None,
                 object_stores: Vec::new(),
             }],
+            s3_profiles: Vec::new(),
         };
 
         let merged = config.merged_with(RemoteConfigOverrides {
@@ -520,6 +550,7 @@ mod tests {
                     }),
                 }),
             }],
+            s3_profiles: Vec::new(),
         };
 
         let redacted = config.redacted();

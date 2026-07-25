@@ -52,12 +52,13 @@ pub use auth_guard::{
 };
 pub use auth_routes::{
     federated_gui_api_router, gui_api_router_for_host_mode,
-    gui_api_router_for_host_mode_with_application_auth, standalone_auth_router,
+    gui_api_router_for_host_mode_with_application_auth,
+    gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
     standalone_gui_api_router, AssignLocalUserToGroupRequest, AuthRouteError,
     CreateLocalGroupRequest, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
     SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,
     StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
-    StandaloneLocalGroupOperation,
+    StandaloneLocalGroupOperation, StandaloneS3ConnectionDescriptor,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,

@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod authenticate;
+pub mod aws_profile;
 pub mod cli;
 pub mod config;
 pub mod control;

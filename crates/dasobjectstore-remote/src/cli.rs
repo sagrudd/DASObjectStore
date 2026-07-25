@@ -79,6 +79,8 @@ impl RemoteCli {
 pub enum RemoteCommand {
     /// Authenticate to one appliance ObjectStore and emit an 8-hour S3 context.
     Authenticate(AuthenticateArgs),
+    /// Inspect locally configured S3 access for an authenticated ObjectStore.
+    S3(S3Args),
     /// Define the browser-approved easyconnect pairing flow for a DAS appliance.
     Easyconnect(EasyconnectArgs),
     /// Configure this remote client.
@@ -117,6 +119,18 @@ pub struct AuthenticateArgs {
     /// Emit the full connection context, including temporary S3 credentials.
     #[arg(long)]
     json: bool,
+    /// Install the issued session into a standard AWS CLI profile.
+    #[arg(long)]
+    set_s3_config: bool,
+    /// AWS profile name; defaults to dasobjectstore-<ObjectStore>.
+    #[arg(long, requires = "set_s3_config")]
+    s3_profile: Option<String>,
+    /// Replace a conflicting DASObjectStore-managed AWS profile association.
+    #[arg(long, requires = "set_s3_config")]
+    force: bool,
+    /// Skip the default authenticated S3 verification (diagnostics only).
+    #[arg(long, requires = "set_s3_config")]
+    no_verify_s3: bool,
 }
 
 impl AuthenticateArgs {
@@ -140,6 +154,57 @@ impl AuthenticateArgs {
     }
     pub fn session_lifetime_seconds(&self) -> Option<u64> {
         self.session_lifetime_seconds
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+    pub fn set_s3_config(&self) -> bool {
+        self.set_s3_config
+    }
+    pub fn s3_profile(&self) -> Option<&str> {
+        self.s3_profile.as_deref()
+    }
+    pub fn force(&self) -> bool {
+        self.force
+    }
+    pub fn verify_s3(&self) -> bool {
+        !self.no_verify_s3
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct S3Args {
+    #[command(subcommand)]
+    command: S3Command,
+}
+
+impl S3Args {
+    pub fn command(&self) -> &S3Command {
+        &self.command
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum S3Command {
+    /// Compare a local AWS profile with its authenticated ObjectStore association.
+    Status(S3StatusArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct S3StatusArgs {
+    store: String,
+    #[arg(long)]
+    profile: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+impl S3StatusArgs {
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
     }
     pub fn json(&self) -> bool {
         self.json
@@ -634,7 +699,7 @@ impl UploadArgs {
 mod tests {
     use super::{
         ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli, RemoteCommand,
-        StoresCommand,
+        S3Command, StoresCommand,
     };
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
@@ -676,6 +741,9 @@ mod tests {
             "stephen",
             "--ca-cert",
             "/etc/dasobjectstore/ca.pem",
+            "--set-s3-config",
+            "--s3-profile",
+            "dasobjectstore-porkchop",
             "--json",
         ])
         .expect("authenticate parses");
@@ -689,6 +757,30 @@ mod tests {
             args.ca_cert().and_then(|path| path.to_str()),
             Some("/etc/dasobjectstore/ca.pem")
         );
+        assert!(args.json());
+        assert!(args.set_s3_config());
+        assert_eq!(args.s3_profile(), Some("dasobjectstore-porkchop"));
+        assert!(args.verify_s3());
+    }
+
+    #[test]
+    fn parses_s3_status_command() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "s3",
+            "status",
+            "epic_collection",
+            "--profile",
+            "dasobjectstore-epic_collection",
+            "--json",
+        ])
+        .expect("s3 status parses");
+        let RemoteCommand::S3(args) = cli.command() else {
+            panic!()
+        };
+        let S3Command::Status(args) = args.command();
+        assert_eq!(args.store(), "epic_collection");
+        assert_eq!(args.profile(), Some("dasobjectstore-epic_collection"));
         assert!(args.json());
     }
 

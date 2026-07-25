@@ -4,10 +4,14 @@ use crate::auth::{
 use crate::authenticate::{
     authenticate, prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
 };
+use crate::aws_profile::{
+    default_profile_name, install_profile, status as s3_profile_status, AwsProfileAssociation,
+    AwsProfileError,
+};
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
     ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
-    RemoteCommand, StoreListArgs, StoreReadinessArgs, StoresCommand, UploadArgs,
+    RemoteCommand, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand, UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
@@ -42,6 +46,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
+        RemoteCommand::S3(args) => match args.command() {
+            S3Command::Status(args) => {
+                run_s3_status(cli, args.store(), args.profile(), args.json(), writer)
+            }
+        },
         RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
@@ -337,13 +346,47 @@ fn run_authenticate(
         args.object_store(),
         args.session_lifetime_seconds(),
     )?;
-    persist_authenticated_context(cli, &username, &context)?;
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &context)?;
-        writer.write_all(b"\n")?;
+    let profile_name = args
+        .s3_profile()
+        .map(str::to_string)
+        .map(Ok)
+        .unwrap_or_else(|| default_profile_name(&context.object_store))?;
+    let prior_config = read_optional_config(&config_path(cli)?)?.unwrap_or_else(empty_config);
+    let existing = prior_config
+        .s3_profiles
+        .iter()
+        .find(|entry| entry.profile == profile_name);
+    let (association, verified) = if args.set_s3_config() {
+        let (association, verified) = install_profile(
+            &context,
+            &profile_name,
+            existing,
+            args.force(),
+            args.verify_s3(),
+        )?;
+        (Some(association), verified)
     } else {
-        write_redacted_connection_context(&context, writer)?;
-    }
+        (None, false)
+    };
+    persist_authenticated_context(cli, &username, &context, association)?;
+    let safe = serde_json::json!({
+        "authenticated": true,
+        "server": context.appliance_host,
+        "store_id": context.object_store,
+        "s3": {
+            "configured": args.set_s3_config(),
+            "profile": if args.set_s3_config() { Some(profile_name.as_str()) } else { None },
+            "endpoint_url": context.endpoint_url,
+            "bucket": context.bucket,
+            "region": context.region,
+            "addressing_style": context.addressing_style,
+            "temporary_credentials": context.session_token.is_some(),
+            "expires_at": context.expires_at_utc,
+            "verified": verified
+        }
+    });
+    serde_json::to_writer_pretty(&mut *writer, &safe)?;
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -351,6 +394,7 @@ fn persist_authenticated_context(
     cli: &RemoteCli,
     username: &str,
     context: &RemoteConnectionContext,
+    association: Option<AwsProfileAssociation>,
 ) -> Result<(), RemoteRunError> {
     let path = config_path(cli)?;
     let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
@@ -358,6 +402,12 @@ fn persist_authenticated_context(
     config.region = context.region.clone();
     config.auth_authority = RemoteAuthAuthority::LocalPassword;
     config.username = Some(username.to_string());
+    if let Some(association) = association {
+        config
+            .s3_profiles
+            .retain(|entry| entry.profile != association.profile);
+        config.s3_profiles.push(association);
+    }
     let appliance_id = format!("standalone:{}", context.appliance_host);
     config.default_appliance_id = Some(appliance_id.clone());
     let session = RemoteUploadSession {
@@ -430,16 +480,28 @@ fn persist_authenticated_context(
     Ok(())
 }
 
-fn write_redacted_connection_context(
-    context: &RemoteConnectionContext,
+fn run_s3_status(
+    cli: &RemoteCli,
+    store: &str,
+    requested_profile: Option<&str>,
+    _json: bool,
     writer: &mut impl Write,
-) -> Result<(), std::io::Error> {
-    serde_json::to_writer_pretty(&mut *writer, &context.redacted())?;
+) -> Result<(), RemoteRunError> {
+    let config = read_optional_config(&config_path(cli)?)?.unwrap_or_else(empty_config);
+    let association = config
+        .s3_profiles
+        .iter()
+        .find(|entry| {
+            entry.store_id == store
+                && requested_profile.is_none_or(|profile| profile == entry.profile)
+        })
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(format!(
+                "no DASObjectStore-managed AWS profile is associated with ObjectStore {store}; authenticate with --set-s3-config"
+            ))
+        })?;
+    serde_json::to_writer_pretty(&mut *writer, &s3_profile_status(association, true)?)?;
     writer.write_all(b"\n")?;
-    writeln!(
-        writer,
-        "Credentials are redacted; rerun with --json only when a process must consume the temporary S3 context."
-    )?;
     Ok(())
 }
 
@@ -1172,6 +1234,7 @@ fn empty_config() -> RemoteConfig {
         credential_helper: None,
         default_appliance_id: None,
         paired_appliances: Vec::new(),
+        s3_profiles: Vec::new(),
     }
 }
 
@@ -1216,6 +1279,7 @@ pub enum RemoteRunError {
     Authenticate(RemoteAuthenticateError),
     Control(RemoteControlError),
     S3(RemoteS3Error),
+    AwsProfile(AwsProfileError),
     Daemon(DaemonClientError),
     Clock(String),
     UploadRouting(String),
@@ -1233,6 +1297,7 @@ impl fmt::Display for RemoteRunError {
             Self::Authenticate(error) => write!(formatter, "{error}"),
             Self::Control(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
+            Self::AwsProfile(error) => write!(formatter, "{error}"),
             Self::Daemon(error) => write!(formatter, "{error}"),
             Self::Clock(error) => write!(formatter, "{error}"),
             Self::UploadRouting(message) => formatter.write_str(message),
@@ -1281,6 +1346,12 @@ impl From<RemoteAuthError> for RemoteRunError {
 impl From<RemoteAuthenticateError> for RemoteRunError {
     fn from(error: RemoteAuthenticateError) -> Self {
         Self::Authenticate(error)
+    }
+}
+
+impl From<AwsProfileError> for RemoteRunError {
+    fn from(error: AwsProfileError) -> Self {
+        Self::AwsProfile(error)
     }
 }
 
@@ -1726,6 +1797,7 @@ mod tests {
                     renewal: None,
                 }),
             }],
+            s3_profiles: Vec::new(),
         }
     }
 

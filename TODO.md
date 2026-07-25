@@ -1792,6 +1792,11 @@ list until every temporary size-budget exception has been removed.
   OBJECTSTORE` over verified HTTPS, with daemon-owned eight-hour scoped Garage
   sessions, redacted default output, explicit JSON connection context, and
   persisted-credential validation.
+- [x] Make remote authentication return a server-authoritative S3 connection
+  descriptor and optionally install it as a locked, atomic, verified standard
+  AWS profile. Keep JSON secret-free, retain ObjectStore/bucket associations
+  in DASObjectStore configuration, and add non-secret ``s3 status``
+  diagnostics.
 - [x] Remove SSH from production remote ingest finalization: add explicitly
   scoped HTTPS readiness, 20,000-object authoritative snapshots, exact
   payload-group settlement, idempotent three-key S3 reconciliation, and remote

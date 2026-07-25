@@ -7,10 +7,10 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
     application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
-    gui_api_router_for_host_mode_with_application_auth, s3_gateway_router, LocalAuthStore,
+    gui_api_router_for_host_mode_with_s3_descriptor, s3_gateway_router, LocalAuthStore,
     LocalAuthStoreError, MtlsApplicationConnectInfo, MtlsListenerError,
-    StandaloneAuthenticationConfig, StandaloneServerConfig, StandaloneServerConfigError,
-    StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    StandaloneAuthenticationConfig, StandaloneS3ConnectionDescriptor, StandaloneServerConfig,
+    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -73,11 +73,26 @@ async fn start_server(
     let auth_root = auth_store.root().to_path_buf();
     let mtls_enabled = config.application_mtls.enabled;
     let s3_ingress = config.s3_ingress.clone();
+    let public_s3_descriptor = match (
+        s3_ingress.public_endpoint_url.clone(),
+        s3_ingress.region.clone(),
+        s3_ingress.addressing_style.clone(),
+    ) {
+        (Some(endpoint_url), Some(region), Some(addressing_style)) => {
+            Some(StandaloneS3ConnectionDescriptor {
+                endpoint_url,
+                region,
+                addressing_style,
+            })
+        }
+        _ => None,
+    };
     let primary_router = standalone_router_with_application_auth(
         web_root,
         config.authentication.clone(),
         auth_root,
         !mtls_enabled,
+        public_s3_descriptor,
     );
     let direct_s3 = async move {
         if s3_ingress.enabled() {
@@ -122,7 +137,7 @@ fn standalone_router(
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
 ) -> Router {
-    standalone_router_with_application_auth(web_root, authentication, auth_root, true)
+    standalone_router_with_application_auth(web_root, authentication, auth_root, true, None)
 }
 
 fn standalone_router_with_application_auth(
@@ -130,21 +145,24 @@ fn standalone_router_with_application_auth(
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
     include_application_auth: bool,
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
 ) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
     let asset_root = web_root;
     let host_mode = authentication.gui_api_host_mode();
     let auth_store = LocalAuthStore::new(auth_root);
-    let root_api = gui_api_router_for_host_mode_with_application_auth(
+    let root_api = gui_api_router_for_host_mode_with_s3_descriptor(
         host_mode,
         auth_store.clone(),
         include_application_auth,
+        s3_descriptor.clone(),
     );
-    let product_api = gui_api_router_for_host_mode_with_application_auth(
+    let product_api = gui_api_router_for_host_mode_with_s3_descriptor(
         host_mode,
         auth_store,
         include_application_auth,
+        s3_descriptor,
     );
     Router::new()
         .route("/", get(root_redirect))
@@ -530,6 +548,7 @@ mod tests {
             Default::default(),
             auth_root.clone(),
             false,
+            None,
         )
         .oneshot(request())
         .await
@@ -541,6 +560,7 @@ mod tests {
             Default::default(),
             auth_root.clone(),
             true,
+            None,
         )
         .oneshot(request())
         .await

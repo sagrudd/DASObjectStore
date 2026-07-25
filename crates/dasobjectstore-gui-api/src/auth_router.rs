@@ -42,6 +42,33 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
     }
 }
 
+pub fn gui_api_router_for_host_mode_with_s3_descriptor(
+    host_mode: GuiApiHostMode,
+    auth_store: LocalAuthStore,
+    include_application_auth: bool,
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+) -> Router {
+    match host_mode {
+        GuiApiHostMode::Standalone => {
+            let router = federated_operational_router(auth_store.clone()).merge(
+                standalone_session_auth_router_with_state(StandaloneAuthRouteState {
+                    auth_store,
+                    local_password_authenticator: Arc::new(
+                        SystemLocalPasswordAuthenticator::default(),
+                    ),
+                    s3_descriptor,
+                }),
+            );
+            if include_application_auth {
+                router.merge(standalone_application_auth_router())
+            } else {
+                router
+            }
+        }
+        GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
+    }
+}
+
 /// Product routes for a host that supplies a verified actor. Login/session
 /// issuance is intentionally omitted so Monas or Synoptikon remains the sole
 /// browser authentication authority.

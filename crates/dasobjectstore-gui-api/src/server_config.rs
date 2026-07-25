@@ -98,6 +98,14 @@ pub struct StandaloneS3IngressConfig {
     pub legacy_upstream_endpoint: String,
     #[serde(default = "default_s3_max_concurrent_uploads")]
     pub max_concurrent_uploads: usize,
+    /// Operator-configured public S3 service descriptor. Remote clients must
+    /// never derive these values from the Web listener.
+    #[serde(default)]
+    pub public_endpoint_url: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub addressing_style: Option<String>,
 }
 
 impl StandaloneS3IngressConfig {
@@ -120,7 +128,34 @@ impl StandaloneS3IngressConfig {
         primary_port: u16,
         application_mtls: &StandaloneMutualTlsConfig,
     ) -> Result<(), StandaloneServerConfigError> {
+        let descriptor_fields = [
+            self.public_endpoint_url.is_some(),
+            self.region.is_some(),
+            self.addressing_style.is_some(),
+        ];
+        if descriptor_fields.iter().any(|present| *present)
+            && !descriptor_fields.iter().all(|present| *present)
+        {
+            return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+        }
+        if let Some(endpoint) = &self.public_endpoint_url {
+            validate_s3_public_endpoint(endpoint)?;
+        }
+        if self
+            .region
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+            || self
+                .addressing_style
+                .as_deref()
+                .is_some_and(|value| !matches!(value, "path" | "virtual"))
+        {
+            return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+        }
         if !self.enabled() {
+            if self.public_endpoint_url.is_some() {
+                return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+            }
             return Ok(());
         }
         self.socket_addr()?;
@@ -160,6 +195,9 @@ impl Default for StandaloneS3IngressConfig {
             port: default_s3_ingress_port(),
             legacy_upstream_endpoint: default_s3_ingress_upstream(),
             max_concurrent_uploads: default_s3_max_concurrent_uploads(),
+            public_endpoint_url: None,
+            region: None,
+            addressing_style: None,
         }
     }
 }
@@ -321,6 +359,7 @@ pub enum StandaloneServerConfigError {
     InvalidS3IngressBindAddress { bind_address: String },
     InvalidS3LegacyUpstream { endpoint: String },
     InvalidS3Concurrency { value: usize },
+    InvalidS3PublicDescriptor,
 }
 
 impl Display for StandaloneServerConfigError {
@@ -385,6 +424,9 @@ impl Display for StandaloneServerConfigError {
                 formatter,
                 "direct S3 max_concurrent_uploads must be between 1 and 256: {value}"
             ),
+            Self::InvalidS3PublicDescriptor => formatter.write_str(
+                "S3 public descriptor requires an HTTP(S) endpoint with a host, a non-empty region, and addressing_style path or virtual",
+            ),
         }
     }
 }
@@ -415,6 +457,22 @@ fn default_s3_ingress_upstream() -> String {
 
 fn default_s3_max_concurrent_uploads() -> usize {
     8
+}
+
+fn validate_s3_public_endpoint(endpoint: &str) -> Result<(), StandaloneServerConfigError> {
+    let parsed = reqwest::Url::parse(endpoint)
+        .map_err(|_| StandaloneServerConfigError::InvalidS3PublicDescriptor)?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+    }
+    Ok(())
 }
 
 fn default_application_identity_registry_path() -> PathBuf {
@@ -689,6 +747,43 @@ mod tests {
                 StandaloneServerConfigError::InvalidS3Concurrency { value: invalid }
             );
         }
+    }
+
+    #[test]
+    fn validates_complete_authoritative_s3_descriptor_without_assuming_3900() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+        config.s3_ingress.public_endpoint_url =
+            Some("https://objects.lab.example:9443".to_string());
+        config.s3_ingress.region = Some("lab-west".to_string());
+        config.s3_ingress.addressing_style = Some("virtual".to_string());
+        config.validate().expect("descriptor is valid");
+        assert_ne!(
+            config.s3_ingress.public_endpoint_url.as_deref(),
+            Some("http://127.0.0.1:3900")
+        );
+    }
+
+    #[test]
+    fn rejects_partial_or_malformed_authoritative_s3_descriptor() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+        config.s3_ingress.public_endpoint_url = Some("https://objects.example:7443".to_string());
+        assert_eq!(
+            config.validate().expect_err("partial descriptor rejected"),
+            StandaloneServerConfigError::InvalidS3PublicDescriptor
+        );
+
+        config.s3_ingress.region = Some("test".to_string());
+        config.s3_ingress.addressing_style = Some("path".to_string());
+        config.s3_ingress.public_endpoint_url =
+            Some("https://user:secret@objects.example:7443/path".to_string());
+        assert_eq!(
+            config
+                .validate()
+                .expect_err("malformed descriptor rejected"),
+            StandaloneServerConfigError::InvalidS3PublicDescriptor
+        );
     }
 
     #[test]

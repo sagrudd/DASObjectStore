@@ -98,23 +98,39 @@ returns a single-store, eight-hour Garage context:
 .. code-block:: console
 
    dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
-     --username stephen
+     --username stephen \
+     --ca-cert ~/.config/dasobjectstore/appliance-ca.pem \
+     --set-s3-config
 
-The command establishes trust before asking for the password. On first
-connection it downloads the public certificate from
-``http://HOST:3900/.well-known/dasobjectstore/appliance-ca.pem``, displays its
-SHA-256 fingerprint for comparison with the appliance console or an SSH
-session, and asks whether to pin it. The pin is stored below
-``~/.config/dasobjectstore/trusted-appliances`` with private permissions.
-Certificate changes fail closed and require deliberate, out-of-band
-verification. The client has no insecure TLS bypass. Managed deployments may
-continue to pass ``--ca-cert`` and ``--tls-server-name`` explicitly.
+The command establishes trust before asking for the password. Supply a verified
+appliance CA with ``--ca-cert`` on first use; subsequent connections may use
+the pinned certificate below
+``~/.config/dasobjectstore/trusted-appliances``. The client does not probe or
+guess an S3 listener to obtain trust material. Certificate changes fail closed
+and require deliberate out-of-band verification. There is no insecure TLS
+bypass.
 
-Normal output is redacted, while the full temporary connection context is
-stored in the mode-``0600`` remote client configuration for uploads and
-renewal. ``--json`` may be used when a process must consume the temporary
-context directly. The password is never stored, sent to the S3 service, or
-included in process arguments.
+``--set-s3-config`` installs the temporary session into the standard AWS
+credentials and config files under the deterministic profile
+``dasobjectstore-epic_collection``. Use ``--s3-profile NAME`` to override it.
+The API, not the client, supplies the exact endpoint URL, bucket, region and
+addressing style. Profile updates preserve unrelated profiles, are locked and
+atomically replaced, respect ``AWS_CONFIG_FILE`` and
+``AWS_SHARED_CREDENTIALS_FILE``, and are verified with a bounded authenticated
+bucket listing by default. A conflicting association requires ``--force``;
+``--no-verify-s3`` is reserved for diagnostics.
+
+All text and ``--json`` output is secret-free. Temporary credentials and
+renewal material remain only in private local configuration. The password is
+never stored, sent to the S3 service, or included in process arguments.
+
+Inspect a configured association without disclosing credentials:
+
+.. code-block:: console
+
+   dasobjectstore-remote s3 status epic_collection \
+     --profile dasobjectstore-epic_collection \
+     --json
 
 The server-side easyconnect contract is defined as stable daemon/API DTOs for
 the following operations:
