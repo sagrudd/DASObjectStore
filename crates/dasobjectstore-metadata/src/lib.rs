@@ -8,6 +8,7 @@ pub mod copy;
 pub mod destage;
 pub mod direct_import;
 pub mod disk;
+pub mod disk_capacity;
 pub mod drain;
 pub mod evacuation;
 pub mod export;
@@ -75,6 +76,12 @@ pub use direct_import::{
 };
 pub use disk::{
     force_retire_disk, request_disk_retirement, DiskRetirementError, DiskRetirementReport,
+};
+pub use disk_capacity::{
+    acquire_disk_capacity_claims, read_outstanding_disk_capacity,
+    read_outstanding_disk_capacity_excluding, release_disk_capacity_claims,
+    update_disk_capacity_claim_consumption, DiskCapacityClaim, DiskCapacityClaimAllocation,
+    DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
 };
 pub use drain::{
     read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,

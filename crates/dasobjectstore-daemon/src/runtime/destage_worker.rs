@@ -5,10 +5,12 @@ use dasobjectstore_core::ids::ObjectId;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::utc::add_seconds_to_utc_timestamp;
 use dasobjectstore_metadata::{
-    claim_next_destage, fail_destage, list_ssd_eviction_candidates, mark_ssd_evicted,
-    measure_ssd_capacity, promote_hdd_settlement, read_ssd_placement,
+    acquire_disk_capacity_claims, claim_next_destage, fail_destage, list_ssd_eviction_candidates,
+    mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement,
+    read_outstanding_disk_capacity_excluding, read_ssd_placement,
     settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
-    DestageQueueRecord, HddSettlementPromotionRequest, ObjectPutError, StagedObjectPut,
+    DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+    DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, StagedObjectPut,
     VerifiedHddPlacement,
 };
 use sha2::{Digest, Sha256};
@@ -80,7 +82,7 @@ pub fn run_one_durable_destage(
         return evict_one_settled_ssd_copy(config, now_utc);
     };
 
-    match settle_claimed_record(config, &record, now_utc) {
+    match settle_claimed_record(config, &record, now_utc, &lease_expires_at_utc) {
         Ok(copies) => Ok(DurableDestageOutcome::Settled {
             store_id: record.store_id.clone(),
             object_id: record.object_id,
@@ -153,6 +155,7 @@ fn settle_claimed_record(
     config: &DurableDestageWorkerConfig,
     record: &DestageQueueRecord,
     now_utc: &str,
+    lease_expires_at_utc: &str,
 ) -> Result<u8, DurableDestageWorkerError> {
     let ssd = read_ssd_placement(&config.live_sqlite_path, &record.object_id)?
         .ok_or_else(|| DurableDestageWorkerError::MissingSsdPlacement(record.object_id.clone()))?;
@@ -174,10 +177,44 @@ fn settle_claimed_record(
     }
     let object_type = parse_queued_object_type(&record.object_type)?;
     let roots = select_managed_hdd_roots_with_capacity(
+        &config.live_sqlite_path,
         &config.hdd_root,
         record.required_copy_count,
         record.expected_size_bytes,
+        Some(record.object_id.as_str()),
     )?;
+    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
+        live_sqlite_path: config.live_sqlite_path.clone(),
+        kind: DiskCapacityClaimKind::Destage,
+        owner_id: record.object_id.as_str().to_string(),
+        request_id: format!("destage:{}", record.destage_job_id),
+        request_digest: format!(
+            "{}:{}:{}:{}",
+            record.object_id.as_str(),
+            record.expected_size_bytes,
+            record.required_copy_count,
+            record.content_hash
+        ),
+        lease_owner: Some(config.worker_id.clone()),
+        lease_expires_at_utc: Some(lease_expires_at_utc.to_string()),
+        created_at_utc: now_utc.to_string(),
+        allocations: roots
+            .iter()
+            .map(|root| {
+                let capacity = measure_ssd_capacity(&root.root_path).map_err(|error| {
+                    DurableDestageWorkerError::CapacityMeasurement {
+                        disk_id: root.disk_id.as_str().to_string(),
+                        message: error.to_string(),
+                    }
+                })?;
+                Ok(DiskCapacityClaimAllocation {
+                    disk_id: root.disk_id.clone(),
+                    measured_available_bytes: capacity.available_bytes,
+                    requested_bytes: record.expected_size_bytes,
+                })
+            })
+            .collect::<Result<Vec<_>, DurableDestageWorkerError>>()?,
+    })?;
     let job_root = payload_path
         .parent()
         .ok_or_else(|| DurableDestageWorkerError::UnsafeSsdPlacement(ssd.relative_path.clone()))?
@@ -258,17 +295,30 @@ fn settle_claimed_record(
 /// exact fractional free capacity. Disk identity is only a deterministic
 /// tiebreaker when two fractions are equal.
 pub(crate) fn select_managed_hdd_roots_with_capacity(
+    live_sqlite_path: &Path,
     hdd_root: &Path,
     required_copies: u8,
     required_bytes: u64,
+    excluded_destage_owner: Option<&str>,
 ) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    let outstanding = read_outstanding_disk_capacity_excluding(
+        live_sqlite_path,
+        excluded_destage_owner.map(|owner| (DiskCapacityClaimKind::Destage, owner)),
+    )?;
     select_hdd_roots_with_capacity(
         discover_managed_hdd_roots(hdd_root)?,
         required_copies,
         required_bytes,
         |root| {
             measure_ssd_capacity(&root.root_path)
-                .map(|capacity| (capacity.available_bytes, capacity.total_bytes))
+                .map(|capacity| {
+                    (
+                        capacity
+                            .available_bytes
+                            .saturating_sub(outstanding.get(&root.disk_id).copied().unwrap_or(0)),
+                        capacity.total_bytes,
+                    )
+                })
                 .map_err(|error| error.to_string())
         },
     )
@@ -485,6 +535,7 @@ fn placement_id(object_id: &ObjectId, disk_id: &str, relative_path: &str) -> Str
 #[derive(Debug)]
 pub enum DurableDestageWorkerError {
     Metadata(DestageMetadataError),
+    CapacityClaim(DiskCapacityClaimError),
     Ingest(crate::runtime::DaemonIngestFilesRuntimeError),
     ObjectPut(ObjectPutError),
     Io(std::io::Error),
@@ -513,12 +564,17 @@ pub enum DurableDestageWorkerError {
     },
     UnknownPlacementDisk(String),
     UnsafeHddPlacement(PathBuf),
+    CapacityMeasurement {
+        disk_id: String,
+        message: String,
+    },
 }
 
 impl Display for DurableDestageWorkerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Metadata(error) => Display::fmt(error, formatter),
+            Self::CapacityClaim(error) => Display::fmt(error, formatter),
             Self::Ingest(error) => Display::fmt(error, formatter),
             Self::ObjectPut(error) => Display::fmt(error, formatter),
             Self::Io(error) => write!(formatter, "durable destage IO failed: {error}"),
@@ -567,6 +623,9 @@ impl Display for DurableDestageWorkerError {
             Self::UnsafeHddPlacement(path) => {
                 write!(formatter, "HDD placement escaped its managed root: {}", path.display())
             }
+            Self::CapacityMeasurement { disk_id, message } => {
+                write!(formatter, "failed to measure HDD {disk_id} capacity: {message}")
+            }
         }
     }
 }
@@ -576,6 +635,12 @@ impl std::error::Error for DurableDestageWorkerError {}
 impl From<DestageMetadataError> for DurableDestageWorkerError {
     fn from(error: DestageMetadataError) -> Self {
         Self::Metadata(error)
+    }
+}
+
+impl From<DiskCapacityClaimError> for DurableDestageWorkerError {
+    fn from(error: DiskCapacityClaimError) -> Self {
+        Self::CapacityClaim(error)
     }
 }
 

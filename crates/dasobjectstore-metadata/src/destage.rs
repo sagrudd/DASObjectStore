@@ -408,6 +408,7 @@ pub fn promote_hdd_settlement(
         |r| r.get(0),
     )?;
     if existing == "hdd_copy_verified" {
+        release_destage_capacity_claims_tx(&tx, request.object_id, request.verified_at_utc)?;
         tx.commit()?;
         return Ok(true);
     }
@@ -441,8 +442,25 @@ pub fn promote_hdd_settlement(
         params![request.verified_at_utc, request.object_id.as_str()],
     )?;
     tx.execute("UPDATE ssd_object_placements SET eviction_eligible=1, updated_at_utc=?1 WHERE object_id=?2 AND evicted_at_utc IS NULL",params![request.verified_at_utc,request.object_id.as_str()])?;
+    release_destage_capacity_claims_tx(&tx, request.object_id, request.verified_at_utc)?;
     tx.commit()?;
     Ok(false)
+}
+
+fn release_destage_capacity_claims_tx(
+    transaction: &Transaction<'_>,
+    object_id: &ObjectId,
+    released_at_utc: &str,
+) -> Result<(), DestageMetadataError> {
+    transaction.execute(
+        "UPDATE disk_capacity_claims
+         SET state='released', released_at_utc=?1, updated_at_utc=?1,
+             lease_owner=NULL, lease_expires_at_utc=NULL
+         WHERE claim_kind='destage' AND owner_id=?2
+           AND state='active' AND released_at_utc IS NULL",
+        params![released_at_utc, object_id.as_str()],
+    )?;
+    Ok(())
 }
 
 pub fn read_destage(
@@ -932,6 +950,21 @@ mod tests {
             None,
         )
         .expect("claim");
+        Connection::open(&path)
+            .expect("open for capacity claim")
+            .execute(
+                "INSERT INTO disk_capacity_claims (
+                    claim_id, claim_kind, owner_id, request_id, request_digest,
+                    disk_id, state, reserved_bytes, consumed_bytes, created_at_utc,
+                    updated_at_utc
+                 ) VALUES (
+                    'destage:object-a:disk-a', 'destage', 'object-a', 'job-a',
+                    'digest-a', 'disk-a', 'active', 5, 0,
+                    '2026-01-01T00:02:00Z', '2026-01-01T00:02:00Z'
+                 )",
+                [],
+            )
+            .expect("insert capacity claim");
         let placements = [VerifiedHddPlacement {
             placement_id: "placement-a",
             disk_id: "disk-a",
@@ -961,6 +994,15 @@ mod tests {
         let connection = Connection::open(&path).expect("open");
         let row: (String, bool) = connection.query_row("SELECT o.state, s.eviction_eligible FROM objects o JOIN ssd_object_placements s USING(object_id) WHERE o.object_id='object-a'", [], |r| Ok((r.get(0)?, r.get(1)?))).expect("state");
         assert_eq!(row, ("HddCopyVerified".to_string(), true));
+        let capacity_claim_state: String = connection
+            .query_row(
+                "SELECT state FROM disk_capacity_claims
+                 WHERE claim_id='destage:object-a:disk-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("capacity claim");
+        assert_eq!(capacity_claim_state, "released");
         cleanup(path);
     }
 

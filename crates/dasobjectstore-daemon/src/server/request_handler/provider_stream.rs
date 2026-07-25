@@ -62,9 +62,11 @@ where
         // acceptance. The worker repeats the same selection immediately
         // before copying so a subsequent capacity race remains fail-closed.
         crate::runtime::select_managed_hdd_roots_with_capacity(
+            &self.live_sqlite_path,
             &self.hdd_root_path,
             definition.policy.copies,
             record.size_bytes,
+            None,
         )
         .map_err(|error| error.to_string())?;
         self.publish_profile_s3_catalogue(&definition.store_id, backend)

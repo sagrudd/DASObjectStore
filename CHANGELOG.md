@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.133.0 - 2026-07-25
+
+- Add live-metadata schema 0.8 and one durable per-disk physical-capacity claim
+  authority shared by workspace reservations, ordinary HDD ingest, asynchronous
+  destage, repair/rebalancing, and disk evacuation.
+- Subtract outstanding claims before disk selection, revalidate eligibility and
+  capacity under an immediate transaction, renew identical claims after worker
+  restart, reject conflicting ownership, and retain claims across ambiguous
+  partial writes.
+- Release ordinary ingest claims only after immutable object metadata commits,
+  release destage claims atomically with verified HDD placement promotion, and
+  wrap background relocation in the same fail-closed admission boundary.
+
 ## 0.132.1 - 2026-07-25
 
 - Add the authoritative SQLite compute-workspace repository with immediate

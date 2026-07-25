@@ -85,6 +85,9 @@ pub(super) fn spawn_hdd_settlement_workers(
     event_tx: mpsc::Sender<HddSettlementEvent>,
     worker_count: usize,
     scheduler: SharedHddSettlementScheduler,
+    live_sqlite_path: PathBuf,
+    ingest_job_id: IngestJobId,
+    recorded_at_utc: String,
 ) -> Vec<thread::JoinHandle<()>> {
     let settle_rx = Arc::new(Mutex::new(settle_rx));
     (0..worker_count.max(1))
@@ -92,6 +95,9 @@ pub(super) fn spawn_hdd_settlement_workers(
             let settle_rx = Arc::clone(&settle_rx);
             let event_tx = event_tx.clone();
             let scheduler = Arc::clone(&scheduler);
+            let live_sqlite_path = live_sqlite_path.clone();
+            let ingest_job_id = ingest_job_id.clone();
+            let recorded_at_utc = recorded_at_utc.clone();
             thread::spawn(move || loop {
                 let work = {
                     let receiver = match settle_rx.lock() {
@@ -116,6 +122,53 @@ pub(super) fn spawn_hdd_settlement_workers(
                         break;
                     }
                 };
+                let claim_owner = format!(
+                    "{}:{}",
+                    ingest_job_id.as_str(),
+                    work.entry.object_id.as_str()
+                );
+                let allocations = roots
+                    .iter()
+                    .map(|root| {
+                        let capacity = measure_ssd_capacity(&root.root_path)
+                            .map_err(|error| error.to_string())?;
+                        Ok(DiskCapacityClaimAllocation {
+                            disk_id: root.disk_id.clone(),
+                            measured_available_bytes: capacity.available_bytes,
+                            requested_bytes: work.entry.size_bytes,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, String>>();
+                let claim_result = allocations.and_then(|allocations| {
+                    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
+                        live_sqlite_path: live_sqlite_path.clone(),
+                        kind: DiskCapacityClaimKind::Ingest,
+                        owner_id: claim_owner,
+                        request_id: format!(
+                            "ingest:{}:{}",
+                            ingest_job_id.as_str(),
+                            work.entry.object_id.as_str()
+                        ),
+                        request_digest: format!(
+                            "{}:{}:{}",
+                            work.entry.object_id.as_str(),
+                            work.entry.size_bytes,
+                            work.payload.copy_count()
+                        ),
+                        lease_owner: Some(ingest_job_id.as_str().to_string()),
+                        lease_expires_at_utc: None,
+                        created_at_utc: recorded_at_utc.clone(),
+                        allocations,
+                    })
+                    .map_err(|error| error.to_string())
+                });
+                if let Err(error) = claim_result {
+                    let _ = release_hdd_settlement_roots(&scheduler, &roots, 0);
+                    let _ = event_tx.send(HddSettlementEvent::Failed {
+                        error: ObjectPutError::Io(io::Error::other(error)),
+                    });
+                    break;
+                }
                 let _ = event_tx.send(HddSettlementEvent::Started {
                     entry: work.entry.clone(),
                     roots: roots.clone(),

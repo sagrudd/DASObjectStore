@@ -58,10 +58,14 @@ capacity first with a stable disk-ID tie-break. It can satisfy a request larger
 than any single disk. Filesystem provisioning happens after commit and must not
 hold a SQLite transaction.
 
-The capacity authority will be generalized as ``disk_capacity_claims`` so
-workspace reservations and short-lived ingest, destage, repair, and evacuation
-claims cannot overcommit one another. Until that shared claim authority exists,
-workspace mutation must remain unavailable rather than race immutable writes.
+Live-metadata schema 0.8 provides ``disk_capacity_claims`` as the shared
+authority for workspace reservations and short-lived ingest, destage, repair,
+and evacuation writes. Outstanding capacity is ``reserved - consumed`` so
+physical free-space measurements do not double-count bytes already written.
+Claim acquisition uses an immediate transaction, disk-state revalidation, and
+request identity conflict protection. Immutable ingest releases only after its
+object metadata commit; destage releases atomically with verified placement
+promotion; interrupted or ambiguous writes retain their claims for safe retry.
 
 Provider and privilege boundaries
 ---------------------------------

@@ -3720,7 +3720,7 @@ browser and appliance acceptance remain external validation gates.
   reports.
 - [ ] Implement the durable operation repository and lease/checkpoint recovery
   for provisioning, materialization, promotion, and cleanup.
-- [ ] Introduce shared per-disk physical claims across workspaces, ingest,
+- [x] Introduce shared per-disk physical claims across workspaces, ingest,
   destage, repair, and evacuation before enabling workspace mutation.
 - [ ] Implement marker-owned branch provisioning, project quotas, rollback,
   and restart reconciliation through a narrow privileged Linux host broker.

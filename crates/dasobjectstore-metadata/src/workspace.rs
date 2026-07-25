@@ -1,3 +1,4 @@
+use crate::disk_capacity::outstanding_claim_bytes;
 use crate::schema::LIVE_SCHEMA_SQL;
 use dasobjectstore_core::ids::{DiskId, PoolId, StoreId, WorkspaceId};
 use dasobjectstore_core::lifecycle::{DiskState, HealthState};
@@ -186,6 +187,7 @@ pub fn reserve_workspace(
                 workspace_id: request.workspace_id.clone(),
             });
         }
+        ensure_workspace_claims(&transaction, request)?;
         let snapshot = read_workspace_in_transaction(&transaction, &request.workspace_id)?;
         transaction.commit()?;
         return Ok(snapshot);
@@ -283,6 +285,12 @@ pub fn reserve_workspace(
                 branch.reserved_bytes,
                 request.created_at_utc,
             ],
+        )?;
+        insert_workspace_claim(
+            &transaction,
+            request,
+            &branch.disk_id,
+            branch.reserved_bytes,
         )?;
     }
 
@@ -442,14 +450,7 @@ fn transaction_candidates(
                 .as_deref()
                 .and_then(parse_disk_state)
                 .unwrap_or(DiskState::Failed);
-            let already_reserved_bytes = transaction.query_row(
-                "SELECT COALESCE(SUM(reserved_bytes), 0)
-                 FROM compute_workspace_branches
-                 WHERE disk_id = ?1 AND released_at_utc IS NULL
-                   AND state != 'released'",
-                [candidate.disk_id.as_str()],
-                |row| row.get::<_, u64>(0),
-            )?;
+            let already_reserved_bytes = outstanding_claim_bytes(transaction, &candidate.disk_id)?;
             Ok(WorkspaceCapacityCandidate {
                 disk_id: candidate.disk_id.clone(),
                 disk_state,
@@ -459,6 +460,89 @@ fn transaction_candidates(
             })
         })
         .collect()
+}
+
+fn ensure_workspace_claims(
+    transaction: &Transaction<'_>,
+    request: &ReserveWorkspaceRequest,
+) -> Result<(), WorkspaceMetadataError> {
+    let mut statement = transaction.prepare(
+        "SELECT disk_id, reserved_bytes
+         FROM compute_workspace_branches
+         WHERE workspace_id=?1 AND released_at_utc IS NULL AND state!='released'",
+    )?;
+    let branches = statement
+        .query_map([request.workspace_id.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
+    for (disk_value, reserved_bytes) in branches {
+        let disk_id = DiskId::new(disk_value.clone()).map_err(|_| {
+            WorkspaceMetadataError::InvalidStoredValue {
+                field: "disk_id",
+                value: disk_value,
+            }
+        })?;
+        insert_workspace_claim(transaction, request, &disk_id, reserved_bytes)?;
+    }
+    Ok(())
+}
+
+fn insert_workspace_claim(
+    transaction: &Transaction<'_>,
+    request: &ReserveWorkspaceRequest,
+    disk_id: &DiskId,
+    reserved_bytes: u64,
+) -> Result<(), WorkspaceMetadataError> {
+    transaction.execute(
+        "INSERT INTO disk_capacity_claims (
+            claim_id, claim_kind, owner_id, request_id, request_digest, disk_id,
+            state, reserved_bytes, consumed_bytes, lease_owner,
+            lease_expires_at_utc, created_at_utc, updated_at_utc,
+            released_at_utc
+         ) VALUES (?1, 'workspace', ?2, ?3, ?4, ?5, 'active', ?6, 0, NULL,
+                   NULL, ?7, ?7, NULL)
+         ON CONFLICT(claim_kind, owner_id, disk_id) DO NOTHING",
+        params![
+            format!(
+                "workspace:{}:{}",
+                request.workspace_id.as_str(),
+                disk_id.as_str()
+            ),
+            request.workspace_id.as_str(),
+            request.request_id,
+            request.request_digest,
+            disk_id.as_str(),
+            reserved_bytes,
+            request.created_at_utc,
+        ],
+    )?;
+    let existing = transaction.query_row(
+        "SELECT request_digest, reserved_bytes, state
+         FROM disk_capacity_claims
+         WHERE claim_kind='workspace' AND owner_id=?1 AND disk_id=?2",
+        params![request.workspace_id.as_str(), disk_id.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u64>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    if existing
+        != (
+            request.request_digest.clone(),
+            reserved_bytes,
+            "active".to_string(),
+        )
+    {
+        return Err(WorkspaceMetadataError::RequestIdentityConflict {
+            request_id: request.request_id.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn read_workspace(

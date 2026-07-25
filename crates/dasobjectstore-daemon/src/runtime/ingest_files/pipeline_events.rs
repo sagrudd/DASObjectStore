@@ -163,6 +163,18 @@ pub(super) fn drain_hdd_settlement_events(
                         "failed to commit completed object metadata: {error}"
                     )));
                 }
+                let claim_owner = format!("{}:{}", job_id.as_str(), entry.object_id.as_str());
+                release_disk_capacity_claims(
+                    live_sqlite_path,
+                    DiskCapacityClaimKind::Ingest,
+                    &claim_owner,
+                    recorded_at_utc,
+                )
+                .map_err(|error| {
+                    DaemonIngestFilesRuntimeError::CommandFailed(format!(
+                        "failed to release committed HDD capacity claim: {error}"
+                    ))
+                })?;
                 capacity_reservations.commit(&entry)?;
                 state.hdd_active = state.hdd_active.saturating_sub(1);
                 state.completed_files = state.completed_files.saturating_add(1);

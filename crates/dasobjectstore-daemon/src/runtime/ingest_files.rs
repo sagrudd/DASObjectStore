@@ -11,10 +11,13 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{AcknowledgementPolicy, IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    commit_object_put, commit_verified_ssd_and_enqueue, existing_object_payload_candidate_paths,
-    measure_ssd_capacity, put_object_direct_to_hdd_with_controlled_progress, read_destage,
-    read_object_inspect, settle_staged_object_to_hdd_with_controlled_progress,
-    stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest, DiskCopyRoot,
+    acquire_disk_capacity_claims, commit_object_put, commit_verified_ssd_and_enqueue,
+    existing_object_payload_candidate_paths, measure_ssd_capacity,
+    put_object_direct_to_hdd_with_controlled_progress, read_destage, read_object_inspect,
+    read_outstanding_disk_capacity, release_disk_capacity_claims,
+    settle_staged_object_to_hdd_with_controlled_progress,
+    stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest,
+    DiskCapacityClaimAllocation, DiskCapacityClaimKind, DiskCapacityClaimRequest, DiskCopyRoot,
     IngestJobPaths, IngestPayloadWriteError, IngestStagingLayout, IngestWriteReport,
     ObjectInspectError, ObjectPutError, ObjectPutProgress, ObjectPutProgressStage,
     ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut, VerifiedSsdCommitRequest,
@@ -66,7 +69,7 @@ use pipeline_workers::{
 #[cfg(test)]
 use scheduling::{default_hdd_worker_count, HddSettlementDiskState, HddSettlementScheduler};
 use scheduling::{
-    new_shared_hdd_settlement_scheduler, release_hdd_settlement_roots,
+    new_shared_hdd_settlement_scheduler_with_claims, release_hdd_settlement_roots,
     reserve_hdd_settlement_roots, resolve_hdd_worker_count, SharedHddSettlementScheduler,
 };
 use source_classification::{
@@ -363,12 +366,20 @@ impl LocalFileIngestExecutor {
         let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
         let (flush_tx, flush_rx) = mpsc::sync_channel::<SsdFlushWork>(SSD_FLUSH_QUEUE_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
-        let hdd_scheduler = new_shared_hdd_settlement_scheduler(&managed_disk_roots)?;
+        let outstanding_claims = read_outstanding_disk_capacity(&self.live_sqlite_path)
+            .map_err(|error| DaemonIngestFilesRuntimeError::CommandFailed(error.to_string()))?;
+        let hdd_scheduler = new_shared_hdd_settlement_scheduler_with_claims(
+            &managed_disk_roots,
+            &outstanding_claims,
+        )?;
         let hdd_workers = spawn_hdd_settlement_workers(
             settle_rx,
             event_tx.clone(),
             hdd_worker_count,
             hdd_scheduler,
+            self.live_sqlite_path.clone(),
+            job_id.clone(),
+            accepted_at_utc.to_string(),
         );
         let ssd_flush_worker = spawn_ssd_flush_worker(flush_rx, settle_tx.clone(), event_tx);
         let mut source_failures = Vec::new();
@@ -877,9 +888,21 @@ impl LocalFileIngestExecutor {
         let queue_capacity = HDD_SETTLEMENT_QUEUE_CAPACITY.max(hdd_worker_count.saturating_mul(2));
         let (settle_tx, settle_rx) = mpsc::sync_channel::<HddSettlementWork>(queue_capacity);
         let (event_tx, event_rx) = mpsc::channel::<HddSettlementEvent>();
-        let hdd_scheduler = new_shared_hdd_settlement_scheduler(&managed_disk_roots)?;
-        let hdd_workers =
-            spawn_hdd_settlement_workers(settle_rx, event_tx, hdd_worker_count, hdd_scheduler);
+        let outstanding_claims = read_outstanding_disk_capacity(&self.live_sqlite_path)
+            .map_err(|error| DaemonIngestFilesRuntimeError::CommandFailed(error.to_string()))?;
+        let hdd_scheduler = new_shared_hdd_settlement_scheduler_with_claims(
+            &managed_disk_roots,
+            &outstanding_claims,
+        )?;
+        let hdd_workers = spawn_hdd_settlement_workers(
+            settle_rx,
+            event_tx,
+            hdd_worker_count,
+            hdd_scheduler,
+            self.live_sqlite_path.clone(),
+            job_id.clone(),
+            accepted_at_utc.to_string(),
+        );
 
         for entry in &files {
             if maybe_skip_existing_object(
@@ -1358,8 +1381,9 @@ mod tests {
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::{
-        hash_file_sha256, object_payload_path, read_destage, DiskCopyRoot, IngestStagingLayout,
-        ObjectPutProgress, ObjectPutProgressStage, ObjectPutRequest, SsdCapacityPolicy,
+        hash_file_sha256, object_payload_path, read_destage, read_outstanding_disk_capacity,
+        DiskCopyRoot, IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage,
+        ObjectPutRequest, SsdCapacityPolicy,
     };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use rusqlite::Connection;
@@ -1592,6 +1616,12 @@ mod tests {
         assert_eq!(
             find_payloads(&hdd_root.join("disk-a").join("objects")),
             vec![b"reproducible reference".to_vec()]
+        );
+        assert!(
+            read_outstanding_disk_capacity(ssd_root.join(".dasobjectstore").join("live.sqlite"))
+                .expect("capacity claims")
+                .is_empty(),
+            "immutable ingest claims must release only after metadata commit"
         );
         let capacity_events = capacity_provider.events.lock().expect("events lock");
         assert_eq!(capacity_events.len(), 2);

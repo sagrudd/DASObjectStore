@@ -3,7 +3,7 @@
 use super::DaemonIngestFilesRuntimeError;
 use dasobjectstore_core::ids::DiskId;
 use dasobjectstore_metadata::{measure_ssd_capacity, DiskCopyRoot};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 
@@ -28,7 +28,15 @@ pub(super) struct HddSettlementScheduler {
 pub(super) type SharedHddSettlementScheduler = Arc<(Mutex<HddSettlementScheduler>, Condvar)>;
 
 impl HddSettlementScheduler {
+    #[cfg(test)]
     pub(super) fn new(roots: &[DiskCopyRoot]) -> Result<Self, DaemonIngestFilesRuntimeError> {
+        Self::new_with_outstanding_claims(roots, &BTreeMap::new())
+    }
+
+    pub(super) fn new_with_outstanding_claims(
+        roots: &[DiskCopyRoot],
+        outstanding_claims: &BTreeMap<DiskId, u64>,
+    ) -> Result<Self, DaemonIngestFilesRuntimeError> {
         let mut seen_disk_ids = BTreeSet::new();
         for root in roots {
             if !seen_disk_ids.insert(root.disk_id.clone()) {
@@ -49,7 +57,9 @@ impl HddSettlementScheduler {
                         root_path: root.root_path.clone(),
                         active: false,
                         total_bytes: capacity.total_bytes,
-                        available_bytes: capacity.available_bytes,
+                        available_bytes: capacity.available_bytes.saturating_sub(
+                            outstanding_claims.get(&root.disk_id).copied().unwrap_or(0),
+                        ),
                         assigned_bytes: 0,
                     })
                 })
@@ -122,11 +132,15 @@ impl HddSettlementDiskState {
     }
 }
 
-pub(super) fn new_shared_hdd_settlement_scheduler(
+pub(super) fn new_shared_hdd_settlement_scheduler_with_claims(
     roots: &[DiskCopyRoot],
+    outstanding_claims: &BTreeMap<DiskId, u64>,
 ) -> Result<SharedHddSettlementScheduler, DaemonIngestFilesRuntimeError> {
     Ok(Arc::new((
-        Mutex::new(HddSettlementScheduler::new(roots)?),
+        Mutex::new(HddSettlementScheduler::new_with_outstanding_claims(
+            roots,
+            outstanding_claims,
+        )?),
         Condvar::new(),
     )))
 }

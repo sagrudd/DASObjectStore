@@ -5,11 +5,13 @@ use super::LiveStatusRegistry;
 use dasobjectstore_core::ids::DiskId;
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use dasobjectstore_metadata::{
-    assurance_primary_work_pending, commit_assurance_relocation, hash_file_sha256,
-    list_assurance_disk_states, list_assurance_placement_candidates, measure_ssd_capacity,
-    record_assurance_hash_failure, record_assurance_verification,
+    acquire_disk_capacity_claims, assurance_primary_work_pending, commit_assurance_relocation,
+    hash_file_sha256, list_assurance_disk_states, list_assurance_placement_candidates,
+    measure_ssd_capacity, read_outstanding_disk_capacity, record_assurance_hash_failure,
+    record_assurance_verification, release_disk_capacity_claims,
     write_verified_hdd_copy_with_controlled_progress, AssuranceMetadataError,
-    AssurancePlacementCandidate, HddCopyError, HddCopyRequest,
+    AssurancePlacementCandidate, DiskCapacityClaimAllocation, DiskCapacityClaimError,
+    DiskCapacityClaimKind, DiskCapacityClaimRequest, HddCopyError, HddCopyRequest,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -318,6 +320,41 @@ pub fn run_one_storage_assurance(
 
     let destination =
         destination.ok_or_else(|| StorageAssuranceError::MissingAssuranceDestination)?;
+    let claim_kind = match action {
+        StorageAssuranceAction::Evacuate => DiskCapacityClaimKind::Evacuation,
+        StorageAssuranceAction::Rebalance => DiskCapacityClaimKind::Repair,
+        StorageAssuranceAction::Verify | StorageAssuranceAction::Idle => {
+            return Err(StorageAssuranceError::MissingAssuranceDestination);
+        }
+    };
+    let claim_owner = format!(
+        "assurance:{}:{}",
+        candidate.object_id.as_str(),
+        destination.disk_id.as_str()
+    );
+    let raw_capacity = measure_ssd_capacity(&destination.root_path)
+        .map_err(|error| StorageAssuranceError::Discovery(error.to_string()))?;
+    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
+        live_sqlite_path: config.live_sqlite_path.clone(),
+        kind: claim_kind,
+        owner_id: claim_owner.clone(),
+        request_id: claim_owner.clone(),
+        request_digest: format!(
+            "{}:{}:{}:{}",
+            candidate.object_id.as_str(),
+            destination.disk_id.as_str(),
+            candidate.size_bytes,
+            expected_hash
+        ),
+        lease_owner: Some("storage-assurance".to_string()),
+        lease_expires_at_utc: None,
+        created_at_utc: now_utc.to_string(),
+        allocations: vec![DiskCapacityClaimAllocation {
+            disk_id: destination.disk_id.clone(),
+            measured_available_bytes: raw_capacity.available_bytes,
+            requested_bytes: candidate.size_bytes,
+        }],
+    })?;
     let destination_path = destination.root_path.join(&relative);
     let request = HddCopyRequest::new(
         candidate.object_id.clone(),
@@ -327,7 +364,7 @@ pub fn run_one_storage_assurance(
         &destination_path,
         &expected_hash,
     );
-    write_verified_hdd_copy_with_controlled_progress(&request, |_| {
+    let copy_result = write_verified_hdd_copy_with_controlled_progress(&request, |_| {
         let snapshot = live_status_registry.snapshot(now_utc.to_string());
         if snapshot.aggregate.active_ingests > 0
             || assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true)
@@ -335,7 +372,11 @@ pub fn run_one_storage_assurance(
             return Err(HddCopyError::Cancelled);
         }
         Ok(())
-    })?;
+    });
+    if let Err(error) = copy_result {
+        release_disk_capacity_claims(&config.live_sqlite_path, claim_kind, &claim_owner, now_utc)?;
+        return Err(error.into());
+    }
     commit_assurance_relocation(
         &config.live_sqlite_path,
         candidate,
@@ -343,6 +384,7 @@ pub fn run_one_storage_assurance(
         &candidate.relative_path,
         now_utc,
     )?;
+    release_disk_capacity_claims(&config.live_sqlite_path, claim_kind, &claim_owner, now_utc)?;
     let source_removed = match fs::remove_file(&source_path) {
         Ok(()) => {
             if let Some(parent) = source_path.parent() {
@@ -462,6 +504,7 @@ fn best_destination<'a>(
 fn measured_roots(
     config: &StorageAssuranceConfig,
 ) -> Result<Vec<MeasuredRoot>, StorageAssuranceError> {
+    let outstanding = read_outstanding_disk_capacity(&config.live_sqlite_path)?;
     let states = list_assurance_disk_states(&config.live_sqlite_path)?
         .into_iter()
         .map(|disk| (disk.disk_id.to_string(), disk.state))
@@ -472,10 +515,13 @@ fn measured_roots(
         .filter_map(|root| {
             let state = states.get(root.disk_id.as_str())?.clone();
             let capacity = measure_ssd_capacity(&root.root_path).ok()?;
+            let available_bytes = capacity
+                .available_bytes
+                .saturating_sub(outstanding.get(&root.disk_id).copied().unwrap_or(0));
             Some(MeasuredRoot {
                 disk_id: root.disk_id,
                 root_path: root.root_path,
-                available_bytes: capacity.available_bytes,
+                available_bytes,
                 total_bytes: capacity.total_bytes,
                 state,
             })
@@ -639,6 +685,7 @@ pub enum StorageAssuranceError {
         actual: String,
     },
     Metadata(AssuranceMetadataError),
+    CapacityClaim(DiskCapacityClaimError),
     Copy(HddCopyError),
     Io(io::Error),
 }
@@ -655,6 +702,7 @@ impl Display for StorageAssuranceError {
             Self::Discovery(error) => write!(formatter, "assurance disk discovery failed: {error}"),
             Self::HashMismatch { object_id, disk_id, expected, actual } => write!(formatter, "assurance hash mismatch for {object_id} on {disk_id}: expected {expected}, got {actual}"),
             Self::Metadata(error) => error.fmt(formatter),
+            Self::CapacityClaim(error) => error.fmt(formatter),
             Self::Copy(error) => error.fmt(formatter),
             Self::Io(error) => error.fmt(formatter),
         }
@@ -666,6 +714,11 @@ impl std::error::Error for StorageAssuranceError {}
 impl From<AssuranceMetadataError> for StorageAssuranceError {
     fn from(error: AssuranceMetadataError) -> Self {
         Self::Metadata(error)
+    }
+}
+impl From<DiskCapacityClaimError> for StorageAssuranceError {
+    fn from(error: DiskCapacityClaimError) -> Self {
+        Self::CapacityClaim(error)
     }
 }
 impl From<HddCopyError> for StorageAssuranceError {

@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 7);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 8);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -357,6 +357,35 @@ CREATE TABLE IF NOT EXISTS compute_workspace_audit_events (
 
 CREATE INDEX IF NOT EXISTS idx_compute_workspace_audit_events_workspace
 ON compute_workspace_audit_events (workspace_id, recorded_at_utc);
+
+-- One physical-capacity authority protects immutable writes and mutable
+-- workspace reservations from overcommitting the same disk. Reserved capacity
+-- is reduced by accounted consumption so filesystem free-space measurements
+-- and outstanding claims are not double-counted.
+CREATE TABLE IF NOT EXISTS disk_capacity_claims (
+    claim_id TEXT PRIMARY KEY NOT NULL,
+    claim_kind TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    disk_id TEXT NOT NULL REFERENCES disks(disk_id),
+    state TEXT NOT NULL,
+    reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
+    consumed_bytes INTEGER NOT NULL DEFAULT 0
+        CHECK (consumed_bytes >= 0 AND consumed_bytes <= reserved_bytes),
+    lease_owner TEXT,
+    lease_expires_at_utc TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    released_at_utc TEXT,
+    UNIQUE (claim_kind, owner_id, disk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_disk_capacity_claims_active_disk
+ON disk_capacity_claims (disk_id, state, released_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_disk_capacity_claims_owner
+ON disk_capacity_claims (claim_kind, owner_id, state);
 "#;
 
 #[cfg(test)]
@@ -372,7 +401,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 7);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 8);
     }
 
     #[test]
@@ -397,6 +426,7 @@ mod tests {
                 "compute_workspace_promotions",
                 "compute_workspaces",
                 "destage_queue",
+                "disk_capacity_claims",
                 "disks",
                 "ingest_jobs",
                 "metadata_format_versions",
