@@ -7,7 +7,9 @@ Status
 This document fixes the production architecture for first-class mutable compute
 workspaces. The implementation is intentionally delivered in dependency order.
 Schema version 1 and live-metadata schema 0.7 establish the domain and durable
-boundaries; they do not yet advertise a usable workspace.
+boundaries. The metadata repository can now reserve aggregate capacity
+atomically and expose path-redacted inspection, but it does not yet advertise a
+usable workspace.
 
 Authority boundary
 ------------------
@@ -147,7 +149,7 @@ Delivery and acceptance
 
 The ordered implementation sequence is:
 
-#. domain, schema, aggregate reservation, and read-only inspection;
+#. domain, schema, aggregate reservation, and read-only inspection (delivered);
 #. shared physical claims, branch provisioning, rollback, and restart recovery;
 #. privileged broker, mergerfs provider, hard quotas, and readiness;
 #. NFSv4 attach/detach and client isolation;

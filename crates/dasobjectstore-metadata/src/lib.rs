@@ -33,6 +33,7 @@ pub mod schema;
 mod secure_fs;
 pub mod snapshot;
 pub mod store;
+pub mod workspace;
 
 pub use assurance::{
     assurance_primary_work_pending, commit_assurance_relocation, list_assurance_disk_states,
@@ -169,6 +170,11 @@ pub use snapshot::{
 pub use store::{
     delete_store, drain_store, StoreCleanupError, StoreDeleteReport, StoreDeleteRequest,
     StoreDrainReport, StoreDrainRequest, StorePayloadRemoval,
+};
+pub use workspace::{
+    list_workspace_reservations, read_workspace_reservation, reserve_workspace,
+    transition_workspace, MeasuredWorkspaceDisk, ReserveWorkspaceRequest, WorkspaceDiskAllocation,
+    WorkspaceMetadataError, WorkspaceReservationSnapshot,
 };
 
 /// Returns the metadata crate version.

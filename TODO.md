@@ -3715,9 +3715,11 @@ browser and appliance acceptance remain external validation gates.
 - [x] Establish the distinct mutable-workspace domain, explicit lifecycle,
   aggregate capacity planner, additive live-metadata 0.7 schema, security
   boundaries, and dependency-ordered architecture.
-- [ ] Add the transactional SQLite repository for idempotent aggregate
-  reservation, generation-based state mutation, durable operations, and
-  path-redacted inspect/list reports.
+- [x] Add the transactional SQLite repository for idempotent aggregate
+  reservation, generation-based state mutation, and path-redacted inspect/list
+  reports.
+- [ ] Implement the durable operation repository and lease/checkpoint recovery
+  for provisioning, materialization, promotion, and cleanup.
 - [ ] Introduce shared per-disk physical claims across workspaces, ingest,
   destage, repair, and evacuation before enabling workspace mutation.
 - [ ] Implement marker-owned branch provisioning, project quotas, rollback,

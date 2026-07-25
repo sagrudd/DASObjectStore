@@ -8,6 +8,17 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.132.1 - 2026-07-25
+
+- Add the authoritative SQLite compute-workspace repository with immediate
+  transactions for atomic aggregate reservations, request replay/conflict
+  protection, healthy disk and writable pool enforcement, per-disk active
+  reservation accounting, generation-checked lifecycle transitions, and
+  path-redacted inspect/list records.
+- Cover concurrent admission, stale measurements, insufficient capacity,
+  unhealthy and draining disks, read-only pools, idempotent retries, invalid
+  transitions, and report redaction with synthetic regression tests.
+
 ## 0.132.0 - 2026-07-25
 
 - Establish the first-class managed compute workspace architecture with a
