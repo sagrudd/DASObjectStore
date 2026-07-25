@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.131.1 - 2026-07-25
+
+- Select the Rustls ring provider explicitly at standalone-server startup so
+  the Web and direct-S3 listeners remain available when dependencies enable
+  more than one compiled crypto provider.
+
 ## 0.131.0 - 2026-07-25
 
 - Make password-authenticated remote access consume a complete,

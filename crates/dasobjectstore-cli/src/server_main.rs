@@ -6,6 +6,13 @@ use std::process::ExitCode;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        eprintln!("unable to install the DASObjectStore TLS crypto provider");
+        return ExitCode::FAILURE;
+    }
     let cli = server_cli::ServerCli::parse();
     let mut stdout = std::io::stdout();
 
