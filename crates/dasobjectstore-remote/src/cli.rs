@@ -79,6 +79,8 @@ impl RemoteCli {
 pub enum RemoteCommand {
     /// Authenticate to one appliance ObjectStore and emit an 8-hour S3 context.
     Authenticate(AuthenticateArgs),
+    /// Inspect or explicitly change enrolled appliance TLS trust.
+    Trust(TrustArgs),
     /// Inspect locally configured S3 access for an authenticated ObjectStore.
     S3(S3Args),
     /// Define the browser-approved easyconnect pairing flow for a DAS appliance.
@@ -93,6 +95,96 @@ pub enum RemoteCommand {
     Operations(OperationsArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TrustArgs {
+    #[command(subcommand)]
+    command: TrustCommand,
+}
+
+impl TrustArgs {
+    pub fn command(&self) -> &TrustCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TrustCommand {
+    /// Inspect trust for one appliance endpoint.
+    Inspect(TrustInspectArgs),
+    /// List enrolled appliance trust records.
+    List(TrustListArgs),
+    /// Remove one appliance trust record.
+    Remove(TrustRemoveArgs),
+    /// Replace a changed certificate using an independently verified fingerprint.
+    Rotate(TrustRotateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TrustInspectArgs {
+    host_or_ip: String,
+    #[arg(long, default_value_t = crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    #[arg(long)]
+    json: bool,
+}
+
+impl TrustInspectArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct TrustListArgs {
+    #[arg(long)]
+    json: bool,
+}
+
+impl TrustListArgs {
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct TrustRemoveArgs {
+    appliance_id: String,
+    /// Confirm removal without an interactive prompt.
+    #[arg(long)]
+    yes: bool,
+}
+
+impl TrustRemoveArgs {
+    pub fn appliance_id(&self) -> &str {
+        &self.appliance_id
+    }
+    pub fn yes(&self) -> bool {
+        self.yes
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct TrustRotateArgs {
+    appliance_id: String,
+    #[arg(long)]
+    trust_fingerprint: String,
+}
+
+impl TrustRotateArgs {
+    pub fn appliance_id(&self) -> &str {
+        &self.appliance_id
+    }
+    pub fn trust_fingerprint(&self) -> &str {
+        &self.trust_fingerprint
+    }
 }
 
 #[derive(Debug, Args)]
@@ -113,6 +205,9 @@ pub struct AuthenticateArgs {
     /// TLS certificate name when the appliance certificate is not issued to its IP.
     #[arg(long)]
     tls_server_name: Option<String>,
+    /// Independently verified leaf-certificate SHA-256 fingerprint for non-interactive enrollment.
+    #[arg(long, conflicts_with = "ca_cert")]
+    trust_fingerprint: Option<String>,
     /// Requested session lifetime; defaults to the appliance policy (8 hours).
     #[arg(long)]
     session_lifetime_seconds: Option<u64>,
@@ -151,6 +246,9 @@ impl AuthenticateArgs {
     }
     pub fn tls_server_name(&self) -> Option<&str> {
         self.tls_server_name.as_deref()
+    }
+    pub fn trust_fingerprint(&self) -> Option<&str> {
+        self.trust_fingerprint.as_deref()
     }
     pub fn session_lifetime_seconds(&self) -> Option<u64> {
         self.session_lifetime_seconds
@@ -698,8 +796,8 @@ impl UploadArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli, RemoteCommand,
-        S3Command, StoresCommand,
+        ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli, RemoteCommand, S3Command,
+        StoresCommand, TrustCommand,
     };
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
@@ -782,6 +880,76 @@ mod tests {
         assert_eq!(args.store(), "epic_collection");
         assert_eq!(args.profile(), Some("dasobjectstore-epic_collection"));
         assert!(args.json());
+    }
+
+    #[test]
+    fn parses_non_interactive_fingerprint_enrollment() {
+        let fingerprint = "C9:9C:C8:A3:18:4A:70:3B:9C:9B:5A:7E:4A:DF:FB:8A:2D:6F:CF:45:EB:E4:D6:B5:02:8E:A6:82:B8:2D:F8:C5";
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "authenticate",
+            "192.168.1.192",
+            "epic_collection",
+            "--username",
+            "stephen",
+            "--trust-fingerprint",
+            fingerprint,
+            "--set-s3-config",
+        ])
+        .expect("fingerprint enrollment parses");
+        let RemoteCommand::Authenticate(args) = cli.command() else {
+            panic!("expected authenticate command");
+        };
+        assert_eq!(args.trust_fingerprint(), Some(fingerprint));
+        assert!(args.set_s3_config());
+    }
+
+    #[test]
+    fn rejects_ambiguous_manual_ca_and_fingerprint_authority() {
+        assert!(RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "authenticate",
+            "192.168.1.192",
+            "epic_collection",
+            "--ca-cert",
+            "/tmp/ca.pem",
+            "--trust-fingerprint",
+            "C99CC8A3184A703B9C9B5A7E4ADFFB8A2D6FCF45EBE4D6B5028EA682B82DF8C5",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn parses_trust_management_commands() {
+        let inspect = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "inspect",
+            "192.168.1.192",
+        ])
+        .expect("trust inspect parses");
+        let RemoteCommand::Trust(args) = inspect.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Inspect(args) = args.command() else {
+            panic!("expected inspect command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.https_port(), 8448);
+
+        let rotate = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "rotate",
+            "standalone-dasobjectstore",
+            "--trust-fingerprint",
+            "C99CC8A3184A703B9C9B5A7E4ADFFB8A2D6FCF45EBE4D6B5028EA682B82DF8C5",
+        ])
+        .expect("trust rotate parses");
+        let RemoteCommand::Trust(args) = rotate.command() else {
+            panic!("expected trust command");
+        };
+        assert!(matches!(args.command(), TrustCommand::Rotate(_)));
     }
 
     #[test]

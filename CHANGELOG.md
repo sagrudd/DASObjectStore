@@ -8,6 +8,21 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.134.0 - 2026-07-25
+
+- Add first-contact TLS certificate enrollment to
+  ``dasobjectstore-remote authenticate``: probe only the TLS handshake, display
+  certificate identity and validity, require default-deny interactive approval,
+  or compare an independently supplied SHA-256 fingerprint in constant time
+  before prompting for or transmitting credentials.
+- Persist endpoint- and appliance-bound trust as one locked, atomically replaced
+  private record; detect certificate changes, preserve explicit legacy
+  localhost-only enrollment, and make authenticated control/renewal consume the
+  same enrolled TLS-name policy.
+- Add ``trust inspect``, ``trust list``, ``trust remove``, and independently
+  fingerprinted ``trust rotate`` operations without exposing certificate PEM or
+  session credentials in command output.
+
 ## 0.133.0 - 2026-07-25
 
 - Add live-metadata schema 0.8 and one durable per-disk physical-capacity claim

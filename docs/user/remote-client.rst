@@ -99,16 +99,61 @@ returns a single-store, eight-hour Garage context:
 
    dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
      --username stephen \
-     --ca-cert ~/.config/dasobjectstore/appliance-ca.pem \
      --set-s3-config
 
-The command establishes trust before asking for the password. Supply a verified
-appliance CA with ``--ca-cert`` on first use; subsequent connections may use
-the pinned certificate below
-``~/.config/dasobjectstore/trusted-appliances``. The client does not probe or
-guess an S3 listener to obtain trust material. Certificate changes fail closed
-and require deliberate out-of-band verification. There is no insecure TLS
-bypass.
+The command establishes trust before asking for the password. On first contact
+it performs a TLS handshake without sending an HTTP request, username,
+password, session token, or S3 credential. It displays the leaf certificate
+subject, issuer, SANs, validity, address match, SHA-256 fingerprint and any
+appliance identity subsequently obtained through the approved pinned channel.
+An interactive user must answer the default-deny prompt:
+
+.. code-block:: text
+
+   Trust this DASObjectStore appliance certificate? [y/N]
+
+The accepted certificate and endpoint/appliance binding are stored as private,
+locked, atomic trust state below
+``~/.config/dasobjectstore/trusted-appliances`` (or
+``$XDG_CONFIG_HOME/dasobjectstore/trusted-appliances``). Subsequent
+authentication verifies the presented leaf against that pin before prompting
+for a password. A changed, expired, or not-yet-valid certificate fails closed
+and shows the old and new fingerprints.
+
+For non-interactive enrollment, compare a fingerprint obtained through an
+independent trusted channel:
+
+.. code-block:: console
+
+   dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
+     --username stephen \
+     --trust-fingerprint \
+     C9:9C:C8:A3:18:4A:70:3B:9C:9B:5A:7E:4A:DF:FB:8A:2D:6F:CF:45:EB:E4:D6:B5:02:8E:A6:82:B8:2D:F8:C5 \
+     --set-s3-config
+
+The comparison is constant-time and a mismatch stops before password input.
+Unknown certificates are rejected when stdin is non-interactive unless this
+option is supplied. Certificates correctly issued to the appliance DNS name or
+IP use ordinary name validation. Older appliance certificates that contain
+only ``localhost`` are supported solely after explicit fingerprint approval;
+the resulting endpoint record is marked as a legacy fingerprint-pinned
+connection. ``localhost`` is never guessed for another appliance.
+
+Inspect and deliberately maintain enrolled trust with:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust inspect 192.168.1.192
+   dasobjectstore-remote trust list
+   dasobjectstore-remote trust remove APPLIANCE_ID
+   dasobjectstore-remote trust rotate APPLIANCE_ID \
+     --trust-fingerprint SHA256
+
+Ordinary authentication never replaces an existing pin. Rotation requires a
+new independently verified fingerprint; removal requires interactive
+confirmation or ``--yes``. ``--ca-cert`` and ``--tls-server-name`` remain
+advanced administrator-controlled overrides. There is no insecure TLS bypass
+or accept-any-certificate option.
 
 ``--set-s3-config`` installs the temporary session into the standard AWS
 credentials and config files under the deterministic profile

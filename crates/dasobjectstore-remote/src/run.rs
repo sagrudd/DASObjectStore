@@ -11,7 +11,8 @@ use crate::aws_profile::{
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
     ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
-    RemoteCommand, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand, UploadArgs,
+    RemoteCommand, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand, TrustCommand,
+    UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
@@ -39,13 +40,23 @@ use dasobjectstore_daemon::{
     UnixSocketDaemonTransport, DEFAULT_DAEMON_SOCKET_FILE_NAME, LINUX_DAEMON_RUNTIME_DIR,
 };
 use std::fmt;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
+        RemoteCommand::Trust(args) => match args.command() {
+            TrustCommand::Inspect(args) => {
+                run_trust_inspect(args.host_or_ip(), args.https_port(), args.json(), writer)
+            }
+            TrustCommand::List(args) => run_trust_list(args.json(), writer),
+            TrustCommand::Remove(args) => run_trust_remove(args.appliance_id(), args.yes(), writer),
+            TrustCommand::Rotate(args) => {
+                run_trust_rotate(args.appliance_id(), args.trust_fingerprint(), writer)
+            }
+        },
         RemoteCommand::S3(args) => match args.command() {
             S3Command::Status(args) => {
                 run_s3_status(cli, args.store(), args.profile(), args.json(), writer)
@@ -79,6 +90,85 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         },
         RemoteCommand::Upload(args) => run_upload(cli, args, writer),
     }
+}
+
+fn trust_summary(record: &crate::trust::ApplianceTrustRecord) -> serde_json::Value {
+    serde_json::json!({
+        "appliance_id": record.appliance_id,
+        "endpoint": format!("{}:{}", record.endpoint_host, record.endpoint_port),
+        "enrolled_at_utc": record.enrolled_at_utc,
+        "subject": record.subject,
+        "issuer": record.issuer,
+        "subject_alt_names": record.subject_alt_names,
+        "not_before": record.not_before,
+        "not_after": record.not_after,
+        "fingerprint_sha256": record.fingerprint_sha256,
+        "spki_sha256": record.spki_sha256,
+        "address_matches_certificate": record.address_matches_certificate,
+        "legacy_fingerprint_pinned": record.legacy_fingerprint_pinned,
+        "tls_server_name": record.tls_server_name,
+    })
+}
+
+fn run_trust_inspect(
+    host: &str,
+    port: u16,
+    _json: bool,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let record = crate::trust::load_trust(host, port)?.ok_or_else(|| {
+        RemoteRunError::UploadRouting(format!("no appliance trust is enrolled for {host}:{port}"))
+    })?;
+    serde_json::to_writer_pretty(&mut *writer, &trust_summary(&record))?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn run_trust_list(_json: bool, writer: &mut impl Write) -> Result<(), RemoteRunError> {
+    let records = crate::trust::list_trust()?
+        .into_iter()
+        .map(|(_, record)| trust_summary(&record))
+        .collect::<Vec<_>>();
+    serde_json::to_writer_pretty(&mut *writer, &records)?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn run_trust_remove(
+    appliance_id: &str,
+    confirmed: bool,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    if !confirmed {
+        if !std::io::stdin().is_terminal() {
+            return Err(RemoteRunError::UploadRouting(
+                "trust removal requires --yes in non-interactive operation".to_string(),
+            ));
+        }
+        eprint!("Remove TLS trust for appliance {appliance_id}? [y/N] ");
+        std::io::stderr().flush()?;
+        let mut response = String::new();
+        std::io::stdin().read_line(&mut response)?;
+        if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+            return Err(RemoteRunError::UploadRouting(
+                "appliance trust was not removed".to_string(),
+            ));
+        }
+    }
+    let path = crate::trust::remove_trust(appliance_id)?;
+    writeln!(writer, "Removed appliance trust: {}", path.display())?;
+    Ok(())
+}
+
+fn run_trust_rotate(
+    appliance_id: &str,
+    expected_fingerprint: &str,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let record = crate::trust::rotate_trust(appliance_id, expected_fingerprint)?;
+    serde_json::to_writer_pretty(&mut *writer, &trust_summary(&record))?;
+    writer.write_all(b"\n")?;
+    Ok(())
 }
 
 fn run_store_readiness(
@@ -334,12 +424,49 @@ fn run_authenticate(
         args.https_port(),
         args.ca_cert(),
         args.tls_server_name(),
+        args.trust_fingerprint(),
+        |certificate, appliance_id, confirmation_required| {
+            eprintln!(
+                "{}",
+                crate::trust::format_certificate_details(
+                    args.host_or_ip(),
+                    args.https_port(),
+                    certificate,
+                    appliance_id,
+                )
+            );
+            if !confirmation_required {
+                return Ok(true);
+            }
+            if !std::io::stdin().is_terminal() {
+                return Ok(false);
+            }
+            eprint!("Trust this DASObjectStore appliance certificate? [y/N] ");
+            std::io::stderr().flush()?;
+            let mut response = String::new();
+            std::io::stdin().read_line(&mut response)?;
+            Ok(matches!(
+                response.trim().to_ascii_lowercase().as_str(),
+                "y" | "yes"
+            ))
+        },
     )?;
+    if trust.newly_enrolled {
+        eprintln!(
+            "Enrolled appliance identity: {} ({})",
+            trust.appliance_id.as_deref().unwrap_or("<endpoint-bound>"),
+            if trust.legacy_fingerprint_pinned {
+                "legacy fingerprint-pinned TLS name"
+            } else {
+                "certificate address verified"
+            }
+        );
+    }
     let password = rpassword::prompt_password("DASObjectStore password: ")?;
     let context = authenticate(
         args.host_or_ip(),
         args.https_port(),
-        Some(&trust.ca_cert),
+        Some(&trust.certificate_pem),
         trust.tls_server_name.as_deref(),
         &username,
         &password,
@@ -368,7 +495,14 @@ fn run_authenticate(
     } else {
         (None, false)
     };
-    persist_authenticated_context(cli, &username, &context, association)?;
+    persist_authenticated_context(
+        cli,
+        &username,
+        &context,
+        trust.appliance_id.as_deref(),
+        args.https_port(),
+        association,
+    )?;
     let safe = serde_json::json!({
         "authenticated": true,
         "server": context.appliance_host,
@@ -394,6 +528,8 @@ fn persist_authenticated_context(
     cli: &RemoteCli,
     username: &str,
     context: &RemoteConnectionContext,
+    enrolled_appliance_id: Option<&str>,
+    https_port: u16,
     association: Option<AwsProfileAssociation>,
 ) -> Result<(), RemoteRunError> {
     let path = config_path(cli)?;
@@ -408,7 +544,9 @@ fn persist_authenticated_context(
             .retain(|entry| entry.profile != association.profile);
         config.s3_profiles.push(association);
     }
-    let appliance_id = format!("standalone:{}", context.appliance_host);
+    let appliance_id = enrolled_appliance_id
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("standalone:{}", context.appliance_host));
     config.default_appliance_id = Some(appliance_id.clone());
     let session = RemoteUploadSession {
         session_id: context.session_id.clone(),
@@ -439,11 +577,7 @@ fn persist_authenticated_context(
         .iter_mut()
         .find(|appliance| appliance.appliance_id == appliance_id)
     {
-        existing.appliance_base_url = format!(
-            "https://{}:{}",
-            context.appliance_host,
-            crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT
-        );
+        existing.appliance_base_url = format!("https://{}:{}", context.appliance_host, https_port);
         existing.discovery_url = format!(
             "{}/products/dasobjectstore/api/v1/remote/easyconnect/discovery",
             existing.appliance_base_url
@@ -457,11 +591,7 @@ fn persist_authenticated_context(
             .retain(|entry| entry.object_store != context.object_store);
         existing.object_stores.push(grant);
     } else {
-        let appliance_base_url = format!(
-            "https://{}:{}",
-            context.appliance_host,
-            crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT
-        );
+        let appliance_base_url = format!("https://{}:{}", context.appliance_host, https_port);
         config.paired_appliances.push(RemotePairedAppliance {
             appliance_id,
             display_name: format!("DASObjectStore {}", context.appliance_host),
@@ -1277,6 +1407,7 @@ pub enum RemoteRunError {
     EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
     Authenticate(RemoteAuthenticateError),
+    Trust(crate::trust::TrustError),
     Control(RemoteControlError),
     S3(RemoteS3Error),
     AwsProfile(AwsProfileError),
@@ -1295,6 +1426,7 @@ impl fmt::Display for RemoteRunError {
             Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::Authenticate(error) => write!(formatter, "{error}"),
+            Self::Trust(error) => write!(formatter, "{error}"),
             Self::Control(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
             Self::AwsProfile(error) => write!(formatter, "{error}"),
@@ -1346,6 +1478,12 @@ impl From<RemoteAuthError> for RemoteRunError {
 impl From<RemoteAuthenticateError> for RemoteRunError {
     fn from(error: RemoteAuthenticateError) -> Self {
         Self::Authenticate(error)
+    }
+}
+
+impl From<crate::trust::TrustError> for RemoteRunError {
+    fn from(error: crate::trust::TrustError) -> Self {
+        Self::Trust(error)
     }
 }
 

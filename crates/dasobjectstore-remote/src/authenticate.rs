@@ -1,13 +1,13 @@
 //! HTTPS password authentication and scoped Garage connection context.
 
+use dasobjectstore_daemon::RemoteEasyconnectDiscoveryResponse;
 use dasobjectstore_daemon::RemoteEasyconnectSession;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
 use std::net::ToSocketAddrs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
@@ -139,47 +139,118 @@ impl From<serde_json::Error> for RemoteAuthenticateError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApplianceTrust {
-    pub ca_cert: PathBuf,
+    pub certificate_pem: Vec<u8>,
     pub tls_server_name: Option<String>,
     pub fingerprint_sha256: String,
+    pub appliance_id: Option<String>,
+    pub newly_enrolled: bool,
+    pub legacy_fingerprint_pinned: bool,
 }
 
-pub fn prepare_appliance_trust(
+pub fn prepare_appliance_trust<F>(
     host: &str,
     https_port: u16,
     explicit_ca_cert: Option<&Path>,
     explicit_tls_server_name: Option<&str>,
-) -> Result<ApplianceTrust, RemoteAuthenticateError> {
+    expected_fingerprint: Option<&str>,
+    mut confirm_unknown: F,
+) -> Result<ApplianceTrust, RemoteAuthenticateError>
+where
+    F: FnMut(
+        &crate::trust::PresentedCertificate,
+        Option<&str>,
+        bool,
+    ) -> Result<bool, RemoteAuthenticateError>,
+{
     let host = normalize_host(host)?;
     if let Some(path) = explicit_ca_cert {
         let certificate = fs::read(path)?;
         validate_public_certificate(&certificate)?;
+        let leaf = crate::trust::pem_leaf_der(&certificate)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        let presented = crate::trust::inspect_leaf_certificate(&host, &leaf)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        if let Some(expected) = expected_fingerprint {
+            crate::trust::expected_fingerprint_matches(expected, &presented)
+                .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        }
         return Ok(ApplianceTrust {
-            ca_cert: path.to_path_buf(),
+            certificate_pem: certificate,
             tls_server_name: explicit_tls_server_name.map(str::to_string),
-            fingerprint_sha256: hex_sha256(&certificate),
+            fingerprint_sha256: presented.fingerprint_sha256,
+            appliance_id: None,
+            newly_enrolled: false,
+            legacy_fingerprint_pinned: false,
         });
     }
 
-    let path = appliance_trust_path(&host, https_port)?;
-    if !path.exists() {
-        return Err(RemoteAuthenticateError::Http(format!(
-            "no pinned appliance CA exists for {host}:{https_port}; pass --ca-cert with a verified PEM certificate (DASObjectStore no longer guesses an S3 listener for certificate discovery)"
-        )));
+    let presented = crate::trust::probe_certificate(&host, https_port)
+        .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+    if let Some(record) = crate::trust::load_trust(&host, https_port)
+        .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?
+    {
+        crate::trust::verify_presented_pin(&record, &presented)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        if let Some(expected) = expected_fingerprint {
+            crate::trust::expected_fingerprint_matches(expected, &presented)
+                .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        }
+        return Ok(ApplianceTrust {
+            certificate_pem: record.certificate_pem.into_bytes(),
+            tls_server_name: Some(record.tls_server_name),
+            fingerprint_sha256: record.fingerprint_sha256,
+            appliance_id: Some(record.appliance_id),
+            newly_enrolled: false,
+            legacy_fingerprint_pinned: record.legacy_fingerprint_pinned,
+        });
     }
-    let certificate = fs::read(&path)?;
-    validate_public_certificate(&certificate)?;
+
+    if let Some(expected) = expected_fingerprint {
+        crate::trust::expected_fingerprint_matches(expected, &presented)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        let _ = confirm_unknown(&presented, None, false)?;
+    } else if !confirm_unknown(&presented, None, true)? {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance certificate was not trusted; no credentials were requested or sent"
+                .to_string(),
+        ));
+    }
+    let tls_server_name = explicit_tls_server_name
+        .map(str::to_string)
+        .or_else(|| presented.tls_server_name.clone())
+        .ok_or_else(|| {
+            RemoteAuthenticateError::Http(
+                "certificate does not match the appliance address and has no supported legacy certificate name"
+                    .to_string(),
+            )
+        })?;
+    let appliance_id = discover_appliance_id(
+        &host,
+        https_port,
+        presented.certificate_pem.as_bytes(),
+        &tls_server_name,
+    )
+    .ok();
+    let mut record =
+        crate::trust::new_trust_record(&host, https_port, appliance_id.as_deref(), &presented)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+    record.tls_server_name = tls_server_name.clone();
+    crate::trust::persist_trust(&record)
+        .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
     Ok(ApplianceTrust {
-        ca_cert: path,
-        tls_server_name: explicit_tls_server_name.map(str::to_string),
-        fingerprint_sha256: hex_sha256(&certificate),
+        certificate_pem: record.certificate_pem.into_bytes(),
+        tls_server_name: Some(tls_server_name),
+        fingerprint_sha256: record.fingerprint_sha256,
+        appliance_id: Some(record.appliance_id),
+        newly_enrolled: true,
+        legacy_fingerprint_pinned: record.legacy_fingerprint_pinned,
     })
 }
 
 pub fn authenticate(
     host: &str,
     https_port: u16,
-    ca_cert: Option<&Path>,
+    ca_certificate_pem: Option<&[u8]>,
     tls_server_name: Option<&str>,
     username: &str,
     password: &str,
@@ -228,8 +299,8 @@ pub fn authenticate(
             })?;
         builder = builder.resolve(tls_server_name, socket);
     }
-    if let Some(ca_cert) = ca_cert {
-        let certificate = reqwest::Certificate::from_pem(&fs::read(ca_cert)?).map_err(|error| {
+    if let Some(ca_certificate_pem) = ca_certificate_pem {
+        let certificate = reqwest::Certificate::from_pem(ca_certificate_pem).map_err(|error| {
             RemoteAuthenticateError::Http(format!("read CA certificate: {error}"))
         })?;
         builder = builder.add_root_certificate(certificate);
@@ -295,6 +366,55 @@ pub fn authenticate(
     })
 }
 
+fn discover_appliance_id(
+    host: &str,
+    https_port: u16,
+    certificate_pem: &[u8],
+    tls_server_name: &str,
+) -> Result<String, RemoteAuthenticateError> {
+    let socket = format!("{host}:{https_port}")
+        .to_socket_addrs()
+        .map_err(|error| RemoteAuthenticateError::Http(format!("resolve appliance host: {error}")))?
+        .next()
+        .ok_or_else(|| {
+            RemoteAuthenticateError::Http("resolve appliance host returned no address".to_string())
+        })?;
+    let certificate = reqwest::Certificate::from_pem(certificate_pem).map_err(|error| {
+        RemoteAuthenticateError::Http(format!("read enrolled appliance certificate: {error}"))
+    })?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .resolve(tls_server_name, socket)
+        .add_root_certificate(certificate)
+        .build()
+        .map_err(|error| {
+            RemoteAuthenticateError::Http(format!("build discovery client: {error}"))
+        })?;
+    let url = format!(
+        "https://{tls_server_name}:{https_port}/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+    );
+    let response = client.get(url).send().map_err(|error| {
+        RemoteAuthenticateError::Http(format!("discover appliance identity: {error}"))
+    })?;
+    if !response.status().is_success() {
+        return Err(RemoteAuthenticateError::Http(format!(
+            "discover appliance identity returned HTTP {}",
+            response.status()
+        )));
+    }
+    let discovery = response
+        .json::<RemoteEasyconnectDiscoveryResponse>()
+        .map_err(|error| {
+            RemoteAuthenticateError::Http(format!("decode appliance identity: {error}"))
+        })?;
+    if discovery.appliance_id.trim().is_empty() {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance discovery returned a blank identity".to_string(),
+        ));
+    }
+    Ok(discovery.appliance_id)
+}
+
 fn validate_descriptor(
     response: &RemoteAuthenticateResponse,
     requested_store: &str,
@@ -357,32 +477,6 @@ fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
     Ok(host.to_string())
 }
 
-pub(crate) fn appliance_trust_path(
-    host: &str,
-    https_port: u16,
-) -> Result<PathBuf, RemoteAuthenticateError> {
-    let home = std::env::var_os("HOME").ok_or_else(|| {
-        RemoteAuthenticateError::Http(
-            "HOME is not set; pass --ca-cert explicitly for appliance authentication".to_string(),
-        )
-    })?;
-    let safe_host = host
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    Ok(PathBuf::from(home)
-        .join(".config")
-        .join("dasobjectstore")
-        .join("trusted-appliances")
-        .join(format!("{safe_host}-{https_port}.pem")))
-}
-
 fn validate_public_certificate(certificate: &[u8]) -> Result<(), RemoteAuthenticateError> {
     let text = std::str::from_utf8(certificate).map_err(|_| {
         RemoteAuthenticateError::Http("appliance CA response is not PEM text".to_string())
@@ -396,10 +490,6 @@ fn validate_public_certificate(certificate: &[u8]) -> Result<(), RemoteAuthentic
         RemoteAuthenticateError::Http(format!("appliance CA certificate is invalid: {error}"))
     })?;
     Ok(())
-}
-
-fn hex_sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn redact(value: &str) -> String {

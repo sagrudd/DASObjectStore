@@ -3,7 +3,6 @@
 //! Object bytes remain on the S3 data plane. This module only exposes
 //! store-scoped operations that S3 cannot represent.
 
-use crate::authenticate::appliance_trust_path;
 use crate::config::{
     RemoteConfig, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionCredentials,
     RemoteSessionRenewalMetadata, RemoteUploadSession,
@@ -16,7 +15,7 @@ use reqwest::{Method, StatusCode};
 use serde::Serialize;
 use serde_json::Value;
 use std::fmt;
-use std::fs;
+use std::net::ToSocketAddrs;
 use std::time::Duration;
 
 const CONTROL_ROOT: &str = "/products/dasobjectstore/api/v1/remote";
@@ -302,24 +301,32 @@ fn pinned_client(
         RemoteControlError::Configuration("appliance URL has no host".to_string())
     })?;
     let port = url.port_or_known_default().unwrap_or(8448);
-    let trust_path = appliance_trust_path(host, port)?;
-    let certificate = reqwest::Certificate::from_pem(&fs::read(&trust_path)?).map_err(|_| {
-        RemoteControlError::Configuration(format!(
-            "pinned appliance certificate at {} is invalid; authenticate again",
-            trust_path.display()
-        ))
+    let trust = crate::trust::load_trust(host, port)
+        .map_err(|error| RemoteControlError::Configuration(error.to_string()))?
+        .ok_or_else(|| {
+            RemoteControlError::Configuration(format!(
+                "no enrolled TLS trust exists for {host}:{port}; authenticate again"
+            ))
+        })?;
+    let certificate = reqwest::Certificate::from_pem(trust.certificate_pem()).map_err(|_| {
+        RemoteControlError::Configuration(
+            "enrolled appliance certificate is invalid; inspect trust state".to_string(),
+        )
     })?;
     let mut builder = Client::builder().add_root_certificate(certificate);
-    let base_url = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        let socket = std::net::SocketAddr::new(ip, port);
-        builder = builder.resolve("localhost", socket);
-        format!("https://localhost:{port}")
-    } else {
-        appliance
-            .appliance_base_url
-            .trim_end_matches('/')
-            .to_string()
-    };
+    let socket = format!("{host}:{port}")
+        .to_socket_addrs()
+        .map_err(|error| {
+            RemoteControlError::Configuration(format!("resolve appliance endpoint: {error}"))
+        })?
+        .next()
+        .ok_or_else(|| {
+            RemoteControlError::Configuration(
+                "appliance endpoint resolved to no socket".to_string(),
+            )
+        })?;
+    builder = builder.resolve(&trust.tls_server_name, socket);
+    let base_url = format!("https://{}:{port}", trust.tls_server_name);
     let client = builder
         .timeout(Duration::from_secs(30))
         .build()
