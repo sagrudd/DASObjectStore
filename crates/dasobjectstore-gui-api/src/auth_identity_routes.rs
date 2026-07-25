@@ -198,6 +198,10 @@ pub(super) async fn remote_authenticate(
         can_write: true,
         writer_group: store.writer_group.clone(),
         object_type: store.object_type.clone(),
+        control_operations: dasobjectstore_daemon::api::remote_easyconnect_control_operations(true),
+        allowed_prefixes: vec![
+            dasobjectstore_daemon::api::REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string(),
+        ],
     };
     let requested_object_store = request.object_store.clone();
     let requested_lifetime = request.requested_session_lifetime_seconds;

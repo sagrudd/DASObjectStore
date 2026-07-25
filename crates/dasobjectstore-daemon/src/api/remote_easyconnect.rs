@@ -27,6 +27,59 @@ pub const REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS: u64 = 60;
 pub const REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS: u64 = 8 * 60 * 60;
 pub const REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
 pub const REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS: u64 = 60 * 60;
+pub const REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX: &str = "";
+
+/// Operations exposed by the authenticated remote HTTPS control plane.
+///
+/// These capabilities are deliberately narrower than daemon administrator
+/// authority. A session may inspect only stores it can read and may request a
+/// reconciliation only for stores it can write.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectControlOperation {
+    StoreReadiness,
+    ObjectSnapshot,
+    ObjectGroupStatus,
+    ReconcileS3,
+    OperationStatus,
+    OperationWait,
+}
+
+impl RemoteEasyconnectControlOperation {
+    pub fn requires_write(self) -> bool {
+        matches!(self, Self::ReconcileS3)
+    }
+}
+
+pub fn remote_easyconnect_control_operations(
+    can_write: bool,
+) -> Vec<RemoteEasyconnectControlOperation> {
+    let mut operations = vec![
+        RemoteEasyconnectControlOperation::StoreReadiness,
+        RemoteEasyconnectControlOperation::ObjectSnapshot,
+        RemoteEasyconnectControlOperation::ObjectGroupStatus,
+        RemoteEasyconnectControlOperation::OperationStatus,
+        RemoteEasyconnectControlOperation::OperationWait,
+    ];
+    if can_write {
+        operations.push(RemoteEasyconnectControlOperation::ReconcileS3);
+    }
+    operations
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectControlAuthorization {
+    pub session_id: String,
+    pub approved_actor: String,
+    pub object_store: String,
+    pub bucket: String,
+    pub can_read: bool,
+    pub can_write: bool,
+    /// Empty means the entire granted ObjectStore key namespace.
+    pub allowed_prefix: String,
+    pub operation: RemoteEasyconnectControlOperation,
+    pub expires_at_utc: String,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectDiscoveryRequest;
@@ -237,6 +290,10 @@ pub struct RemoteEasyconnectObjectStoreGrant {
     pub can_write: bool,
     pub writer_group: Option<String>,
     pub object_type: String,
+    #[serde(default)]
+    pub control_operations: Vec<RemoteEasyconnectControlOperation>,
+    #[serde(default)]
+    pub allowed_prefixes: Vec<String>,
 }
 
 impl RemoteEasyconnectObjectStoreGrant {
@@ -245,6 +302,9 @@ impl RemoteEasyconnectObjectStoreGrant {
         require_non_blank("bucket", &self.bucket)?;
         validate_optional_non_blank("writer_group", self.writer_group.as_deref())?;
         require_non_blank("object_type", &self.object_type)?;
+        for prefix in &self.allowed_prefixes {
+            validate_control_prefix(prefix)?;
+        }
         if !self.can_read && !self.can_write {
             return Err(RemoteEasyconnectValidationError::GrantWithoutAccess {
                 object_store: self.object_store.clone(),
@@ -698,6 +758,8 @@ pub fn remote_easyconnect_object_store_grants_for_actor(
                 can_write,
                 writer_group: store.writer_group.clone(),
                 object_type: store.object_type.clone(),
+                control_operations: remote_easyconnect_control_operations(can_write),
+                allowed_prefixes: vec![REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string()],
             });
         }
     }
@@ -713,6 +775,7 @@ pub enum RemoteEasyconnectValidationError {
     InvalidRequestedLifetime { seconds: u64 },
     EmptyObjectStoreGrants,
     GrantWithoutAccess { object_store: String },
+    InvalidControlPrefix { prefix: String },
     EmptyUploadSelection,
     AbsoluteUploadSelectionPath { display_path: String },
     UploadSelectionByteMismatch { expected: u64, actual: u64 },
@@ -764,6 +827,9 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
                 formatter,
                 "object store grant for {object_store} must allow read or write access"
             ),
+            Self::InvalidControlPrefix { prefix } => {
+                write!(formatter, "remote control prefix is invalid: {prefix}")
+            }
             Self::EmptyUploadSelection => {
                 formatter.write_str("remote upload handoff requires at least one selected file")
             }
@@ -817,6 +883,19 @@ fn validate_optional_non_blank(
 ) -> Result<(), RemoteEasyconnectValidationError> {
     if value.is_some_and(|value| value.trim().is_empty()) {
         return Err(RemoteEasyconnectValidationError::BlankField { field });
+    }
+    Ok(())
+}
+
+fn validate_control_prefix(prefix: &str) -> Result<(), RemoteEasyconnectValidationError> {
+    if prefix.starts_with('/')
+        || prefix.contains('\\')
+        || prefix.chars().any(char::is_control)
+        || prefix.split('/').any(|component| component == "..")
+    {
+        return Err(RemoteEasyconnectValidationError::InvalidControlPrefix {
+            prefix: prefix.to_string(),
+        });
     }
     Ok(())
 }
@@ -1112,6 +1191,8 @@ mod tests {
             can_write: false,
             writer_group: None,
             object_type: "fastq".to_string(),
+            control_operations: Vec::new(),
+            allowed_prefixes: Vec::new(),
         };
 
         let err = grant.validate().expect_err("access required");
@@ -1120,6 +1201,22 @@ mod tests {
             err,
             RemoteEasyconnectValidationError::GrantWithoutAccess { .. }
         ));
+    }
+
+    #[test]
+    fn legacy_grant_deserializes_without_remote_control_authority() {
+        let grant: RemoteEasyconnectObjectStoreGrant = serde_json::from_value(serde_json::json!({
+            "object_store": "epic_collection",
+            "bucket": "dos-epic-collection",
+            "can_read": true,
+            "can_write": true,
+            "writer_group": "mnemosyne",
+            "object_type": "generated_data"
+        }))
+        .expect("legacy grant remains readable");
+
+        assert!(grant.control_operations.is_empty());
+        assert!(grant.allowed_prefixes.is_empty());
     }
 
     #[test]

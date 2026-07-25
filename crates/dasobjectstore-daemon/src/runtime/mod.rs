@@ -37,6 +37,7 @@ mod profile_registry;
 mod profile_s3;
 mod profile_s3_multipart;
 mod reconciliation;
+mod remote_object_workflow;
 mod remote_pairings;
 mod remote_sessions;
 mod remote_upload;
@@ -246,6 +247,7 @@ pub use reconciliation::{
     ReconciliationManifest, ReconciliationManifestEntry, ReconciliationManifestError,
     ReconciliationObject, ReconciliationPlan, RECONCILIATION_MANIFEST_SCHEMA,
 };
+pub use remote_object_workflow::{remote_object_group_status, remote_object_snapshot};
 pub use remote_pairings::{
     remote_easyconnect_pairing_store_path, session_credentials_from_store_credentials,
     FileBackedRemoteEasyconnectPairingStore, RemoteEasyconnectPairingApproval,

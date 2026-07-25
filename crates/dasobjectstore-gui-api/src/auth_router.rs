@@ -63,6 +63,7 @@ async fn federated_host_session(
 
 fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
+        .merge(crate::remote_control_routes::remote_control_router())
         .merge(standalone_dashboard_router(auth_store.clone()))
         .merge(standalone_live_status_router(auth_store.clone()))
         .merge(standalone_easyconnect_router(auth_store.clone()))

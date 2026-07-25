@@ -105,6 +105,14 @@ Remote uploads are classified as ``remote_s3`` ingress. The appliance stages
 incoming bytes to the managed SSD path first, then moves them through
 daemon-owned HDD settlement and verification. Users do not choose disks.
 
+Remote production hosts need only the S3 endpoint and authenticated HTTPS on
+the appliance. They must not be provisioned with SSH, sudo, daemon-socket, or
+appliance filesystem access merely to inspect or finalize an upload. After the
+payload and its manifest/checksum sidecars are visible through S3, use
+``dasobjectstore-remote objects reconcile-s3`` and
+``dasobjectstore-remote operations wait`` as documented in
+:doc:`remote-client`.
+
 Operator Throughput and Backpressure
 ------------------------------------
 

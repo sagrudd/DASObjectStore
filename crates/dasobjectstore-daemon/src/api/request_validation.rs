@@ -35,6 +35,12 @@ pub(super) fn remote_easyconnect_validation_error(
                 value: object_store,
             }
         }
+        RemoteEasyconnectValidationError::InvalidControlPrefix { prefix } => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "allowed_object_stores.allowed_prefixes",
+                value: prefix,
+            }
+        }
         RemoteEasyconnectValidationError::AbsoluteUploadSelectionPath { display_path } => {
             DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "selected_files.display_path",

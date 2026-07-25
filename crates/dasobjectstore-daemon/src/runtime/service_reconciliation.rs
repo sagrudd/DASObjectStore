@@ -33,6 +33,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     runner: &R,
     store_id: StoreId,
     prefix: Option<String>,
+    expectation: Option<&crate::api::StoreRepairS3Expectation>,
     dry_run: bool,
     accepted_at_utc: &str,
     is_cancelled: &dyn Fn() -> bool,
@@ -71,6 +72,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         definition.policy.copies,
         store_id.clone(),
         prefix.clone(),
+        expectation,
         dry_run,
         accepted_at_utc,
         capacity_provider.clone(),
@@ -188,6 +190,9 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     let objects = provider.list_objects(ReconciliationListRequest {
         prefix: prefix.as_deref(),
     })?;
+    if let Some(expectation) = expectation {
+        validate_expected_provider_group(&objects, expectation)?;
+    }
     if !reused_checkpoint {
         if let Some(reusable_manifest) = discover_reusable_complete_manifest(
             &reconciliation_root,
@@ -238,6 +243,25 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         is_cancelled,
         emit_progress,
     )?;
+    if let Some(expectation) = expectation {
+        let payload_path = staging_path.join(&expectation.payload_key);
+        let actual = dasobjectstore_metadata::hash_file_sha256(&payload_path).map_err(|error| {
+            DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "reconciliation payload checksum verification failed for {}: {error}",
+                    expectation.payload_key
+                ),
+            }
+        })?;
+        if !actual.eq_ignore_ascii_case(&expectation.expected_sha256) {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "reconciliation payload checksum mismatch for {}",
+                    expectation.payload_key
+                ),
+            });
+        }
+    }
     let ingest = submit_ingest_files_with_resource_gate(
         SubmitIngestFilesRequest {
             endpoint: store_id.clone(),
@@ -277,6 +301,35 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     })
 }
 
+fn validate_expected_provider_group(
+    objects: &[ReconciliationObject],
+    expectation: &crate::api::StoreRepairS3Expectation,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let required = [
+        expectation.payload_key.clone(),
+        format!("{}.manifest.json", expectation.payload_key),
+        format!("{}.sha256", expectation.payload_key),
+    ];
+    for key in &required {
+        let object = objects
+            .iter()
+            .find(|object| &object.key == key)
+            .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!("remote S3 payload group is incomplete: missing {key}"),
+            })?;
+        if key == &expectation.payload_key && object.size_bytes != Some(expectation.expected_bytes)
+        {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "remote S3 payload size mismatch for {}: expected {} bytes",
+                    expectation.payload_key, expectation.expected_bytes
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct ReconciliationAdoptionJournal {
     schema_version: String,
@@ -301,6 +354,7 @@ fn adopt_completed_reconciliation_snapshot(
     required_copies: u8,
     store_id: StoreId,
     prefix: Option<String>,
+    expectation: Option<&crate::api::StoreRepairS3Expectation>,
     dry_run: bool,
     accepted_at_utc: &str,
     capacity_provider: Option<std::sync::Arc<dyn CapacityAdmissionProvider>>,
@@ -334,6 +388,35 @@ fn adopt_completed_reconciliation_snapshot(
         })?;
     let manifest =
         ReconciliationManifest::load(&manifest_path).map_err(reconciliation_manifest_error)?;
+    if let Some(expectation) = expectation {
+        let objects = manifest
+            .entries
+            .values()
+            .map(|entry| ReconciliationObject {
+                key: entry.source_key.clone(),
+                size_bytes: entry.size_bytes,
+                source_revision: entry.source_revision.clone(),
+            })
+            .collect::<Vec<_>>();
+        validate_expected_provider_group(&objects, expectation)?;
+        let payload_path = staging_path.join(&expectation.payload_key);
+        let actual = dasobjectstore_metadata::hash_file_sha256(&payload_path).map_err(|error| {
+            DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "completed reconciliation payload checksum verification failed for {}: {error}",
+                    expectation.payload_key
+                ),
+            }
+        })?;
+        if !actual.eq_ignore_ascii_case(&expectation.expected_sha256) {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: format!(
+                    "completed reconciliation payload checksum mismatch for {}",
+                    expectation.payload_key
+                ),
+            });
+        }
+    }
     let live_sqlite_path = crate::runtime::default_ssd_root()
         .join(dasobjectstore_metadata::METADATA_DIR_NAME)
         .join(dasobjectstore_metadata::LIVE_SQLITE_FILE_NAME);
@@ -2692,5 +2775,34 @@ mod tests {
             })
             .is_err());
         assert_eq!(runner.0.lock().expect("runner lock").len(), 1);
+    }
+
+    #[test]
+    fn exact_remote_group_preflight_requires_all_sidecars_and_payload_size() {
+        let expectation = crate::api::StoreRepairS3Expectation {
+            payload_key: "EPICv1/GSE224365_RAW.tar".to_string(),
+            expected_bytes: 42,
+            expected_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
+        };
+        let object = |key: &str, size_bytes| ReconciliationObject {
+            key: key.to_string(),
+            size_bytes,
+            source_revision: Some(format!("etag-{key}")),
+        };
+        let complete = vec![
+            object(&expectation.payload_key, Some(42)),
+            object(
+                &format!("{}.manifest.json", expectation.payload_key),
+                Some(9),
+            ),
+            object(&format!("{}.sha256", expectation.payload_key), Some(64)),
+        ];
+        super::validate_expected_provider_group(&complete, &expectation).expect("complete group");
+
+        assert!(super::validate_expected_provider_group(&complete[..2], &expectation).is_err());
+        let mut wrong_size = complete;
+        wrong_size[0].size_bytes = Some(41);
+        assert!(super::validate_expected_provider_group(&wrong_size, &expectation).is_err());
     }
 }

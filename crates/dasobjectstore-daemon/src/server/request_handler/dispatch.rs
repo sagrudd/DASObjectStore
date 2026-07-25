@@ -61,6 +61,8 @@ where
         | DaemonApiRequest::UpdateObjectStoreIngestPolicy(_)
         | DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(_)
         | DaemonApiRequest::ObjectBrowser(_)
+        | DaemonApiRequest::RemoteObjectSnapshot(_)
+        | DaemonApiRequest::RemoteObjectGroupStatus(_)
         | DaemonApiRequest::ProfileBrowser(_)
         | DaemonApiRequest::ProfileCatalogueExport(_)
         | DaemonApiRequest::ProfileCatalogueImport(_)

@@ -5,13 +5,17 @@ use crate::authenticate::{
     authenticate, prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
 };
 use crate::cli::{
-    AuthenticateArgs, ConfigCommand, EasyconnectArgs, RemoteCli, RemoteCommand, StoreListArgs,
-    StoresCommand, UploadArgs,
+    AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
+    ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
+    RemoteCommand, StoreListArgs, StoreReadinessArgs, StoresCommand, UploadArgs,
 };
 use crate::config::{
     default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
     RemoteConfigOverrides, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionCredentials,
     RemoteSessionRenewalMetadata, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
+};
+use crate::control::{
+    renew_store_session_if_due, ReconcileS3Request, RemoteControlClient, RemoteControlError,
 };
 use crate::easyconnect::{
     define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
@@ -45,9 +49,263 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         },
         RemoteCommand::Stores(args) => match args.command() {
             StoresCommand::List(args) => run_store_list(cli, args, writer),
+            StoresCommand::Readiness(args) => run_store_readiness(cli, args, writer),
+        },
+        RemoteCommand::Objects(args) => match args.command() {
+            ObjectsCommand::Snapshot(args) => run_object_snapshot(cli, args, writer),
+            ObjectsCommand::GroupStatus(args) => {
+                let config = resolved_control_config(cli, args.store())?;
+                let (client, _) = RemoteControlClient::for_store(&config, args.store(), false)?;
+                write_control_json(
+                    client.group_status(args.store(), args.key())?,
+                    args.json(),
+                    writer,
+                )
+            }
+            ObjectsCommand::ReconcileS3(args) => run_object_reconcile(cli, args, writer),
+        },
+        RemoteCommand::Operations(args) => match args.command() {
+            OperationsCommand::Status(args) => run_operation_status(cli, args, writer),
+            OperationsCommand::Wait(args) => run_operation_wait(cli, args, writer),
         },
         RemoteCommand::Upload(args) => run_upload(cli, args, writer),
     }
+}
+
+fn run_store_readiness(
+    cli: &RemoteCli,
+    args: &StoreReadinessArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let config = resolved_control_config(cli, args.store())?;
+    let (client, _) = RemoteControlClient::for_store(&config, args.store(), false)?;
+    write_control_json(client.readiness(args.store())?, args.json(), writer)
+}
+
+fn run_object_snapshot(
+    cli: &RemoteCli,
+    args: &ObjectSnapshotArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    if args.limit() == 0 || args.limit() > 20_000 {
+        return Err(RemoteRunError::UploadRouting(
+            "snapshot --limit must be between 1 and 20000".to_string(),
+        ));
+    }
+    let config = resolved_control_config(cli, args.store())?;
+    let (client, _) = RemoteControlClient::for_store(&config, args.store(), false)?;
+    write_control_json(
+        client.snapshot(args.store(), args.prefix(), args.cursor(), args.limit())?,
+        args.json(),
+        writer,
+    )
+}
+
+fn run_object_reconcile(
+    cli: &RemoteCli,
+    args: &ObjectReconcileS3Args,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    validate_sha256(args.expected_sha256())?;
+    if args.idempotency_key().trim().is_empty() {
+        return Err(RemoteRunError::UploadRouting(
+            "--idempotency-key must not be blank".to_string(),
+        ));
+    }
+    let config = resolved_control_config(cli, args.store())?;
+    let (client, _) = RemoteControlClient::for_store(&config, args.store(), true)?;
+    let request = ReconcileS3Request {
+        key: args.key(),
+        expected_bytes: args.expected_bytes(),
+        expected_sha256: args.expected_sha256(),
+        idempotency_key: args.idempotency_key(),
+        ack_policy: args.ack_policy().as_wire_name(),
+    };
+    write_control_json(
+        client.reconcile_s3(args.store(), &request)?,
+        args.json(),
+        writer,
+    )
+}
+
+fn run_operation_status(
+    cli: &RemoteCli,
+    args: &OperationStatusArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let config = resolved_control_config_for_operation(cli)?;
+    let client = control_client_for_operation(&config)?;
+    write_control_json(
+        client.operation_status(args.operation_id())?,
+        args.json(),
+        writer,
+    )
+}
+
+fn run_operation_wait(
+    cli: &RemoteCli,
+    args: &OperationWaitArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let timeout = parse_human_duration(args.timeout())?;
+    let config = resolved_control_config_for_operation(cli)?;
+    let client = control_client_for_operation(&config)?;
+    let started = std::time::Instant::now();
+    loop {
+        let response = client.operation_status(args.operation_id())?;
+        if operation_reached(&response, args.until().as_wire_name())
+            || operation_terminal(&response)
+        {
+            return write_control_json(response, args.json(), writer);
+        }
+        if started.elapsed() >= timeout {
+            return Err(RemoteRunError::UploadRouting(format!(
+                "operation {} did not reach {} within {}",
+                args.operation_id(),
+                args.until().as_wire_name(),
+                args.timeout()
+            )));
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn control_client_for_operation(
+    config: &RemoteConfig,
+) -> Result<RemoteControlClient, RemoteRunError> {
+    let appliance = config
+        .default_appliance_id
+        .as_deref()
+        .and_then(|id| {
+            config
+                .paired_appliances
+                .iter()
+                .find(|item| item.appliance_id == id)
+        })
+        .or_else(|| config.paired_appliances.first())
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(
+                "no paired appliance is configured; authenticate first".to_string(),
+            )
+        })?;
+    let store = appliance
+        .default_object_store
+        .as_deref()
+        .or_else(|| {
+            appliance
+                .object_stores
+                .first()
+                .map(|grant| grant.object_store.as_str())
+        })
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting("paired appliance has no ObjectStore grant".to_string())
+        })?;
+    RemoteControlClient::for_store(config, store, false)
+        .map(|(client, _)| client)
+        .map_err(Into::into)
+}
+
+fn resolved_control_config(cli: &RemoteCli, store: &str) -> Result<RemoteConfig, RemoteRunError> {
+    let mut config = resolved_valid_config(cli)?;
+    if renew_store_session_if_due(&mut config, store)? {
+        write_config(&config_path(cli)?, &config)?;
+    }
+    Ok(config)
+}
+
+fn resolved_control_config_for_operation(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
+    let config = resolved_valid_config(cli)?;
+    let appliance = config
+        .default_appliance_id
+        .as_deref()
+        .and_then(|id| {
+            config
+                .paired_appliances
+                .iter()
+                .find(|item| item.appliance_id == id)
+        })
+        .or_else(|| config.paired_appliances.first())
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(
+                "no paired appliance is configured; authenticate first".to_string(),
+            )
+        })?;
+    let store = appliance
+        .default_object_store
+        .clone()
+        .or_else(|| {
+            appliance
+                .object_stores
+                .first()
+                .map(|grant| grant.object_store.clone())
+        })
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting("paired appliance has no ObjectStore grant".to_string())
+        })?;
+    resolved_control_config(cli, &store)
+}
+
+fn operation_reached(response: &serde_json::Value, until: &str) -> bool {
+    match until {
+        "ssd_acknowledged" => response
+            .get("ssd_acknowledged")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        "hdd_settled" => response
+            .get("hdd_settled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        _ => operation_terminal(response),
+    }
+}
+
+fn operation_terminal(response: &serde_json::Value) -> bool {
+    response
+        .get("state")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|state| matches!(state, "complete" | "failed" | "cancelled"))
+}
+
+fn parse_human_duration(value: &str) -> Result<Duration, RemoteRunError> {
+    let (number, multiplier) = if let Some(number) = value.strip_suffix('s') {
+        (number, 1)
+    } else if let Some(number) = value.strip_suffix('m') {
+        (number, 60)
+    } else if let Some(number) = value.strip_suffix('h') {
+        (number, 3600)
+    } else {
+        return Err(RemoteRunError::UploadRouting(
+            "--timeout must end in s, m, or h".to_string(),
+        ));
+    };
+    let number = number.parse::<u64>().map_err(|_| {
+        RemoteRunError::UploadRouting("--timeout must contain a positive integer".to_string())
+    })?;
+    if number == 0 {
+        return Err(RemoteRunError::UploadRouting(
+            "--timeout must be greater than zero".to_string(),
+        ));
+    }
+    Ok(Duration::from_secs(number.saturating_mul(multiplier)))
+}
+
+fn validate_sha256(value: &str) -> Result<(), RemoteRunError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(RemoteRunError::UploadRouting(
+            "--expected-sha256 must be exactly 64 hexadecimal characters".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_control_json(
+    value: serde_json::Value,
+    _json: bool,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    serde_json::to_writer_pretty(&mut *writer, &value)?;
+    writer.write_all(b"\n")?;
+    Ok(())
 }
 
 fn run_authenticate(
@@ -956,6 +1214,7 @@ pub enum RemoteRunError {
     EasyconnectPairing(RemoteEasyconnectPairingError),
     Auth(RemoteAuthError),
     Authenticate(RemoteAuthenticateError),
+    Control(RemoteControlError),
     S3(RemoteS3Error),
     Daemon(DaemonClientError),
     Clock(String),
@@ -972,6 +1231,7 @@ impl fmt::Display for RemoteRunError {
             Self::EasyconnectPairing(error) => write!(formatter, "{error}"),
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::Authenticate(error) => write!(formatter, "{error}"),
+            Self::Control(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
             Self::Daemon(error) => write!(formatter, "{error}"),
             Self::Clock(error) => write!(formatter, "{error}"),
@@ -1021,6 +1281,12 @@ impl From<RemoteAuthError> for RemoteRunError {
 impl From<RemoteAuthenticateError> for RemoteRunError {
     fn from(error: RemoteAuthenticateError) -> Self {
         Self::Authenticate(error)
+    }
+}
+
+impl From<RemoteControlError> for RemoteRunError {
+    fn from(error: RemoteControlError) -> Self {
+        Self::Control(error)
     }
 }
 

@@ -400,6 +400,15 @@ verification, and HDD settlement. A successful S3 PUT means bytes reached the
 object-service ingress; it is not by itself proof that durable DAS settlement
 is complete.
 
+For catalogue-authoritative automation, use ``dasobjectstore-remote`` over
+authenticated HTTPS after the S3 calls. One paginated ``objects snapshot``
+replaces thousands of per-object catalogue requests. ``objects group-status``
+checks the exact payload/manifest/checksum group, and idempotent
+``objects reconcile-s3`` bridges an already S3-visible group into daemon-owned
+ingest without client knowledge of managed paths or catalogue storage.
+``operations wait --until ssd-acknowledged`` is the safe continuation boundary
+when HDD destage may proceed asynchronously. This workflow never requires SSH.
+
 Related pages
 -------------
 

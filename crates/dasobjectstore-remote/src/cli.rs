@@ -1,5 +1,5 @@
 use crate::auth::RemoteAuthAuthority;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Parser)]
@@ -85,6 +85,10 @@ pub enum RemoteCommand {
     Config(ConfigArgs),
     /// List object stores accessible through the configured S3 endpoint.
     Stores(StoresArgs),
+    /// Inspect and reconcile authoritative ObjectStore objects over HTTPS.
+    Objects(ObjectsArgs),
+    /// Inspect or wait for daemon-owned remote operations over HTTPS.
+    Operations(OperationsArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
 }
@@ -293,6 +297,242 @@ impl StoresArgs {
 pub enum StoresCommand {
     /// List object stores visible to the configured S3 credentials.
     List(StoreListArgs),
+    /// Report whether a store is ready for remote S3 ingest and catalogue work.
+    Readiness(StoreReadinessArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct StoreReadinessArgs {
+    /// ObjectStore identifier.
+    store: String,
+    /// Emit the stable JSON response.
+    #[arg(long)]
+    json: bool,
+}
+
+impl StoreReadinessArgs {
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ObjectsArgs {
+    #[command(subcommand)]
+    command: ObjectsCommand,
+}
+
+impl ObjectsArgs {
+    pub fn command(&self) -> &ObjectsCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ObjectsCommand {
+    /// Fetch a bounded page of authoritative catalogue objects.
+    Snapshot(ObjectSnapshotArgs),
+    /// Inspect one payload and its manifest/checksum sidecars as a group.
+    GroupStatus(ObjectGroupStatusArgs),
+    /// Idempotently reconcile an S3-visible payload group into the catalogue.
+    ReconcileS3(ObjectReconcileS3Args),
+}
+
+#[derive(Debug, Args)]
+pub struct ObjectSnapshotArgs {
+    store: String,
+    /// Restrict results to this object-key prefix.
+    #[arg(long, default_value = "")]
+    prefix: String,
+    /// Opaque continuation cursor returned by the preceding page.
+    #[arg(long)]
+    cursor: Option<String>,
+    /// Maximum objects in this page; the appliance enforces its own upper bound.
+    #[arg(long, default_value_t = 20_000)]
+    limit: u32,
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectSnapshotArgs {
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+    pub fn cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
+    }
+    pub fn limit(&self) -> u32 {
+        self.limit
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ObjectGroupStatusArgs {
+    store: String,
+    /// Exact payload object key; sidecar keys are derived by the appliance.
+    #[arg(long)]
+    key: String,
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectGroupStatusArgs {
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ReconcileAckPolicy {
+    AfterSsdIngest,
+    AfterHddSettlement,
+}
+
+impl ReconcileAckPolicy {
+    pub fn as_wire_name(self) -> &'static str {
+        match self {
+            Self::AfterSsdIngest => "after_ssd_ingest",
+            Self::AfterHddSettlement => "after_hdd_settlement",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ObjectReconcileS3Args {
+    store: String,
+    #[arg(long)]
+    key: String,
+    #[arg(long)]
+    expected_bytes: u64,
+    /// Expected lowercase hexadecimal SHA-256 of the payload.
+    #[arg(long)]
+    expected_sha256: String,
+    /// Stable caller-generated key used to deduplicate retries.
+    #[arg(long)]
+    idempotency_key: String,
+    #[arg(long, value_enum, default_value_t = ReconcileAckPolicy::AfterSsdIngest)]
+    ack_policy: ReconcileAckPolicy,
+    #[arg(long)]
+    json: bool,
+}
+
+impl ObjectReconcileS3Args {
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+    pub fn expected_bytes(&self) -> u64 {
+        self.expected_bytes
+    }
+    pub fn expected_sha256(&self) -> &str {
+        &self.expected_sha256
+    }
+    pub fn idempotency_key(&self) -> &str {
+        &self.idempotency_key
+    }
+    pub fn ack_policy(&self) -> ReconcileAckPolicy {
+        self.ack_policy
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct OperationsArgs {
+    #[command(subcommand)]
+    command: OperationsCommand,
+}
+
+impl OperationsArgs {
+    pub fn command(&self) -> &OperationsCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum OperationsCommand {
+    /// Fetch the current state of a remote operation.
+    Status(OperationStatusArgs),
+    /// Poll until an acknowledgement boundary or terminal state is reached.
+    Wait(OperationWaitArgs),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum OperationWaitUntil {
+    SsdAcknowledged,
+    HddSettled,
+    Complete,
+}
+
+impl OperationWaitUntil {
+    pub fn as_wire_name(self) -> &'static str {
+        match self {
+            Self::SsdAcknowledged => "ssd_acknowledged",
+            Self::HddSettled => "hdd_settled",
+            Self::Complete => "complete",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct OperationStatusArgs {
+    operation_id: String,
+    #[arg(long)]
+    json: bool,
+}
+
+impl OperationStatusArgs {
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct OperationWaitArgs {
+    operation_id: String,
+    #[arg(long, value_enum, default_value_t = OperationWaitUntil::Complete)]
+    until: OperationWaitUntil,
+    /// Maximum wait, for example 90s, 10m, or 2h.
+    #[arg(long, default_value = "10m")]
+    timeout: String,
+    #[arg(long)]
+    json: bool,
+}
+
+impl OperationWaitArgs {
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+    pub fn until(&self) -> OperationWaitUntil {
+        self.until
+    }
+    pub fn timeout(&self) -> &str {
+        &self.timeout
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Args)]
@@ -392,7 +632,10 @@ impl UploadArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{RemoteCli, RemoteCommand, StoresCommand};
+    use super::{
+        ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli, RemoteCommand,
+        StoresCommand,
+    };
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
 
@@ -464,8 +707,75 @@ mod tests {
         let RemoteCommand::Stores(stores) = cli.command() else {
             panic!("expected stores command");
         };
-        let StoresCommand::List(args) = stores.command();
+        let StoresCommand::List(args) = stores.command() else {
+            panic!("expected list")
+        };
         assert!(args.json());
+    }
+
+    #[test]
+    fn parses_remote_control_hierarchy() {
+        let readiness = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "stores",
+            "readiness",
+            "epic_collection",
+            "--json",
+        ])
+        .unwrap();
+        let RemoteCommand::Stores(stores) = readiness.command() else {
+            panic!()
+        };
+        let StoresCommand::Readiness(args) = stores.command() else {
+            panic!()
+        };
+        assert_eq!(args.store(), "epic_collection");
+
+        let reconcile = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "objects",
+            "reconcile-s3",
+            "epic_collection",
+            "--key",
+            "EPICv1/GSE224365_RAW.tar",
+            "--expected-bytes",
+            "10705582080",
+            "--expected-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--idempotency-key",
+            "epic-gse224365-v1",
+            "--ack-policy",
+            "after-ssd-ingest",
+            "--json",
+        ])
+        .unwrap();
+        let RemoteCommand::Objects(objects) = reconcile.command() else {
+            panic!()
+        };
+        let ObjectsCommand::ReconcileS3(args) = objects.command() else {
+            panic!()
+        };
+        assert_eq!(args.expected_bytes(), 10_705_582_080);
+
+        let wait = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "operations",
+            "wait",
+            "op-1",
+            "--until",
+            "ssd-acknowledged",
+            "--timeout",
+            "10m",
+            "--json",
+        ])
+        .unwrap();
+        let RemoteCommand::Operations(operations) = wait.command() else {
+            panic!()
+        };
+        let OperationsCommand::Wait(args) = operations.command() else {
+            panic!()
+        };
+        assert_eq!(args.until(), OperationWaitUntil::SsdAcknowledged);
     }
 
     #[test]

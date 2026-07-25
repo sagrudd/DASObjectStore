@@ -288,6 +288,36 @@ where
             advertise_provider_stream_downloads(handler, &store_id, &mut response);
             Ok(DaemonApiResponse::ObjectBrowser(response))
         }
+        DaemonApiRequest::RemoteObjectSnapshot(request) => {
+            if let Err(error) = handler.authorize_endpoint_read(actor, &request.store_id) {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    error.code(),
+                    error.to_string(),
+                )));
+            }
+            match remote_object_snapshot(&handler.live_sqlite_path, &request) {
+                Ok(response) => Ok(DaemonApiResponse::RemoteObjectSnapshot(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "remote_object_snapshot_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
+        DaemonApiRequest::RemoteObjectGroupStatus(request) => {
+            if let Err(error) = handler.authorize_endpoint_read(actor, &request.store_id) {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    error.code(),
+                    error.to_string(),
+                )));
+            }
+            match remote_object_group_status(&handler.live_sqlite_path, &request) {
+                Ok(response) => Ok(DaemonApiResponse::RemoteObjectGroupStatus(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "remote_object_group_status_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
         DaemonApiRequest::ProfileBrowser(request) => {
             storage_profiles::profile_browser(handler, request, actor)
         }

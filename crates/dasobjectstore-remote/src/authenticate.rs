@@ -370,7 +370,10 @@ fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
     Ok(host.to_string())
 }
 
-fn appliance_trust_path(host: &str, https_port: u16) -> Result<PathBuf, RemoteAuthenticateError> {
+pub(crate) fn appliance_trust_path(
+    host: &str,
+    https_port: u16,
+) -> Result<PathBuf, RemoteAuthenticateError> {
     let home = std::env::var_os("HOME").ok_or_else(|| {
         RemoteAuthenticateError::Http(
             "HOME is not set; pass --ca-cert explicitly for appliance authentication".to_string(),

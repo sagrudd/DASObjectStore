@@ -626,6 +626,8 @@ pub(super) fn run_store_repair(
             confirmation: args.confirm().to_string(),
             reconcile_s3: args.reconcile_s3(),
             s3_prefix: args.s3_prefix().map(ToOwned::to_owned),
+            s3_expectation: None,
+            idempotency_key: None,
         },
         |event| {
             super::write_daemon_ingest_progress(writer, &event, started_at)

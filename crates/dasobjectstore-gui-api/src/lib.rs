@@ -18,6 +18,8 @@ mod live_status;
 mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
+pub mod remote_control_guard;
+pub mod remote_control_routes;
 mod remote_upload_aggregator;
 mod reporting;
 pub mod routes;
@@ -85,6 +87,10 @@ pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,
     MtlsApplicationListener, MtlsListenerError,
 };
+pub use remote_control_guard::{
+    RemoteControlGuardState, RemoteControlRejection, REMOTE_CONTROL_ACCESS_KEY_HEADER,
+};
+pub use remote_control_routes::remote_control_router;
 pub use remote_upload_aggregator::{
     RemoteUploadActorView, RemoteUploadObjectStoreView, RemoteUploadWorkspaceView,
 };

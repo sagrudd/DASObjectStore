@@ -310,6 +310,7 @@ where
         &self,
         store_id: StoreId,
         prefix: Option<String>,
+        expectation: Option<&crate::api::StoreRepairS3Expectation>,
         dry_run: bool,
         accepted_at_utc: &str,
         emit_progress: &mut dyn FnMut(
@@ -320,6 +321,7 @@ where
         self.reconcile_store_s3_cancellable(
             store_id,
             prefix,
+            expectation,
             dry_run,
             accepted_at_utc,
             &|| false,
@@ -331,6 +333,7 @@ where
         &self,
         store_id: StoreId,
         prefix: Option<String>,
+        expectation: Option<&crate::api::StoreRepairS3Expectation>,
         dry_run: bool,
         accepted_at_utc: &str,
         is_cancelled: &dyn Fn() -> bool,
@@ -344,6 +347,7 @@ where
             &self.runner,
             store_id,
             prefix,
+            expectation,
             dry_run,
             accepted_at_utc,
             is_cancelled,

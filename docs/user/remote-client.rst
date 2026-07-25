@@ -319,6 +319,73 @@ If the paired ObjectStore has no active session, or if the stored session has
 expired, the client rejects the upload before using any stored credentials and
 asks the user to run ``dasobjectstore-remote easyconnect`` again.
 
+Remote catalogue control without SSH
+------------------------------------
+
+Production clients use two deliberately separate network surfaces:
+
+* standard S3 for LIST, HEAD, PUT, multipart completion, and object reads; and
+* the authenticated appliance HTTPS API for readiness, catalogue inventory,
+  payload-group settlement, and reconciliation status.
+
+They do not require an SSH binary, an ``~/.ssh`` directory, sudo, a daemon Unix
+socket, an appliance filesystem path, or Garage administrator credentials.
+Authenticate once to obtain a temporary, store-scoped session. The same
+rotating session token authorizes the HTTPS control calls; the S3 secret and
+renewal token are never placed in an HTTP control header, command argument, or
+JSON error.
+
+The stable control command hierarchy is:
+
+.. code-block:: console
+
+   dasobjectstore-remote stores readiness epic_collection --json
+   dasobjectstore-remote objects snapshot epic_collection \
+     --prefix EPICv1/ --limit 20000 --json
+   dasobjectstore-remote objects group-status epic_collection \
+     --key EPICv1/GSE224365_RAW.tar --json
+   dasobjectstore-remote objects reconcile-s3 epic_collection \
+     --key EPICv1/GSE224365_RAW.tar \
+     --expected-bytes 10705582080 \
+     --expected-sha256 "$PAYLOAD_SHA256" \
+     --idempotency-key epic-gse224365-v1 \
+     --ack-policy after-ssd-ingest --json
+   dasobjectstore-remote operations status "$OPERATION_ID" --json
+   dasobjectstore-remote operations wait "$OPERATION_ID" \
+     --until ssd-acknowledged --timeout 10m --json
+
+Snapshot results are bounded to 20,000 objects per response. Follow
+``next_cursor`` until ``complete`` is true; cursors are opaque and bind later
+pages to the first page's catalogue high-water mark. Never decode, edit, or
+persist a cursor as object identity.
+
+``reconcile-s3`` expects the payload, ``.manifest.json``, and ``.sha256`` keys
+to exist. The appliance independently verifies their identities, payload byte
+count, and authoritative SHA-256 metadata before it queues daemon-owned work.
+Reuse the same idempotency key after a timeout or client restart. With
+``after-ssd-ingest``, a successful response means the object is immediately
+catalogue-visible and HDD destage is durably queued; it does not claim HDD
+settlement. Use ``operations wait --until hdd-settled`` where that stronger
+boundary is required.
+
+The HTTPS client uses the appliance certificate pinned during
+``authenticate``. A changed certificate fails closed and requires deliberate
+out-of-band verification. An expired session, an unauthorized store or prefix,
+catalogue lock, and capacity pressure are returned as typed errors. Honour
+``retry_after`` for retryable lock or backpressure responses.
+
+Migrating an SSH-based harvester
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Replace appliance-shell calls one-for-one: local ``profile-readiness`` becomes
+``stores readiness``; catalogue SQL or per-key SSH loops become one paginated
+``objects snapshot``; settlement inspection becomes ``objects group-status``;
+``store repair --reconcile-s3`` becomes the constrained, idempotent
+``objects reconcile-s3``; and daemon job polling becomes ``operations
+status/wait``. Keep object transfer on S3. Remove SSH identities only after the
+HTTPS workflow has passed a three-object payload/manifest/checksum acceptance
+test and a repeated idempotency test.
+
 Upload a single file to a prefix. The filename is preserved:
 
 .. code-block:: console

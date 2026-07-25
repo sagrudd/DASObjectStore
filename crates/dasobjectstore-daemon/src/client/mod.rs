@@ -51,10 +51,12 @@ use crate::api::{
     RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
     RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, StoreDeduplicateRequest, StoreDeduplicateResponse,
-    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
-    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
-    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    RemoteEasyconnectUploadAdmissionRequest, RemoteObjectGroupStatusRequest,
+    RemoteObjectGroupStatusResponse, RemoteObjectSnapshotRequest, RemoteObjectSnapshotResponse,
+    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
+    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
+    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
     UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
@@ -712,6 +714,26 @@ where
         }
     }
 
+    pub fn remote_object_snapshot(
+        &self,
+        request: RemoteObjectSnapshotRequest,
+    ) -> Result<RemoteObjectSnapshotResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteObjectSnapshot(request))? {
+            DaemonApiResponse::RemoteObjectSnapshot(response) => Ok(response),
+            response => Err(unexpected("remote_object_snapshot", response)),
+        }
+    }
+
+    pub fn remote_object_group_status(
+        &self,
+        request: RemoteObjectGroupStatusRequest,
+    ) -> Result<RemoteObjectGroupStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteObjectGroupStatus(request))? {
+            DaemonApiResponse::RemoteObjectGroupStatus(response) => Ok(response),
+            response => Err(unexpected("remote_object_group_status", response)),
+        }
+    }
+
     pub fn object_download(
         &self,
         request: ObjectDownloadRequest,
@@ -920,6 +942,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
             "update_object_store_acknowledgement_policy"
         }
         DaemonApiResponse::ObjectBrowser(_) => "object_browser",
+        DaemonApiResponse::RemoteObjectSnapshot(_) => "remote_object_snapshot",
+        DaemonApiResponse::RemoteObjectGroupStatus(_) => "remote_object_group_status",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
         DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",

@@ -23,6 +23,14 @@ DASObjectStore standalone server owns that listener; Garage moves to
 ``http://127.0.0.1:3901`` and remains available only for legacy/recovery
 operations.
 
+Remote clients use standard S3 as the data plane. Readiness, authoritative
+bulk inventory, exact payload-group settlement, idempotent reconciliation, and
+operation waiting use the store-scoped authenticated HTTPS API exposed by
+``dasobjectstore-remote``. These control calls neither proxy object bytes nor
+expose disk identities, managed paths, database locations, or provider
+administrator credentials. See :doc:`remote-client` for the no-SSH command
+sequence.
+
 The gateway authenticates AWS Signature Version 4 against the daemon-managed,
 store-scoped credential registry. The access key and bucket select the target
 ObjectStore. A client cannot supply a managed path, profile, enclosure, or

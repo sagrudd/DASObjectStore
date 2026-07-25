@@ -289,6 +289,8 @@ fn seed_session(path: &Path) {
                 can_write: true,
                 writer_group: Some("synoptikon".to_string()),
                 object_type: "fastq".to_string(),
+                control_operations: Vec::new(),
+                allowed_prefixes: Vec::new(),
             }],
             revoked_at_utc: None,
         })

@@ -1792,6 +1792,13 @@ list until every temporary size-budget exception has been removed.
   OBJECTSTORE` over verified HTTPS, with daemon-owned eight-hour scoped Garage
   sessions, redacted default output, explicit JSON connection context, and
   persisted-credential validation.
+- [x] Remove SSH from production remote ingest finalization: add explicitly
+  scoped HTTPS readiness, 20,000-object authoritative snapshots, exact
+  payload-group settlement, idempotent three-key S3 reconciliation, and remote
+  operation polling. Temporary EasyConnect sessions now carry explicit
+  operation/prefix capabilities; legacy sessions fail closed, provider secrets
+  and managed paths remain daemon-private, and the EPIC migration sequence is
+  documented for `dasobjectstore-remote`.
 - [x] Align remote-upload admission with the registry's canonical `s3_bucket`
   export label so writer-group users can authenticate to exported stores.
 - [x] Split global Web CSS by base primitives and feature-owned styles, and

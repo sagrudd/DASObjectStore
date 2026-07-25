@@ -140,6 +140,7 @@ pub trait DaemonServiceOrchestrator {
         &self,
         _store_id: StoreId,
         _prefix: Option<String>,
+        _expectation: Option<&crate::api::StoreRepairS3Expectation>,
         _dry_run: bool,
         _accepted_at_utc: &str,
         _emit_progress: &mut dyn FnMut(
@@ -155,6 +156,7 @@ pub trait DaemonServiceOrchestrator {
         &self,
         store_id: StoreId,
         prefix: Option<String>,
+        expectation: Option<&crate::api::StoreRepairS3Expectation>,
         dry_run: bool,
         accepted_at_utc: &str,
         is_cancelled: &dyn Fn() -> bool,
@@ -163,7 +165,14 @@ pub trait DaemonServiceOrchestrator {
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
         let _ = is_cancelled;
-        self.reconcile_store_s3(store_id, prefix, dry_run, accepted_at_utc, emit_progress)
+        self.reconcile_store_s3(
+            store_id,
+            prefix,
+            expectation,
+            dry_run,
+            accepted_at_utc,
+            emit_progress,
+        )
     }
 
     fn prepare_enclosure(

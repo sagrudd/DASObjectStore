@@ -40,26 +40,9 @@ pub(super) fn reconciliation_job_summary(
     state: crate::api::DaemonJobState,
     message: impl Into<String>,
 ) -> Result<crate::api::DaemonJobSummary, String> {
-    let store_id = request
-        .store_id
-        .as_ref()
-        .expect("validated reconciliation store");
-    let timestamp = accepted_at_utc
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    let job_id = crate::api::DaemonJobId::new(format!(
-        "store-repair-s3-{}-{}",
-        store_id.as_str(),
-        timestamp.trim_matches('-').to_ascii_lowercase()
-    ))
-    .map_err(|error| error.to_string())?;
+    let job_id = request
+        .reconciliation_operation_id(accepted_at_utc)
+        .map_err(|error| error.to_string())?;
     let terminal = matches!(state, crate::api::DaemonJobState::Complete);
     Ok(crate::api::DaemonJobSummary {
         job_id,

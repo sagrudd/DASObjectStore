@@ -314,6 +314,7 @@ where
                         .reconcile_store_s3_cancellable(
                             store_id,
                             request.s3_prefix.clone(),
+                            request.s3_expectation.as_ref(),
                             request.dry_run,
                             &self.clock.now_utc(),
                             &|| {

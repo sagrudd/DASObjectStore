@@ -26,6 +26,7 @@ pub mod placement_log;
 pub mod profile_catalogue_commit;
 pub mod queue;
 pub mod recovery;
+pub mod remote_inventory;
 pub mod repair_activity;
 pub mod s3_access;
 pub mod schema;
@@ -146,6 +147,10 @@ pub use queue::{
 pub use recovery::{
     recover_live_metadata, RecoverLiveMetadataError, RecoverLiveMetadataReport,
     RecoverLiveMetadataRequest, RecoveryStoreDefinition,
+};
+pub use remote_inventory::{
+    read_remote_object_inventory_page, RemoteObjectInventoryError, RemoteObjectInventoryPage,
+    RemoteObjectInventoryRecord,
 };
 pub use repair_activity::{
     read_pool_repair_activity, PoolRepairActivityEvent, PoolRepairActivityReadError,

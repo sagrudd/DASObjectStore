@@ -383,6 +383,8 @@ mod tests {
             can_write,
             writer_group: Some("mnemosyne".to_string()),
             object_type: "naive".to_string(),
+            control_operations: Vec::new(),
+            allowed_prefixes: Vec::new(),
         }
     }
 }

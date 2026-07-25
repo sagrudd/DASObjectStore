@@ -33,6 +33,7 @@ mod profile_readiness;
 mod profile_s3;
 mod provider_stream;
 mod remote_easyconnect;
+mod remote_object_workflow;
 mod request_validation;
 mod service;
 mod storage_mutation;
@@ -225,11 +226,12 @@ pub use provider_stream::{
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
-    remote_easyconnect_object_store_grants_for_actor,
+    remote_easyconnect_control_operations, remote_easyconnect_object_store_grants_for_actor,
     remote_easyconnect_renew_after_offset_seconds,
     resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovePairingRequest,
     RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectControlAuthorization,
+    RemoteEasyconnectControlOperation, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
     RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectObjectStoreAccessPolicy,
@@ -244,13 +246,24 @@ pub use remote_easyconnect::{
     RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
     RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
     RemoteEasyconnectUploadProgressTelemetry, RemoteEasyconnectUploadSelectionEntry,
-    RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
-    REMOTE_EASYCONNECT_DISCOVERY_ROUTE, REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE,
-    REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
+    RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX,
+    REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_DISCOVERY_ROUTE,
+    REMOTE_EASYCONNECT_LOCAL_AGENT_HANDOFF_ROUTE, REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS,
     REMOTE_EASYCONNECT_MIN_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
     REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS, REMOTE_EASYCONNECT_SESSIONS_ROUTE,
     REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+};
+pub(crate) use remote_object_workflow::{
+    decode_snapshot_cursor, encode_snapshot_cursor, snapshot_id,
+};
+pub use remote_object_workflow::{
+    RemoteObjectChecksum, RemoteObjectGroupMemberRole, RemoteObjectGroupRelationship,
+    RemoteObjectGroupState, RemoteObjectGroupStatusRequest, RemoteObjectGroupStatusResponse,
+    RemoteObjectPlacementSummary, RemoteObjectReadiness, RemoteObjectSnapshotEntry,
+    RemoteObjectSnapshotRequest, RemoteObjectSnapshotResponse, RemoteProviderVisibility,
+    REMOTE_OBJECT_SNAPSHOT_DEFAULT_LIMIT, REMOTE_OBJECT_SNAPSHOT_MAX_LIMIT,
+    REMOTE_OBJECT_WORKFLOW_SCHEMA_VERSION,
 };
 pub use service::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
@@ -274,7 +287,8 @@ pub use store_policy::{
 };
 pub use store_repair::{
     CompletedSnapshotOutcome, StoreRepairReport, StoreRepairRequest, StoreRepairResponse,
-    StoreRepairS3Reconciliation, StoreRepairValidationError, STORE_REPAIR_CONFIRMATION,
+    StoreRepairS3Expectation, StoreRepairS3Reconciliation, StoreRepairValidationError,
+    STORE_REPAIR_CONFIRMATION,
 };
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
@@ -340,6 +354,8 @@ pub enum DaemonApiRequest {
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyRequest),
     UpdateObjectStoreAcknowledgementPolicy(UpdateObjectStoreAcknowledgementPolicyRequest),
     ObjectBrowser(ObjectBrowserRequest),
+    RemoteObjectSnapshot(RemoteObjectSnapshotRequest),
+    RemoteObjectGroupStatus(RemoteObjectGroupStatusRequest),
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
@@ -415,6 +431,8 @@ impl DaemonApiRequest {
                 "update_object_store_acknowledgement_policy"
             }
             Self::ObjectBrowser(_) => "object_browser",
+            Self::RemoteObjectSnapshot(_) => "remote_object_snapshot",
+            Self::RemoteObjectGroupStatus(_) => "remote_object_group_status",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
@@ -539,6 +557,8 @@ impl DaemonApiRequest {
                 .map(|_| ())
                 .map_err(update_object_store_acknowledgement_policy_validation_error),
             Self::ObjectBrowser(request) => request.validate(),
+            Self::RemoteObjectSnapshot(request) => request.validate(),
+            Self::RemoteObjectGroupStatus(request) => request.validate(),
             Self::ObjectDownload(request) => request.validate(),
             Self::ObjectFolderDownload(request) => request.validate(),
             Self::UpsertEndpointInventory(request) => request
@@ -641,6 +661,8 @@ pub enum DaemonApiResponse {
     UpdateObjectStoreIngestPolicy(UpdateObjectStoreIngestPolicyResponse),
     UpdateObjectStoreAcknowledgementPolicy(UpdateObjectStoreAcknowledgementPolicyResponse),
     ObjectBrowser(ObjectBrowserResponse),
+    RemoteObjectSnapshot(RemoteObjectSnapshotResponse),
+    RemoteObjectGroupStatus(RemoteObjectGroupStatusResponse),
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
@@ -1223,6 +1245,8 @@ mod tests {
                     can_write: true,
                     writer_group: Some("mnemosyne".to_string()),
                     object_type: "fastq".to_string(),
+                    control_operations: Vec::new(),
+                    allowed_prefixes: Vec::new(),
                 }],
                 approval_expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
             },

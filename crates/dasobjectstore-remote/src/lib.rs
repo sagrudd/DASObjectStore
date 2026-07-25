@@ -4,6 +4,7 @@ pub mod auth;
 pub mod authenticate;
 pub mod cli;
 pub mod config;
+pub mod control;
 pub mod easyconnect;
 pub mod run;
 pub mod s3;

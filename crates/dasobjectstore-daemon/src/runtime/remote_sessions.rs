@@ -1,5 +1,6 @@
 use crate::api::{
-    RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectControlAuthorization,
+    RemoteEasyconnectControlOperation, RemoteEasyconnectObjectStoreGrant,
     RemoteEasyconnectSessionCredentials,
 };
 use crate::auth::DaemonLocalActor;
@@ -67,6 +68,16 @@ pub trait RemoteEasyconnectPairedSessionStore: Send + Sync {
         &self,
         now_utc: &str,
     ) -> Result<Vec<RemoteEasyconnectS3Credential>, RemoteEasyconnectPairedSessionStoreError>;
+
+    fn authorize_control(
+        &self,
+        access_key_id: &str,
+        session_token: &str,
+        object_store: &str,
+        requested_prefix: &str,
+        operation: RemoteEasyconnectControlOperation,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectControlAuthorization, RemoteEasyconnectPairedSessionStoreError>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -427,6 +438,82 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
         }
         Ok(credentials)
     }
+
+    fn authorize_control(
+        &self,
+        access_key_id: &str,
+        session_token: &str,
+        object_store: &str,
+        requested_prefix: &str,
+        operation: RemoteEasyconnectControlOperation,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectControlAuthorization, RemoteEasyconnectPairedSessionStoreError>
+    {
+        require_non_blank("access_key_id", access_key_id)?;
+        require_non_blank("session_token", session_token)?;
+        require_non_blank("object_store", object_store)?;
+        require_non_blank("now_utc", now_utc)?;
+        validate_control_prefix(requested_prefix)?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let store = read_store(&self.path)?;
+        let Some(session) = store.sessions.iter().find(|session| {
+            secure_eq(&session.credentials.access_key_id, access_key_id)
+                && session
+                    .credentials
+                    .session_token
+                    .as_deref()
+                    .is_some_and(|expected| secure_eq(expected, session_token))
+        }) else {
+            return Err(RemoteEasyconnectPairedSessionStoreError::ControlTokenInvalid);
+        };
+        ensure_session_usable(session, now_utc)?;
+        let Some(grant) = session
+            .object_stores
+            .iter()
+            .find(|grant| grant.object_store == object_store)
+        else {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::ObjectStoreNotGranted {
+                    session_id: session.session_id.clone(),
+                    object_store: object_store.to_string(),
+                },
+            );
+        };
+        let access_permitted = if operation.requires_write() {
+            grant.can_write
+        } else {
+            grant.can_read
+        };
+        let operation_permitted = grant.control_operations.contains(&operation);
+        let allowed_prefix = grant
+            .allowed_prefixes
+            .iter()
+            .filter(|prefix| requested_prefix.starts_with(prefix.as_str()))
+            .max_by_key(|prefix| prefix.len());
+        if !access_permitted || !operation_permitted || allowed_prefix.is_none() {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::ControlOperationNotGranted {
+                    session_id: session.session_id.clone(),
+                    object_store: object_store.to_string(),
+                    operation,
+                },
+            );
+        }
+        Ok(RemoteEasyconnectControlAuthorization {
+            session_id: session.session_id.clone(),
+            approved_actor: session.approved_actor.clone(),
+            object_store: object_store.to_string(),
+            bucket: grant.bucket.clone(),
+            can_read: grant.can_read,
+            can_write: grant.can_write,
+            allowed_prefix: allowed_prefix.cloned().unwrap_or_default(),
+            operation,
+            expires_at_utc: session.expires_at_utc.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -517,6 +604,13 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
         object_store: String,
         writer_group: Option<String>,
     },
+    ControlTokenInvalid,
+    InvalidControlPrefix,
+    ControlOperationNotGranted {
+        session_id: String,
+        object_store: String,
+        operation: RemoteEasyconnectControlOperation,
+    },
 }
 
 impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
@@ -586,6 +680,20 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
                 formatter,
                 "paired easyconnect session {session_id} does not allow writing ObjectStore {object_store}; writer group {:?}",
                 writer_group
+            ),
+            Self::ControlTokenInvalid => {
+                write!(formatter, "remote control token is invalid")
+            }
+            Self::InvalidControlPrefix => {
+                write!(formatter, "remote control prefix is invalid")
+            }
+            Self::ControlOperationNotGranted {
+                session_id,
+                object_store,
+                operation,
+            } => write!(
+                formatter,
+                "paired easyconnect session {session_id} does not allow {operation:?} for ObjectStore {object_store}"
             ),
         }
     }
@@ -718,6 +826,31 @@ fn require_non_blank(
     Ok(())
 }
 
+fn validate_control_prefix(prefix: &str) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+    if prefix.starts_with('/')
+        || prefix.contains('\\')
+        || prefix.chars().any(char::is_control)
+        || prefix.split('/').any(|component| component == "..")
+    {
+        return Err(RemoteEasyconnectPairedSessionStoreError::InvalidControlPrefix);
+    }
+    Ok(())
+}
+
+fn secure_eq(expected: &str, presented: &str) -> bool {
+    let expected = expected.as_bytes();
+    let presented = presented.as_bytes();
+    let mut difference = expected.len() ^ presented.len();
+    let length = expected.len().max(presented.len());
+    for index in 0..length {
+        difference |= usize::from(
+            expected.get(index).copied().unwrap_or_default()
+                ^ presented.get(index).copied().unwrap_or_default(),
+        );
+    }
+    difference == 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -727,8 +860,8 @@ mod tests {
         REMOTE_EASYCONNECT_SESSION_SCHEMA,
     };
     use crate::api::{
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectControlOperation,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectSessionCredentials,
     };
     use crate::auth::DaemonLocalActor;
     #[cfg(unix)]
@@ -997,6 +1130,139 @@ mod tests {
         cleanup(&root);
     }
 
+    #[test]
+    fn control_authorization_uses_rotating_session_token_and_store_capabilities() {
+        let root = temp_root("control-authorize");
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            remote_easyconnect_session_store_path(&root),
+        );
+        store.upsert(session("session-1")).expect("session stored");
+
+        let authorization = store
+            .authorize_control(
+                "AKIAEXAMPLE",
+                "session-token",
+                "zymo_fecal_2025.05",
+                "raw/PAU59949/",
+                RemoteEasyconnectControlOperation::ObjectSnapshot,
+                "2026-07-09T16:30:00Z",
+            )
+            .expect("read authorized");
+        assert_eq!(authorization.approved_actor, "stephen");
+        assert_eq!(authorization.allowed_prefix, "");
+
+        assert!(matches!(
+            store
+                .authorize_control(
+                    "AKIAEXAMPLE",
+                    "session-token",
+                    "ena",
+                    "",
+                    RemoteEasyconnectControlOperation::ReconcileS3,
+                    "2026-07-09T16:30:00Z",
+                )
+                .expect_err("write operation denied"),
+            RemoteEasyconnectPairedSessionStoreError::ControlOperationNotGranted { .. }
+        ));
+        assert!(matches!(
+            store
+                .authorize_control(
+                    "AKIAEXAMPLE",
+                    "secret",
+                    "zymo_fecal_2025.05",
+                    "",
+                    RemoteEasyconnectControlOperation::ObjectSnapshot,
+                    "2026-07-09T16:30:00Z",
+                )
+                .expect_err("persistent secret is not a bearer token"),
+            RemoteEasyconnectPairedSessionStoreError::ControlTokenInvalid
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn control_authorization_rejects_path_like_prefixes() {
+        let root = temp_root("control-prefix");
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            remote_easyconnect_session_store_path(&root),
+        );
+        store.upsert(session("session-1")).expect("session stored");
+        let result = store.authorize_control(
+            "AKIAEXAMPLE",
+            "session-token",
+            "zymo_fecal_2025.05",
+            "../other-store",
+            RemoteEasyconnectControlOperation::ObjectSnapshot,
+            "2026-07-09T16:30:00Z",
+        );
+        assert!(matches!(
+            result.expect_err("unsafe prefix rejected"),
+            RemoteEasyconnectPairedSessionStoreError::InvalidControlPrefix
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn legacy_session_without_control_scope_fails_closed() {
+        let root = temp_root("legacy-control");
+        let path = remote_easyconnect_session_store_path(&root);
+        let mut legacy = session("session-1");
+        legacy.object_stores[0].control_operations.clear();
+        legacy.object_stores[0].allowed_prefixes.clear();
+        FileBackedRemoteEasyconnectPairedSessionStore::new(&path)
+            .upsert(legacy)
+            .expect("legacy-compatible session stored");
+
+        let result = FileBackedRemoteEasyconnectPairedSessionStore::new(&path).authorize_control(
+            "AKIAEXAMPLE",
+            "session-token",
+            "zymo_fecal_2025.05",
+            "",
+            RemoteEasyconnectControlOperation::StoreReadiness,
+            "2026-07-09T16:30:00Z",
+        );
+        assert!(matches!(
+            result.expect_err("missing control scope denied"),
+            RemoteEasyconnectPairedSessionStoreError::ControlOperationNotGranted { .. }
+        ));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn control_authorization_enforces_the_most_specific_granted_prefix() {
+        let root = temp_root("scoped-control-prefix");
+        let path = remote_easyconnect_session_store_path(&root);
+        let mut scoped = session("session-1");
+        scoped.object_stores[0].allowed_prefixes = vec!["EPICv1/".to_string()];
+        FileBackedRemoteEasyconnectPairedSessionStore::new(&path)
+            .upsert(scoped)
+            .expect("session stored");
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+
+        let allowed = store
+            .authorize_control(
+                "AKIAEXAMPLE",
+                "session-token",
+                "zymo_fecal_2025.05",
+                "EPICv1/GSE171074",
+                RemoteEasyconnectControlOperation::ObjectGroupStatus,
+                "2026-07-09T16:30:00Z",
+            )
+            .expect("prefix authorized");
+        assert_eq!(allowed.allowed_prefix, "EPICv1/");
+        assert!(store
+            .authorize_control(
+                "AKIAEXAMPLE",
+                "session-token",
+                "zymo_fecal_2025.05",
+                "other/",
+                RemoteEasyconnectControlOperation::ObjectGroupStatus,
+                "2026-07-09T16:30:00Z",
+            )
+            .is_err());
+        cleanup(&root);
+    }
+
     fn session(session_id: &str) -> RemoteEasyconnectPairedSessionRecord {
         RemoteEasyconnectPairedSessionRecord {
             session_id: session_id.to_string(),
@@ -1019,6 +1285,8 @@ mod tests {
                     can_write: true,
                     writer_group: Some("mnemosyne".to_string()),
                     object_type: "fastq".to_string(),
+                    control_operations: crate::api::remote_easyconnect_control_operations(true),
+                    allowed_prefixes: vec!["".to_string()],
                 },
                 RemoteEasyconnectObjectStoreGrant {
                     object_store: "ena".to_string(),
@@ -1027,6 +1295,8 @@ mod tests {
                     can_write: false,
                     writer_group: Some("ena-writers".to_string()),
                     object_type: "fastq".to_string(),
+                    control_operations: crate::api::remote_easyconnect_control_operations(false),
+                    allowed_prefixes: vec!["".to_string()],
                 },
             ],
             revoked_at_utc: None,

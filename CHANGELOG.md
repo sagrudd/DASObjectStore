@@ -8,6 +8,21 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.130.0 - 2026-07-25
+
+- Add a no-SSH remote control plane for store readiness, bounded authoritative
+  object snapshots, exact payload-group settlement, idempotent S3
+  reconciliation, and operation polling while retaining standard S3 as the
+  payload data plane.
+- Scope every HTTPS control request to an explicit EasyConnect ObjectStore,
+  key-prefix, and operation capability; legacy sessions fail closed and
+  temporary credentials remain renewable without exposing provider secrets.
+- Validate remote reconciliation payload groups against all three required
+  keys, exact payload size, and SHA-256 before catalogue acknowledgement, and
+  derive stable operation identities from caller idempotency keys.
+- Add a 20,000-object SQLite inventory regression fixture, stable path-free JSON
+  contracts, pinned-CA remote CLI commands, and SSH-to-HTTPS migration guidance.
+
 ## 0.129.1 - 2026-07-25
 
 - Fix direct-S3 multipart completion so healthy multi-gigabyte publication is
