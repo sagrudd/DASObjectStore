@@ -1797,6 +1797,13 @@ list until every temporary size-budget exception has been removed.
   AWS profile. Keep JSON secret-free, retain ObjectStore/bucket associations
   in DASObjectStore configuration, and add non-secret ``s3 status``
   diagnostics.
+- [x] Make first-use remote TLS enrollment a single-command, default-deny
+  workflow: inspect the certificate before credentials, support constant-time
+  independently verified fingerprints, persist endpoint/appliance-bound trust
+  atomically with private permissions, fail closed on certificate change, and
+  expose explicit trust inspection, removal, and rotation operations. Preserve
+  localhost-only legacy certificates solely as explicitly approved
+  fingerprint-pinned endpoint records.
 - [x] Remove SSH from production remote ingest finalization: add explicitly
   scoped HTTPS readiness, 20,000-object authoritative snapshots, exact
   payload-group settlement, idempotent three-key S3 reconciliation, and remote
