@@ -77,15 +77,16 @@ repair_managed_tree() {
 
   chown "$service_user:$service_group" "$root"
   chmod 0750 "$root"
-  find "$root" -mindepth 1 \
-    -path "$root/lost+found" -prune \
-    -o -exec chown "$service_user:$service_group" {} +
-  find "$root" \
-    -path "$root/lost+found" -prune \
-    -o -type d -exec chmod 0750 {} +
-  find "$root" \
-    -path "$root/lost+found" -prune \
-    -o -type f -exec chmod 0640 {} +
+  # Never recursively traverse a live data plane from a package maintainer
+  # script. Ingest/destage may create or retire payloads concurrently, and a
+  # stale `find -exec` batch can both fail package configuration and rewrite
+  # ownership on application-managed workspaces. The daemon creates managed
+  # descendants with the service identity; legacy/adopted trees require the
+  # explicit reconciliation workflow.
+  if [[ -d "$root/.dasobjectstore" ]]; then
+    chown "$service_user:$service_group" "$root/.dasobjectstore"
+    chmod 0750 "$root/.dasobjectstore"
+  fi
 }
 
 repair_marked_managed_tree() {

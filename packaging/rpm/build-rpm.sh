@@ -210,9 +210,13 @@ repair_managed_tree() {
   [ -d "\$root" ] || return 0
   chown "\$service_user:\$service_group" "\$root"
   chmod 0750 "\$root"
-  find "\$root" -mindepth 1 -path "\$root/lost+found" -prune -o -exec chown "\$service_user:\$service_group" {} +
-  find "\$root" -path "\$root/lost+found" -prune -o -type d -exec chmod 0750 {} +
-  find "\$root" -path "\$root/lost+found" -prune -o -type f -exec chmod 0640 {} +
+  # Package upgrades must not recursively traverse a live data plane. The
+  # daemon owns descendant creation; legacy/adopted trees use explicit
+  # reconciliation rather than an unsafe package-time ownership rewrite.
+  if [ -d "\$root/.dasobjectstore" ]; then
+    chown "\$service_user:\$service_group" "\$root/.dasobjectstore"
+    chmod 0750 "\$root/.dasobjectstore"
+  fi
 }
 
 repair_marked_managed_tree() {

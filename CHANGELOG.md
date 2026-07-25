@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.130.1 - 2026-07-25
+
+- Stop DEB/RPM package upgrades from recursively rewriting live SSD/HDD payload
+  ownership and permissions. Maintainer scripts now repair only managed root
+  and namespace-marker ownership, avoiding concurrent-ingest races and leaving
+  legacy tree adoption to the explicit daemon reconciliation workflow.
+
 ## 0.130.0 - 2026-07-25
 
 - Add a no-SSH remote control plane for store readiness, bounded authoritative
