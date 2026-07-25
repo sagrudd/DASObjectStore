@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.129.1 - 2026-07-25
+
+- Fix direct-S3 multipart completion so healthy multi-gigabyte publication is
+  not terminated by the 1.5-second control-plane Unix-socket idle deadline.
+- Isolate multipart completion from routine control-plane bridge capacity while
+  retaining a generous, size-aware bounded overall deadline.
+- Preserve typed daemon completion conflicts and capacity pressure through the
+  HTTP adapter and map them to deterministic S3-compatible errors.
+
 ## 0.129.0 - 2026-07-24
 
 - Add daemon-owned idle storage assurance for verified evacuation, fractional

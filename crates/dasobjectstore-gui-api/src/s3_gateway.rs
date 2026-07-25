@@ -237,7 +237,15 @@ async fn s3_get_object(
     .await
     {
         Ok(response) => response,
-        Err((status, error)) => s3_error(status, &error.0.code, &error.0.message),
+        Err((status, error)) => {
+            let code = match error.0.code.as_str() {
+                "profile_s3_multipart_slow_down" => "SlowDown",
+                "profile_s3_multipart_completion_conflict" => "OperationAborted",
+                "profile_s3_multipart_incomplete" => "InvalidPart",
+                _ => error.0.code.as_str(),
+            };
+            s3_error(status, code, &error.0.message)
+        }
     }
 }
 

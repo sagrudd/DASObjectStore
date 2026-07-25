@@ -5,6 +5,7 @@ use tokio::sync::Semaphore;
 
 const DEFAULT_PERMITS: usize = 8;
 const PRIORITY_PERMITS: usize = 2;
+const MULTIPART_COMPLETION_PERMITS: usize = 2;
 const DEFAULT_DEADLINE: Duration = Duration::from_secs(2);
 const CIRCUIT_FAILURE_THRESHOLD: usize = 3;
 const CIRCUIT_COOLDOWN: Duration = Duration::from_secs(5);
@@ -86,6 +87,28 @@ impl DaemonBridge {
         Arc::clone(BRIDGE.get_or_init(|| Arc::new(Self::priority_packaged())))
     }
 
+    /// A completion-specific lane keeps multi-gigabyte assembly work from
+    /// consuming routine control-plane permits. Callers still provide the
+    /// operation's generous bounded overall deadline.
+    pub(crate) fn multipart_completion_packaged() -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(MULTIPART_COMPLETION_PERMITS)),
+            deadline: DEFAULT_DEADLINE,
+            circuit: Arc::new(Mutex::new(CircuitState {
+                epoch: 0,
+                next_request_id: 0,
+                last_failure_request_id: 0,
+                last_success_request_id: 0,
+                mode: CircuitMode::Closed { failures: 0 },
+            })),
+        }
+    }
+
+    pub(crate) fn shared_multipart_completion_packaged() -> Arc<Self> {
+        static BRIDGE: OnceLock<Arc<DaemonBridge>> = OnceLock::new();
+        Arc::clone(BRIDGE.get_or_init(|| Arc::new(Self::multipart_completion_packaged())))
+    }
+
     #[cfg(test)]
     pub(crate) fn with_capacity_and_deadline(capacity: usize, deadline: Duration) -> Self {
         Self {
@@ -124,7 +147,7 @@ impl DaemonBridge {
         .await
     }
 
-    async fn call_with_deadline<T, F>(
+    pub(crate) async fn call_with_deadline<T, F>(
         &self,
         deadline: Duration,
         operation: F,
@@ -386,6 +409,30 @@ mod tests {
             Err(DaemonBridgeError::CircuitOpen)
         ));
         assert!(priority.call(|| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn multipart_completion_lane_does_not_consume_control_capacity() {
+        let completion = DaemonBridge::multipart_completion_packaged();
+        let control = DaemonBridge::packaged();
+        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
+        let running = tokio::spawn(async move {
+            completion
+                .call_message_with_deadline(Duration::from_secs(2), move || {
+                    entered_sender.send(()).expect("completion entered");
+                    release_receiver
+                        .blocking_recv()
+                        .expect("completion released");
+                    Ok::<_, String>(())
+                })
+                .await
+        });
+        entered_receiver.await.expect("completion starts");
+
+        assert!(control.call(|| Ok(())).await.is_ok());
+        release_sender.send(()).expect("release completion");
+        assert!(running.await.expect("completion joins").is_ok());
     }
 
     #[tokio::test]

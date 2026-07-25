@@ -335,20 +335,78 @@ pub(crate) async fn complete_profile_s3_multipart(
     (StatusCode, axum::Json<AuthRouteError>),
 > {
     let deadline = multipart_completion_deadline(request.expected_size_bytes);
-    crate::daemon_bridge::DaemonBridge::shared_packaged()
-        .call_message_with_deadline(deadline, move || {
-            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+    crate::daemon_bridge::DaemonBridge::shared_multipart_completion_packaged()
+        .call_with_deadline(deadline, move || {
+            let client = DaemonClient::new(UnixSocketDaemonTransport::for_multipart_completion(
                 DaemonRuntimeConfig::default_packaged().socket_path,
             ));
             client
                 .profile_s3_multipart_complete(request)
-                .map_err(|error| error.to_string())
+                .map_err(multipart_completion_client_error)
         })
         .await
         .map(axum::Json)
-        .map_err(|error| {
-            admin_daemon_bridge_error_with_code(error, "profile_s3_multipart_complete_failed")
-        })
+        .map_err(multipart_completion_bridge_error)
+}
+
+fn multipart_completion_client_error(
+    error: DaemonClientError,
+) -> crate::object_browser_routes::StandaloneObjectBrowserClientError {
+    use crate::object_browser_routes::StandaloneObjectBrowserClientError;
+
+    let message = error.to_string();
+    match error {
+        DaemonClientError::RequestValidation(_) => StandaloneObjectBrowserClientError {
+            status: StatusCode::BAD_REQUEST,
+            code: "profile_s3_invalid_multipart_completion".to_string(),
+            message,
+        },
+        DaemonClientError::Api(error) => StandaloneObjectBrowserClientError {
+            status: multipart_daemon_error_status(&error.code),
+            code: error.code,
+            message: error.message,
+        },
+        DaemonClientError::Transport(_) => StandaloneObjectBrowserClientError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "profile_s3_multipart_transport_failed".to_string(),
+            message,
+        },
+        _ => StandaloneObjectBrowserClientError {
+            status: StatusCode::BAD_GATEWAY,
+            code: "profile_s3_multipart_complete_failed".to_string(),
+            message,
+        },
+    }
+}
+
+fn multipart_completion_bridge_error(
+    error: crate::daemon_bridge::DaemonBridgeError,
+) -> (StatusCode, axum::Json<AuthRouteError>) {
+    match error {
+        crate::daemon_bridge::DaemonBridgeError::Client(error) => {
+            route_error(error.status, error.code, error.message)
+        }
+        crate::daemon_bridge::DaemonBridgeError::Busy => route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "profile_s3_multipart_slow_down",
+            "multipart completion capacity is saturated; retry shortly",
+        ),
+        error => admin_daemon_bridge_error_with_code(error, "profile_s3_multipart_complete_failed"),
+    }
+}
+
+fn multipart_daemon_error_status(code: &str) -> StatusCode {
+    match code {
+        "profile_s3_multipart_completion_conflict" => StatusCode::CONFLICT,
+        "profile_s3_multipart_incomplete" | "profile_s3_invalid_multipart_completion" => {
+            StatusCode::BAD_REQUEST
+        }
+        "profile_s3_multipart_unavailable"
+        | "profile_s3_unavailable"
+        | "profile_s3_multipart_publication_failed"
+        | "profile_s3_multipart_recovery_failed" => StatusCode::SERVICE_UNAVAILABLE,
+        _ => StatusCode::BAD_GATEWAY,
+    }
 }
 
 fn multipart_completion_deadline(size_bytes: u64) -> Duration {
@@ -375,6 +433,18 @@ mod completion_deadline_tests {
         assert_eq!(
             multipart_completion_deadline(u64::MAX),
             COMPLETION_MAXIMUM_DEADLINE
+        );
+    }
+
+    #[test]
+    fn completion_conflict_preserves_a_deterministic_http_status() {
+        assert_eq!(
+            multipart_daemon_error_status("profile_s3_multipart_completion_conflict"),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            multipart_daemon_error_status("profile_s3_multipart_unavailable"),
+            StatusCode::SERVICE_UNAVAILABLE
         );
     }
 }

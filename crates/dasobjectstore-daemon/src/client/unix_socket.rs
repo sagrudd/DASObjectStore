@@ -39,6 +39,17 @@ impl UnixSocketDaemonTransport {
         Self::new(socket_path).with_idle_timeout(Duration::from_millis(1_500))
     }
 
+    /// Construct a transport for durable multipart completion.
+    ///
+    /// Completion can legitimately remain silent while the daemon assembles,
+    /// verifies, synchronizes, and publishes a multi-gigabyte object. The
+    /// caller owns the generous bounded overall deadline; applying the short
+    /// control-plane idle deadline here would turn healthy work into an
+    /// ambiguous transport failure while publication continues.
+    pub fn for_multipart_completion(socket_path: impl Into<PathBuf>) -> Self {
+        Self::new(socket_path)
+    }
+
     pub fn with_idle_timeout(mut self, timeout: Duration) -> Self {
         self.idle_timeout = Some(timeout);
         self
@@ -466,9 +477,11 @@ mod tests {
     use super::{connect_error_message, ProviderStreamReceipt, UnixSocketDaemonTransport};
     use crate::api::{
         DaemonApiRequest, DaemonApiResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, ProviderStreamChunkHeader,
-        ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
-        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest, PROVIDER_STREAM_SCHEMA_VERSION,
+        DaemonServiceStatusResponse, ProfileS3MultipartCompletionRequest,
+        ProfileS3MultipartCompletionResponse, ProfileS3MultipartPartRequest,
+        ProviderStreamChunkHeader, ProviderStreamMultipartPartUploadOpenRequest,
+        ProviderStreamMultipartPartUploadResponse, ProviderStreamOpenRequest,
+        ProviderStreamUploadOpenRequest, PROFILE_S3_SCHEMA_VERSION, PROVIDER_STREAM_SCHEMA_VERSION,
     };
     use crate::client::{DaemonClient, DaemonClientError};
     use crate::server::{DaemonApiHandler, UnixSocketDaemonServer, UnixSocketDaemonServerError};
@@ -476,7 +489,7 @@ mod tests {
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::fs;
-    use std::io::{Error as IoError, ErrorKind};
+    use std::io::{BufRead, BufReader, Error as IoError, ErrorKind, Write};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
     use std::thread;
@@ -846,6 +859,62 @@ mod tests {
             DaemonClientError::Transport(message)
                 if message.contains("bounded idle deadline")
         ));
+        join.join().expect("server thread joins");
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn multipart_completion_transport_survives_the_control_idle_deadline() {
+        let socket_path = unique_socket_path();
+        let listener = UnixListener::bind(&socket_path).expect("listener binds");
+        let join = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("client connects");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut request = String::new();
+            reader.read_line(&mut request).expect("request line");
+            thread::sleep(Duration::from_millis(1_750));
+            serde_json::to_writer(
+                &mut stream,
+                &DaemonApiResponse::ProfileS3MultipartComplete(
+                    ProfileS3MultipartCompletionResponse {
+                        schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                        store_id: StoreId::new("store-1").expect("store id"),
+                        reservation_id: "reservation-1".to_string(),
+                        key: BackendObjectKey {
+                            object_id: "large.bin".to_string(),
+                            version: 1,
+                        },
+                        committed: true,
+                    },
+                ),
+            )
+            .expect("response");
+            stream.write_all(b"\n").expect("response newline");
+        });
+
+        let client = DaemonClient::new(UnixSocketDaemonTransport::for_multipart_completion(
+            &socket_path,
+        ));
+        let response = client
+            .profile_s3_multipart_complete(ProfileS3MultipartCompletionRequest {
+                store_id: StoreId::new("store-1").expect("store id"),
+                reservation_id: "reservation-1".to_string(),
+                key: BackendObjectKey {
+                    object_id: "large.bin".to_string(),
+                    version: 1,
+                },
+                expected_size_bytes: 5,
+                parts: vec![ProfileS3MultipartPartRequest {
+                    part_number: 1,
+                    size_bytes: 5,
+                    checksum:
+                        "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                            .to_string(),
+                }],
+            })
+            .expect("completion survives short control idle deadline");
+
+        assert!(response.committed);
         join.join().expect("server thread joins");
         let _ = fs::remove_file(socket_path);
     }

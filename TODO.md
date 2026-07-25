@@ -1066,6 +1066,10 @@ hardware acceptance.
   exact S3 ``SlowDown``/``Retry-After`` backpressure, leased multipart journal
   mutation and fail-closed aborted-upload collection, plus store-private
   exact-file SSD eviction for successfully destaged direct-S3 objects.
+  Release 0.129.1 removes the accidental 1.5-second bounded-control idle cutoff
+  from multipart completion, gives completion an independent bridge lane, and
+  preserves deterministic conflict and backpressure errors through the S3
+  adapter.
   Do not implement those paths by writing request bodies directly from the Web
   process into a managed profile root.
   - [x] Add a provider-neutral profile read adapter for authoritative

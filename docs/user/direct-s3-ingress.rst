@@ -297,8 +297,11 @@ Completion persists an immutable intent before assembling the object and a
 committed receipt before discarding redundant part files. A matching retry
 returns that receipt, including after an HTTP wait timeout or daemon restart;
 it does not rebuild or abort the object. Completion uses a size-aware deadline
-rather than the normal two-second control request deadline. Once completion
-has started, abort fails closed.
+rather than the normal two-second control request deadline. Its dedicated
+gateway bridge and Unix transport do not apply the 1.5-second control-plane
+idle cutoff while the daemon is legitimately silent during assembly and
+verification. Routine HEAD, status, and cancellation calls retain independent
+capacity. Once completion has started, abort fails closed.
 
 Before acknowledging direct-S3 SSD acceptance, the daemon proves that the
 complete object fits on the required number of distinct managed HDDs. Eligible
