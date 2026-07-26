@@ -180,9 +180,9 @@ pub use store::{
     StoreDrainReport, StoreDrainRequest, StorePayloadRemoval,
 };
 pub use workspace::{
-    list_workspace_reservations, read_workspace_reservation, reserve_workspace,
-    transition_workspace, MeasuredWorkspaceDisk, ReserveWorkspaceRequest, WorkspaceDiskAllocation,
-    WorkspaceMetadataError, WorkspaceReservationSnapshot,
+    list_workspace_reservations, publish_workspace_aggregate_ready, read_workspace_reservation,
+    reserve_workspace, transition_workspace, MeasuredWorkspaceDisk, ReserveWorkspaceRequest,
+    WorkspaceDiskAllocation, WorkspaceMetadataError, WorkspaceReservationSnapshot,
 };
 pub use workspace_operations::{
     checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,

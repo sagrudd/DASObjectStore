@@ -99,7 +99,12 @@ Project identities are allocated transactionally and per-branch hard quotas sum
 to the workspace logical quota. Exact marker and quota replay is idempotent.
 Rollback removes only empty branches carrying the exact ownership marker.
 This preserves the daemon's ``NoNewPrivileges`` and ``ProtectSystem``
-protections.
+protections. Protocol v2 adds aggregate mount, inspection, and unmount without
+adding a general command or path surface. The broker derives every branch and
+mount path from root-owned configuration, assigns a workspace-specific FUSE
+identity, and verifies the live mergerfs process command line against the exact
+branch set and reviewed option profile. A workspace cannot become ``ready``
+until that evidence and every branch quota are simultaneously valid.
 
 NFSv4 attachment
 ----------------

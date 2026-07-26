@@ -60,6 +60,8 @@ pub struct WorkspaceReservationSnapshot {
     pub reserved_capacity_bytes: u64,
     pub quota_bytes: u64,
     pub minimum_free_bytes_per_disk: u64,
+    pub aggregation_provider: String,
+    pub aggregate_mount_identity: Option<String>,
     pub generation: u64,
     pub created_at_utc: String,
     pub updated_at_utc: String,
@@ -396,6 +398,64 @@ pub fn transition_workspace(
     Ok(snapshot)
 }
 
+pub fn publish_workspace_aggregate_ready(
+    live_sqlite_path: impl AsRef<Path>,
+    workspace_id: &WorkspaceId,
+    expected_generation: u64,
+    aggregate_mount_identity: &str,
+    updated_at_utc: &str,
+) -> Result<WorkspaceReservationSnapshot, WorkspaceMetadataError> {
+    if aggregate_mount_identity.is_empty()
+        || aggregate_mount_identity.len() > 128
+        || !aggregate_mount_identity
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    {
+        return Err(WorkspaceMetadataError::InvalidRequest {
+            field: "aggregate_mount_identity",
+            reason: "must be a conservative path-free identity".to_string(),
+        });
+    }
+    let mut connection = open_workspace_metadata(live_sqlite_path.as_ref())?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current = read_workspace_in_transaction(&transaction, workspace_id)?;
+    if current.generation != expected_generation {
+        return Err(WorkspaceMetadataError::StaleGeneration {
+            expected: expected_generation,
+            actual: current.generation,
+        });
+    }
+    if !matches!(
+        current.state,
+        ComputeWorkspaceState::Provisioning | ComputeWorkspaceState::Ready
+    ) || current
+        .aggregate_mount_identity
+        .as_deref()
+        .is_some_and(|identity| identity != aggregate_mount_identity)
+    {
+        return Err(WorkspaceMetadataError::InvalidTransition {
+            current: current.state,
+            next: ComputeWorkspaceState::Ready,
+        });
+    }
+    transaction.execute(
+        "UPDATE compute_workspaces
+         SET state = 'ready', aggregate_mount_identity = ?1,
+             generation = generation + 1, updated_at_utc = ?2,
+             failure_reason = NULL
+         WHERE workspace_id = ?3 AND generation = ?4",
+        params![
+            aggregate_mount_identity,
+            updated_at_utc,
+            workspace_id.as_str(),
+            expected_generation,
+        ],
+    )?;
+    let snapshot = read_workspace_in_transaction(&transaction, workspace_id)?;
+    transaction.commit()?;
+    Ok(snapshot)
+}
+
 fn open_workspace_metadata(path: &Path) -> Result<Connection, WorkspaceMetadataError> {
     let connection = Connection::open(path)?;
     connection.busy_timeout(Duration::from_secs(5))?;
@@ -654,7 +714,8 @@ fn read_workspace(
         .query_row(
             "SELECT request_id, pool_id, state, owner, project, purpose,
                     requested_capacity_bytes, reserved_capacity_bytes,
-                    quota_bytes, minimum_free_bytes_per_disk, generation,
+                    quota_bytes, minimum_free_bytes_per_disk, aggregation_provider,
+                    aggregate_mount_identity, generation,
                     created_at_utc, updated_at_utc, expires_at_utc
              FROM compute_workspaces WHERE workspace_id = ?1",
             [workspace_id.as_str()],
@@ -675,7 +736,8 @@ fn read_workspace_in_transaction(
         .query_row(
             "SELECT request_id, pool_id, state, owner, project, purpose,
                     requested_capacity_bytes, reserved_capacity_bytes,
-                    quota_bytes, minimum_free_bytes_per_disk, generation,
+                    quota_bytes, minimum_free_bytes_per_disk, aggregation_provider,
+                    aggregate_mount_identity, generation,
                     created_at_utc, updated_at_utc, expires_at_utc
              FROM compute_workspaces WHERE workspace_id = ?1",
             [workspace_id.as_str()],
@@ -699,6 +761,8 @@ type WorkspaceRow = (
     u64,
     u64,
     u64,
+    String,
+    Option<String>,
     u64,
     String,
     String,
@@ -721,6 +785,8 @@ fn map_workspace_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceRow> 
         row.get(11)?,
         row.get(12)?,
         row.get(13)?,
+        row.get(14)?,
+        row.get(15)?,
     ))
 }
 
@@ -791,10 +857,12 @@ fn finish_workspace_snapshot(
         reserved_capacity_bytes: row.7,
         quota_bytes: row.8,
         minimum_free_bytes_per_disk: row.9,
-        generation: row.10,
-        created_at_utc: row.11,
-        updated_at_utc: row.12,
-        expires_at_utc: row.13,
+        aggregation_provider: row.10,
+        aggregate_mount_identity: row.11,
+        generation: row.12,
+        created_at_utc: row.13,
+        updated_at_utc: row.14,
+        expires_at_utc: row.15,
         allocations,
     })
 }

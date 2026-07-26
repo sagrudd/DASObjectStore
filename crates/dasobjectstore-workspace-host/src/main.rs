@@ -74,6 +74,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
                 error_code: Some("workspace_host_rejected".to_string()),
                 error_message: Some(error.to_string()),
                 branches: Vec::new(),
+                aggregate: None,
             })
             .expect("serialize bounded error response")
         })
@@ -89,6 +90,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
             error_code: Some("invalid_request".to_string()),
             error_message: Some(error),
             branches: Vec::new(),
+            aggregate: None,
         })
         .expect("serialize protocol error"),
     };

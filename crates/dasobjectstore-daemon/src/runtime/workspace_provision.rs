@@ -9,12 +9,14 @@ use dasobjectstore_core::workspace::{
 };
 use dasobjectstore_metadata::{
     checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,
-    list_workspace_operations, read_workspace_reservation, recover_expired_workspace_operations,
-    transition_workspace, WorkspaceOperationRecoveryAction,
+    list_workspace_operations, list_workspace_reservations, publish_workspace_aggregate_ready,
+    read_workspace_reservation, recover_expired_workspace_operations, transition_workspace,
+    WorkspaceOperationRecoveryAction, WorkspaceReservationSnapshot,
 };
 use dasobjectstore_workspace_host::{
-    request_broker, BranchInspection, BranchPlan, BrokerRequest, BrokerResponse, RecoveryState,
-    WorkspaceHostOperation, PROTOCOL_VERSION,
+    request_broker, AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection,
+    BranchPlan, BrokerRequest, BrokerResponse, RecoveryState, WorkspaceHostOperation,
+    PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -38,6 +40,15 @@ pub struct WorkspaceProvisionRecoveryReport {
     pub retained_for_review: usize,
     pub deferred_operations: usize,
     pub operations: Vec<WorkspaceProvisionOperationReport>,
+    pub workspace_health: Vec<WorkspaceAggregateHealthReport>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkspaceAggregateHealthReport {
+    pub workspace_id: String,
+    pub state: String,
+    pub reason: String,
+    pub aggregate: Option<AggregateInspection>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -111,6 +122,7 @@ where
         retained_for_review: 0,
         deferred_operations: 0,
         operations: Vec::new(),
+        workspace_health: Vec::new(),
     };
     for operation in operations
         .into_iter()
@@ -177,7 +189,139 @@ where
             }
         }
     }
+    for mut workspace in list_workspace_reservations(&config.live_sqlite_path)
+        .map_err(metadata_error)?
+        .into_iter()
+        .filter(|workspace| workspace.state == ComputeWorkspaceState::Ready)
+    {
+        let aggregate_plan = match aggregate_plan(&workspace) {
+            Ok(plan) => plan,
+            Err(error) => {
+                report
+                    .workspace_health
+                    .push(WorkspaceAggregateHealthReport {
+                        workspace_id: workspace.workspace_id.as_str().to_string(),
+                        state: "unavailable".to_string(),
+                        reason: error.to_string(),
+                        aggregate: None,
+                    });
+                continue;
+            }
+        };
+        let request_id = format!("health-{}", workspace.workspace_id.as_str());
+        let inspected = call_aggregate_broker(
+            &mut broker,
+            &request_id,
+            workspace.workspace_id.as_str(),
+            WorkspaceHostOperation::InspectAggregate {
+                aggregate: aggregate_plan.clone(),
+            },
+        );
+        let inspected = match inspected {
+            Ok(inspection)
+                if inspection.state == AggregateRecoveryState::MountConflict
+                    && !inspection.mounted =>
+            {
+                call_aggregate_broker(
+                    &mut broker,
+                    &request_id,
+                    workspace.workspace_id.as_str(),
+                    WorkspaceHostOperation::MountAggregate {
+                        aggregate: aggregate_plan,
+                    },
+                )
+            }
+            other => other,
+        };
+        match inspected {
+            Ok(aggregate)
+                if aggregate.state == AggregateRecoveryState::Ready
+                    && aggregate.mounted
+                    && aggregate.source_matches
+                    && aggregate.options_match =>
+            {
+                report
+                    .workspace_health
+                    .push(WorkspaceAggregateHealthReport {
+                        workspace_id: workspace.workspace_id.as_str().to_string(),
+                        state: "ready".to_string(),
+                        reason: "aggregate identity and branch evidence verified".to_string(),
+                        aggregate: Some(aggregate),
+                    });
+            }
+            Ok(aggregate) => {
+                workspace = transition_workspace(
+                    &config.live_sqlite_path,
+                    &workspace.workspace_id,
+                    workspace.generation,
+                    ComputeWorkspaceState::Failed,
+                    now_utc,
+                    Some("workspace aggregate health evidence no longer matches"),
+                )
+                .map_err(metadata_error)?;
+                report
+                    .workspace_health
+                    .push(WorkspaceAggregateHealthReport {
+                        workspace_id: workspace.workspace_id.as_str().to_string(),
+                        state: "failed".to_string(),
+                        reason: "explicit aggregate conflict withdrew readiness".to_string(),
+                        aggregate: Some(aggregate),
+                    });
+            }
+            Err(error) => {
+                report
+                    .workspace_health
+                    .push(WorkspaceAggregateHealthReport {
+                        workspace_id: workspace.workspace_id.as_str().to_string(),
+                        state: "unavailable".to_string(),
+                        reason: error.to_string(),
+                        aggregate: None,
+                    });
+            }
+        }
+    }
     Ok(report)
+}
+
+fn aggregate_plan(
+    workspace: &WorkspaceReservationSnapshot,
+) -> Result<AggregatePlan, WorkspaceProvisionError> {
+    if workspace.aggregation_provider != "mergerfs" {
+        return Err(WorkspaceProvisionError::InvalidAuthority(
+            "workspace aggregation provider is not mergerfs".to_string(),
+        ));
+    }
+    let mount_identity = workspace
+        .aggregate_mount_identity
+        .clone()
+        .unwrap_or_else(|| workspace.workspace_id.as_str().to_string());
+    let branches = workspace
+        .allocations
+        .iter()
+        .map(|allocation| {
+            Ok(BranchPlan {
+                disk_id: allocation.disk_id.as_str().to_string(),
+                branch_id: allocation.branch_id.clone(),
+                project_id: allocation.project_id.ok_or_else(|| {
+                    WorkspaceProvisionError::InvalidAuthority(format!(
+                        "branch {} has no allocated project identity",
+                        allocation.branch_id
+                    ))
+                })?,
+                quota_bytes: allocation.project_quota_bytes.ok_or_else(|| {
+                    WorkspaceProvisionError::InvalidAuthority(format!(
+                        "branch {} has no allocated project quota",
+                        allocation.branch_id
+                    ))
+                })?,
+            })
+        })
+        .collect::<Result<Vec<_>, WorkspaceProvisionError>>()?;
+    Ok(AggregatePlan {
+        mount_identity,
+        branches,
+        minimum_free_bytes: workspace.minimum_free_bytes_per_disk,
+    })
 }
 
 fn execute_one<F>(
@@ -205,28 +349,7 @@ where
     let mut workspace =
         read_workspace_reservation(&config.live_sqlite_path, &operation.workspace_id)
             .map_err(metadata_error)?;
-    let branches = workspace
-        .allocations
-        .iter()
-        .map(|allocation| {
-            Ok(BranchPlan {
-                disk_id: allocation.disk_id.as_str().to_string(),
-                branch_id: allocation.branch_id.clone(),
-                project_id: allocation.project_id.ok_or_else(|| {
-                    WorkspaceProvisionError::InvalidAuthority(format!(
-                        "branch {} has no allocated project identity",
-                        allocation.branch_id
-                    ))
-                })?,
-                quota_bytes: allocation.project_quota_bytes.ok_or_else(|| {
-                    WorkspaceProvisionError::InvalidAuthority(format!(
-                        "branch {} has no allocated project quota",
-                        allocation.branch_id
-                    ))
-                })?,
-            })
-        })
-        .collect::<Result<Vec<_>, WorkspaceProvisionError>>()?;
+    let branches = aggregate_plan(&workspace)?.branches;
 
     let inspected = call_broker(
         broker,
@@ -322,7 +445,69 @@ where
             verified,
         ));
     }
-    let checkpoint_json = serde_json::to_string(&verified).map_err(protocol_error)?;
+    if workspace.aggregation_provider != "mergerfs" {
+        return retain_needs_review(
+            config,
+            &operation,
+            now_utc,
+            "workspace_aggregation_provider_unsupported",
+            "workspace aggregation provider is not the supported mergerfs provider",
+            verified,
+        );
+    }
+    let aggregate_plan = aggregate_plan(&workspace)?;
+    let aggregate = call_aggregate_broker(
+        broker,
+        operation_id,
+        operation.workspace_id.as_str(),
+        WorkspaceHostOperation::InspectAggregate {
+            aggregate: aggregate_plan.clone(),
+        },
+    )?;
+    let aggregate = match aggregate.state {
+        AggregateRecoveryState::Ready => aggregate,
+        AggregateRecoveryState::Absent | AggregateRecoveryState::MountConflict
+            if !aggregate.mounted =>
+        {
+            call_aggregate_broker(
+                broker,
+                operation_id,
+                operation.workspace_id.as_str(),
+                WorkspaceHostOperation::MountAggregate {
+                    aggregate: aggregate_plan,
+                },
+            )?
+        }
+        _ => {
+            return retain_needs_review(
+                config,
+                &operation,
+                now_utc,
+                "workspace_aggregate_state_ambiguous",
+                "aggregate inspection found conflicting mount, marker, or branch evidence",
+                verified,
+            )
+        }
+    };
+    if aggregate.state != AggregateRecoveryState::Ready
+        || !aggregate.mounted
+        || !aggregate.source_matches
+        || !aggregate.options_match
+    {
+        return retain_needs_review(
+            config,
+            &operation,
+            now_utc,
+            "workspace_aggregate_verification_failed",
+            "aggregate mount did not satisfy identity and option readiness",
+            verified,
+        );
+    }
+    let checkpoint_json = serde_json::to_string(&serde_json::json!({
+        "branches": verified,
+        "aggregate": aggregate,
+    }))
+    .map_err(protocol_error)?;
     let checkpoint_digest = hex_sha256(checkpoint_json.as_bytes());
     operation = checkpoint_workspace_operation(
         &config.live_sqlite_path,
@@ -338,18 +523,20 @@ where
         now_utc,
     )
     .map_err(metadata_error)?;
-    if workspace.state == ComputeWorkspaceState::Provisioning {
-        transition_workspace(
+    if matches!(
+        workspace.state,
+        ComputeWorkspaceState::Provisioning | ComputeWorkspaceState::Ready
+    ) {
+        publish_workspace_aggregate_ready(
             &config.live_sqlite_path,
             &operation.workspace_id,
             workspace.generation,
-            ComputeWorkspaceState::Ready,
+            operation.workspace_id.as_str(),
             now_utc,
-            None,
         )
         .map_err(metadata_error)?;
     }
-    let result = serde_json::to_string(&verified).map_err(protocol_error)?;
+    let result = checkpoint_json;
     finish_workspace_operation(
         &config.live_sqlite_path,
         operation_id,
@@ -371,6 +558,36 @@ where
     ))
 }
 
+fn retain_needs_review(
+    config: &WorkspaceProvisionWorkerConfig,
+    operation: &dasobjectstore_metadata::WorkspaceOperationSnapshot,
+    now_utc: &str,
+    code: &str,
+    reason: &str,
+    branches: Vec<BranchInspection>,
+) -> Result<WorkspaceProvisionOperationReport, WorkspaceProvisionError> {
+    let result = serde_json::to_string(&branches).map_err(protocol_error)?;
+    finish_workspace_operation(
+        &config.live_sqlite_path,
+        &operation.operation_id,
+        &config.lease_owner,
+        operation.generation,
+        WorkspaceOperationState::NeedsReview,
+        Some(&result),
+        Some(code),
+        Some(reason),
+        now_utc,
+    )
+    .map_err(metadata_error)?;
+    Ok(operation_report(
+        &operation.operation_id,
+        operation.workspace_id.as_str(),
+        "needs_review",
+        reason,
+        branches,
+    ))
+}
+
 fn call_broker<F>(
     broker: &mut F,
     request_id: &str,
@@ -387,6 +604,13 @@ where
             .iter()
             .map(|branch| (branch.disk_id.clone(), branch.branch_id.clone()))
             .collect::<std::collections::BTreeSet<_>>(),
+        WorkspaceHostOperation::MountAggregate { .. }
+        | WorkspaceHostOperation::InspectAggregate { .. }
+        | WorkspaceHostOperation::UnmountAggregate { .. } => {
+            return Err(WorkspaceProvisionError::InvalidAuthority(
+                "aggregate operation used through branch response validator".to_string(),
+            ))
+        }
     };
     let request = BrokerRequest {
         protocol_version: PROTOCOL_VERSION,
@@ -417,6 +641,41 @@ where
         ));
     }
     Ok(response.branches)
+}
+
+fn call_aggregate_broker<F>(
+    broker: &mut F,
+    request_id: &str,
+    workspace_id: &str,
+    operation: WorkspaceHostOperation,
+) -> Result<AggregateInspection, WorkspaceProvisionError>
+where
+    F: FnMut(&BrokerRequest) -> Result<BrokerResponse, String>,
+{
+    let request = BrokerRequest {
+        protocol_version: PROTOCOL_VERSION,
+        request_id: request_id.to_string(),
+        workspace_id: workspace_id.to_string(),
+        operation,
+    };
+    let response = broker(&request).map_err(WorkspaceProvisionError::Broker)?;
+    if response.protocol_version != PROTOCOL_VERSION
+        || response.request_id != request.request_id
+        || response.workspace_id != request.workspace_id
+        || !response.ok
+        || !response.branches.is_empty()
+    {
+        return Err(WorkspaceProvisionError::Broker(
+            response
+                .error_message
+                .unwrap_or_else(|| "broker aggregate response identity mismatch".to_string()),
+        ));
+    }
+    response.aggregate.ok_or_else(|| {
+        WorkspaceProvisionError::Broker(
+            "broker aggregate response omitted aggregate evidence".to_string(),
+        )
+    })
 }
 
 fn is_ready(branch: &BranchInspection) -> bool {
@@ -540,6 +799,7 @@ mod tests {
     fn provision_worker_inspects_provisions_verifies_and_publishes_ready() {
         let (root, config) = fixture("success");
         let mut calls = Vec::new();
+        let mut aggregate_mounted = false;
         let report = reconcile_workspace_provision_operations_with(
             &config,
             "2026-07-26T00:01:00Z",
@@ -549,26 +809,54 @@ mod tests {
                     WorkspaceHostOperation::Inspect { .. } => "inspect",
                     WorkspaceHostOperation::Provision { .. } => "provision",
                     WorkspaceHostOperation::Rollback { .. } => "rollback",
+                    WorkspaceHostOperation::MountAggregate { .. } => "mount_aggregate",
+                    WorkspaceHostOperation::InspectAggregate { .. } => "inspect_aggregate",
+                    WorkspaceHostOperation::UnmountAggregate { .. } => "unmount_aggregate",
                 });
-                let state = if calls.len() == 1 {
-                    RecoveryState::Absent
-                } else {
-                    RecoveryState::Ready
-                };
-                Ok(response(request, state))
+                let mut response = response(
+                    request,
+                    if calls.len() == 1 {
+                        RecoveryState::Absent
+                    } else {
+                        RecoveryState::Ready
+                    },
+                );
+                if let WorkspaceHostOperation::MountAggregate { .. } = &request.operation {
+                    aggregate_mounted = true;
+                }
+                if aggregate_mounted {
+                    if let Some(aggregate) = response.aggregate.as_mut() {
+                        aggregate.state = AggregateRecoveryState::Ready;
+                        aggregate.mounted = true;
+                        aggregate.source_matches = true;
+                        aggregate.options_match = true;
+                    }
+                }
+                Ok(response)
             },
         )
         .expect("reconcile");
-        assert_eq!(calls, vec!["inspect", "provision", "inspect"]);
-        assert_eq!(report.completed_operations, 1);
         assert_eq!(
-            read_workspace_reservation(
-                &config.live_sqlite_path,
-                &WorkspaceId::new("workspace-a").expect("workspace id")
-            )
-            .expect("workspace")
-            .state,
-            ComputeWorkspaceState::Ready
+            calls,
+            vec![
+                "inspect",
+                "provision",
+                "inspect",
+                "inspect_aggregate",
+                "mount_aggregate",
+                "inspect_aggregate"
+            ]
+        );
+        assert_eq!(report.completed_operations, 1);
+        let workspace = read_workspace_reservation(
+            &config.live_sqlite_path,
+            &WorkspaceId::new("workspace-a").expect("workspace id"),
+        )
+        .expect("workspace");
+        assert_eq!(workspace.state, ComputeWorkspaceState::Ready);
+        assert_eq!(
+            workspace.aggregate_mount_identity.as_deref(),
+            Some("workspace-a")
         );
         assert_eq!(
             dasobjectstore_metadata::read_workspace_operation(
@@ -578,6 +866,41 @@ mod tests {
             .expect("operation")
             .state,
             WorkspaceOperationState::Succeeded
+        );
+        let health = reconcile_workspace_provision_operations_with(
+            &config,
+            "2026-07-26T00:03:00Z",
+            "2026-07-26T00:04:00Z",
+            |request| match &request.operation {
+                WorkspaceHostOperation::InspectAggregate { aggregate } => Ok(BrokerResponse {
+                    protocol_version: PROTOCOL_VERSION,
+                    request_id: request.request_id.clone(),
+                    workspace_id: request.workspace_id.clone(),
+                    ok: true,
+                    error_code: None,
+                    error_message: None,
+                    branches: Vec::new(),
+                    aggregate: Some(AggregateInspection {
+                        mount_identity: aggregate.mount_identity.clone(),
+                        state: AggregateRecoveryState::MountConflict,
+                        mounted: true,
+                        source_matches: false,
+                        options_match: false,
+                    }),
+                }),
+                _ => panic!("terminal workspace health must only inspect"),
+            },
+        )
+        .expect("health reconciliation");
+        assert_eq!(health.workspace_health[0].state, "failed");
+        assert_eq!(
+            read_workspace_reservation(
+                &config.live_sqlite_path,
+                &WorkspaceId::new("workspace-a").expect("workspace id")
+            )
+            .expect("failed workspace")
+            .state,
+            ComputeWorkspaceState::Failed
         );
         fs::remove_dir_all(root).expect("cleanup");
     }
@@ -610,11 +933,77 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn aggregate_conflict_prevents_ready_publication() {
+        let (root, config) = fixture("aggregate-conflict");
+        let report = reconcile_workspace_provision_operations_with(
+            &config,
+            "2026-07-26T00:01:00Z",
+            "2026-07-26T00:02:00Z",
+            |request| match &request.operation {
+                WorkspaceHostOperation::InspectAggregate { aggregate } => Ok(BrokerResponse {
+                    protocol_version: PROTOCOL_VERSION,
+                    request_id: request.request_id.clone(),
+                    workspace_id: request.workspace_id.clone(),
+                    ok: true,
+                    error_code: None,
+                    error_message: None,
+                    branches: Vec::new(),
+                    aggregate: Some(AggregateInspection {
+                        mount_identity: aggregate.mount_identity.clone(),
+                        state: AggregateRecoveryState::MountConflict,
+                        mounted: true,
+                        source_matches: false,
+                        options_match: false,
+                    }),
+                }),
+                _ => Ok(response(request, RecoveryState::Ready)),
+            },
+        )
+        .expect("reconcile");
+        assert_eq!(report.retained_for_review, 1);
+        let workspace = read_workspace_reservation(
+            &config.live_sqlite_path,
+            &WorkspaceId::new("workspace-a").expect("workspace id"),
+        )
+        .expect("workspace");
+        assert_eq!(workspace.state, ComputeWorkspaceState::Provisioning);
+        assert!(workspace.aggregate_mount_identity.is_none());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     fn response(request: &BrokerRequest, state: RecoveryState) -> BrokerResponse {
         let branch = match &request.operation {
             WorkspaceHostOperation::Provision { branches }
             | WorkspaceHostOperation::Inspect { branches }
-            | WorkspaceHostOperation::Rollback { branches } => &branches[0],
+            | WorkspaceHostOperation::Rollback { branches } => Some(&branches[0]),
+            WorkspaceHostOperation::MountAggregate { .. }
+            | WorkspaceHostOperation::InspectAggregate { .. }
+            | WorkspaceHostOperation::UnmountAggregate { .. } => None,
+        };
+        let aggregate = match &request.operation {
+            WorkspaceHostOperation::InspectAggregate { aggregate } => Some(AggregateInspection {
+                mount_identity: aggregate.mount_identity.clone(),
+                state: AggregateRecoveryState::Absent,
+                mounted: false,
+                source_matches: false,
+                options_match: false,
+            }),
+            WorkspaceHostOperation::MountAggregate { aggregate } => Some(AggregateInspection {
+                mount_identity: aggregate.mount_identity.clone(),
+                state: AggregateRecoveryState::Ready,
+                mounted: true,
+                source_matches: true,
+                options_match: true,
+            }),
+            WorkspaceHostOperation::UnmountAggregate { aggregate } => Some(AggregateInspection {
+                mount_identity: aggregate.mount_identity.clone(),
+                state: AggregateRecoveryState::Absent,
+                mounted: false,
+                source_matches: false,
+                options_match: false,
+            }),
+            _ => None,
         };
         BrokerResponse {
             protocol_version: PROTOCOL_VERSION,
@@ -623,13 +1012,18 @@ mod tests {
             ok: true,
             error_code: None,
             error_message: None,
-            branches: vec![BranchInspection {
-                disk_id: branch.disk_id.clone(),
-                branch_id: branch.branch_id.clone(),
-                state,
-                marker_matches: state == RecoveryState::Ready,
-                quota_enforced: state == RecoveryState::Ready,
-            }],
+            branches: branch
+                .map(|branch| {
+                    vec![BranchInspection {
+                        disk_id: branch.disk_id.clone(),
+                        branch_id: branch.branch_id.clone(),
+                        state,
+                        marker_matches: state == RecoveryState::Ready,
+                        quota_enforced: state == RecoveryState::Ready,
+                    }]
+                })
+                .unwrap_or_default(),
+            aggregate,
         }
     }
 

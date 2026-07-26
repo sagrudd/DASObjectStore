@@ -14,6 +14,8 @@ pub struct ManagedDiskRoot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerConfig {
     pub schema_version: u32,
+    #[serde(default)]
+    pub aggregate_root: Option<PathBuf>,
     pub disks: BTreeMap<String, ManagedDiskRoot>,
 }
 
@@ -44,12 +46,31 @@ impl BrokerConfig {
                 "unsupported broker configuration schema".to_string(),
             ));
         }
+        if let Some(root) = &self.aggregate_root {
+            if !root.is_absolute() || root.to_string_lossy().contains(':') {
+                return Err(BrokerError::UnsafeConfig(
+                    "aggregate_root must be an absolute path without ':'".to_string(),
+                ));
+            }
+            if let Ok(metadata) = fs::symlink_metadata(root) {
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return Err(BrokerError::UnsafeConfig(
+                        "aggregate_root must be a real directory".to_string(),
+                    ));
+                }
+            }
+        }
         for (disk_id, disk) in &self.disks {
             validate_identity("disk_id", disk_id)?;
             validate_identity("workspace_directory", &disk.workspace_directory)?;
             if !disk.root.is_absolute() {
                 return Err(BrokerError::UnsafeConfig(format!(
                     "managed root for {disk_id} is not absolute"
+                )));
+            }
+            if disk.root.to_string_lossy().contains(':') {
+                return Err(BrokerError::UnsafeConfig(format!(
+                    "managed root for {disk_id} contains ':'"
                 )));
             }
             let metadata = fs::symlink_metadata(&disk.root)

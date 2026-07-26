@@ -1,4 +1,5 @@
 {
   "schema_version": 1,
+  "aggregate_root": "/srv/dasobjectstore/workspaces",
   "disks": {}
 }

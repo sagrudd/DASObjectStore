@@ -140,6 +140,7 @@ Requires:       ca-certificates
 Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       pam
+Requires:       mergerfs
 Requires:       quota
 # Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
@@ -172,6 +173,7 @@ service_user="dasobjectstore"
 service_group="dasobjectstore"
 admin_group="dasobjectstore-admin"
 managed_root="/srv/dasobjectstore"
+workspace_aggregate_root="\$managed_root/workspaces"
 
 if command -v systemd-sysusers >/dev/null 2>&1; then
   systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf || true
@@ -213,6 +215,19 @@ fi
 if [ -f /etc/dasobjectstore/workspace-host.json ]; then
   chown root:root /etc/dasobjectstore/workspace-host.json
   chmod 0640 /etc/dasobjectstore/workspace-host.json
+  if ! grep -q '"aggregate_root"' /etc/dasobjectstore/workspace-host.json; then
+    temporary="\$(mktemp /etc/dasobjectstore/workspace-host.json.tmp.XXXXXX)"
+    sed '/"schema_version"[[:space:]]*:[[:space:]]*1[[:space:]]*,/a\
+  "aggregate_root": "/srv/dasobjectstore/workspaces",' /etc/dasobjectstore/workspace-host.json >"\$temporary"
+    if grep -q '"aggregate_root"' "\$temporary"; then
+      chown root:root "\$temporary"
+      chmod 0640 "\$temporary"
+      mv -f "\$temporary" /etc/dasobjectstore/workspace-host.json
+    else
+      rm -f "\$temporary"
+      printf >&2 'DASObjectStore retained workspace broker config without aggregate_root; add it explicitly before workspace provisioning.\n'
+    fi
+  fi
 fi
 if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
   chown root:"\$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
@@ -282,6 +297,7 @@ ERROR
 fi
 
 ensure_profile_layout "\$managed_root"
+install -d -o root -g root -m 0755 "\$workspace_aggregate_root"
 repair_marked_managed_tree "\$managed_root/ssd"
 for root in "\$managed_root"/hdd/*; do
   repair_marked_managed_tree "\$root"

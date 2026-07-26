@@ -3736,7 +3736,7 @@ browser and appliance acceptance remain external validation gates.
   enforcement, empty-branch rollback, and path-redacted recovery inspection.
 - [x] Connect the durable provision worker to the host broker and reconcile
   broker inspection evidence into workspace lifecycle state after restart.
-- [ ] Implement the mergerfs aggregation provider and fail-closed health and
+- [x] Implement the mergerfs aggregation provider and fail-closed health and
   readiness checks.
 - [ ] Implement managed host-restricted NFSv4 attach/detach/recovery with
   root-squash policy and machine-readable attachment contracts.

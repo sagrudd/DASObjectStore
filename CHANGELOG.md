@@ -8,6 +8,17 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.139.0 - 2026-07-26
+
+- Add typed mergerfs aggregate mount, inspection, recovery, and unmount
+  operations to the root-owned workspace broker protocol.
+- Require exact branch identity, ownership-marker, quota, mergerfs process,
+  source-set, mount identity, and reviewed option evidence before publishing a
+  workspace ready.
+- Reconcile interrupted unmounted aggregates idempotently, retain foreign or
+  conflicting mounts for review, persist aggregate identity transactionally,
+  and package mergerfs plus the root-owned aggregate namespace.
+
 ## 0.138.0 - 2026-07-26
 
 - Connect durable managed-workspace provision operations to the narrow

@@ -22,6 +22,7 @@ symlink. A minimal configuration is::
 
   {
     "schema_version": 1,
+    "aggregate_root": "/srv/dasobjectstore/workspaces",
     "disks": {
       "qnap-1057": {
         "root": "/srv/dasobjectstore/hdd/qnap-1057",
@@ -100,8 +101,9 @@ The latest path-redacted worker reconciliation report is written to::
   /var/lib/dasobjectstore/workspace-operations/recovery-latest.json
 
 The report contains operation and workspace identities, bounded branch states,
-and the reason for completion, deferral, or review. It never contains managed
-host paths. Inspect it alongside the daemon and broker journals::
+aggregate health evidence, and the reason for completion, deferral, or review.
+It never contains managed host paths. Inspect it alongside the daemon and
+broker journals::
 
   sudo cat /var/lib/dasobjectstore/workspace-operations/recovery-latest.json
   journalctl -u dasobjectstored -u dasobjectstore-workspace-host.service
@@ -109,3 +111,29 @@ host paths. Inspect it alongside the daemon and broker journals::
 Rollback is attempted only for an exact marker-owned branch and the broker
 will remove it only when the marker is its sole entry. Any branch containing
 workspace data is retained for explicit operator review.
+
+Managed aggregate namespace
+---------------------------
+
+After every branch is quota-ready, the daemon asks the broker to mount one
+mergerfs namespace beneath the configured ``aggregate_root``. The package
+creates ``/srv/dasobjectstore/workspaces`` as a root-owned namespace and
+installs mergerfs as a runtime dependency.
+
+The broker uses a fixed reviewed profile: ``category.create=mfs``, the
+workspace minimum-free floor, ``inodecalc=path-hash``, ``cache.files=off``,
+``dropcacheonclose=true``, and ``moveonenospc=mfs``. It assigns a distinct
+``fsname`` for the workspace and accepts no caller-supplied option or path.
+
+Readiness proves all of the following together:
+
+* the exact configured branches are mounted in their planned order;
+* every branch still has its exact ownership marker and project quota;
+* the live process is mergerfs and targets the configured aggregate identity;
+* its source set and reviewed options match the durable workspace plan.
+
+If the process disappears, the broker may remount only when the hidden
+mountpoint reveals the exact aggregate marker. A foreign mount, changed source
+set, changed option, missing marker, symlink, or unavailable branch is retained
+for review and prevents ``ready`` publication. Unmount similarly requires
+complete identity proof and never removes files from workspace branches.

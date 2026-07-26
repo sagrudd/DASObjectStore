@@ -14,8 +14,8 @@ pub use broker::{execute_request, BrokerError};
 pub use config::{BrokerConfig, ManagedDiskRoot};
 pub use marker::{BranchMarker, MARKER_FILE, MARKER_SCHEMA_VERSION};
 pub use protocol::{
-    BranchInspection, BranchPlan, BrokerRequest, BrokerResponse, RecoveryState,
-    WorkspaceHostOperation, PROTOCOL_VERSION,
+    AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchPlan,
+    BrokerRequest, BrokerResponse, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 
 use std::io::{BufRead, BufReader, Write};
