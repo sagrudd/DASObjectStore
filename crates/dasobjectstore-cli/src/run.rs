@@ -53,6 +53,7 @@ mod storage_lifecycle;
 mod store_read;
 mod store_write;
 mod subobject;
+mod workspace;
 
 use self::performance_direct_hdd::benchmark_direct_hdd;
 use self::performance_execution::{
@@ -100,6 +101,7 @@ use self::command_handlers::{
 };
 #[cfg(feature = "debug-commands")]
 use self::command_handlers::{run_pool_mark_clean, run_pool_mark_dirty};
+use self::workspace::run_workspace;
 
 use self::health::run_health;
 #[cfg(test)]
@@ -333,6 +335,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             None => Cli::write_subcommand_help("store", writer).map_err(CliError::Io),
         },
         Some(Command::ApplicationAuth(args)) => run_application_auth(args, writer),
+        Some(Command::Workspace(args)) => run_workspace(args, writer),
         Some(Command::Ingest(args)) => match args.command() {
             Some(IngestCommand::Files(args)) => run_ingest_files(args, writer),
             Some(IngestCommand::Status(args)) => run_ingest_status(args, writer),

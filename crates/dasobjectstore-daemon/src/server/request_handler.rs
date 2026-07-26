@@ -953,8 +953,8 @@ mod tests {
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
         SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
-        APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, WorkspaceControlAction,
+        WorkspaceControlRequest, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, PROFILE_BINDING_CONFIRMATION,
@@ -1057,6 +1057,119 @@ mod tests {
         assert_eq!(response.sequence, 0);
         assert!(response.active.is_empty());
         assert!(response.recent.is_empty());
+    }
+
+    #[test]
+    fn workspace_control_requires_peer_authentication_before_metadata_access() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        );
+        let response = handler
+            .handle(DaemonApiRequest::WorkspaceControl(
+                WorkspaceControlRequest {
+                    action: WorkspaceControlAction::List,
+                    delegated_actor: None,
+                },
+            ))
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "workspace_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn workspace_mutation_rejects_non_administrator_before_metadata_access() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        );
+        let actor = DaemonLocalActor::new(1000).with_username("analyst");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::WorkspaceControl(WorkspaceControlRequest {
+                    action: WorkspaceControlAction::Close {
+                        workspace_id: "analysis-a".to_string(),
+                        request_id: "close-a".to_string(),
+                        request_digest:
+                            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                .to_string(),
+                    },
+                    delegated_actor: None,
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "workspace_administrator_required"
+        ));
+    }
+
+    #[test]
+    fn workspace_control_rejects_actor_delegation_from_an_untrusted_peer() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        );
+        let actor = DaemonLocalActor::new(1000).with_username("analyst");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::WorkspaceControl(WorkspaceControlRequest {
+                    action: WorkspaceControlAction::List,
+                    delegated_actor: Some(ObjectBrowserDelegatedActor {
+                        username: "administrator".to_string(),
+                        uid: Some(0),
+                        primary_gid: Some(0),
+                        groups: vec!["sudo".to_string()],
+                    }),
+                }),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "workspace_actor_delegation_rejected"
+        ));
+    }
+
+    #[test]
+    fn workspace_control_accepts_delegation_only_from_the_packaged_api_peer() {
+        let root = temp_root("workspace-delegation");
+        let live_sqlite = create_live_sqlite(&root, "store-a");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        )
+        .with_live_sqlite_path(live_sqlite);
+        let service_actor = DaemonLocalActor::new(991).with_username("dasobjectstore");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::WorkspaceControl(WorkspaceControlRequest {
+                    action: WorkspaceControlAction::List,
+                    delegated_actor: Some(ObjectBrowserDelegatedActor {
+                        username: "analyst".to_string(),
+                        uid: Some(1000),
+                        primary_gid: Some(1000),
+                        groups: vec!["research".to_string()],
+                    }),
+                }),
+                Some(&service_actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::WorkspaceControl(response)
+                if response.actor == "analyst" && response.workspaces.is_empty()
+        ));
+        cleanup(&root);
     }
 
     #[test]

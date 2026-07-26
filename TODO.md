@@ -3748,7 +3748,12 @@ browser and appliance acceptance remain external validation gates.
   normal immutable ingest/catalogue/destage pipeline with complete lineage.
 - [x] Implement governed closure, expiry reporting/application, safe cleanup,
   audit, cancellation, and dry-run repair.
-- [ ] Complete CLI/API/authentication contracts, synthetic unit/failure tests,
+- [x] Complete CLI/API/authentication contracts, synthetic unit/failure tests,
   and the opt-in privileged Linux mergerfs/NFS integration test.
+  Version 0.145.0 adds daemon-owned owner/admin lifecycle control, trusted
+  audience-bound adapter delegation, exact-confirmation cleanup, CLI
+  inspection and mutation commands, failure-path regression coverage, and an
+  explicitly gated read-only Linux mergerfs/NFS evidence check for synthetic
+  ``codex-*`` workspaces.
 - [ ] Complete synthetic end-to-end acceptance and then the governed
   AlleleAnchor HG002 acceptance without accessing held-out HG005.

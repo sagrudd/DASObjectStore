@@ -6,6 +6,8 @@ mod easyconnect;
 mod service;
 #[path = "storage.rs"]
 mod storage;
+#[path = "workspace.rs"]
+mod workspace;
 
 /// Routes validated daemon API requests to their request-family handlers.
 pub(super) fn request<S, C>(
@@ -91,6 +93,7 @@ where
         | DaemonApiRequest::DeleteApplicationObject(_)) => {
             easyconnect::request(handler, easyconnect_request, actor)
         }
+        DaemonApiRequest::WorkspaceControl(request) => workspace::request(handler, request, actor),
         request => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
             "not_implemented",
             format!(

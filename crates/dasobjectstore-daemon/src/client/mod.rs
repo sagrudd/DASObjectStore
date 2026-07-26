@@ -3,6 +3,7 @@
 mod error;
 mod in_process;
 mod unix_socket;
+mod workspace;
 
 pub use error::DaemonClientError;
 pub use in_process::InProcessDaemonTransport;
@@ -879,6 +880,7 @@ where
             )),
         }
     }
+
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {
@@ -977,6 +979,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(_) => {
             "remote_easyconnect_submit_aws_cli_upload"
         }
+        DaemonApiResponse::WorkspaceControl(_) => "workspace_control",
         DaemonApiResponse::ApplicationUploadCapabilityIssued(_) => {
             "application_upload_capability_issued"
         }

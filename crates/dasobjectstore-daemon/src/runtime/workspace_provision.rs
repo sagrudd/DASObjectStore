@@ -947,6 +947,10 @@ mod tests {
                     WorkspaceHostOperation::DetachNfs { .. } => "detach_nfs",
                     WorkspaceHostOperation::MaterializeInspect { .. } => "materialize_inspect",
                     WorkspaceHostOperation::MaterializeStep { .. } => "materialize_step",
+                    WorkspaceHostOperation::Cleanup { .. } => "cleanup",
+                    WorkspaceHostOperation::CheckpointInventory { .. } => "checkpoint_inventory",
+                    WorkspaceHostOperation::PromotionInspect { .. } => "promotion_inspect",
+                    WorkspaceHostOperation::PromotionStep { .. } => "promotion_step",
                 });
                 let mut response = response(
                     request,
@@ -1128,6 +1132,7 @@ mod tests {
             | WorkspaceHostOperation::DetachNfs { .. } => None,
             WorkspaceHostOperation::MaterializeInspect { .. }
             | WorkspaceHostOperation::MaterializeStep { .. }
+            | WorkspaceHostOperation::Cleanup { .. }
             | WorkspaceHostOperation::CheckpointInventory { .. }
             | WorkspaceHostOperation::PromotionInspect { .. }
             | WorkspaceHostOperation::PromotionStep { .. } => None,

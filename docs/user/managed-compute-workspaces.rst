@@ -88,6 +88,58 @@ The path-redacted report at
 ``/var/lib/dasobjectstore/workspace-operations/cleanup-latest.json`` records
 expiry candidates and recovery outcomes without exposing managed host paths.
 
+Operator control surface
+------------------------
+
+Workspace lifecycle control is exposed through the typed daemon socket. The
+CLI is a client of that contract and never opens ``live.sqlite`` or contacts
+the privileged host broker directly.
+
+Authenticated local users can list and inspect only workspaces whose
+``owner`` matches their operating-system username::
+
+  dasobjectstore workspace list
+  dasobjectstore workspace inspect analysis-a --json
+  dasobjectstore workspace cleanup-plan analysis-a --json
+  dasobjectstore workspace expiry-report --json
+
+Root, ``sudo`` members, and ``dasobjectstore-admin`` members can perform the
+audited lifecycle mutations. Request identities must be stable across retries;
+the CLI derives a request digest from the operation and those identities::
+
+  sudo dasobjectstore workspace close analysis-a \
+    --request-id close-analysis-a-20260726
+
+  sudo dasobjectstore workspace expiry-apply analysis-a
+
+  sudo dasobjectstore workspace cleanup-request analysis-a \
+    --operation-id cleanup-analysis-a-20260726 \
+    --request-id cleanup-request-analysis-a-20260726 \
+    --confirmation "CLEAN WORKSPACE analysis-a"
+
+  sudo dasobjectstore workspace cleanup-cancel analysis-a \
+    --operation-id cleanup-analysis-a-20260726
+
+``list``, ``inspect``, ``expiry-report``, and ``cleanup-plan`` are non-mutating
+inspection operations. Closing does not delete data. Cleanup remains a
+separate exact-confirmation operation, and cancellation is refused after the
+broker has crossed the branch-release boundary.
+
+The daemon derives the actor from Unix-socket peer credentials. Client JSON
+cannot select an actor, claim administrator status, supply host paths, or
+address the broker.
+
+Privileged Linux acceptance
+---------------------------
+
+``deploy/acceptance/workspace-mergerfs-nfs.sh`` is an opt-in, read-only
+acceptance check for an already provisioned synthetic workspace. It refuses
+non-Linux hosts, non-root execution, non-``codex-`` workspace identities,
+missing mergerfs process evidence, and missing root-squashed NFS export
+evidence. It does not create, delete, mount, or unmount anything. This makes it
+safe to run after the daemon's synthetic provisioning fixture without
+weakening the normal host boundary.
+
 Service inspection
 ------------------
 

@@ -12,6 +12,7 @@ mod pool;
 mod service;
 mod store;
 mod subobject;
+mod workspace;
 
 pub(crate) use application_auth::{ApplicationAuthArgs, ApplicationAuthCommand};
 pub(crate) use disk::{
@@ -43,6 +44,10 @@ pub(crate) use store::{
 };
 pub(crate) use subobject::{
     SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
+};
+pub(crate) use workspace::{
+    WorkspaceArgs, WorkspaceCleanupCancelArgs, WorkspaceCleanupRequestArgs, WorkspaceCommand,
+    WorkspaceIdentityArgs, WorkspaceMutationArgs,
 };
 
 pub(crate) use performance::{
@@ -99,6 +104,8 @@ pub(crate) enum Command {
     ApplicationAuth(ApplicationAuthArgs),
     /// Inspect SSD ingest and destage work.
     Ingest(IngestArgs),
+    /// Inspect, close, expire, and safely clean managed compute workspaces.
+    Workspace(WorkspaceArgs),
     /// Manage named SubObject endpoints.
     Subobject(SubobjectArgs),
     /// Test daemon-managed external storage connections.

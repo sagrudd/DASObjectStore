@@ -42,6 +42,7 @@ mod store_policy;
 mod store_repair;
 mod store_verify;
 mod stores;
+mod workspace;
 
 pub use appliance_telemetry::{
     query_appliance_telemetry, ApplianceTelemetryCapacityPoint, ApplianceTelemetryCapacitySummary,
@@ -295,6 +296,10 @@ pub use store_repair::{
 };
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
+pub use workspace::{
+    WorkspaceControlAction, WorkspaceControlRequest, WorkspaceControlResponse,
+    WORKSPACE_CONTROL_SCHEMA_VERSION,
+};
 
 use request_validation::*;
 use serde::{Deserialize, Serialize};
@@ -373,6 +378,7 @@ pub enum DaemonApiRequest {
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionRequest),
     RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionRequest),
     RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadRequest),
+    WorkspaceControl(WorkspaceControlRequest),
 }
 
 impl DaemonApiRequest {
@@ -453,6 +459,7 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectSubmitAwsCliUpload(_) => {
                 "remote_easyconnect_submit_aws_cli_upload"
             }
+            Self::WorkspaceControl(_) => "workspace_control",
         }
     }
 
@@ -596,6 +603,9 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectSubmitAwsCliUpload(request) => request
                 .validate()
                 .map_err(remote_easyconnect_validation_error),
+            Self::WorkspaceControl(request) => request
+                .validate()
+                .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
             Self::HealthSummary(_)
             | Self::LiveStatus(_)
             | Self::StoreInventory(_)
@@ -685,6 +695,7 @@ pub enum DaemonApiResponse {
     RemoteEasyconnectRenewSession(RemoteEasyconnectRenewSessionResponse),
     RemoteEasyconnectUploadAdmission(RemoteEasyconnectUploadAdmissionDecision),
     RemoteEasyconnectSubmitAwsCliUpload(RemoteEasyconnectSubmitAwsCliUploadResponse),
+    WorkspaceControl(WorkspaceControlResponse),
     ApplicationUploadCapabilityIssued(ApplicationUploadCapabilityIssueResponse),
     ApplicationUploadCompleted(ApplicationUploadCompletionResponse),
     ApplicationObjectDeleted(ApplicationObjectDeleteResponse),

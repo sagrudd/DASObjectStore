@@ -8,6 +8,23 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.0 - 2026-07-26
+
+- Add a typed daemon workspace-control contract and CLI commands for
+  owner-scoped list/inspect, expiry reporting, cleanup planning, administrator
+  closure/expiry, explicitly confirmed cleanup, and pre-release cancellation.
+- Derive standalone authority from Unix peer credentials. Trusted root or the
+  dedicated API service may delegate an already authenticated audience-bound
+  actor; ordinary peers cannot spoof identities or administrator groups.
+- Keep all lifecycle mutation behind ``dasobjectstored`` and preserve stable
+  idempotency identities and request digests across retries.
+- Add contract, authorization, confirmation, CLI parsing, and digest tests,
+  including a regression guard for every current privileged broker protocol
+  variant.
+- Add an opt-in, read-only privileged Linux acceptance check for an existing
+  synthetic ``codex-*`` workspace's mergerfs identity and root-squashed NFS
+  export evidence.
+
 ## 0.144.0 - 2026-07-26
 
 - Add governed compute-workspace closure with explicit evidence for detached
