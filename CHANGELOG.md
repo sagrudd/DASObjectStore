@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.1 - 2026-07-26
+
+- Add an explicitly gated, disposable Linux loopback acceptance that exercises
+  real ext4 project quotas, typed broker protocol, mergerfs aggregation,
+  root-squashed NFS publication, bounded checkpoint inventory, restart
+  inspection, fail-closed symlink handling, and marker-owned cleanup.
+- Correct mergerfs process identity inspection to read the real command layout:
+  the aggregate target is the trailing argument and the branch source list
+  immediately precedes it. The previous positional assumption caused every
+  newly mounted aggregate to fail closed despite a healthy mergerfs process.
+- Give each managed mergerfs NFS export a deterministic, identity-derived
+  numeric ``fsid`` so Linux ``exportfs`` can publish the FUSE aggregate while
+  retaining host restriction, secure transport, and root squashing.
+
 ## 0.145.0 - 2026-07-26
 
 - Add a typed daemon workspace-control contract and CLI commands for

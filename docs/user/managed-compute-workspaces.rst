@@ -140,6 +140,22 @@ evidence. It does not create, delete, mount, or unmount anything. This makes it
 safe to run after the daemon's synthetic provisioning fixture without
 weakening the normal host boundary.
 
+``deploy/acceptance/workspace-e2e-loopback.sh`` owns the complete disposable
+fixture. It creates two 2 GiB ext4 loopback filesystems beneath
+``/home/<operator>/.dasobjectstore-codex-validation``, enables project quotas,
+starts an isolated broker socket and configuration, and proves provision,
+aggregation, root-squashed NFS, checkpoint, restart recovery, unsafe-symlink
+rejection, unmount, and cleanup. It never edits the production broker
+configuration or uses a production disk. Run it only in an explicitly approved
+root window::
+
+  sudo env DASOBJECTSTORE_RUN_PRIVILEGED_WORKSPACE_ACCEPTANCE=1 \
+    deploy/acceptance/workspace-e2e-loopback.sh
+
+The script removes its loop devices, mounts, export fragment, socket, and
+generated files on success or failure. A failed cleanup must be investigated
+before running another fixture.
+
 Service inspection
 ------------------
 

@@ -7,6 +7,7 @@ use crate::{
     NfsExportPlan, NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
 use std::io::Write;
@@ -325,11 +326,17 @@ fn expected_export_line(
         NfsAccessMode::ReadOnly => "ro",
         NfsAccessMode::ReadWrite => "rw",
     };
+    let fsid = workspace_export_fsid(workspace_id, &export.client_id);
     Ok(format!(
-        "{} {}({access},sync,no_subtree_check,root_squash,secure)\n",
+        "{} {}({access},sync,no_subtree_check,root_squash,secure,fsid={fsid})\n",
         target.display(),
         client.address_or_cidr
     ))
+}
+
+fn workspace_export_fsid(workspace_id: &str, client_id: &str) -> u32 {
+    let digest = Sha256::digest(format!("{workspace_id}\0{client_id}").as_bytes());
+    u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) & 0x7fff_ffff | 1
 }
 
 fn inspect_nfs(
@@ -851,24 +858,32 @@ pub(crate) fn mounted_mergerfs_entry(
                 .filter(|value| !value.is_empty())
                 .map(|value| String::from_utf8_lossy(value).into_owned())
                 .collect::<Vec<_>>();
-            if arguments.len() < 3
-                || Path::new(&arguments[0])
-                    .file_name()
-                    .is_none_or(|name| name != "mergerfs")
-                || Path::new(&arguments[2]) != target
-            {
-                continue;
+            if let Some(identity) = parse_mergerfs_process(&arguments, target) {
+                return Ok(Some(identity));
             }
-            let options = arguments
-                .windows(2)
-                .find_map(|pair| (pair[0] == "-o").then(|| pair[1].clone()))
-                .unwrap_or_default();
-            return Ok(Some((arguments[1].clone(), options)));
         }
         Err(BrokerError::UnsafeEntry(
             "mergerfs mount exists without a matching mergerfs process identity".to_string(),
         ))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_mergerfs_process(arguments: &[String], target: &Path) -> Option<(String, String)> {
+    if arguments.len() < 3
+        || Path::new(&arguments[0])
+            .file_name()
+            .is_none_or(|name| name != "mergerfs")
+        || Path::new(arguments.last()?) != target
+    {
+        return None;
+    }
+    let options = arguments
+        .windows(2)
+        .find_map(|pair| (pair[0] == "-o").then(|| pair[1].clone()))?;
+    let source_index = arguments.len().checked_sub(2)?;
+    let sources = arguments.get(source_index)?;
+    (!sources.starts_with('-')).then(|| (sources.clone(), options))
 }
 
 #[cfg(target_os = "linux")]
@@ -1247,8 +1262,9 @@ mod tests {
         assert_eq!(
             line,
             format!(
-                "{} 192.168.1.48(rw,sync,no_subtree_check,root_squash,secure)\n",
-                root.join("aggregates/workspace-a").display()
+                "{} 192.168.1.48(rw,sync,no_subtree_check,root_squash,secure,fsid={})\n",
+                root.join("aggregates/workspace-a").display(),
+                workspace_export_fsid("workspace-a", "compute-a")
             )
         );
         assert!(!line.contains("no_root_squash"));
@@ -1446,6 +1462,31 @@ mod tests {
             Err(BrokerError::InvalidRequest(_))
         ));
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mergerfs_process_identity_uses_trailing_target_and_preceding_sources() {
+        let arguments = vec![
+            "/usr/bin/mergerfs".to_string(),
+            "-o".to_string(),
+            "fsname=dasobjectstore-workspace-workspace-a,allow_other".to_string(),
+            "/mnt/disk-a/branch:/mnt/disk-b/branch".to_string(),
+            "/srv/dasobjectstore/workspaces/workspace-a".to_string(),
+        ];
+        assert_eq!(
+            parse_mergerfs_process(
+                &arguments,
+                Path::new("/srv/dasobjectstore/workspaces/workspace-a")
+            ),
+            Some((
+                "/mnt/disk-a/branch:/mnt/disk-b/branch".to_string(),
+                "fsname=dasobjectstore-workspace-workspace-a,allow_other".to_string()
+            ))
+        );
+        assert!(
+            parse_mergerfs_process(&arguments, Path::new("/srv/another-workspace")).is_none()
+        );
     }
 
     #[cfg(not(target_os = "linux"))]

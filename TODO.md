@@ -3757,3 +3757,8 @@ browser and appliance acceptance remain external validation gates.
   ``codex-*`` workspaces.
 - [ ] Complete synthetic end-to-end acceptance and then the governed
   AlleleAnchor HG002 acceptance without accessing held-out HG005.
+  The v0.145.1 isolated loopback fixture now covers privileged quota, broker,
+  mergerfs, root-squashed NFS, checkpoint, restart, failure, and cleanup
+  boundaries without changing production mounts. The remaining acceptance is
+  the governed audit/promotion of the already-started HG002 run; held-out HG005
+  remains excluded.
