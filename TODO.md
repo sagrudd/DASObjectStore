@@ -3734,7 +3734,7 @@ browser and appliance acceptance remain external validation gates.
 - [x] Implement the narrow, socket-activated Linux host broker with strict
   configured-root validation, marker-owned branch provisioning, project quota
   enforcement, empty-branch rollback, and path-redacted recovery inspection.
-- [ ] Connect the durable provision worker to the host broker and reconcile
+- [x] Connect the durable provision worker to the host broker and reconcile
   broker inspection evidence into workspace lifecycle state after restart.
 - [ ] Implement the mergerfs aggregation provider and fail-closed health and
   readiness checks.

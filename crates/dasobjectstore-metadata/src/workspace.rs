@@ -70,6 +70,9 @@ pub struct WorkspaceReservationSnapshot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WorkspaceDiskAllocation {
     pub disk_id: DiskId,
+    /// Opaque daemon-allocated branch identity used at the privileged host
+    /// boundary. This is deliberately not a filesystem path.
+    pub branch_id: String,
     /// Transactionally allocated Linux project identity. A legacy reservation
     /// without one must be reconciled before host provisioning.
     pub project_id: Option<u32>,
@@ -738,7 +741,7 @@ fn finish_workspace_snapshot(
         }
     })?;
     let mut statement = connection.prepare(
-        "SELECT disk_id, project_id, project_quota_bytes, reserved_bytes, state
+        "SELECT disk_id, branch_id, project_id, project_quota_bytes, reserved_bytes, state
          FROM compute_workspace_branches
          WHERE workspace_id = ?1
          ORDER BY disk_id",
@@ -747,17 +750,18 @@ fn finish_workspace_snapshot(
         .query_map([workspace_id.as_str()], |allocation| {
             Ok((
                 allocation.get::<_, String>(0)?,
-                allocation.get::<_, Option<u32>>(1)?,
-                allocation.get::<_, Option<u64>>(2)?,
-                allocation.get::<_, u64>(3)?,
-                allocation.get::<_, String>(4)?,
+                allocation.get::<_, String>(1)?,
+                allocation.get::<_, Option<u32>>(2)?,
+                allocation.get::<_, Option<u64>>(3)?,
+                allocation.get::<_, u64>(4)?,
+                allocation.get::<_, String>(5)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let allocations = allocation_rows
         .into_iter()
         .map(
-            |(disk, project_id, project_quota_bytes, reserved_bytes, state)| {
+            |(disk, branch_id, project_id, project_quota_bytes, reserved_bytes, state)| {
                 let disk_id = DiskId::new(disk.clone()).map_err(|_| {
                     WorkspaceMetadataError::InvalidStoredValue {
                         field: "disk_id",
@@ -766,6 +770,7 @@ fn finish_workspace_snapshot(
                 })?;
                 Ok(WorkspaceDiskAllocation {
                     disk_id,
+                    branch_id,
                     project_id,
                     project_quota_bytes,
                     reserved_bytes,

@@ -45,6 +45,7 @@ mod service;
 mod service_reconciliation;
 mod storage_assurance;
 mod subobject_capacity_persistence;
+mod workspace_provision;
 
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,
@@ -301,4 +302,8 @@ pub use storage_assurance::{
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,
     SubObjectCapacityLedgerPersistenceError,
+};
+pub use workspace_provision::{
+    reconcile_workspace_provision_operations, WorkspaceProvisionRecoveryReport,
+    WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
 };

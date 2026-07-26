@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.138.0 - 2026-07-26
+
+- Connect durable managed-workspace provision operations to the narrow
+  root-owned host broker, using inspection-before-mutation, lease/generation
+  fencing, durable path-free checkpoints, and exact marker/quota verification.
+- Run a bounded daemon worker that reconciles new and restart-recovered
+  replay-safe provision operations, publishes workspaces ready only after
+  broker evidence succeeds, and retains ambiguous marker or filesystem state
+  for review without destructive rollback.
+- Persist a path-redacted startup recovery report under daemon state for
+  operator inspection, and expose the previously omitted opaque branch
+  identity in reservation snapshots.
+
 ## 0.137.1 - 2026-07-26
 
 - Add daemon-owned, endpoint-kind-specific connection testing with bounded

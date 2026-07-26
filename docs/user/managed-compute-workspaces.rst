@@ -78,3 +78,34 @@ when the daemon connects::
 
 Do not send hand-written requests to the socket. Durable workspace operations
 and recovery checkpoints remain the daemon's orchestration authority.
+
+Daemon provisioning and restart recovery
+----------------------------------------
+
+The daemon's bounded worker claims queued provision operations with a lease and
+asks the broker to inspect every branch before changing the host. An absent
+branch or a matching branch whose quota needs repair may be provisioned
+idempotently. The workspace becomes ``ready`` only after a second inspection
+proves the exact ownership marker and project quota on every branch.
+
+After restart, expired operations are first classified by the durable operation
+repository. Only explicitly idempotent operations or operations with a durable
+resume checkpoint are replayed. An active lease is not stolen. Marker
+conflicts, missing markers, symlinks, unexpected filesystem entries, ambiguous
+cancellation, and exhausted retries remain ``needs_review`` and are not
+deleted.
+
+The latest path-redacted worker reconciliation report is written to::
+
+  /var/lib/dasobjectstore/workspace-operations/recovery-latest.json
+
+The report contains operation and workspace identities, bounded branch states,
+and the reason for completion, deferral, or review. It never contains managed
+host paths. Inspect it alongside the daemon and broker journals::
+
+  sudo cat /var/lib/dasobjectstore/workspace-operations/recovery-latest.json
+  journalctl -u dasobjectstored -u dasobjectstore-workspace-host.service
+
+Rollback is attempted only for an exact marker-owned branch and the broker
+will remove it only when the marker is its sole entry. Any branch containing
+workspace data is retained for explicit operator review.
