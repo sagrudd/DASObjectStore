@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 11);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 12);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -356,6 +356,7 @@ CREATE TABLE IF NOT EXISTS compute_workspace_promotions (
     promotion_id TEXT PRIMARY KEY NOT NULL,
     workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
     operation_id TEXT NOT NULL UNIQUE REFERENCES compute_workspace_operations(operation_id),
+    checkpoint_id TEXT NOT NULL REFERENCES compute_workspace_checkpoints(checkpoint_id),
     target_store_id TEXT NOT NULL REFERENCES stores(store_id),
     manifest_digest TEXT NOT NULL,
     state TEXT NOT NULL,
@@ -375,6 +376,16 @@ CREATE TABLE IF NOT EXISTS compute_workspace_promotion_members (
     state TEXT NOT NULL,
     accepted_at_utc TEXT,
     PRIMARY KEY (promotion_id, object_id)
+);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_promotion_lineage (
+    promotion_id TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    parent_object_id TEXT NOT NULL REFERENCES objects(object_id),
+    PRIMARY KEY (promotion_id, object_id, parent_object_id),
+    FOREIGN KEY (promotion_id, object_id)
+        REFERENCES compute_workspace_promotion_members(promotion_id, object_id)
+        ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS compute_workspace_audit_events (
@@ -436,7 +447,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 11);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 12);
     }
 
     #[test]
@@ -459,6 +470,7 @@ mod tests {
                 "compute_workspace_materializations",
                 "compute_workspace_operation_checkpoints",
                 "compute_workspace_operations",
+                "compute_workspace_promotion_lineage",
                 "compute_workspace_promotion_members",
                 "compute_workspace_promotions",
                 "compute_workspaces",

@@ -213,11 +213,25 @@ and live root-broker aggregate inspection. A missing or conflicting live
 aggregate elevates the report to ``needs_review``; metadata alone cannot claim
 host readiness.
 
-Promotion securely opens a bounded
-workspace-relative file, hashes it, validates lineage, and hands one
-deterministic job to the existing SSD-first immutable ingest pipeline. Bundle
-promotion is complete only when all required members have authoritative
-acceptance evidence.
+Promotion registers an exact checkpoint-bound manifest in one transaction.
+Every required member declares its logical object identity, type, size,
+SHA-256, and zero or more immutable parent object identities. The v6 root
+broker accepts no caller-selected host path: it independently proves the live
+workspace, checkpoint, promotion, mergerfs mount and daemon-created managed
+ingest job before copying at most 64 MiB per reconciliation step.
+
+Before staging, the worker obtains the same authoritative logical, HDD-copy and
+SSD admission reservation used by ordinary ingest. It verifies and fsyncs the
+complete file, then commits one deterministic job through the existing
+SSD-first catalogue and durable HDD destage transaction. Exact replay after a
+restart neither replaces an object nor creates a second reservation. The
+manifest remains authoritative until all required members have matching
+catalogue and destage evidence, when operation, promotion and workspace state
+commit atomically.
+
+Cancellation before any publication returns the workspace to ``ready``.
+Cancellation after a member becomes immutable retains the promotion as
+``needs_review``; accepted objects and lineage are never silently rolled back.
 
 Restart reconciliation never selects replacement disks silently and never
 releases a reservation while a branch may contain files. It validates branch

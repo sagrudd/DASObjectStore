@@ -39,6 +39,7 @@ pub mod workspace_attachments;
 pub mod workspace_checkpoints;
 pub mod workspace_materializations;
 pub mod workspace_operations;
+pub mod workspace_promotions;
 
 pub use assurance::{
     assurance_primary_work_pending, commit_assurance_relocation, list_assurance_disk_states,
@@ -207,6 +208,12 @@ pub use workspace_operations::{
     submit_workspace_operation, SubmitWorkspaceOperationRequest,
     WorkspaceOperationCheckpointSummary, WorkspaceOperationError, WorkspaceOperationRecoveryAction,
     WorkspaceOperationRecoveryRecord, WorkspaceOperationSnapshot,
+};
+pub use workspace_promotions::{
+    accept_workspace_promotion_member, cancel_workspace_promotion, complete_workspace_promotion,
+    list_active_workspace_promotions, register_workspace_promotion,
+    workspace_promotion_manifest_digest, RegisterWorkspacePromotion,
+    WorkspacePromotionMemberRequest, WorkspacePromotionMemberSnapshot, WorkspacePromotionSnapshot,
 };
 
 /// Returns the metadata crate version.

@@ -3,11 +3,11 @@ use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
     reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
-    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
-    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
-    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
-    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceProvisionWorkerConfig,
-    DEFAULT_WORKSPACE_HOST_SOCKET,
+    reconcile_workspace_promotions, reconcile_workspace_provision_operations,
+    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
+    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
+    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
+    WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -133,7 +133,7 @@ fn run() -> Result<(), String> {
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir))
     .with_live_status_registry(Arc::clone(&live_status_registry));
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
-    let _capacity_lease_loop = spawn_capacity_lease_loop(&config, capacity_provider);
+    let _capacity_lease_loop = spawn_capacity_lease_loop(&config, Arc::clone(&capacity_provider));
     let assurance_config = StorageAssuranceConfig::from_environment(&config.state_dir)
         .map_err(|error| error.to_string())?;
     let _assurance_loop = assurance_config.enabled.then(|| {
@@ -147,6 +147,7 @@ fn run() -> Result<(), String> {
         spawn_startup_garbage_collection(&config, Arc::clone(&live_status_registry));
     let _workspace_worker = spawn_workspace_provision_worker(&config);
     let _workspace_materialize_worker = spawn_workspace_materialize_worker(&config);
+    let _workspace_promotion_worker = spawn_workspace_promotion_worker(&config, capacity_provider);
     let available_cpu_cores = std::thread::available_parallelism()
         .map(|cores| cores.get().min(u16::MAX as usize) as u16)
         .unwrap_or(1);
@@ -266,6 +267,56 @@ fn spawn_workspace_materialize_worker(config: &DaemonRuntimeConfig) -> thread::J
                     }
                 }
                 Err(error) => eprintln!("workspace materialization cycle deferred: {error}"),
+            }
+            thread::sleep(Duration::from_secs(5));
+        }
+    })
+}
+
+fn spawn_workspace_promotion_worker(
+    config: &DaemonRuntimeConfig,
+    capacity_provider: Arc<FileBackedCapacityAdmissionProvider>,
+) -> thread::JoinHandle<()> {
+    let state_dir = config.state_dir.clone();
+    thread::spawn(move || {
+        let worker = WorkspacePromotionWorkerConfig {
+            live_sqlite_path: profile_catalogue_live_sqlite_path(),
+            ssd_root: default_ssd_root(),
+            broker_socket_path: PathBuf::from(DEFAULT_WORKSPACE_HOST_SOCKET),
+            lease_owner: format!("dasobjectstored.promotion.{}", std::process::id()),
+            capacity_provider,
+        };
+        loop {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs();
+            let now_utc = utc_timestamp_for_unix_seconds(now);
+            let lease_expires_at_utc = utc_timestamp_for_unix_seconds(now.saturating_add(60));
+            match reconcile_workspace_promotions(&worker, &now_utc, &lease_expires_at_utc) {
+                Ok(report) => {
+                    let report_path = state_dir.join("workspace-operations/promotion-latest.json");
+                    if let Some(parent) = report_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Ok(payload) = serde_json::to_vec_pretty(&report) {
+                        let temporary = report_path.with_extension("json.tmp");
+                        if std::fs::read(&report_path).ok().as_deref() != Some(&payload) {
+                            if let Err(error) = std::fs::write(&temporary, payload)
+                                .and_then(|_| std::fs::rename(&temporary, &report_path))
+                            {
+                                eprintln!("workspace promotion report failed: {error}");
+                            }
+                        }
+                    }
+                    if report.accepted_members > 0 || report.completed_promotions > 0 {
+                        eprintln!(
+                            "workspace promotion accepted {} member(s); completed {} bundle(s)",
+                            report.accepted_members, report.completed_promotions
+                        );
+                    }
+                }
+                Err(error) => eprintln!("workspace promotion cycle deferred: {error}"),
             }
             thread::sleep(Duration::from_secs(5));
         }

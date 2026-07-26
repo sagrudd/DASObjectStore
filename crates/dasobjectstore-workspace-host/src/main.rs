@@ -78,6 +78,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
                 export: None,
                 materialization: None,
                 checkpoint: None,
+                promotion: None,
             })
             .expect("serialize bounded error response")
         })
@@ -97,6 +98,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
             export: None,
             materialization: None,
             checkpoint: None,
+            promotion: None,
         })
         .expect("serialize protocol error"),
     };

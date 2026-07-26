@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.143.0 - 2026-07-26
+
+- Add checkpoint-bound, manifest-driven single and bundle workspace promotion
+  with exact member hashes, object identities, and immutable parent lineage.
+- Extend the root-owned broker protocol to v6 with path-free, bounded promotion
+  staging. The broker independently verifies workspace, checkpoint, promotion,
+  mergerfs mount, managed ingest root, file type, size, and SHA-256 evidence.
+- Route verified output through the normal SSD-first catalogue and durable HDD
+  destage transaction using deterministic ingest identities and authoritative
+  capacity reservations. Restart and exact request replay do not duplicate
+  payload publication or capacity charges.
+- Complete a bundle only after every required member has independent catalogue
+  and destage evidence. Cancellation before publication restores the workspace;
+  cancellation after partial immutable publication retains a `needs_review`
+  record without deleting accepted objects.
+
 ## 0.142.0 - 2026-07-26
 
 - Add daemon-owned registration of immutable compute-workspace checkpoints

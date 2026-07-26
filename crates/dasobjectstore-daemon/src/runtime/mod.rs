@@ -47,6 +47,7 @@ mod storage_assurance;
 mod subobject_capacity_persistence;
 mod workspace_checkpoint;
 mod workspace_materialize;
+mod workspace_promotion;
 mod workspace_provision;
 
 pub use admin_jobs::{
@@ -311,6 +312,10 @@ pub use workspace_checkpoint::{
 };
 pub use workspace_materialize::{
     reconcile_workspace_materializations, WorkspaceMaterializationReport,
+};
+pub use workspace_promotion::{
+    reconcile_workspace_promotions, WorkspacePromotionError, WorkspacePromotionOutcome,
+    WorkspacePromotionRecoveryReport, WorkspacePromotionWorkerConfig,
 };
 pub use workspace_provision::{
     reconcile_workspace_nfs_attachments, reconcile_workspace_provision_operations,

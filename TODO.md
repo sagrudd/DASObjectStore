@@ -3744,7 +3744,7 @@ browser and appliance acceptance remain external validation gates.
   exposing placement paths.
 - [x] Implement bounded checkpoint registration, accounting, capacity, and
   workspace health reports.
-- [ ] Implement verified idempotent single and bundle promotion through the
+- [x] Implement verified idempotent single and bundle promotion through the
   normal immutable ingest/catalogue/destage pipeline with complete lineage.
 - [ ] Implement governed closure, expiry reporting/application, safe cleanup,
   audit, cancellation, and dry-run repair.

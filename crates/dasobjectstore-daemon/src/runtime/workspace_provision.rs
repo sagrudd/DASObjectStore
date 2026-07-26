@@ -733,7 +733,9 @@ where
         | WorkspaceHostOperation::DetachNfs { .. }
         | WorkspaceHostOperation::MaterializeInspect { .. }
         | WorkspaceHostOperation::MaterializeStep { .. }
-        | WorkspaceHostOperation::CheckpointInventory { .. } => {
+        | WorkspaceHostOperation::CheckpointInventory { .. }
+        | WorkspaceHostOperation::PromotionInspect { .. }
+        | WorkspaceHostOperation::PromotionStep { .. } => {
             return Err(WorkspaceProvisionError::InvalidAuthority(
                 "aggregate operation used through branch response validator".to_string(),
             ))
@@ -1022,6 +1024,7 @@ mod tests {
                     export: None,
                     materialization: None,
                     checkpoint: None,
+                    promotion: None,
                 }),
                 _ => panic!("terminal workspace health must only inspect"),
             },
@@ -1094,6 +1097,7 @@ mod tests {
                     export: None,
                     materialization: None,
                     checkpoint: None,
+                    promotion: None,
                 }),
                 _ => Ok(response(request, RecoveryState::Ready)),
             },
@@ -1123,7 +1127,9 @@ mod tests {
             | WorkspaceHostOperation::DetachNfs { .. } => None,
             WorkspaceHostOperation::MaterializeInspect { .. }
             | WorkspaceHostOperation::MaterializeStep { .. }
-            | WorkspaceHostOperation::CheckpointInventory { .. } => None,
+            | WorkspaceHostOperation::CheckpointInventory { .. }
+            | WorkspaceHostOperation::PromotionInspect { .. }
+            | WorkspaceHostOperation::PromotionStep { .. } => None,
         };
         let aggregate = match &request.operation {
             WorkspaceHostOperation::InspectAggregate { aggregate } => Some(AggregateInspection {
@@ -1171,6 +1177,7 @@ mod tests {
             export: None,
             materialization: None,
             checkpoint: None,
+            promotion: None,
         }
     }
 

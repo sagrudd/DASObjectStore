@@ -9,6 +9,7 @@ mod checkpoint;
 mod config;
 mod marker;
 mod materialize;
+mod promotion;
 mod protocol;
 mod quota;
 
@@ -19,8 +20,8 @@ pub use protocol::{
     AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchPlan,
     BrokerRequest, BrokerResponse, CheckpointInventory, CheckpointMember, CheckpointPlan,
     MaterializationInspection, MaterializationPlan, MaterializationRecoveryState, NfsAccessMode,
-    NfsExportInspection, NfsExportPlan, NfsExportRecoveryState, RecoveryState,
-    WorkspaceHostOperation, PROTOCOL_VERSION,
+    NfsExportInspection, NfsExportPlan, NfsExportRecoveryState, PromotionInspection, PromotionPlan,
+    PromotionRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 
 use std::io::{BufRead, BufReader, Write};
@@ -36,8 +37,13 @@ pub fn request_broker(
 ) -> Result<BrokerResponse, BrokerError> {
     let mut stream = UnixStream::connect(socket_path)
         .map_err(|error| BrokerError::Io("connect broker socket", error))?;
+    let timeout = match &request.operation {
+        WorkspaceHostOperation::CheckpointInventory { .. }
+        | WorkspaceHostOperation::PromotionStep { .. } => std::time::Duration::from_secs(24 * 3600),
+        _ => std::time::Duration::from_secs(30),
+    };
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+        .set_read_timeout(Some(timeout))
         .map_err(|error| BrokerError::Io("set broker read timeout", error))?;
     serde_json::to_writer(&mut stream, request)
         .map_err(|error| BrokerError::Protocol(error.to_string()))?;

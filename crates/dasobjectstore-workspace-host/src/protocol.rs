@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerRequest {
@@ -49,6 +49,12 @@ pub enum WorkspaceHostOperation {
     CheckpointInventory {
         checkpoint: CheckpointPlan,
     },
+    PromotionInspect {
+        promotion: PromotionPlan,
+    },
+    PromotionStep {
+        promotion: PromotionPlan,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -56,6 +62,17 @@ pub struct CheckpointPlan {
     pub relative_prefix: String,
     pub max_files: u32,
     pub max_logical_bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PromotionPlan {
+    pub promotion_id: String,
+    pub checkpoint_id: String,
+    pub source_relative_path: String,
+    pub object_id: String,
+    pub ingest_job_id: String,
+    pub expected_size_bytes: u64,
+    pub expected_sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -113,6 +130,8 @@ pub struct BrokerResponse {
     pub materialization: Option<MaterializationInspection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<CheckpointInventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<PromotionInspection>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -128,6 +147,26 @@ pub struct CheckpointMember {
     pub relative_path: String,
     pub size_bytes: u64,
     pub sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PromotionInspection {
+    pub state: PromotionRecoveryState,
+    pub completed_bytes: u64,
+    pub expected_size_bytes: u64,
+    pub observed_sha256: Option<String>,
+    pub staged_relative_path: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromotionRecoveryState {
+    Absent,
+    Copying,
+    Ready,
+    SourceConflict,
+    DestinationConflict,
+    UnsafeFilesystemEntry,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
