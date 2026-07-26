@@ -167,7 +167,23 @@ transactions.
 
 Materialization resolves a verified placement internally, copies into a
 daemon-owned partial, checkpoints progress, verifies size and SHA-256, fsyncs,
-and atomically publishes the destination. Promotion securely opens a bounded
+and atomically publishes the destination. Protocol v4 implements this as
+bounded 64 MiB broker steps. The request contains object, placement, workspace,
+and relative destination identities but no physical path. The root broker
+independently resolves the verified catalogue row and configured disk root,
+rejects symlink components and changed size/hash evidence, and writes a
+deterministic destination-local partial. The daemon renews the operation lease
+and commits monotonic checkpoints between steps.
+
+Materialization admission is restricted to a ``ready`` workspace: it cannot
+mutate a namespace while NFS is attached. The expected logical bytes must fit
+the workspace quota, while per-branch project quotas remain the physical hard
+limit. Completion verifies the full SHA-256, fsyncs, publishes without
+replacement, and atomically commits both the materialization and operation
+terminal state. A restart after publication re-verifies the destination and
+reclaims a retained partial only when it is byte- and hash-identical.
+
+Promotion securely opens a bounded
 workspace-relative file, hashes it, validates lineage, and hands one
 deterministic job to the existing SSD-first immutable ingest pipeline. Bundle
 promotion is complete only when all required members have authoritative

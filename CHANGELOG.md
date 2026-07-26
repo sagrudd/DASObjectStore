@@ -8,6 +8,23 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.141.0 - 2026-07-26
+
+- Add daemon-owned, durable workspace materialization workers that claim
+  generation-fenced operations, renew leases, checkpoint bounded byte
+  progress, and resume deterministic partial files after restart.
+- Extend the root-owned broker protocol with catalogue-authoritative
+  materialization inspection and 64 MiB copy steps. The broker independently
+  resolves verified placements from live metadata and configured disk roots;
+  callers cannot provide a physical source or destination path.
+- Require a ready, unattached mergerfs workspace, verified matching object and
+  placement checksums, logical quota admission, non-symlink source and
+  destination components, fsync, full SHA-256 verification, and non-replacing
+  atomic publication.
+- Commit completed materialization and operation state atomically, retain
+  conflicts for review, safely reclaim a proven post-publication duplicate
+  partial, and package the root broker's read-only live-metadata authority.
+
 ## 0.140.0 - 2026-07-26
 
 - Add typed, path-free NFSv4 attach, inspect, and detach operations to the

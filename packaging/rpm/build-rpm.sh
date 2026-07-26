@@ -229,6 +229,19 @@ if [ -f /etc/dasobjectstore/workspace-host.json ]; then
       printf >&2 'DASObjectStore retained workspace broker config without aggregate_root; add it explicitly before workspace provisioning.\n'
     fi
   fi
+  if ! grep -q '"live_metadata_path"' /etc/dasobjectstore/workspace-host.json; then
+    temporary="\$(mktemp /etc/dasobjectstore/workspace-host.json.tmp.XXXXXX)"
+    sed '/"schema_version"[[:space:]]*:[[:space:]]*1[[:space:]]*,/a\
+  "live_metadata_path": "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",' /etc/dasobjectstore/workspace-host.json >"\$temporary"
+    if grep -q '"live_metadata_path"' "\$temporary"; then
+      chown root:root "\$temporary"
+      chmod 0640 "\$temporary"
+      mv -f "\$temporary" /etc/dasobjectstore/workspace-host.json
+    else
+      rm -f "\$temporary"
+      printf >&2 'DASObjectStore retained workspace broker config without live_metadata_path; add it before materialization.\n'
+    fi
+  fi
   if ! grep -q '"nfs_clients"' /etc/dasobjectstore/workspace-host.json; then
     temporary="\$(mktemp /etc/dasobjectstore/workspace-host.json.tmp.XXXXXX)"
     sed '/"aggregate_root"[[:space:]]*:/a\

@@ -3740,7 +3740,7 @@ browser and appliance acceptance remain external validation gates.
   readiness checks.
 - [x] Implement managed host-restricted NFSv4 attach/detach/recovery with
   root-squash policy and machine-readable attachment contracts.
-- [ ] Implement durable, resumable, verified object materialization without
+- [x] Implement durable, resumable, verified object materialization without
   exposing placement paths.
 - [ ] Implement bounded checkpoint registration, accounting, capacity, and
   workspace health reports.

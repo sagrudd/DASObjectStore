@@ -20,6 +20,8 @@ pub struct ManagedNfsClient {
 pub struct BrokerConfig {
     pub schema_version: u32,
     #[serde(default)]
+    pub live_metadata_path: Option<PathBuf>,
+    #[serde(default)]
     pub aggregate_root: Option<PathBuf>,
     #[serde(default)]
     pub nfs_clients: BTreeMap<String, ManagedNfsClient>,
@@ -52,6 +54,20 @@ impl BrokerConfig {
             return Err(BrokerError::UnsafeConfig(
                 "unsupported broker configuration schema".to_string(),
             ));
+        }
+        if let Some(path) = &self.live_metadata_path {
+            if !path.is_absolute() {
+                return Err(BrokerError::UnsafeConfig(
+                    "live_metadata_path must be absolute".to_string(),
+                ));
+            }
+            if let Ok(metadata) = fs::symlink_metadata(path) {
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Err(BrokerError::UnsafeConfig(
+                        "live_metadata_path must be a regular non-symlink file".to_string(),
+                    ));
+                }
+            }
         }
         if let Some(root) = &self.aggregate_root {
             if !root.is_absolute() || root.to_string_lossy().contains(':') {

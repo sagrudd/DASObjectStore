@@ -36,6 +36,7 @@ pub mod snapshot;
 pub mod store;
 pub mod workspace;
 pub mod workspace_attachments;
+pub mod workspace_materializations;
 pub mod workspace_operations;
 
 pub use assurance::{
@@ -187,6 +188,11 @@ pub use workspace::{
 };
 pub use workspace_attachments::{
     list_workspace_attachments, publish_workspace_attachment_state, WorkspaceAttachmentSnapshot,
+};
+pub use workspace_materializations::{
+    finish_workspace_materialization, list_active_workspace_materializations,
+    publish_workspace_materialization_state, register_workspace_materialization,
+    WorkspaceMaterializationSnapshot,
 };
 pub use workspace_operations::{
     checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,

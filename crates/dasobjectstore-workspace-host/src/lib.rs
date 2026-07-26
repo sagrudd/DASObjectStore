@@ -7,6 +7,7 @@
 mod broker;
 mod config;
 mod marker;
+mod materialize;
 mod protocol;
 mod quota;
 
@@ -15,7 +16,8 @@ pub use config::{BrokerConfig, ManagedDiskRoot, ManagedNfsClient};
 pub use marker::{BranchMarker, MARKER_FILE, MARKER_SCHEMA_VERSION};
 pub use protocol::{
     AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchPlan,
-    BrokerRequest, BrokerResponse, NfsAccessMode, NfsExportInspection, NfsExportPlan,
+    BrokerRequest, BrokerResponse, MaterializationInspection, MaterializationPlan,
+    MaterializationRecoveryState, NfsAccessMode, NfsExportInspection, NfsExportPlan,
     NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 

@@ -730,7 +730,9 @@ where
         | WorkspaceHostOperation::UnmountAggregate { .. }
         | WorkspaceHostOperation::AttachNfs { .. }
         | WorkspaceHostOperation::InspectNfs { .. }
-        | WorkspaceHostOperation::DetachNfs { .. } => {
+        | WorkspaceHostOperation::DetachNfs { .. }
+        | WorkspaceHostOperation::MaterializeInspect { .. }
+        | WorkspaceHostOperation::MaterializeStep { .. } => {
             return Err(WorkspaceProvisionError::InvalidAuthority(
                 "aggregate operation used through branch response validator".to_string(),
             ))
@@ -939,6 +941,8 @@ mod tests {
                     WorkspaceHostOperation::AttachNfs { .. } => "attach_nfs",
                     WorkspaceHostOperation::InspectNfs { .. } => "inspect_nfs",
                     WorkspaceHostOperation::DetachNfs { .. } => "detach_nfs",
+                    WorkspaceHostOperation::MaterializeInspect { .. } => "materialize_inspect",
+                    WorkspaceHostOperation::MaterializeStep { .. } => "materialize_step",
                 });
                 let mut response = response(
                     request,
@@ -1015,6 +1019,7 @@ mod tests {
                         options_match: false,
                     }),
                     export: None,
+                    materialization: None,
                 }),
                 _ => panic!("terminal workspace health must only inspect"),
             },
@@ -1085,6 +1090,7 @@ mod tests {
                         options_match: false,
                     }),
                     export: None,
+                    materialization: None,
                 }),
                 _ => Ok(response(request, RecoveryState::Ready)),
             },
@@ -1112,6 +1118,8 @@ mod tests {
             | WorkspaceHostOperation::AttachNfs { .. }
             | WorkspaceHostOperation::InspectNfs { .. }
             | WorkspaceHostOperation::DetachNfs { .. } => None,
+            WorkspaceHostOperation::MaterializeInspect { .. }
+            | WorkspaceHostOperation::MaterializeStep { .. } => None,
         };
         let aggregate = match &request.operation {
             WorkspaceHostOperation::InspectAggregate { aggregate } => Some(AggregateInspection {
@@ -1157,6 +1165,7 @@ mod tests {
                 .unwrap_or_default(),
             aggregate,
             export: None,
+            materialization: None,
         }
     }
 

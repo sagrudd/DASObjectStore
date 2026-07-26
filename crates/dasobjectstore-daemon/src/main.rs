@@ -2,11 +2,12 @@ use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
-    reconcile_workspace_nfs_attachments, reconcile_workspace_provision_operations,
-    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
-    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
-    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
-    WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
+    reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
+    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
+    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
+    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
+    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceProvisionWorkerConfig,
+    DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -145,6 +146,7 @@ fn run() -> Result<(), String> {
     let _garbage_collection =
         spawn_startup_garbage_collection(&config, Arc::clone(&live_status_registry));
     let _workspace_worker = spawn_workspace_provision_worker(&config);
+    let _workspace_materialize_worker = spawn_workspace_materialize_worker(&config);
     let available_cpu_cores = std::thread::available_parallelism()
         .map(|cores| cores.get().min(u16::MAX as usize) as u16)
         .unwrap_or(1);
@@ -230,6 +232,40 @@ fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::Joi
                     }
                 }
                 Err(error) => eprintln!("workspace NFS reconciliation deferred: {error}"),
+            }
+            thread::sleep(Duration::from_secs(5));
+        }
+    })
+}
+
+fn spawn_workspace_materialize_worker(config: &DaemonRuntimeConfig) -> thread::JoinHandle<()> {
+    let state_dir = config.state_dir.clone();
+    thread::spawn(move || {
+        let worker = WorkspaceProvisionWorkerConfig {
+            live_sqlite_path: profile_catalogue_live_sqlite_path(),
+            broker_socket_path: PathBuf::from(DEFAULT_WORKSPACE_HOST_SOCKET),
+            lease_owner: format!("dasobjectstored.materialize.{}", std::process::id()),
+        };
+        loop {
+            match reconcile_workspace_materializations(&worker) {
+                Ok(report) => {
+                    let report_path =
+                        state_dir.join("workspace-operations/materialization-latest.json");
+                    if let Some(parent) = report_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Ok(payload) = serde_json::to_vec_pretty(&report) {
+                        let temporary = report_path.with_extension("json.tmp");
+                        if std::fs::read(&report_path).ok().as_deref() != Some(&payload) {
+                            if let Err(error) = std::fs::write(&temporary, payload)
+                                .and_then(|_| std::fs::rename(&temporary, &report_path))
+                            {
+                                eprintln!("workspace materialization report failed: {error}");
+                            }
+                        }
+                    }
+                }
+                Err(error) => eprintln!("workspace materialization cycle deferred: {error}"),
             }
             thread::sleep(Duration::from_secs(5));
         }

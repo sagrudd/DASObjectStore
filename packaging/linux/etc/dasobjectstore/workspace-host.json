@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "live_metadata_path": "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",
   "aggregate_root": "/srv/dasobjectstore/workspaces",
   "nfs_clients": {},
   "disks": {}

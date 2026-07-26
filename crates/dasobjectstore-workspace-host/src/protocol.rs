@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerRequest {
@@ -13,15 +13,48 @@ pub struct BrokerRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkspaceHostOperation {
-    Provision { branches: Vec<BranchPlan> },
-    Inspect { branches: Vec<BranchPlan> },
-    Rollback { branches: Vec<BranchPlan> },
-    MountAggregate { aggregate: AggregatePlan },
-    InspectAggregate { aggregate: AggregatePlan },
-    UnmountAggregate { aggregate: AggregatePlan },
-    AttachNfs { export: NfsExportPlan },
-    InspectNfs { export: NfsExportPlan },
-    DetachNfs { export: NfsExportPlan },
+    Provision {
+        branches: Vec<BranchPlan>,
+    },
+    Inspect {
+        branches: Vec<BranchPlan>,
+    },
+    Rollback {
+        branches: Vec<BranchPlan>,
+    },
+    MountAggregate {
+        aggregate: AggregatePlan,
+    },
+    InspectAggregate {
+        aggregate: AggregatePlan,
+    },
+    UnmountAggregate {
+        aggregate: AggregatePlan,
+    },
+    AttachNfs {
+        export: NfsExportPlan,
+    },
+    InspectNfs {
+        export: NfsExportPlan,
+    },
+    DetachNfs {
+        export: NfsExportPlan,
+    },
+    MaterializeInspect {
+        materialization: MaterializationPlan,
+    },
+    MaterializeStep {
+        materialization: MaterializationPlan,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MaterializationPlan {
+    pub source_object_id: String,
+    pub source_placement_id: String,
+    pub destination_relative_path: String,
+    pub expected_size_bytes: u64,
+    pub expected_sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -66,6 +99,27 @@ pub struct BrokerResponse {
     pub aggregate: Option<AggregateInspection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<NfsExportInspection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub materialization: Option<MaterializationInspection>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MaterializationInspection {
+    pub state: MaterializationRecoveryState,
+    pub completed_bytes: u64,
+    pub expected_size_bytes: u64,
+    pub observed_sha256: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MaterializationRecoveryState {
+    Absent,
+    Copying,
+    Ready,
+    DestinationConflict,
+    SourceUnavailable,
+    UnsafeFilesystemEntry,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -52,9 +52,10 @@ pub fn execute_request(
     request: &BrokerRequest,
 ) -> Result<BrokerResponse, BrokerError> {
     validate_request(config, request)?;
-    let (branches, aggregate, export) = match &request.operation {
+    let (branches, aggregate, export, materialization) = match &request.operation {
         WorkspaceHostOperation::Provision { branches } => (
             provision_all(config, &request.workspace_id, branches)?,
+            None,
             None,
             None,
         ),
@@ -67,9 +68,11 @@ pub fn execute_request(
             )?,
             None,
             None,
+            None,
         ),
         WorkspaceHostOperation::Rollback { branches } => (
             rollback_all(config, &request.workspace_id, branches)?,
+            None,
             None,
             None,
         ),
@@ -77,31 +80,57 @@ pub fn execute_request(
             Vec::new(),
             Some(mount_aggregate(config, &request.workspace_id, aggregate)?),
             None,
+            None,
         ),
         WorkspaceHostOperation::InspectAggregate { aggregate } => (
             Vec::new(),
             Some(inspect_aggregate(config, &request.workspace_id, aggregate)?),
+            None,
             None,
         ),
         WorkspaceHostOperation::UnmountAggregate { aggregate } => (
             Vec::new(),
             Some(unmount_aggregate(config, &request.workspace_id, aggregate)?),
             None,
+            None,
         ),
         WorkspaceHostOperation::AttachNfs { export } => (
             Vec::new(),
             None,
             Some(attach_nfs(config, &request.workspace_id, export)?),
+            None,
         ),
         WorkspaceHostOperation::InspectNfs { export } => (
             Vec::new(),
             None,
             Some(inspect_nfs(config, &request.workspace_id, export)?),
+            None,
         ),
         WorkspaceHostOperation::DetachNfs { export } => (
             Vec::new(),
             None,
             Some(detach_nfs(config, &request.workspace_id, export)?),
+            None,
+        ),
+        WorkspaceHostOperation::MaterializeInspect { materialization } => (
+            Vec::new(),
+            None,
+            None,
+            Some(crate::materialize::inspect(
+                config,
+                &request.workspace_id,
+                materialization,
+            )?),
+        ),
+        WorkspaceHostOperation::MaterializeStep { materialization } => (
+            Vec::new(),
+            None,
+            None,
+            Some(crate::materialize::copy_step(
+                config,
+                &request.workspace_id,
+                materialization,
+            )?),
         ),
     };
     Ok(BrokerResponse {
@@ -114,6 +143,7 @@ pub fn execute_request(
         branches,
         aggregate,
         export,
+        materialization,
     })
 }
 
@@ -156,6 +186,11 @@ fn validate_request(config: &BrokerConfig, request: &BrokerRequest) -> Result<()
                     export.client_id
                 )));
             }
+            return Ok(());
+        }
+        WorkspaceHostOperation::MaterializeInspect { materialization }
+        | WorkspaceHostOperation::MaterializeStep { materialization } => {
+            crate::materialize::validate_plan(materialization)?;
             return Ok(());
         }
     };
@@ -428,7 +463,7 @@ impl AggregateMarker {
     }
 }
 
-fn aggregate_root(config: &BrokerConfig) -> Result<&Path, BrokerError> {
+pub(crate) fn aggregate_root(config: &BrokerConfig) -> Result<&Path, BrokerError> {
     config
         .aggregate_root
         .as_deref()
@@ -684,7 +719,9 @@ fn read_aggregate_marker(path: &Path) -> Result<Option<AggregateMarker>, BrokerE
     }
 }
 
-fn mounted_mergerfs_entry(target: &Path) -> Result<Option<(String, String)>, BrokerError> {
+pub(crate) fn mounted_mergerfs_entry(
+    target: &Path,
+) -> Result<Option<(String, String)>, BrokerError> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = target;
@@ -987,6 +1024,7 @@ mod tests {
         fs::create_dir(&root).expect("root");
         let config = BrokerConfig {
             schema_version: 1,
+            live_metadata_path: None,
             aggregate_root: Some(root.join("aggregates")),
             nfs_clients: BTreeMap::from([(
                 "compute-a".to_string(),

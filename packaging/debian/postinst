@@ -80,6 +80,24 @@ ensure_workspace_nfs_config() {
   fi
 }
 
+ensure_workspace_metadata_config() {
+  local config="/etc/dasobjectstore/workspace-host.json"
+  local temporary
+  [[ -f "$config" ]] || return 0
+  grep -q '"live_metadata_path"' "$config" && return 0
+  temporary="$(mktemp "${config}.tmp.XXXXXX")"
+  sed '/"schema_version"[[:space:]]*:[[:space:]]*1[[:space:]]*,/a\
+  "live_metadata_path": "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite",' "$config" >"$temporary"
+  if grep -q '"live_metadata_path"' "$temporary"; then
+    chown root:root "$temporary"
+    chmod 0640 "$temporary"
+    mv -f "$temporary" "$config"
+  else
+    rm -f "$temporary"
+    printf >&2 'DASObjectStore retained workspace broker config without live_metadata_path; add it before materialization.\n'
+  fi
+}
+
 ensure_report_provider() {
   local wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
   if [[ ! -x "$wrapper" ]]; then
@@ -218,6 +236,7 @@ if [[ -f /etc/dasobjectstore/workspace-host.json ]]; then
 fi
 ensure_workspace_aggregate_config
 ensure_workspace_nfs_config
+ensure_workspace_metadata_config
 if [[ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]]; then
   chown root:"$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
   chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
