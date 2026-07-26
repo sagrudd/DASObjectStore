@@ -52,9 +52,10 @@ pub fn execute_request(
     request: &BrokerRequest,
 ) -> Result<BrokerResponse, BrokerError> {
     validate_request(config, request)?;
-    let (branches, aggregate, export, materialization) = match &request.operation {
+    let (branches, aggregate, export, materialization, checkpoint) = match &request.operation {
         WorkspaceHostOperation::Provision { branches } => (
             provision_all(config, &request.workspace_id, branches)?,
+            None,
             None,
             None,
             None,
@@ -69,9 +70,11 @@ pub fn execute_request(
             None,
             None,
             None,
+            None,
         ),
         WorkspaceHostOperation::Rollback { branches } => (
             rollback_all(config, &request.workspace_id, branches)?,
+            None,
             None,
             None,
             None,
@@ -81,10 +84,12 @@ pub fn execute_request(
             Some(mount_aggregate(config, &request.workspace_id, aggregate)?),
             None,
             None,
+            None,
         ),
         WorkspaceHostOperation::InspectAggregate { aggregate } => (
             Vec::new(),
             Some(inspect_aggregate(config, &request.workspace_id, aggregate)?),
+            None,
             None,
             None,
         ),
@@ -93,11 +98,13 @@ pub fn execute_request(
             Some(unmount_aggregate(config, &request.workspace_id, aggregate)?),
             None,
             None,
+            None,
         ),
         WorkspaceHostOperation::AttachNfs { export } => (
             Vec::new(),
             None,
             Some(attach_nfs(config, &request.workspace_id, export)?),
+            None,
             None,
         ),
         WorkspaceHostOperation::InspectNfs { export } => (
@@ -105,11 +112,13 @@ pub fn execute_request(
             None,
             Some(inspect_nfs(config, &request.workspace_id, export)?),
             None,
+            None,
         ),
         WorkspaceHostOperation::DetachNfs { export } => (
             Vec::new(),
             None,
             Some(detach_nfs(config, &request.workspace_id, export)?),
+            None,
             None,
         ),
         WorkspaceHostOperation::MaterializeInspect { materialization } => (
@@ -121,6 +130,7 @@ pub fn execute_request(
                 &request.workspace_id,
                 materialization,
             )?),
+            None,
         ),
         WorkspaceHostOperation::MaterializeStep { materialization } => (
             Vec::new(),
@@ -130,6 +140,18 @@ pub fn execute_request(
                 config,
                 &request.workspace_id,
                 materialization,
+            )?),
+            None,
+        ),
+        WorkspaceHostOperation::CheckpointInventory { checkpoint } => (
+            Vec::new(),
+            None,
+            None,
+            None,
+            Some(crate::checkpoint::inventory(
+                config,
+                &request.workspace_id,
+                checkpoint,
             )?),
         ),
     };
@@ -144,6 +166,7 @@ pub fn execute_request(
         aggregate,
         export,
         materialization,
+        checkpoint,
     })
 }
 
@@ -191,6 +214,10 @@ fn validate_request(config: &BrokerConfig, request: &BrokerRequest) -> Result<()
         WorkspaceHostOperation::MaterializeInspect { materialization }
         | WorkspaceHostOperation::MaterializeStep { materialization } => {
             crate::materialize::validate_plan(materialization)?;
+            return Ok(());
+        }
+        WorkspaceHostOperation::CheckpointInventory { checkpoint } => {
+            crate::checkpoint::validate_plan(checkpoint)?;
             return Ok(());
         }
     };

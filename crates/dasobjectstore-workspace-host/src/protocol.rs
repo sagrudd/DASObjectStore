@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerRequest {
@@ -46,6 +46,16 @@ pub enum WorkspaceHostOperation {
     MaterializeStep {
         materialization: MaterializationPlan,
     },
+    CheckpointInventory {
+        checkpoint: CheckpointPlan,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointPlan {
+    pub relative_prefix: String,
+    pub max_files: u32,
+    pub max_logical_bytes: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -101,6 +111,23 @@ pub struct BrokerResponse {
     pub export: Option<NfsExportInspection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub materialization: Option<MaterializationInspection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<CheckpointInventory>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointInventory {
+    pub relative_prefix: String,
+    pub logical_bytes: u64,
+    pub manifest_sha256: String,
+    pub members: Vec<CheckpointMember>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CheckpointMember {
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

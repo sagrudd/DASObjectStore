@@ -45,6 +45,7 @@ mod service;
 mod service_reconciliation;
 mod storage_assurance;
 mod subobject_capacity_persistence;
+mod workspace_checkpoint;
 mod workspace_materialize;
 mod workspace_provision;
 
@@ -303,6 +304,10 @@ pub use storage_assurance::{
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,
     SubObjectCapacityLedgerPersistenceError,
+};
+pub use workspace_checkpoint::{
+    register_bounded_workspace_checkpoint, WorkspaceCheckpointConfig, WorkspaceCheckpointError,
+    WorkspaceCheckpointReport, WorkspaceCheckpointRequest,
 };
 pub use workspace_materialize::{
     reconcile_workspace_materializations, WorkspaceMaterializationReport,

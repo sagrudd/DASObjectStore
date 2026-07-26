@@ -732,7 +732,8 @@ where
         | WorkspaceHostOperation::InspectNfs { .. }
         | WorkspaceHostOperation::DetachNfs { .. }
         | WorkspaceHostOperation::MaterializeInspect { .. }
-        | WorkspaceHostOperation::MaterializeStep { .. } => {
+        | WorkspaceHostOperation::MaterializeStep { .. }
+        | WorkspaceHostOperation::CheckpointInventory { .. } => {
             return Err(WorkspaceProvisionError::InvalidAuthority(
                 "aggregate operation used through branch response validator".to_string(),
             ))
@@ -1020,6 +1021,7 @@ mod tests {
                     }),
                     export: None,
                     materialization: None,
+                    checkpoint: None,
                 }),
                 _ => panic!("terminal workspace health must only inspect"),
             },
@@ -1091,6 +1093,7 @@ mod tests {
                     }),
                     export: None,
                     materialization: None,
+                    checkpoint: None,
                 }),
                 _ => Ok(response(request, RecoveryState::Ready)),
             },
@@ -1119,7 +1122,8 @@ mod tests {
             | WorkspaceHostOperation::InspectNfs { .. }
             | WorkspaceHostOperation::DetachNfs { .. } => None,
             WorkspaceHostOperation::MaterializeInspect { .. }
-            | WorkspaceHostOperation::MaterializeStep { .. } => None,
+            | WorkspaceHostOperation::MaterializeStep { .. }
+            | WorkspaceHostOperation::CheckpointInventory { .. } => None,
         };
         let aggregate = match &request.operation {
             WorkspaceHostOperation::InspectAggregate { aggregate } => Some(AggregateInspection {
@@ -1166,6 +1170,7 @@ mod tests {
             aggregate,
             export: None,
             materialization: None,
+            checkpoint: None,
         }
     }
 

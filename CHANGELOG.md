@@ -8,6 +8,23 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.142.0 - 2026-07-26
+
+- Add daemon-owned registration of immutable compute-workspace checkpoints
+  from a declared logical prefix, with root-broker protocol v5 inventory,
+  explicit file and logical-byte bounds, deterministic SHA-256 manifests, and
+  no caller-visible or caller-selected host paths.
+- Require a ready, unattached aggregate; reject symlinks, non-regular entries,
+  excessive depth, changing files, changed broker identities, and quota
+  overflow before publishing checkpoint authority.
+- Commit checkpoint manifests, members, unique-path logical accounting, and
+  workspace generation atomically. Exact retries are idempotent, overlapping
+  immutable checkpoints do not double count capacity, and failed registration
+  leaves no partial authority.
+- Add path-free workspace health and capacity reports combining registered
+  checkpoint/materialization usage, quota headroom, branch, aggregate,
+  attachment, and durable-operation evidence.
+
 ## 0.141.0 - 2026-07-26
 
 - Add daemon-owned, durable workspace materialization workers that claim

@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 10);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 11);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -341,6 +341,17 @@ CREATE TABLE IF NOT EXISTS compute_workspace_checkpoints (
     retention_deadline_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS compute_workspace_checkpoint_members (
+    checkpoint_id TEXT NOT NULL REFERENCES compute_workspace_checkpoints(checkpoint_id) ON DELETE CASCADE,
+    workspace_relative_path TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY (checkpoint_id, workspace_relative_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspace_checkpoint_members_path
+ON compute_workspace_checkpoint_members (workspace_relative_path, checkpoint_id);
+
 CREATE TABLE IF NOT EXISTS compute_workspace_promotions (
     promotion_id TEXT PRIMARY KEY NOT NULL,
     workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
@@ -425,7 +436,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 10);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 11);
     }
 
     #[test]
@@ -443,6 +454,7 @@ mod tests {
                 "compute_workspace_attachments",
                 "compute_workspace_audit_events",
                 "compute_workspace_branches",
+                "compute_workspace_checkpoint_members",
                 "compute_workspace_checkpoints",
                 "compute_workspace_materializations",
                 "compute_workspace_operation_checkpoints",

@@ -183,6 +183,36 @@ replacement, and atomically commits both the materialization and operation
 terminal state. A restart after publication re-verifies the destination and
 reclaims a retained partial only when it is byte- and hash-identical.
 
+Checkpoint registration and health
+----------------------------------
+
+Checkpoint registration is daemon-owned and operates only on a declared
+workspace-relative prefix while the workspace is ``ready`` and has no active
+attachment. Root-broker protocol v5 independently resolves the mounted
+aggregate identity and inventories at most 4,096 regular files and 4 TiB per
+request. Both limits must be explicitly lower than or equal to those hard
+bounds. Symlinks, special entries, excessive depth, unsafe relative names, and
+files whose size or modification evidence changes while being hashed fail
+closed. The broker returns only workspace-relative names, sizes, SHA-256
+values, and a deterministic manifest digest; it never returns the aggregate
+host path.
+
+Filesystem traversal and hashing occur without a SQLite transaction. The
+daemon subsequently commits the immutable checkpoint header, all members,
+unique-path logical accounting, and workspace generation in one
+``BEGIN IMMEDIATE`` transaction. Exact checkpoint retries are idempotent.
+Reusing an identity with different evidence, conflicting evidence for the same
+workspace path, or crossing the logical quota rolls the transaction back.
+Overlapping checkpoints with identical evidence do not double count the
+workspace's registered usage.
+
+The path-free workspace health report distinguishes aggregate and branch
+readiness, active attachment and durable-operation evidence, checkpoint
+manifest totals, materialized inputs, unique registered bytes, quota headroom,
+and live root-broker aggregate inspection. A missing or conflicting live
+aggregate elevates the report to ``needs_review``; metadata alone cannot claim
+host readiness.
+
 Promotion securely opens a bounded
 workspace-relative file, hashes it, validates lineage, and hands one
 deterministic job to the existing SSD-first immutable ingest pipeline. Bundle

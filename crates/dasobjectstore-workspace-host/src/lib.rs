@@ -5,6 +5,7 @@
 //! opaque disk and branch identities, never arbitrary host paths.
 
 mod broker;
+mod checkpoint;
 mod config;
 mod marker;
 mod materialize;
@@ -16,9 +17,10 @@ pub use config::{BrokerConfig, ManagedDiskRoot, ManagedNfsClient};
 pub use marker::{BranchMarker, MARKER_FILE, MARKER_SCHEMA_VERSION};
 pub use protocol::{
     AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchPlan,
-    BrokerRequest, BrokerResponse, MaterializationInspection, MaterializationPlan,
-    MaterializationRecoveryState, NfsAccessMode, NfsExportInspection, NfsExportPlan,
-    NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
+    BrokerRequest, BrokerResponse, CheckpointInventory, CheckpointMember, CheckpointPlan,
+    MaterializationInspection, MaterializationPlan, MaterializationRecoveryState, NfsAccessMode,
+    NfsExportInspection, NfsExportPlan, NfsExportRecoveryState, RecoveryState,
+    WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 
 use std::io::{BufRead, BufReader, Write};

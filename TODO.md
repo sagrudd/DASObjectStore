@@ -3742,7 +3742,7 @@ browser and appliance acceptance remain external validation gates.
   root-squash policy and machine-readable attachment contracts.
 - [x] Implement durable, resumable, verified object materialization without
   exposing placement paths.
-- [ ] Implement bounded checkpoint registration, accounting, capacity, and
+- [x] Implement bounded checkpoint registration, accounting, capacity, and
   workspace health reports.
 - [ ] Implement verified idempotent single and bundle promotion through the
   normal immutable ingest/catalogue/destage pipeline with complete lineage.
