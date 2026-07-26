@@ -8,6 +8,22 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.144.0 - 2026-07-26
+
+- Add governed compute-workspace closure with explicit evidence for detached
+  clients, terminal operations, and completed promotion of every retained
+  checkpoint. Closure and destructive cleanup remain separate audited actions.
+- Report expired workspaces without automatically mutating or deleting them;
+  provide an explicit audited expiry-application operation.
+- Require the exact ``CLEAN WORKSPACE <workspace-id>`` confirmation before
+  queuing cleanup, with durable operation identity and cancellation only before
+  the external deletion boundary.
+- Extend the root broker protocol to v7 with marker-owned cleanup. It preflights
+  every branch before mutation, rejects symlinks and special files, and proves
+  every managed branch absent before metadata and capacity claims are released.
+- Add a restart-safe daemon cleanup worker and path-redacted recovery/expiry
+  report. Ambiguous cancellation or filesystem evidence is retained for review.
+
 ## 0.143.1 - 2026-07-26
 
 - Advance the live metadata compatibility marker to schema 0.12 when an

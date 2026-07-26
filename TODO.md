@@ -3746,7 +3746,7 @@ browser and appliance acceptance remain external validation gates.
   workspace health reports.
 - [x] Implement verified idempotent single and bundle promotion through the
   normal immutable ingest/catalogue/destage pipeline with complete lineage.
-- [ ] Implement governed closure, expiry reporting/application, safe cleanup,
+- [x] Implement governed closure, expiry reporting/application, safe cleanup,
   audit, cancellation, and dry-run repair.
 - [ ] Complete CLI/API/authentication contracts, synthetic unit/failure tests,
   and the opt-in privileged Linux mergerfs/NFS integration test.

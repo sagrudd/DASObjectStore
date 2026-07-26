@@ -721,7 +721,8 @@ where
     let expected = match &operation {
         WorkspaceHostOperation::Provision { branches }
         | WorkspaceHostOperation::Inspect { branches }
-        | WorkspaceHostOperation::Rollback { branches } => branches
+        | WorkspaceHostOperation::Rollback { branches }
+        | WorkspaceHostOperation::Cleanup { branches } => branches
             .iter()
             .map(|branch| (branch.disk_id.clone(), branch.branch_id.clone()))
             .collect::<std::collections::BTreeSet<_>>(),

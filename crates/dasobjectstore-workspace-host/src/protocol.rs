@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerRequest {
@@ -20,6 +20,9 @@ pub enum WorkspaceHostOperation {
         branches: Vec<BranchPlan>,
     },
     Rollback {
+        branches: Vec<BranchPlan>,
+    },
+    Cleanup {
         branches: Vec<BranchPlan>,
     },
     MountAggregate {

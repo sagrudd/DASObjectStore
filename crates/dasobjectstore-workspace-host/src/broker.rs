@@ -83,6 +83,14 @@ pub fn execute_request(
                 None,
                 None,
             ),
+            WorkspaceHostOperation::Cleanup { branches } => (
+                cleanup_all(config, &request.workspace_id, branches)?,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
             WorkspaceHostOperation::MountAggregate { aggregate } => (
                 Vec::new(),
                 Some(mount_aggregate(config, &request.workspace_id, aggregate)?),
@@ -219,7 +227,8 @@ fn validate_request(config: &BrokerConfig, request: &BrokerRequest) -> Result<()
     let branches = match &request.operation {
         WorkspaceHostOperation::Provision { branches }
         | WorkspaceHostOperation::Inspect { branches }
-        | WorkspaceHostOperation::Rollback { branches } => branches,
+        | WorkspaceHostOperation::Rollback { branches }
+        | WorkspaceHostOperation::Cleanup { branches } => branches,
         WorkspaceHostOperation::MountAggregate { aggregate }
         | WorkspaceHostOperation::InspectAggregate { aggregate }
         | WorkspaceHostOperation::UnmountAggregate { aggregate } => {
@@ -1072,6 +1081,113 @@ fn rollback_one(
     fs::remove_dir(&directory).map_err(|error| BrokerError::Io("remove empty branch", error))
 }
 
+fn cleanup_all(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    branches: &[BranchPlan],
+) -> Result<Vec<BranchInspection>, BrokerError> {
+    for branch in branches {
+        validate_cleanup_one(config, workspace_id, branch)?;
+    }
+    for branch in branches.iter().rev() {
+        cleanup_one(config, workspace_id, branch)?;
+    }
+    inspect_all(config, workspace_id, branches, false)
+}
+
+fn cleanup_one(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    branch: &BranchPlan,
+) -> Result<(), BrokerError> {
+    validate_cleanup_one(config, workspace_id, branch)?;
+    let directory = branch_path(config, branch)?;
+    if !directory.exists() {
+        return Ok(());
+    }
+    remove_owned_tree_contents(&directory)?;
+    fs::remove_dir(&directory).map_err(|error| BrokerError::Io("remove cleanup branch", error))
+}
+
+fn validate_cleanup_one(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    branch: &BranchPlan,
+) -> Result<(), BrokerError> {
+    let directory = branch_path(config, branch)?;
+    match fs::symlink_metadata(&directory) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(BrokerError::Io("stat cleanup branch", error)),
+        Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+            return Err(BrokerError::UnsafeEntry(
+                "cleanup target is not a real directory".to_string(),
+            ));
+        }
+        Ok(_) => {}
+    }
+    if BranchMarker::read(&directory)?.as_ref()
+        != Some(&BranchMarker::expected(workspace_id, branch))
+    {
+        return Err(BrokerError::MarkerConflict(branch.branch_id.clone()));
+    }
+    validate_owned_tree_contents(&directory)?;
+    Ok(())
+}
+
+fn validate_owned_tree_contents(directory: &Path) -> Result<(), BrokerError> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| BrokerError::Io("read cleanup directory", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| BrokerError::Io("read cleanup entry", error))?;
+    for entry in entries {
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| BrokerError::Io("stat cleanup entry", error))?;
+        if metadata.file_type().is_symlink() {
+            return Err(BrokerError::UnsafeEntry(
+                "cleanup refuses symbolic links".to_string(),
+            ));
+        }
+        if metadata.is_dir() {
+            validate_owned_tree_contents(&entry.path())?;
+        } else if !metadata.is_file() {
+            return Err(BrokerError::UnsafeEntry(
+                "cleanup refuses non-file filesystem entries".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn remove_owned_tree_contents(directory: &Path) -> Result<(), BrokerError> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| BrokerError::Io("read cleanup directory", error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| BrokerError::Io("read cleanup entry", error))?;
+    for entry in entries {
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| BrokerError::Io("stat cleanup entry", error))?;
+        if metadata.file_type().is_symlink() {
+            return Err(BrokerError::UnsafeEntry(
+                "cleanup refuses symbolic links".to_string(),
+            ));
+        }
+        if metadata.is_dir() {
+            remove_owned_tree_contents(&path)?;
+            fs::remove_dir(&path)
+                .map_err(|error| BrokerError::Io("remove cleanup directory", error))?;
+        } else if metadata.is_file() {
+            fs::remove_file(&path)
+                .map_err(|error| BrokerError::Io("remove cleanup file", error))?;
+        } else {
+            return Err(BrokerError::UnsafeEntry(
+                "cleanup refuses non-file filesystem entries".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1194,6 +1310,41 @@ mod tests {
             Err(BrokerError::UnsafeEntry(_))
         ));
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn cleanup_removes_only_exact_marker_owned_regular_tree() {
+        let (root, config, branch) = fixture();
+        let directory = root.join(".workspaces").join("branch-a");
+        fs::create_dir_all(directory.join("nested")).expect("branch");
+        BranchMarker::expected("workspace-a", &branch)
+            .create_exclusive(&directory)
+            .expect("marker");
+        fs::write(directory.join("nested/result.bin"), b"result").expect("payload");
+        cleanup_one(&config, "workspace-a", &branch).expect("cleanup");
+        assert!(!directory.exists());
+        fs::remove_dir_all(root).expect("fixture cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_preflight_rejects_symlink_without_removing_marker_or_data() {
+        use std::os::unix::fs::symlink;
+        let (root, config, branch) = fixture();
+        let directory = root.join(".workspaces").join("branch-a");
+        fs::create_dir_all(&directory).expect("branch");
+        BranchMarker::expected("workspace-a", &branch)
+            .create_exclusive(&directory)
+            .expect("marker");
+        fs::write(directory.join("kept.bin"), b"kept").expect("payload");
+        symlink("/tmp", directory.join("unsafe")).expect("symlink");
+        assert!(matches!(
+            cleanup_one(&config, "workspace-a", &branch),
+            Err(BrokerError::UnsafeEntry(_))
+        ));
+        assert!(directory.join(crate::MARKER_FILE).exists());
+        assert!(directory.join("kept.bin").exists());
+        fs::remove_dir_all(root).expect("fixture cleanup");
     }
 
     #[cfg(unix)]

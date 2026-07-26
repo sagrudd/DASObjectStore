@@ -67,6 +67,27 @@ data. A non-empty branch, conflicting marker, symlink, quota ambiguity, or
 unexpected filesystem entry is retained for operator review. Package removal
 and service restart never authorize workspace-data deletion.
 
+Closing and cleaning a workspace
+--------------------------------
+
+Closing freezes the mutable lifecycle but does not delete data. Closure is
+refused until clients are detached, operations are terminal, and every retained
+checkpoint has completed promotion evidence. Expiry is reported without
+automatic application or deletion.
+
+Cleanup is a separate audited operation requiring the exact confirmation
+``CLEAN WORKSPACE <workspace-id>``. The daemon unmounts the managed aggregate;
+the root broker then validates every registered branch and removes only exact
+marker-owned regular directory trees. Symlinks, special files, foreign markers
+and incomplete evidence stop cleanup. Capacity is released only after every
+branch is proven absent.
+
+Cancellation is safe before execution starts. After deletion may have begun,
+the operation is retained for review rather than presenting a false rollback.
+The path-redacted report at
+``/var/lib/dasobjectstore/workspace-operations/cleanup-latest.json`` records
+expiry candidates and recovery outcomes without exposing managed host paths.
+
 Service inspection
 ------------------
 

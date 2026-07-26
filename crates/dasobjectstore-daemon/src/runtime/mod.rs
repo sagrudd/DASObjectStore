@@ -46,6 +46,7 @@ mod service_reconciliation;
 mod storage_assurance;
 mod subobject_capacity_persistence;
 mod workspace_checkpoint;
+mod workspace_cleanup;
 mod workspace_materialize;
 mod workspace_promotion;
 mod workspace_provision;
@@ -309,6 +310,10 @@ pub use subobject_capacity_persistence::{
 pub use workspace_checkpoint::{
     register_bounded_workspace_checkpoint, WorkspaceCheckpointConfig, WorkspaceCheckpointError,
     WorkspaceCheckpointReport, WorkspaceCheckpointRequest,
+};
+pub use workspace_cleanup::{
+    reconcile_workspace_cleanups, WorkspaceCleanupError, WorkspaceCleanupOutcome,
+    WorkspaceCleanupRecoveryReport, WorkspaceCleanupWorkerConfig,
 };
 pub use workspace_materialize::{
     reconcile_workspace_materializations, WorkspaceMaterializationReport,

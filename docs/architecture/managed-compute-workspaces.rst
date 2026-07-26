@@ -241,12 +241,24 @@ Ambiguity fails closed and is reported by a dry-run repair command.
 Closure and cleanup
 -------------------
 
-Closure refuses active work and missing required promotions, records final
-accounting, and revokes exports before cleanup eligibility. Cleanup removes only
-marker-owned branches for the exact workspace, proves that no immutable
-placement or other workspace is in scope, and releases reservations only after
-branch removal is proven. Automatic expiry remains report-only until policy
-explicitly enables application.
+Closure refuses active attachments, non-terminal work, and checkpoints lacking
+completed required promotion evidence. It is a distinct audited transaction:
+closing a workspace never implies deletion. Declared expiry is reported by the
+daemon but remains report-only until an operator explicitly applies it.
+
+Cleanup requires a separately durable operation and the exact confirmation
+``CLEAN WORKSPACE <workspace-id>``. The v7 root broker derives every branch
+from registered disk and branch identities. Before removing anything it
+preflights *all* branches for exact ownership markers, ordinary directories and
+regular files; symbolic links, special files and marker conflicts fail closed.
+Only after the broker proves all branches absent does one metadata transaction
+mark branches released, release shared physical capacity claims, complete the
+operation, audit the result and mark the workspace ``cleaned``.
+
+Cancellation is accepted before cleanup begins. Once the external deletion
+boundary may have been crossed, cancellation becomes ``needs_review`` rather
+than claiming rollback. Daemon restart safely replays absent branches and never
+releases claims from ambiguous filesystem evidence.
 
 Delivery and acceptance
 -----------------------

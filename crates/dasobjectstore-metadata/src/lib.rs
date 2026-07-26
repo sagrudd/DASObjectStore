@@ -37,6 +37,7 @@ pub mod store;
 pub mod workspace;
 pub mod workspace_attachments;
 pub mod workspace_checkpoints;
+pub mod workspace_cleanup;
 pub mod workspace_materializations;
 pub mod workspace_operations;
 pub mod workspace_promotions;
@@ -195,6 +196,13 @@ pub use workspace_checkpoints::{
     read_workspace_health, register_workspace_checkpoint, RegisterWorkspaceCheckpoint,
     WorkspaceCapacityReport, WorkspaceCheckpointMember, WorkspaceCheckpointSnapshot,
     WorkspaceHealthReport,
+};
+pub use workspace_cleanup::{
+    apply_workspace_expiry, cancel_workspace_cleanup, close_workspace, complete_workspace_cleanup,
+    read_cleanup_plan, record_workspace_branch_removed, report_expired_workspaces,
+    request_workspace_cleanup, CloseWorkspaceRequest, RequestWorkspaceCleanup,
+    WorkspaceCleanupBranch, WorkspaceCleanupPlan, WorkspaceExpiryCandidate,
+    CLEANUP_CONFIRMATION_PREFIX,
 };
 pub use workspace_materializations::{
     finish_workspace_materialization, list_active_workspace_materializations,
