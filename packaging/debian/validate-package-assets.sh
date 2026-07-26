@@ -85,6 +85,7 @@ require_file "$package_auth_guard"
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
 require_text "$service" "RuntimeDirectory=dasobjectstore"
+require_text "$service" "RuntimeDirectoryPreserve=yes"
 require_text "$service" "Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.json"
 require_text "$service" "Slice=dasobjectstore-storage.slice"
 require_text "$service" "CPUAccounting=true"
@@ -171,6 +172,7 @@ require_text "$postinst" "systemctl enable --now dasobjectstored.service dasobje
 require_text "$postinst" 'store_registry_state=/var/lib/dasobjectstore/stores.json'
 require_text "$postinst" 'store_registry_config=/etc/dasobjectstore/stores.json'
 require_text "$postinst" "systemctl restart dasobjectstored.service dasobjectstore-server.service"
+require_text "$postinst" "systemctl restart dasobjectstore-workspace-host.socket"
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 require_text "$prerm" 'remove|deconfigure'
 require_text "$prerm" 'upgrade|failed-upgrade'

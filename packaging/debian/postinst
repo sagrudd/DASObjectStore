@@ -205,6 +205,9 @@ if command -v systemctl >/dev/null 2>&1; then
     dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
   systemctl start dasobjectstore-source-access.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
+  # dasobjectstored and the socket share /run/dasobjectstore. Recreate the
+  # pathname after any daemon runtime-directory lifecycle transition.
+  systemctl restart dasobjectstore-workspace-host.socket || true
 fi
 
 ensure_report_provider

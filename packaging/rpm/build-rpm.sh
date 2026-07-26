@@ -300,6 +300,7 @@ if command -v systemctl >/dev/null 2>&1; then
     dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
   systemctl start dasobjectstore-source-access.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
+  systemctl restart dasobjectstore-workspace-host.socket || true
 fi
 
 wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"

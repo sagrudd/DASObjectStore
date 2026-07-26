@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.136.1 - 2026-07-26
+
+- Preserve the shared ``/run/dasobjectstore`` runtime directory across daemon
+  restarts and recreate the workspace-host socket after package service
+  restarts, preventing an active-but-unreachable unlinked listener.
+
 ## 0.136.0 - 2026-07-26
 
 - Add the root-owned, socket-activated managed-workspace host broker with a
