@@ -35,6 +35,7 @@ mod secure_fs;
 pub mod snapshot;
 pub mod store;
 pub mod workspace;
+pub mod workspace_operations;
 
 pub use assurance::{
     assurance_primary_work_pending, commit_assurance_relocation, list_assurance_disk_states,
@@ -182,6 +183,14 @@ pub use workspace::{
     list_workspace_reservations, read_workspace_reservation, reserve_workspace,
     transition_workspace, MeasuredWorkspaceDisk, ReserveWorkspaceRequest, WorkspaceDiskAllocation,
     WorkspaceMetadataError, WorkspaceReservationSnapshot,
+};
+pub use workspace_operations::{
+    checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,
+    list_workspace_operations, read_workspace_operation, recover_expired_workspace_operations,
+    renew_workspace_operation_lease, request_workspace_operation_cancellation,
+    submit_workspace_operation, SubmitWorkspaceOperationRequest,
+    WorkspaceOperationCheckpointSummary, WorkspaceOperationError, WorkspaceOperationRecoveryAction,
+    WorkspaceOperationRecoveryRecord, WorkspaceOperationSnapshot,
 };
 
 /// Returns the metadata crate version.

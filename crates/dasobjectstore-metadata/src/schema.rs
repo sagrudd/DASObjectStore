@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 8);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 9);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -276,11 +276,17 @@ CREATE TABLE IF NOT EXISTS compute_workspace_operations (
     total_units INTEGER CHECK (total_units >= 0),
     cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0, 1)),
     retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 3 CHECK (max_attempts > 0),
+    lease_epoch INTEGER NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
     lease_owner TEXT,
     lease_expires_at_utc TEXT,
+    next_retry_at_utc TEXT,
+    recovery_disposition TEXT NOT NULL DEFAULT 'verify_external_effect',
     failure_code TEXT,
     failure_message TEXT,
     result_json TEXT,
+    generation INTEGER NOT NULL DEFAULT 1 CHECK (generation > 0),
+    completed_at_utc TEXT,
     created_at_utc TEXT NOT NULL,
     updated_at_utc TEXT NOT NULL,
     UNIQUE (workspace_id, operation_kind, request_id)
@@ -288,6 +294,22 @@ CREATE TABLE IF NOT EXISTS compute_workspace_operations (
 
 CREATE INDEX IF NOT EXISTS idx_compute_workspace_operations_runnable
 ON compute_workspace_operations (state, lease_expires_at_utc, created_at_utc);
+
+CREATE TABLE IF NOT EXISTS compute_workspace_operation_checkpoints (
+    operation_id TEXT NOT NULL REFERENCES compute_workspace_operations(operation_id) ON DELETE CASCADE,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    stage TEXT NOT NULL,
+    completed_bytes INTEGER NOT NULL CHECK (completed_bytes >= 0),
+    completed_units INTEGER NOT NULL CHECK (completed_units >= 0),
+    recovery_disposition TEXT NOT NULL,
+    checkpoint_digest TEXT NOT NULL,
+    checkpoint_json TEXT NOT NULL,
+    recorded_at_utc TEXT NOT NULL,
+    PRIMARY KEY (operation_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_compute_workspace_operation_checkpoints_latest
+ON compute_workspace_operation_checkpoints (operation_id, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS compute_workspace_materializations (
     workspace_id TEXT NOT NULL REFERENCES compute_workspaces(workspace_id) ON DELETE CASCADE,
@@ -401,7 +423,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 8);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 9);
     }
 
     #[test]
@@ -421,6 +443,7 @@ mod tests {
                 "compute_workspace_branches",
                 "compute_workspace_checkpoints",
                 "compute_workspace_materializations",
+                "compute_workspace_operation_checkpoints",
                 "compute_workspace_operations",
                 "compute_workspace_promotion_members",
                 "compute_workspace_promotions",

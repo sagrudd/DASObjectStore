@@ -12,6 +12,79 @@ pub const COMPUTE_WORKSPACE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WorkspaceOperationKind {
+    Provision,
+    Materialize,
+    Promote,
+    Cleanup,
+}
+
+impl WorkspaceOperationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Provision => "provision",
+            Self::Materialize => "materialize",
+            Self::Promote => "promote",
+            Self::Cleanup => "cleanup",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceOperationState {
+    Queued,
+    Running,
+    RetryWait,
+    Succeeded,
+    Failed,
+    NeedsReview,
+    Cancelled,
+}
+
+impl WorkspaceOperationState {
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::NeedsReview | Self::Cancelled
+        )
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::RetryWait => "retry_wait",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::NeedsReview => "needs_review",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceRecoveryDisposition {
+    RetryIdempotent,
+    ResumeCheckpoint,
+    VerifyExternalEffect,
+    Terminal,
+}
+
+impl WorkspaceRecoveryDisposition {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RetryIdempotent => "retry_idempotent",
+            Self::ResumeCheckpoint => "resume_checkpoint",
+            Self::VerifyExternalEffect => "verify_external_effect",
+            Self::Terminal => "terminal",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ComputeWorkspaceState {
     Requested,
     CapacityReserved,

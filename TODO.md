@@ -3725,7 +3725,7 @@ browser and appliance acceptance remain external validation gates.
 - [x] Add the transactional SQLite repository for idempotent aggregate
   reservation, generation-based state mutation, and path-redacted inspect/list
   reports.
-- [ ] Implement the durable operation repository and lease/checkpoint recovery
+- [x] Implement the durable operation repository and lease/checkpoint recovery
   for provisioning, materialization, promotion, and cleanup.
 - [x] Introduce shared per-disk physical claims across workspaces, ingest,
   destage, repair, and evacuation before enabling workspace mutation.

@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.135.0 - 2026-07-26
+
+- Add the authoritative SQLite operation repository for managed-workspace
+  provisioning, materialization, promotion, and cleanup, with idempotent request
+  identities, bounded attempts, renewable worker leases, owner/generation
+  fencing, monotonic progress, cancellation, and terminal-result persistence.
+- Add append-only, path-free durable checkpoints and fail-closed restart
+  recovery: only explicitly idempotent work or a proven resumable checkpoint is
+  returned to the queue; ambiguous external effects and exhausted attempts
+  require operator review.
+- Upgrade live metadata to schema 0.9 while retaining an idempotent additive
+  upgrade path for existing operation tables.
+
 ## 0.134.0 - 2026-07-25
 
 - Add first-contact TLS certificate enrollment to

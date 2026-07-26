@@ -6,10 +6,11 @@ Status
 
 This document fixes the production architecture for first-class mutable compute
 workspaces. The implementation is intentionally delivered in dependency order.
-Schema version 1 and live-metadata schema 0.7 establish the domain and durable
-boundaries. The metadata repository can now reserve aggregate capacity
-atomically and expose path-redacted inspection, but it does not yet advertise a
-usable workspace.
+Schema version 1 and live-metadata schema 0.9 establish the domain and durable
+boundaries. The metadata repositories now reserve aggregate capacity
+atomically, expose path-redacted inspection, and durably coordinate workspace
+operations, but the host provisioning provider is not yet enabled and the
+system does not advertise a usable workspace.
 
 Authority boundary
 ------------------
@@ -120,10 +121,26 @@ Durable operations and recovery
 -------------------------------
 
 The existing summary-only administrator job registry is not authoritative for
-workspace work because it marks active jobs failed at daemon restart. Workspace
-operations live in SQLite with a request identity and digest, lease, stage,
-byte/unit progress, cancellation request, retry count, typed failure, and
-path-free result.
+workspace work because it marks active jobs failed at daemon restart. The
+live-metadata 0.9 operation repository is authoritative for workspace
+provisioning, materialization, promotion, and cleanup. Operations carry a
+request identity and digest, bounded attempt count, renewable lease, lease
+epoch, monotonically increasing generation, stage, byte/unit progress,
+cancellation request, typed failure, path-free result, and completion time.
+
+Workers claim operations under ``BEGIN IMMEDIATE``. Every renewal, checkpoint,
+cancellation, and completion is fenced by generation and, for worker actions,
+lease owner. Checkpoints are append-only, size-bounded, path- and
+secret-rejecting JSON records committed atomically with monotonic summary
+progress. Exact checkpoint and terminal-result retries are idempotent.
+
+On restart, an unexpired lease remains authoritative. An expired lease is
+returned to the queue only when the current stage explicitly declares
+idempotent replay, or an append-only checkpoint proves resumability. Cancelled,
+attempt-exhausted, malformed, or externally ambiguous work enters
+``needs_review`` without silently replaying a host mutation. Recovery examines
+metadata only; hashing and provider inspection remain outside SQLite write
+transactions.
 
 Materialization resolves a verified placement internally, copies into a
 daemon-owned partial, checkpoints progress, verifies size and SHA-256, fsyncs,
@@ -153,8 +170,9 @@ Delivery and acceptance
 
 The ordered implementation sequence is:
 
-#. domain, schema, aggregate reservation, and read-only inspection (delivered);
-#. shared physical claims, branch provisioning, rollback, and restart recovery;
+#. domain, schema, aggregate reservation, read-only inspection, shared physical
+   claims, and the durable operation/recovery repository (delivered);
+#. branch provisioning, rollback, and provider-state restart reconciliation;
 #. privileged broker, mergerfs provider, hard quotas, and readiness;
 #. NFSv4 attach/detach and client isolation;
 #. durable verified materialization;
