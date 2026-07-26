@@ -82,6 +82,18 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn test_endpoint_connection(
+        &self,
+        request: TestEndpointConnectionRequest,
+        checked_at_utc: &str,
+    ) -> Result<TestEndpointConnectionResponse, DaemonServiceRuntimeError> {
+        crate::runtime::test_endpoint_connection(
+            crate::runtime::default_endpoint_registry_path(),
+            &request.endpoint_id,
+            checked_at_utc,
+        )
+    }
+
     fn remote_easyconnect_aws_cli_upload_job(
         &self,
         _registry: &dyn AdminJobRegistry,

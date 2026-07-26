@@ -37,6 +37,7 @@ where
         | DaemonApiRequest::ProfileInspection(_)
         | DaemonApiRequest::ProfileReadiness(_)
         | DaemonApiRequest::UpsertEndpointInventory(_)
+        | DaemonApiRequest::TestEndpointConnection(_)
         | DaemonApiRequest::CreateLocalGroup(_)
         | DaemonApiRequest::AssignLocalUserToLocalGroup(_)
         | DaemonApiRequest::ProfileCapabilities(_)

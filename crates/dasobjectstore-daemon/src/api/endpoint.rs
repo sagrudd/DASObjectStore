@@ -3,6 +3,62 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 pub const ENDPOINT_RECORD_CONFIRMATION: &str = "record endpoint inventory";
+pub const ENDPOINT_CONNECTION_TEST_SCHEMA_VERSION: &str =
+    "dasobjectstore.endpoint_connection_test.v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TestEndpointConnectionRequest {
+    pub endpoint_id: String,
+}
+
+impl TestEndpointConnectionRequest {
+    pub fn validate(&self) -> Result<(), EndpointInventoryValidationError> {
+        validate_local_name("endpoint_id", &self.endpoint_id)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TestEndpointConnectionResponse {
+    pub schema_version: String,
+    pub endpoint_id: String,
+    pub kind: DaemonEndpointKind,
+    pub state: DaemonEndpointValidationState,
+    pub checked_at_utc: String,
+    pub duration_ms: u64,
+    pub retryable: bool,
+    pub evidence: Vec<DaemonEndpointConnectionEvidence>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonEndpointConnectionEvidence {
+    pub stage: DaemonEndpointConnectionStage,
+    pub outcome: DaemonEndpointConnectionOutcome,
+    pub code: String,
+    pub message: String,
+    pub latency_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonEndpointConnectionStage {
+    Configuration,
+    Dns,
+    Tcp,
+    TlsHttp,
+    ServiceIdentity,
+    Authentication,
+    Authorization,
+    NfsExportPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DaemonEndpointConnectionOutcome {
+    Passed,
+    Degraded,
+    Failed,
+    NotApplicable,
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct UpsertEndpointInventoryRequest {
@@ -228,8 +284,8 @@ fn default_manager_product_id() -> String {
 mod tests {
     use super::{
         DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        EndpointInventoryValidationError, UpsertEndpointInventoryRequest,
-        ENDPOINT_RECORD_CONFIRMATION,
+        EndpointInventoryValidationError, TestEndpointConnectionRequest,
+        UpsertEndpointInventoryRequest, ENDPOINT_RECORD_CONFIRMATION,
     };
 
     #[test]
@@ -250,6 +306,22 @@ mod tests {
             request.validate(),
             Err(EndpointInventoryValidationError::ConfirmationMismatch)
         );
+    }
+
+    #[test]
+    fn endpoint_test_accepts_only_conservative_inventory_identity() {
+        assert_eq!(
+            TestEndpointConnectionRequest {
+                endpoint_id: "nas-staging.1".to_string(),
+            }
+            .validate(),
+            Ok(())
+        );
+        assert!(TestEndpointConnectionRequest {
+            endpoint_id: "https://nas.example".to_string(),
+        }
+        .validate()
+        .is_err());
     }
 
     fn valid_request() -> UpsertEndpointInventoryRequest {

@@ -2,20 +2,21 @@
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
     Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
-    DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, HealthArgs,
-    IngestCommand, IngestControlArgs, IngestDirectImportArgs, IngestDrainQueueArgs,
-    IngestFilesArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs,
-    MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs,
-    ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
-    PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand, PoolImportArgs,
-    PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand, ServiceRenderComposeArgs,
-    StoreAcknowledgementPolicyArgs, StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs,
-    StoreCommand, StoreContentsArgs, StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs,
-    StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs,
-    StoreProfileBindingOperation, StoreProfileBrowserArgs, StoreProfileHeadArgs,
-    StoreProfileHealthArgs, StoreProfileInspectionArgs, StoreProfileMigrationArgs,
-    StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs,
-    StoreValidateArgs, StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
+    DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, EndpointCommand,
+    EndpointTestArgs, HealthArgs, IngestCommand, IngestControlArgs, IngestDirectImportArgs,
+    IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
+    MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
+    ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection,
+    PerformanceReportArgs, PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand,
+    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
+    ServiceRenderComposeArgs, StoreAcknowledgementPolicyArgs, StoreAdoptArgs,
+    StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
+    StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
+    StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
+    StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
+    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
 };
 mod application_auth;
 mod command_handlers;
@@ -344,6 +345,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
         Some(Command::Subobject(args)) => run_subobject(args, writer),
+        Some(Command::Endpoint(args)) => match args.command() {
+            EndpointCommand::Test(args) => run_endpoint_test(args, writer),
+        },
         Some(Command::Object(args)) => match args.command() {
             ObjectCommand::Export(args) => run_object_export(args, writer),
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
@@ -366,6 +370,33 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+fn run_endpoint_test(args: &EndpointTestArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response =
+        client.test_endpoint_connection(dasobjectstore_daemon::TestEndpointConnectionRequest {
+            endpoint_id: args.endpoint_id().to_string(),
+        })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writeln!(writer)?;
+    } else {
+        writeln!(
+            writer,
+            "Connection {}: {:?} ({} ms)",
+            response.endpoint_id, response.state, response.duration_ms
+        )?;
+        for item in response.evidence {
+            writeln!(
+                writer,
+                "- {:?}: {} — {}",
+                item.stage, item.code, item.message
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn run_ingest_files(args: &IngestFilesArgs, writer: &mut impl Write) -> Result<(), CliError> {

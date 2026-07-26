@@ -163,8 +163,8 @@ pub fn endpoint_upsert_review_from_values(
 
 #[cfg(target_arch = "wasm32")]
 use crate::api::{
-    EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest, EndpointInventoryUpsertResponse,
-    EndpointValidationUpsertRequest, EndpointsWorkspaceResponse,
+    EndpointBindingUpsertRequest, EndpointConnectionTestRequest, EndpointInventoryUpsertRequest,
+    EndpointInventoryUpsertResponse, EndpointValidationUpsertRequest, EndpointsWorkspaceResponse,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::components::{TaskPane, TaskPaneMode};
@@ -371,12 +371,50 @@ fn render_endpoint_inventory(
                             let endpoint_for_form = endpoint.clone();
                             let form_state = form_state.clone();
                             let pane_mode = pane_mode.clone();
+                            let test_form_state = form_state.clone();
+                            let test_pane_mode = pane_mode.clone();
                             let inspect = Callback::from(move |_| {
                                 form_state.set(endpoint_form_state_from_item(&endpoint_for_form));
                                 pane_mode.set(TaskPaneMode::Review);
                             });
+                            let test_endpoint_id = endpoint.endpoint_id.clone();
+                            let test_api_base = api_base_path.clone();
+                            let test_endpoints_state = endpoints_state.clone();
+                            let test = Callback::from(move |_| {
+                                let endpoint_id = test_endpoint_id.clone();
+                                let api_base_path = test_api_base.clone();
+                                let form_state = test_form_state.clone();
+                                let pane_mode = test_pane_mode.clone();
+                                let endpoints_state = test_endpoints_state.clone();
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    match crate::api::submit_endpoint_connection_test(
+                                        &api_base_path,
+                                        &EndpointConnectionTestRequest { endpoint_id },
+                                    ).await {
+                                        Ok(result) => {
+                                            let mut next = (*form_state).clone();
+                                            next.validation_state = result.state;
+                                            next.checked_at_utc = result.checked_at_utc;
+                                            next.validation_message = result.evidence.iter()
+                                                .map(|item| format!("{}: {}", item.code, item.message))
+                                                .collect::<Vec<_>>()
+                                                .join(" · ");
+                                            next.error = None;
+                                            form_state.set(next);
+                                            pane_mode.set(TaskPaneMode::Review);
+                                            refresh_endpoints_workspace(api_base_path, endpoints_state);
+                                        }
+                                        Err(error) => {
+                                            let mut next = (*form_state).clone();
+                                            next.error = Some(error.message);
+                                            form_state.set(next);
+                                            pane_mode.set(TaskPaneMode::Review);
+                                        }
+                                    }
+                                });
+                            });
                             let used_by = if endpoint.active_bindings.is_empty() { "Not attached".to_string() } else { endpoint.active_bindings.iter().map(|binding| binding.store_id.as_str()).collect::<Vec<_>>().join(", ") };
-                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.object_service_url.clone() }</small></td><td>{ endpoint_kind_label(&endpoint.kind) }</td><td>{ used_by }</td><td><span class={classes!("dos-status-pill", format!("is-{}", endpoint.validation.state))}>{ endpoint_validation_label(&endpoint.validation.state) }</span></td><td>{ endpoint.validation.checked_at_utc.clone().unwrap_or_else(|| "Not yet checked".to_string()) }</td><td><button type="button" class="dos-secondary-action" onclick={inspect} aria-label={format!("Open details for {}", endpoint.display_name)}>{ "Open" }</button></td></tr> }
+                            html! { <tr data-endpoint-id={endpoint.endpoint_id.clone()}><td><strong>{ endpoint.display_name.clone() }</strong><small>{ endpoint.object_service_url.clone() }</small></td><td>{ endpoint_kind_label(&endpoint.kind) }</td><td>{ used_by }</td><td><span class={classes!("dos-status-pill", format!("is-{}", endpoint.validation.state))}>{ endpoint_validation_label(&endpoint.validation.state) }</span></td><td>{ endpoint.validation.checked_at_utc.clone().unwrap_or_else(|| "Not yet checked".to_string()) }</td><td><div class="dos-inline-actions"><button type="button" class="dos-secondary-action" onclick={test} aria-label={format!("Test {}", endpoint.display_name)}>{ "Test" }</button><button type="button" class="dos-secondary-action" onclick={inspect} aria-label={format!("Open details for {}", endpoint.display_name)}>{ "Open" }</button></div></td></tr> }
                         }) }</tbody>
                     </table>
                 </div>
@@ -527,6 +565,9 @@ fn render_endpoint_detail(
                     <div><dt>{ "Last checked" }</dt><dd>{ if state.checked_at_utc.is_empty() { "Not yet checked".to_string() } else { state.checked_at_utc.clone() } }</dd></div>
                     if !state.validation_message.is_empty() { <div><dt>{ "Evidence" }</dt><dd>{ state.validation_message.clone() }</dd></div> }
                 </dl>
+                if let Some(error) = &state.error {
+                    <p class="dos-inline-error" role="alert">{ error.clone() }</p>
+                }
             </section>
             <section class="dos-task-pane__section dos-technical-details">
                 <details><summary>{ "Technical details" }</summary><dl class="dos-connection-facts"><div><dt>{ "Endpoint ID" }</dt><dd>{ state.endpoint_id.clone() }</dd></div><div><dt>{ "Manager" }</dt><dd>{ state.manager_product_id.clone() }</dd></div>{ if state.binding_enabled { html! { <><div><dt>{ "Binding ID" }</dt><dd>{ state.binding_id.clone() }</dd></div><div><dt>{ "Governance domain" }</dt><dd>{ state.governance_domain.clone() }</dd></div></> } } else { Html::default() } }</dl></details>

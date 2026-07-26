@@ -162,6 +162,31 @@ pub(super) async fn submit_endpoint_inventory_upsert_request(
         .map_err(admin_daemon_bridge_error)
 }
 
+pub(super) async fn submit_endpoint_connection_test_request(
+    state: &StandaloneEnclosureAdminRouteState,
+    request: dasobjectstore_daemon::TestEndpointConnectionRequest,
+) -> Result<StandaloneEndpointConnectionTestResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = state.enclosure_admin_client.as_ref().ok_or_else(|| {
+        daemon_unavailable(
+            "daemon_endpoint_test_unavailable",
+            "daemon endpoint connection testing contract is not available",
+        )
+    })?;
+    let client = Arc::clone(client);
+    state
+        .daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .test_endpoint_connection(request)
+                .map_err(|err| err.message)
+        })
+        .await
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "endpoint_connection_test_failed")
+        })
+}
+
 pub(super) async fn submit_admin_job_status_request(
     state: &StandaloneEnclosureAdminRouteState,
     request: StandaloneAdminJobStatusDaemonRequest,

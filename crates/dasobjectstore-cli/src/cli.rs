@@ -101,6 +101,8 @@ pub(crate) enum Command {
     Ingest(IngestArgs),
     /// Manage named SubObject endpoints.
     Subobject(SubobjectArgs),
+    /// Test daemon-managed external storage connections.
+    Endpoint(EndpointArgs),
     /// Inspect object metadata.
     Object(ObjectArgs),
     /// Render and manage the S3-compatible object service.
@@ -111,6 +113,43 @@ pub(crate) enum Command {
     PerformanceTest(PerformanceTestArgs),
     /// Rebuild a formal performance PDF report from an existing JSON artifact.
     PerformanceReport(PerformanceReportArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct EndpointArgs {
+    #[command(subcommand)]
+    command: EndpointCommand,
+}
+
+impl EndpointArgs {
+    pub(crate) fn command(&self) -> &EndpointCommand {
+        &self.command
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Subcommand)]
+pub(crate) enum EndpointCommand {
+    /// Test one stored endpoint from the daemon network namespace.
+    Test(EndpointTestArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct EndpointTestArgs {
+    /// Stable endpoint inventory identifier.
+    endpoint_id: String,
+    /// Emit typed evidence as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl EndpointTestArgs {
+    pub(crate) fn endpoint_id(&self) -> &str {
+        &self.endpoint_id
+    }
+
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -271,8 +310,8 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, Command, MnemosyneCommand, PerformanceFileOrder, PerformanceFileSelection,
-        PerformanceScenarioSelection, ProbeArgs, StatusArgs,
+        Cli, Command, EndpointCommand, MnemosyneCommand, PerformanceFileOrder,
+        PerformanceFileSelection, PerformanceScenarioSelection, ProbeArgs, StatusArgs,
     };
     use clap::Parser;
     use std::path::Path;
@@ -282,6 +321,24 @@ mod tests {
         let cli = Cli::try_parse_from(["dasobjectstore"]).expect("root command parses");
 
         assert_eq!(cli.command(), None);
+    }
+
+    #[test]
+    fn parses_endpoint_connection_test() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "endpoint",
+            "test",
+            "nas-staging",
+            "--json",
+        ])
+        .expect("endpoint test parses");
+        let Some(Command::Endpoint(args)) = cli.command() else {
+            panic!("expected endpoint command");
+        };
+        let EndpointCommand::Test(test) = args.command();
+        assert_eq!(test.endpoint_id(), "nas-staging");
+        assert!(test.json());
     }
 
     #[test]

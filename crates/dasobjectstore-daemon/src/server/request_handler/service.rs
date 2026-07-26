@@ -966,6 +966,26 @@ where
             handler.record_admin_job(daemon_job_summary_from_endpoint_inventory(&response))?;
             Ok(DaemonApiResponse::UpsertEndpointInventory(response))
         }
+        DaemonApiRequest::TestEndpointConnection(request) => {
+            let Some(actor) = actor else {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authentication_required",
+                    "endpoint connection testing requires an authenticated local administrator",
+                )));
+            };
+            if !actor.is_administrator() {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "administrator_authorization_required",
+                    "endpoint connection testing requires root, sudo, or dasobjectstore-admin membership",
+                )));
+            }
+            let now = handler.clock.now_utc();
+            let response = handler
+                .service_orchestrator
+                .test_endpoint_connection(request, &now)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            Ok(DaemonApiResponse::TestEndpointConnection(response))
+        }
         DaemonApiRequest::CreateLocalGroup(request) => {
             let now = handler.clock.now_utc();
             let response = handler

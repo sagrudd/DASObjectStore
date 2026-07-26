@@ -3494,7 +3494,7 @@ non-destructive close, and restores focus to its trigger when closed.
 - [x] Populate attachment choices from live ObjectStore inventory, generate the
   binding identity, and make validation evidence read-only so the browser
   cannot self-assert that a connection has been tested.
-- [ ] Add a daemon-owned ``test_endpoint_connection`` operation with typed,
+- [x] Add a daemon-owned ``test_endpoint_connection`` operation with typed,
   endpoint-kind-specific evidence for direct DASObjectStore, NAS/NFS gateway,
   and S3-compatible services. The Web action must invoke that operation and
   must never infer success from browser reachability or a registry write.

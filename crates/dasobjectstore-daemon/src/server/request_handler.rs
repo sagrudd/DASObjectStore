@@ -35,10 +35,11 @@ use crate::api::{
     StoreDrainResponse, StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse,
     StoreRepairReport, StoreRepairRequest, StoreRepairResponse, StoreRepairS3Reconciliation,
     StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest,
-    SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
-    UpdateObjectStoreAcknowledgementPolicyResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse, PROFILE_BROWSER_SCHEMA_VERSION, PROFILE_S3_SCHEMA_VERSION,
+    SubmitIngestFilesResponse, TestEndpointConnectionRequest, TestEndpointConnectionResponse,
+    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    PROFILE_BROWSER_SCHEMA_VERSION, PROFILE_S3_SCHEMA_VERSION,
 };
 use crate::auth::{
     authorize_store_read, authorize_store_write, DaemonAuthorizationError, DaemonLocalActor,

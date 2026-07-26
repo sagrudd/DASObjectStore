@@ -317,6 +317,10 @@ pub(crate) fn standalone_enclosure_admin_router_with_state(
             post(upsert_endpoint_inventory),
         )
         .route(
+            "/api/v1/workspaces/endpoints/test",
+            post(test_endpoint_connection),
+        )
+        .route(
             "/api/v1/workspaces/admin/jobs/{job_id}",
             get(admin_job_status),
         )

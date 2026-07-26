@@ -53,6 +53,15 @@ pub(super) trait StandaloneEnclosureAdminClient: Send + Sync {
         request: DaemonUpsertEndpointInventoryRequest,
     ) -> Result<StandaloneEndpointInventoryUpsertResponse, StandaloneEnclosureAdminClientError>;
 
+    fn test_endpoint_connection(
+        &self,
+        _request: dasobjectstore_daemon::TestEndpointConnectionRequest,
+    ) -> Result<StandaloneEndpointConnectionTestResponse, StandaloneEnclosureAdminClientError> {
+        Err(StandaloneEnclosureAdminClientError {
+            message: "endpoint connection testing is not configured".to_string(),
+        })
+    }
+
     fn job_status(
         &self,
         request: StandaloneAdminJobStatusDaemonRequest,
@@ -243,6 +252,16 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
         self.client
             .upsert_endpoint_inventory(request)
             .map(endpoint_inventory_upsert_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn test_endpoint_connection(
+        &self,
+        request: dasobjectstore_daemon::TestEndpointConnectionRequest,
+    ) -> Result<StandaloneEndpointConnectionTestResponse, StandaloneEnclosureAdminClientError> {
+        self.client
+            .test_endpoint_connection(request)
+            .map(endpoint_connection_test_response_from_daemon)
             .map_err(standalone_enclosure_admin_client_error)
     }
 

@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.137.1 - 2026-07-26
+
+- Add daemon-owned, endpoint-kind-specific connection testing with bounded
+  DNS, TCP, TLS/HTTP, DASObjectStore identity, S3 semantics, and NFS service
+  evidence persisted into the authoritative endpoint registry.
+- Add authenticated CLI and Web connection-test actions with typed, safe,
+  retry-aware evidence; browsers can no longer imply validation from their own
+  reachability.
+
 ## 0.137.0 - 2026-07-26
 
 - Replace ambiguous historical remote sessions with one canonical

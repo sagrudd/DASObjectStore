@@ -98,9 +98,12 @@ pub use enclosure::{
     PrepareEnclosureResponse, PrepareEnclosureValidationError, ENCLOSURE_PREPARE_CONFIRMATION,
 };
 pub use endpoint::{
-    DaemonEndpointBinding, DaemonEndpointBindingReadiness, DaemonEndpointKind,
+    DaemonEndpointBinding, DaemonEndpointBindingReadiness, DaemonEndpointConnectionEvidence,
+    DaemonEndpointConnectionOutcome, DaemonEndpointConnectionStage, DaemonEndpointKind,
     DaemonEndpointValidation, DaemonEndpointValidationState, EndpointInventoryValidationError,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, ENDPOINT_RECORD_CONFIRMATION,
+    TestEndpointConnectionRequest, TestEndpointConnectionResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse, ENDPOINT_CONNECTION_TEST_SCHEMA_VERSION,
+    ENDPOINT_RECORD_CONFIRMATION,
 };
 pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
@@ -359,6 +362,7 @@ pub enum DaemonApiRequest {
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
+    TestEndpointConnection(TestEndpointConnectionRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
     RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryRequest),
@@ -436,6 +440,7 @@ impl DaemonApiRequest {
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
+            Self::TestEndpointConnection(_) => "test_endpoint_connection",
             Self::CreateLocalGroup(_) => "create_local_group",
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
             Self::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
@@ -564,6 +569,9 @@ impl DaemonApiRequest {
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
+            Self::TestEndpointConnection(request) => request
+                .validate()
+                .map_err(endpoint_inventory_validation_error),
             Self::CreateLocalGroup(request) => {
                 request.validate().map_err(local_admin_validation_error)
             }
@@ -666,6 +674,7 @@ pub enum DaemonApiResponse {
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
+    TestEndpointConnection(TestEndpointConnectionResponse),
     CreateLocalGroup(CreateLocalGroupResponse),
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryResponse),

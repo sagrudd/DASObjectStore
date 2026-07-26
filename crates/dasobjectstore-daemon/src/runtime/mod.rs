@@ -141,7 +141,7 @@ pub use direct_s3_ingress::{
 };
 pub use drive_backend::{DriveBackend, DriveRuntimeGuard};
 pub use endpoint_registry::{
-    default_endpoint_registry_path, upsert_endpoint_inventory_record,
+    default_endpoint_registry_path, test_endpoint_connection, upsert_endpoint_inventory_record,
     EndpointRegistryUpsertSummary, DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV,
     ENDPOINT_REGISTRY_SCHEMA,
 };

@@ -142,6 +142,31 @@ pub(super) fn endpoint_inventory_upsert_response_from_daemon(
     }
 }
 
+pub(super) fn endpoint_connection_test_response_from_daemon(
+    response: dasobjectstore_daemon::TestEndpointConnectionResponse,
+) -> StandaloneEndpointConnectionTestResponse {
+    StandaloneEndpointConnectionTestResponse {
+        schema_version: response.schema_version,
+        endpoint_id: response.endpoint_id,
+        kind: endpoint_kind_label(response.kind).to_string(),
+        state: endpoint_validation_state_label(response.state).to_string(),
+        checked_at_utc: response.checked_at_utc,
+        duration_ms: response.duration_ms,
+        retryable: response.retryable,
+        evidence: response
+            .evidence
+            .into_iter()
+            .map(|item| StandaloneEndpointConnectionEvidence {
+                stage: format!("{:?}", item.stage).to_ascii_lowercase(),
+                outcome: format!("{:?}", item.outcome).to_ascii_lowercase(),
+                code: item.code,
+                message: item.message,
+                latency_ms: item.latency_ms,
+            })
+            .collect(),
+    }
+}
+
 fn endpoint_kind_label(kind: DaemonEndpointKind) -> &'static str {
     match kind {
         DaemonEndpointKind::DasobjectstoreDas => "dasobjectstore_das",

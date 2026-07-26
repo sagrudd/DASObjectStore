@@ -334,6 +334,32 @@ pub struct StandaloneEndpointInventoryAcceptedResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct EndpointConnectionTestRequest {
+    pub endpoint_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEndpointConnectionTestResponse {
+    pub schema_version: String,
+    pub endpoint_id: String,
+    pub kind: String,
+    pub state: String,
+    pub checked_at_utc: String,
+    pub duration_ms: u64,
+    pub retryable: bool,
+    pub evidence: Vec<StandaloneEndpointConnectionEvidence>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StandaloneEndpointConnectionEvidence {
+    pub stage: String,
+    pub outcome: String,
+    pub code: String,
+    pub message: String,
+    pub latency_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CancelAdminJobRequest {
     pub reason: Option<String>,
 }

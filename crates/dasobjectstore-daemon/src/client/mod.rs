@@ -56,10 +56,11 @@ use crate::api::{
     StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
     StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
     StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse,
-    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
-    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
-    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    SubmitIngestFilesRequest, SubmitIngestFilesResponse, TestEndpointConnectionRequest,
+    TestEndpointConnectionResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
+    UpdateObjectStoreAcknowledgementPolicyResponse, UpdateObjectStoreIngestPolicyRequest,
+    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
+    UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -764,6 +765,16 @@ where
         }
     }
 
+    pub fn test_endpoint_connection(
+        &self,
+        request: TestEndpointConnectionRequest,
+    ) -> Result<TestEndpointConnectionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::TestEndpointConnection(request))? {
+            DaemonApiResponse::TestEndpointConnection(response) => Ok(response),
+            response => Err(unexpected("test_endpoint_connection", response)),
+        }
+    }
+
     pub fn create_local_group(
         &self,
         request: CreateLocalGroupRequest,
@@ -947,6 +958,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ObjectDownload(_) => "object_download",
         DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
+        DaemonApiResponse::TestEndpointConnection(_) => "test_endpoint_connection",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",

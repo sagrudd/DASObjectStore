@@ -737,6 +737,35 @@ pub struct EndpointValidationResponse {
     pub message: Option<String>,
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct EndpointConnectionTestRequest {
+    pub endpoint_id: String,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EndpointConnectionTestResponse {
+    pub schema_version: String,
+    pub endpoint_id: String,
+    pub kind: String,
+    pub state: String,
+    pub checked_at_utc: String,
+    pub duration_ms: u64,
+    pub retryable: bool,
+    pub evidence: Vec<EndpointConnectionEvidenceResponse>,
+}
+
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct EndpointConnectionEvidenceResponse {
+    pub stage: String,
+    pub outcome: String,
+    pub code: String,
+    pub message: String,
+    pub latency_ms: Option<u64>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[allow(dead_code)]
 pub struct EndpointBindingResponse {

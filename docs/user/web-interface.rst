@@ -817,10 +817,26 @@ shows service address and validation evidence first; endpoint, manager,
 binding, and governance identifiers are available under ``Technical details``.
 ``Add connection`` uses the live ObjectStore inventory instead of asking an
 operator to type binding identifiers. New connections are recorded as
-``pending_validation``. The Web browser cannot declare a connection validated;
-that state requires daemon-owned validation evidence. Until a dedicated
-connection-test action is available, use the formal CLI/API validation workflow
-for the endpoint type and then refresh the inventory.
+``pending_validation``. The Web browser cannot declare a connection validated.
+Its ``Test`` action asks ``dasobjectstored`` to probe from the daemon network
+namespace and then refreshes persisted evidence. The daemon performs bounded
+DNS, TCP, TLS/HTTP, and endpoint-kind checks. Direct DASObjectStore connections
+must return the EasyConnect discovery identity. S3 responses must have S3
+semantics; without a daemon-custodied endpoint credential the result remains
+explicitly degraded rather than claiming authenticated bucket access. NAS/NFS
+connections also require port 2049 reachability and remain degraded until a
+typed export/host-policy descriptor is attached.
+
+The same operation is available to administrators from the appliance CLI::
+
+   dasobjectstore endpoint test CONNECTION_ID
+   dasobjectstore endpoint test CONNECTION_ID --json
+
+Evidence contains stable stages, result codes, safe messages, optional latency,
+overall duration, retryability, and the daemon timestamp. DNS failures,
+connection refusal, timeouts, certificate failures, unverified service
+identity, missing credentials, and incomplete NFS export policy remain
+distinct.
 
 Standalone administrator sessions can submit connection inventory creation or
 updates from this page. The confirmation phrase is only shown for a live update
@@ -842,6 +858,12 @@ The Web route validates the request and forwards it to ``dasobjectstored`` as an
 registry and records an ``endpoint_validation`` administrator job so Activity
 can show the accepted work. Browser code must not edit
 ``/opt/dasobjectstore/endpoints.json`` directly.
+
+Connection tests use ``POST /api/v1/workspaces/endpoints/test`` with only the
+stored ``endpoint_id``. Callers cannot substitute a URL in the test request.
+The daemon resolves the URL from its authoritative registry, performs the
+probe, and atomically persists the resulting validation state and evidence
+summary.
 
 Users/Groups Workspace
 ----------------------

@@ -699,6 +699,27 @@ async fn upsert_endpoint_inventory(
         .map(Json)
 }
 
+async fn test_endpoint_connection(
+    State(state): State<StandaloneEnclosureAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Json(request): Json<EndpointConnectionTestRequest>,
+) -> Result<Json<StandaloneEndpointConnectionTestResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    let request = dasobjectstore_daemon::TestEndpointConnectionRequest {
+        endpoint_id: request.endpoint_id,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_endpoint_connection_test",
+            error.to_string(),
+        )
+    })?;
+    submit_endpoint_connection_test_request(&state, request)
+        .await
+        .map(Json)
+}
+
 async fn rebuild_performance_report(
     State(state): State<StandaloneReportingRouteState>,
     actor: AuthenticatedGuiActor,
