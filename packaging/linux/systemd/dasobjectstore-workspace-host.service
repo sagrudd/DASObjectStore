@@ -1,0 +1,29 @@
+[Unit]
+Description=DASObjectStore privileged managed workspace host broker
+Documentation=https://github.com/sagrudd/DASObjectStore
+Requires=dasobjectstore-workspace-host.socket
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/libexec/dasobjectstore/dasobjectstore-workspace-host /etc/dasobjectstore/workspace-host.json
+StandardOutput=journal
+StandardError=journal
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+ReadWritePaths=/srv/dasobjectstore

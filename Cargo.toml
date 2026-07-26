@@ -11,11 +11,12 @@ members = [
     "crates/dasobjectstore-platform",
     "crates/dasobjectstore-remote",
     "crates/dasobjectstore-tui",
+    "crates/dasobjectstore-workspace-host",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.135.0"
+version = "0.136.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -39,6 +40,7 @@ dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" 
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
 dasobjectstore-remote = { path = "crates/dasobjectstore-remote" }
 dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
+dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host" }
 gloo-net = "0.5.0"
 gloo-timers = "0.3.0"
 flate2 = "1.1.5"

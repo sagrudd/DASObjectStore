@@ -40,6 +40,7 @@ cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.to
 # is a workspace-only test aid and must never enter a DEB payload.
 cargo build --release --no-default-features -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
@@ -65,6 +66,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
 install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$build_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
+install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
+  "$build_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$build_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
@@ -74,6 +77,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
+install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
+  "$build_root/etc/dasobjectstore/workspace-host.json"
 install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
   "$build_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
@@ -90,6 +95,10 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstore-control.slice" \
   "$build_root/lib/systemd/system/dasobjectstore-control.slice"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage.slice" \
   "$build_root/lib/systemd/system/dasobjectstore-storage.slice"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.service" \
+  "$build_root/lib/systemd/system/dasobjectstore-workspace-host.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.socket" \
+  "$build_root/lib/systemd/system/dasobjectstore-workspace-host.socket"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -99,6 +108,7 @@ install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"
 install -m 0755 "$packaging_debian/postrm" "$build_root/DEBIAN/postrm"
 printf '%s\n' '/opt/dasobjectstore/config.json' >"$build_root/DEBIAN/conffiles"
+printf '%s\n' '/etc/dasobjectstore/workspace-host.json' >>"$build_root/DEBIAN/conffiles"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
 
@@ -109,7 +119,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, libpam0g, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin
 Recommends: awscli
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
 X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker

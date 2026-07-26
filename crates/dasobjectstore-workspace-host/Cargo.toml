@@ -1,0 +1,19 @@
+[package]
+name = "dasobjectstore-workspace-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "dasobjectstore-workspace-host"
+path = "src/main.rs"
+
+[dependencies]
+dasobjectstore-core.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true

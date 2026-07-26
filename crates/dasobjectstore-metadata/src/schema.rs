@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 9);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 10);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -239,6 +239,8 @@ CREATE TABLE IF NOT EXISTS compute_workspace_branches (
     disk_id TEXT NOT NULL REFERENCES disks(disk_id),
     branch_id TEXT NOT NULL,
     branch_relative_path TEXT,
+    project_id INTEGER CHECK (project_id >= 1000),
+    project_quota_bytes INTEGER CHECK (project_quota_bytes > 0),
     reserved_bytes INTEGER NOT NULL CHECK (reserved_bytes > 0),
     state TEXT NOT NULL,
     created_at_utc TEXT NOT NULL,
@@ -423,7 +425,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 9);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 10);
     }
 
     #[test]

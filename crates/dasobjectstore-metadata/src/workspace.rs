@@ -70,6 +70,10 @@ pub struct WorkspaceReservationSnapshot {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WorkspaceDiskAllocation {
     pub disk_id: DiskId,
+    /// Transactionally allocated Linux project identity. A legacy reservation
+    /// without one must be reconciled before host provisioning.
+    pub project_id: Option<u32>,
+    pub project_quota_bytes: Option<u64>,
     pub reserved_bytes: u64,
     pub state: String,
 }
@@ -272,16 +276,28 @@ pub fn reserve_workspace(
         ],
     )?;
 
-    for branch in plan.branches {
+    let mut next_project_id = next_workspace_project_id(&transaction)?;
+    let branch_quotas = distribute_branch_quota(&plan.branches, request.quota_bytes)?;
+    for (branch, project_quota_bytes) in plan.branches.into_iter().zip(branch_quotas) {
+        let project_id = next_project_id;
+        next_project_id = next_project_id.checked_add(1).ok_or_else(|| {
+            WorkspaceMetadataError::InvalidRequest {
+                field: "project_id",
+                reason: "project identity space exhausted".to_string(),
+            }
+        })?;
         transaction.execute(
             "INSERT INTO compute_workspace_branches (
                 workspace_id, disk_id, branch_id, branch_relative_path,
-                reserved_bytes, state, created_at_utc, released_at_utc
-             ) VALUES (?1, ?2, ?3, NULL, ?4, 'reserved', ?5, NULL)",
+                project_id, project_quota_bytes, reserved_bytes, state,
+                created_at_utc, released_at_utc
+             ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, 'reserved', ?7, NULL)",
             params![
                 request.workspace_id.as_str(),
                 branch.disk_id.as_str(),
                 branch.branch_id,
+                project_id,
+                project_quota_bytes,
                 branch.reserved_bytes,
                 request.created_at_utc,
             ],
@@ -381,7 +397,89 @@ fn open_workspace_metadata(path: &Path) -> Result<Connection, WorkspaceMetadataE
     let connection = Connection::open(path)?;
     connection.busy_timeout(Duration::from_secs(5))?;
     connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    ensure_workspace_schema_upgrade(&connection)?;
     Ok(connection)
+}
+
+fn ensure_workspace_schema_upgrade(connection: &Connection) -> Result<(), WorkspaceMetadataError> {
+    let mut statement = connection.prepare("PRAGMA table_info(compute_workspace_branches)")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "project_id") {
+        connection.execute(
+            "ALTER TABLE compute_workspace_branches
+             ADD COLUMN project_id INTEGER CHECK (project_id >= 1000)",
+            [],
+        )?;
+    }
+    if !columns.iter().any(|column| column == "project_quota_bytes") {
+        connection.execute(
+            "ALTER TABLE compute_workspace_branches
+             ADD COLUMN project_quota_bytes INTEGER CHECK (project_quota_bytes > 0)",
+            [],
+        )?;
+    }
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_compute_workspace_branches_project_id
+         ON compute_workspace_branches (project_id)
+         WHERE project_id IS NOT NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn next_workspace_project_id(transaction: &Transaction<'_>) -> Result<u32, WorkspaceMetadataError> {
+    let maximum = transaction.query_row(
+        "SELECT COALESCE(MAX(project_id), 9999) FROM compute_workspace_branches",
+        [],
+        |row| row.get::<_, u64>(0),
+    )?;
+    let next = maximum
+        .checked_add(1)
+        .ok_or_else(|| WorkspaceMetadataError::InvalidRequest {
+            field: "project_id",
+            reason: "project identity space exhausted".to_string(),
+        })?;
+    u32::try_from(next).map_err(|_| WorkspaceMetadataError::InvalidRequest {
+        field: "project_id",
+        reason: "project identity space exhausted".to_string(),
+    })
+}
+
+fn distribute_branch_quota(
+    branches: &[dasobjectstore_core::workspace::WorkspaceBranch],
+    quota_bytes: u64,
+) -> Result<Vec<u64>, WorkspaceMetadataError> {
+    if quota_bytes < branches.len() as u64 {
+        return Err(WorkspaceMetadataError::InvalidRequest {
+            field: "quota_bytes",
+            reason: "must permit at least one byte on every reserved branch".to_string(),
+        });
+    }
+    let total = branches
+        .iter()
+        .map(|branch| branch.reserved_bytes)
+        .sum::<u64>();
+    let mut quotas = Vec::with_capacity(branches.len());
+    let mut assigned = 0_u64;
+    for (index, branch) in branches.iter().enumerate() {
+        let remaining_branches = branches.len() - index - 1;
+        let value = if remaining_branches == 0 {
+            quota_bytes - assigned
+        } else {
+            let proportional =
+                ((quota_bytes as u128 * branch.reserved_bytes as u128) / total as u128) as u64;
+            proportional.max(1).min(
+                quota_bytes
+                    .saturating_sub(assigned)
+                    .saturating_sub(remaining_branches as u64),
+            )
+        };
+        assigned += value;
+        quotas.push(value);
+    }
+    Ok(quotas)
 }
 
 fn validate_reservation_request(
@@ -640,7 +738,7 @@ fn finish_workspace_snapshot(
         }
     })?;
     let mut statement = connection.prepare(
-        "SELECT disk_id, reserved_bytes, state
+        "SELECT disk_id, project_id, project_quota_bytes, reserved_bytes, state
          FROM compute_workspace_branches
          WHERE workspace_id = ?1
          ORDER BY disk_id",
@@ -649,26 +747,32 @@ fn finish_workspace_snapshot(
         .query_map([workspace_id.as_str()], |allocation| {
             Ok((
                 allocation.get::<_, String>(0)?,
-                allocation.get::<_, u64>(1)?,
-                allocation.get::<_, String>(2)?,
+                allocation.get::<_, Option<u32>>(1)?,
+                allocation.get::<_, Option<u64>>(2)?,
+                allocation.get::<_, u64>(3)?,
+                allocation.get::<_, String>(4)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     let allocations = allocation_rows
         .into_iter()
-        .map(|(disk, reserved_bytes, state)| {
-            let disk_id = DiskId::new(disk.clone()).map_err(|_| {
-                WorkspaceMetadataError::InvalidStoredValue {
-                    field: "disk_id",
-                    value: disk,
-                }
-            })?;
-            Ok(WorkspaceDiskAllocation {
-                disk_id,
-                reserved_bytes,
-                state,
-            })
-        })
+        .map(
+            |(disk, project_id, project_quota_bytes, reserved_bytes, state)| {
+                let disk_id = DiskId::new(disk.clone()).map_err(|_| {
+                    WorkspaceMetadataError::InvalidStoredValue {
+                        field: "disk_id",
+                        value: disk,
+                    }
+                })?;
+                Ok(WorkspaceDiskAllocation {
+                    disk_id,
+                    project_id,
+                    project_quota_bytes,
+                    reserved_bytes,
+                    state,
+                })
+            },
+        )
         .collect::<Result<Vec<_>, WorkspaceMetadataError>>()?;
     Ok(WorkspaceReservationSnapshot {
         workspace_id: workspace_id.clone(),
@@ -754,6 +858,7 @@ mod tests {
     use dasobjectstore_core::lifecycle::HealthState;
     use dasobjectstore_core::workspace::{ComputeWorkspaceState, WorkspaceCapacityPlanError};
     use rusqlite::Connection;
+    use std::collections::BTreeSet;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Barrier};
@@ -778,7 +883,63 @@ mod tests {
                 .sum::<u64>(),
             150
         );
+        assert_eq!(
+            snapshot
+                .allocations
+                .iter()
+                .map(|allocation| allocation.project_quota_bytes.expect("project quota"))
+                .sum::<u64>(),
+            150
+        );
+        let project_ids = snapshot
+            .allocations
+            .iter()
+            .map(|allocation| allocation.project_id.expect("project identity"))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(project_ids.len(), snapshot.allocations.len());
         cleanup_database(&database);
+    }
+
+    #[test]
+    fn upgrades_legacy_branch_table_for_project_quota_authority() {
+        let connection = Connection::open_in_memory().expect("open fixture");
+        connection
+            .execute_batch(
+                "CREATE TABLE compute_workspace_branches (
+                    workspace_id TEXT NOT NULL,
+                    disk_id TEXT NOT NULL,
+                    branch_id TEXT NOT NULL,
+                    branch_relative_path TEXT,
+                    reserved_bytes INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL,
+                    released_at_utc TEXT,
+                    PRIMARY KEY (workspace_id, disk_id),
+                    UNIQUE (branch_id)
+                 );",
+            )
+            .expect("legacy table");
+        super::ensure_workspace_schema_upgrade(&connection).expect("upgrade");
+        let mut statement = connection
+            .prepare("PRAGMA table_info(compute_workspace_branches)")
+            .expect("table info");
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("columns")
+            .collect::<Result<BTreeSet<_>, _>>()
+            .expect("collect columns");
+        assert!(columns.contains("project_id"));
+        assert!(columns.contains("project_quota_bytes"));
+        let index: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name = 'idx_compute_workspace_branches_project_id'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("index");
+        assert_eq!(index, 1);
     }
 
     #[test]

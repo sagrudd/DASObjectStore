@@ -1,0 +1,80 @@
+Managed compute workspace host broker
+=====================================
+
+DASObjectStore keeps mutable compute workspaces separate from immutable
+ObjectStores. Workspace filesystem mutation is performed by the narrowly
+privileged, socket-activated ``dasobjectstore-workspace-host`` service. The
+normal daemon remains unprivileged.
+
+Security boundary
+-----------------
+
+The broker accepts only versioned ``provision``, ``inspect``, and ``rollback``
+requests from members of the ``dasobjectstore`` service group. Requests name
+opaque workspace, disk, branch, and project identities. They cannot supply
+absolute paths, commands, mount options, users, groups, or arbitrary quota
+arguments.
+
+The administrator-owned file
+``/etc/dasobjectstore/workspace-host.json`` is the only disk-root authority. It
+must be owned by ``root``, must not be group/world writable, and must not be a
+symlink. A minimal configuration is::
+
+  {
+    "schema_version": 1,
+    "disks": {
+      "qnap-1057": {
+        "root": "/srv/dasobjectstore/hdd/qnap-1057",
+        "workspace_directory": ".workspaces"
+      }
+    }
+  }
+
+Do not add a root until its identity and mount are managed by DASObjectStore.
+Unknown disks and changed or symlinked roots fail closed.
+
+Quota prerequisite
+------------------
+
+Every configured filesystem must support Linux project quotas and be mounted
+with project-quota enforcement enabled. Provisioning assigns a globally unique
+project identity and bounded per-branch share of the workspace quota. The
+broker sets and verifies the project inheritance attribute, then applies the
+hard byte limit with the operating-system quota interface. Unsupported or
+inactive project quotas cause provisioning to fail and roll back newly created
+empty branches.
+
+The package installs the ``quota`` runtime dependency but deliberately does not
+rewrite filesystem mount options. Filesystem quota enablement is an
+administrator-controlled storage operation and must be completed before a disk
+is entered in the broker configuration.
+
+Markers, rollback, and recovery
+-------------------------------
+
+Each branch contains one root-created
+``.dasobjectstore-workspace.json`` marker binding it to the exact workspace,
+disk, branch, project identity, and quota. Replayed provisioning is accepted
+only when the marker and quota state match exactly.
+
+Inspection reports only bounded states such as ``absent``, ``ready``,
+``marker_missing``, ``marker_conflict``, ``quota_missing``, or
+``unsafe_filesystem_entry``. It never returns host paths.
+
+Rollback removes only an exact marker-owned branch that contains no workspace
+data. A non-empty branch, conflicting marker, symlink, quota ambiguity, or
+unexpected filesystem entry is retained for operator review. Package removal
+and service restart never authorize workspace-data deletion.
+
+Service inspection
+------------------
+
+The socket is enabled during package installation and starts the broker only
+when the daemon connects::
+
+  systemctl status dasobjectstore-workspace-host.socket
+  systemctl status dasobjectstore-workspace-host.service
+  journalctl -u dasobjectstore-workspace-host.service
+
+Do not send hand-written requests to the socket. Durable workspace operations
+and recovery checkpoints remain the daemon's orchestration authority.

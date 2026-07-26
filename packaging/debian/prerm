@@ -9,10 +9,14 @@ case "${1:-}" in
   remove|deconfigure)
     systemctl disable --now \
       dasobjectstore-source-access.path \
+      dasobjectstore-workspace-host.socket \
+      dasobjectstore-workspace-host.service \
       dasobjectstore-server.service \
       dasobjectstored.service || true
     ;;
   upgrade|failed-upgrade)
-    systemctl stop dasobjectstore-server.service dasobjectstored.service || true
+    systemctl stop dasobjectstore-workspace-host.socket \
+      dasobjectstore-workspace-host.service \
+      dasobjectstore-server.service dasobjectstored.service || true
     ;;
 esac

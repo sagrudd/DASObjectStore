@@ -38,6 +38,7 @@ cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.to
 # is a workspace-only test aid and must never enter an RPM payload.
 cargo build --release --no-default-features -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
 
 rpm_root="$repo_root/target/rpm/rpmbuild"
 staging_root="$repo_root/target/rpm/staging"
@@ -70,6 +71,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
 install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
+install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
+  "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
@@ -80,6 +83,8 @@ install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_nam
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
+install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
+  "$payload_root/etc/dasobjectstore/workspace-host.json"
 install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
   "$payload_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
@@ -96,6 +101,10 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstore-control.slice" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-control.slice"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage.slice" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-storage.slice"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-workspace-host.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.socket" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-workspace-host.socket"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -131,6 +140,7 @@ Requires:       ca-certificates
 Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       pam
+Requires:       quota
 # Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
 Requires:       udisks2
@@ -199,6 +209,10 @@ find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$servi
 if [ -f /opt/dasobjectstore/config.json ]; then
   chown root:"\$service_group" /opt/dasobjectstore/config.json
   chmod 0640 /opt/dasobjectstore/config.json
+fi
+if [ -f /etc/dasobjectstore/workspace-host.json ]; then
+  chown root:root /etc/dasobjectstore/workspace-host.json
+  chmod 0640 /etc/dasobjectstore/workspace-host.json
 fi
 if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
   chown root:"\$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
@@ -282,7 +296,8 @@ if command -v systemd-tmpfiles >/dev/null 2>&1; then
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service dasobjectstore-server.service dasobjectstore-source-access.path || true
+  systemctl enable --now dasobjectstored.service dasobjectstore-server.service \
+    dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
   systemctl start dasobjectstore-source-access.service || true
   systemctl restart dasobjectstored.service dasobjectstore-server.service || true
 fi
@@ -306,6 +321,8 @@ fi
 if [ "\$1" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
   systemctl disable --now \
     dasobjectstore-source-access.path \
+    dasobjectstore-workspace-host.socket \
+    dasobjectstore-workspace-host.service \
     dasobjectstore-server.service \
     dasobjectstored.service || true
 fi
@@ -321,6 +338,7 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
+%config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /etc/pam.d/dasobjectstore
 %config(noreplace) /opt/dasobjectstore/config.json
 /opt/dasobjectstore/web
@@ -330,6 +348,7 @@ fi
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
+/usr/libexec/dasobjectstore/dasobjectstore-workspace-host
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
@@ -339,6 +358,8 @@ fi
 /usr/lib/systemd/system/dasobjectstore-source-access.path
 /usr/lib/systemd/system/dasobjectstore-control.slice
 /usr/lib/systemd/system/dasobjectstore-storage.slice
+/usr/lib/systemd/system/dasobjectstore-workspace-host.service
+/usr/lib/systemd/system/dasobjectstore-workspace-host.socket
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md

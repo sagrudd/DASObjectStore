@@ -89,12 +89,17 @@ legacy options such as ``use_ino`` are never emitted. Production quota
 enforcement requires project quotas on every selected filesystem; mergerfs
 accounting alone is not a hard quota.
 
-The main daemon remains unprivileged. A small root-owned,
-socket-activated ``dasobjectstore-workspace-host`` broker will accept only
+The main daemon remains unprivileged. The root-owned, socket-activated
+``dasobjectstore-workspace-host`` broker accepts only
 versioned typed operations for managed branches, project quotas, aggregate
-mounts, and DASObjectStore-owned NFS fragments. It will not accept arbitrary
-commands or paths. This preserves the daemon's ``NoNewPrivileges`` and
-``ProtectSystem`` protections.
+mounts, and DASObjectStore-owned NFS fragments. Its first delivered protocol
+supports branch provision, recovery inspection, and rollback. Disk roots come
+only from root-owned configuration; callers cannot submit commands or paths.
+Project identities are allocated transactionally and per-branch hard quotas sum
+to the workspace logical quota. Exact marker and quota replay is idempotent.
+Rollback removes only empty branches carrying the exact ownership marker.
+This preserves the daemon's ``NoNewPrivileges`` and ``ProtectSystem``
+protections.
 
 NFSv4 attachment
 ----------------

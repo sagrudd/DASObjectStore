@@ -15,6 +15,7 @@ stabilized in the current MVP.
    telemetry-troubleshooting
    store-classes
    storage-profiles
+   managed-compute-workspaces
    metadata-compatibility
    storage-profile-matrix
    deployment-acceptance

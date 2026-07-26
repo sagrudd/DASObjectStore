@@ -3729,8 +3729,11 @@ browser and appliance acceptance remain external validation gates.
   for provisioning, materialization, promotion, and cleanup.
 - [x] Introduce shared per-disk physical claims across workspaces, ingest,
   destage, repair, and evacuation before enabling workspace mutation.
-- [ ] Implement marker-owned branch provisioning, project quotas, rollback,
-  and restart reconciliation through a narrow privileged Linux host broker.
+- [x] Implement the narrow, socket-activated Linux host broker with strict
+  configured-root validation, marker-owned branch provisioning, project quota
+  enforcement, empty-branch rollback, and path-redacted recovery inspection.
+- [ ] Connect the durable provision worker to the host broker and reconcile
+  broker inspection evidence into workspace lifecycle state after restart.
 - [ ] Implement the mergerfs aggregation provider and fail-closed health and
   readiness checks.
 - [ ] Implement managed host-restricted NFSv4 attach/detach/recovery with

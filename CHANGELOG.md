@@ -8,6 +8,24 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.136.0 - 2026-07-26
+
+- Add the root-owned, socket-activated managed-workspace host broker with a
+  versioned typed protocol, administrator-configured disk roots, conservative
+  identity validation, bounded requests, and no arbitrary path or command
+  surface.
+- Add exact branch ownership markers, idempotent provision/inspect operations,
+  fail-closed recovery states, and rollback restricted to empty branches with
+  matching ownership evidence.
+- Allocate unique Linux project identities transactionally, distribute each
+  workspace's logical quota across its branches, and require verified project
+  inheritance and hard quota application before publishing a branch.
+- Package the hardened broker service/socket and quota dependency for DEB and
+  RPM installations, with an empty default root registry and operator guidance.
+- Upgrade live metadata to schema 0.10 for project identity and branch-quota
+  authority while preserving nullable legacy reservations for explicit
+  reconciliation.
+
 ## 0.135.0 - 2026-07-26
 
 - Add the authoritative SQLite operation repository for managed-workspace

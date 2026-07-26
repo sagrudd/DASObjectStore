@@ -8,11 +8,14 @@ source_access_service="$repo_root/packaging/linux/systemd/dasobjectstore-source-
 source_access_path="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.path"
 control_slice="$repo_root/packaging/linux/systemd/dasobjectstore-control.slice"
 storage_slice="$repo_root/packaging/linux/systemd/dasobjectstore-storage.slice"
+workspace_host_service="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.service"
+workspace_host_socket="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.socket"
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
+workspace_host_config="$repo_root/packaging/linux/etc/dasobjectstore/workspace-host.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
 pam_service="$repo_root/packaging/linux/pam.d/dasobjectstore"
 reporting_wrapper="$repo_root/packaging/reporting/gnostikon-workflow-control"
@@ -58,11 +61,14 @@ require_file "$source_access_service"
 require_file "$source_access_path"
 require_file "$control_slice"
 require_file "$storage_slice"
+require_file "$workspace_host_service"
+require_file "$workspace_host_socket"
 require_file "$source_access_helper"
 require_file "$mount_policy_helper"
 require_file "$sysusers"
 require_file "$tmpfiles"
 require_file "$daemon_config"
+require_file "$workspace_host_config"
 require_file "$web_config"
 require_file "$pam_service"
 require_file "$reporting_wrapper"
@@ -104,6 +110,13 @@ require_text "$control_slice" "MemoryLow=256M"
 require_text "$storage_slice" "CPUWeight=80"
 require_text "$storage_slice" "IOWeight=80"
 require_text "$storage_slice" "MemoryHigh=75%"
+require_text "$workspace_host_service" "User=root"
+require_text "$workspace_host_service" "ProtectSystem=strict"
+require_text "$workspace_host_service" "ReadWritePaths=/srv/dasobjectstore"
+require_text "$workspace_host_service" "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN"
+require_text "$workspace_host_socket" "SocketGroup=dasobjectstore"
+require_text "$workspace_host_socket" "SocketMode=0660"
+require_text "$workspace_host_config" '"schema_version": 1'
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_EXFAT_DEFAULTS'
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS'
 
@@ -191,7 +204,9 @@ require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
-require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'target/release/dasobjectstore-workspace-host'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-workspace-host.socket'
 require_text "$build_deb" 'Recommends: awscli'
 require_text "$build_rpm" 'Requires:       udisks2'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-policy'
@@ -218,6 +233,9 @@ require_text "$reporting_wrapper" 'docker_args=(run --rm'
 require_text "$build_rpm" "rpmbuild"
 require_text "$build_rpm" "cargo build --release --no-default-features -p dasobjectstore-daemon"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_rpm" "cargo build --release -p dasobjectstore-workspace-host"
+require_text "$build_rpm" 'Requires:       quota'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-workspace-host.socket'
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'
 require_text "$build_rpm" 'target/release/dasobjectstore-local-auth-helper'
