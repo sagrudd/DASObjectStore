@@ -545,6 +545,18 @@ fn ensure_upgrade(connection: &Connection) -> rusqlite::Result<()> {
             [],
         )?;
     }
+    connection.execute(
+        "INSERT INTO metadata_format_versions (artifact, major, minor, updated_at_utc)
+         VALUES ('live_sqlite', 0, 12, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         ON CONFLICT(artifact) DO UPDATE SET
+             major = excluded.major,
+             minor = excluded.minor,
+             updated_at_utc = excluded.updated_at_utc
+         WHERE metadata_format_versions.major < excluded.major
+            OR (metadata_format_versions.major = excluded.major
+                AND metadata_format_versions.minor < excluded.minor)",
+        [],
+    )?;
     Ok(())
 }
 
@@ -733,6 +745,17 @@ mod tests {
                 )
                 .expect("lineage"),
             1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT major, minor FROM metadata_format_versions
+                     WHERE artifact = 'live_sqlite'",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                )
+                .expect("format version"),
+            (0, 12)
         );
         fs::remove_file(database).expect("cleanup");
     }

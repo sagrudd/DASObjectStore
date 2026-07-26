@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.143.1 - 2026-07-26
+
+- Advance the live metadata compatibility marker to schema 0.12 when an
+  existing appliance is upgraded for workspace promotion, without downgrading
+  any future schema marker.
+
 ## 0.143.0 - 2026-07-26
 
 - Add checkpoint-bound, manifest-driven single and bundle workspace promotion
