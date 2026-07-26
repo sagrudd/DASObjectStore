@@ -109,17 +109,30 @@ until that evidence and every branch quota are simultaneously valid.
 NFSv4 attachment
 ----------------
 
-Only ``/workspaces/<workspace-id>`` is exported. Client addresses are parsed
-from an administrator-owned registry; wildcard and public exports are invalid.
-The default is ``root_squash``. ``no_root_squash`` requires both global policy
-enablement and an explicit high-trust workspace approval.
+Only the configured aggregate
+``/srv/dasobjectstore/workspaces/<workspace-id>`` is exported. Client addresses
+are parsed from an administrator-owned, root-owned broker registry; wildcard
+and public exports are invalid. Protocol v3 accepts only the opaque workspace
+identity, registered client identity, and read-only/read-write mode. It does
+not accept a path, network address, or arbitrary export option.
+``root_squash`` is mandatory in the delivered provider; there is no
+``no_root_squash`` request surface.
 
-Each workspace owns one exports.d fragment. Publication is atomic and
-idempotent, reload failure restores the prior fragment, and unrelated
-administrator exports are never rewritten. The attachment response contains
+Each workspace/client attachment owns one exports.d fragment so independently
+registered compute hosts can be revoked without rewriting another attachment.
+Publication is atomic and idempotent, reload failure restores the prior
+fragment, and unrelated administrator exports are never rewritten. The
+attachment response contains
 only the server, export path, NFS version, access mode, recommended mount
 options, and workspace identity. DASObjectStore never remotely mounts the
 compute host.
+
+Attachment intent is durable in live SQLite. On daemon restart, requested,
+attached, and detach-requested rows are independently reconciled through
+broker inspection. The broker resolves the current registered client address
+and the daemon records that non-secret evidence. A missing aggregate, changed
+fragment, symlink, client-registry conflict, or reload failure is retained as
+``needs_review`` rather than rewritten or treated as transient success.
 
 NFS over FUSE is treated as a constrained provider combination. Inputs are
 materialized before attachment, daemon-side namespace mutation is forbidden

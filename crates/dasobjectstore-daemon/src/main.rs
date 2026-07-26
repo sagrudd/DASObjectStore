@@ -2,11 +2,11 @@ use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
-    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
-    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
-    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
-    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceProvisionWorkerConfig,
-    DEFAULT_WORKSPACE_HOST_SOCKET,
+    reconcile_workspace_nfs_attachments, reconcile_workspace_provision_operations,
+    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
+    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
+    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
+    WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -213,6 +213,23 @@ fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::Joi
                     }
                 }
                 Err(error) => eprintln!("workspace provision worker cycle deferred: {error}"),
+            }
+            match reconcile_workspace_nfs_attachments(&worker, &now_utc) {
+                Ok(report) => {
+                    let report_path =
+                        state_dir.join("workspace-operations/nfs-reconciliation-latest.json");
+                    if let Ok(payload) = serde_json::to_vec_pretty(&report) {
+                        let temporary = report_path.with_extension("json.tmp");
+                        if std::fs::read(&report_path).ok().as_deref() != Some(&payload) {
+                            if let Err(error) = std::fs::write(&temporary, payload)
+                                .and_then(|_| std::fs::rename(&temporary, &report_path))
+                            {
+                                eprintln!("workspace NFS report persistence failed: {error}");
+                            }
+                        }
+                    }
+                }
+                Err(error) => eprintln!("workspace NFS reconciliation deferred: {error}"),
             }
             thread::sleep(Duration::from_secs(5));
         }

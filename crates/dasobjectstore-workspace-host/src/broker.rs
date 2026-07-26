@@ -3,17 +3,20 @@ use crate::marker::sync_directory;
 use crate::quota::{apply_project_quota, verify_project_quota};
 use crate::{
     AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchMarker,
-    BranchPlan, BrokerConfig, BrokerRequest, BrokerResponse, RecoveryState, WorkspaceHostOperation,
-    PROTOCOL_VERSION,
+    BranchPlan, BrokerConfig, BrokerRequest, BrokerResponse, NfsAccessMode, NfsExportInspection,
+    NfsExportPlan, NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fs;
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const AGGREGATE_MARKER_FILE: &str = ".dasobjectstore-aggregate.json";
 const AGGREGATE_MARKER_SCHEMA: &str = "dasobjectstore.workspace_aggregate.v1";
+const EXPORTS_DIRECTORY: &str = "/etc/exports.d";
 
 #[derive(Debug)]
 pub enum BrokerError {
@@ -49,9 +52,10 @@ pub fn execute_request(
     request: &BrokerRequest,
 ) -> Result<BrokerResponse, BrokerError> {
     validate_request(config, request)?;
-    let (branches, aggregate) = match &request.operation {
+    let (branches, aggregate, export) = match &request.operation {
         WorkspaceHostOperation::Provision { branches } => (
             provision_all(config, &request.workspace_id, branches)?,
+            None,
             None,
         ),
         WorkspaceHostOperation::Inspect { branches } => (
@@ -62,21 +66,42 @@ pub fn execute_request(
                 cfg!(target_os = "linux"),
             )?,
             None,
+            None,
         ),
-        WorkspaceHostOperation::Rollback { branches } => {
-            (rollback_all(config, &request.workspace_id, branches)?, None)
-        }
+        WorkspaceHostOperation::Rollback { branches } => (
+            rollback_all(config, &request.workspace_id, branches)?,
+            None,
+            None,
+        ),
         WorkspaceHostOperation::MountAggregate { aggregate } => (
             Vec::new(),
             Some(mount_aggregate(config, &request.workspace_id, aggregate)?),
+            None,
         ),
         WorkspaceHostOperation::InspectAggregate { aggregate } => (
             Vec::new(),
             Some(inspect_aggregate(config, &request.workspace_id, aggregate)?),
+            None,
         ),
         WorkspaceHostOperation::UnmountAggregate { aggregate } => (
             Vec::new(),
             Some(unmount_aggregate(config, &request.workspace_id, aggregate)?),
+            None,
+        ),
+        WorkspaceHostOperation::AttachNfs { export } => (
+            Vec::new(),
+            None,
+            Some(attach_nfs(config, &request.workspace_id, export)?),
+        ),
+        WorkspaceHostOperation::InspectNfs { export } => (
+            Vec::new(),
+            None,
+            Some(inspect_nfs(config, &request.workspace_id, export)?),
+        ),
+        WorkspaceHostOperation::DetachNfs { export } => (
+            Vec::new(),
+            None,
+            Some(detach_nfs(config, &request.workspace_id, export)?),
         ),
     };
     Ok(BrokerResponse {
@@ -88,6 +113,7 @@ pub fn execute_request(
         error_message: None,
         branches,
         aggregate,
+        export,
     })
 }
 
@@ -113,6 +139,24 @@ fn validate_request(config: &BrokerConfig, request: &BrokerRequest) -> Result<()
                 ));
             }
             &aggregate.branches
+        }
+        WorkspaceHostOperation::AttachNfs { export }
+        | WorkspaceHostOperation::InspectNfs { export }
+        | WorkspaceHostOperation::DetachNfs { export } => {
+            validate_identity("mount_identity", &export.mount_identity)?;
+            validate_identity("client_id", &export.client_id)?;
+            if export.mount_identity != request.workspace_id {
+                return Err(BrokerError::InvalidRequest(
+                    "NFS mount identity must equal workspace identity".to_string(),
+                ));
+            }
+            if !config.nfs_clients.contains_key(&export.client_id) {
+                return Err(BrokerError::InvalidRequest(format!(
+                    "NFS client {} is not registered",
+                    export.client_id
+                )));
+            }
+            return Ok(());
         }
     };
     if branches.is_empty() || branches.len() > 256 {
@@ -142,6 +186,221 @@ fn validate_request(config: &BrokerConfig, request: &BrokerRequest) -> Result<()
         }
     }
     Ok(())
+}
+
+fn exports_directory() -> PathBuf {
+    PathBuf::from(EXPORTS_DIRECTORY)
+}
+
+fn export_fragment_path(workspace_id: &str, client_id: &str) -> PathBuf {
+    exports_directory().join(format!(
+        "dasobjectstore-workspace-{workspace_id}-{client_id}.exports"
+    ))
+}
+
+fn expected_export_line(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    export: &NfsExportPlan,
+) -> Result<String, BrokerError> {
+    let target = aggregate_root(config)?.join(workspace_id);
+    let client = config.nfs_clients.get(&export.client_id).ok_or_else(|| {
+        BrokerError::InvalidRequest(format!("NFS client {} is not registered", export.client_id))
+    })?;
+    let access = match export.access_mode {
+        NfsAccessMode::ReadOnly => "ro",
+        NfsAccessMode::ReadWrite => "rw",
+    };
+    Ok(format!(
+        "{} {}({access},sync,no_subtree_check,root_squash,secure)\n",
+        target.display(),
+        client.address_or_cidr
+    ))
+}
+
+fn inspect_nfs(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    export: &NfsExportPlan,
+) -> Result<NfsExportInspection, BrokerError> {
+    let target = aggregate_root(config)?.join(workspace_id);
+    let aggregate_ready = mounted_mergerfs_entry(&target)?.is_some_and(|(_, options)| {
+        options.split(',').any(|option| {
+            option == format!("fsname=dasobjectstore-workspace-{}", export.mount_identity)
+        })
+    });
+    let expected = expected_export_line(config, workspace_id, export)?;
+    let path = export_fragment_path(workspace_id, &export.client_id);
+    let (state, published, address_matches, access_mode_matches) = match fs::symlink_metadata(&path)
+    {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (
+            if aggregate_ready {
+                NfsExportRecoveryState::Absent
+            } else {
+                NfsExportRecoveryState::AggregateUnavailable
+            },
+            false,
+            false,
+            false,
+        ),
+        Err(error) => return Err(BrokerError::Io("stat NFS export fragment", error)),
+        Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => (
+            NfsExportRecoveryState::UnsafeFilesystemEntry,
+            false,
+            false,
+            false,
+        ),
+        Ok(_) => {
+            let actual = fs::read_to_string(&path)
+                .map_err(|error| BrokerError::Io("read NFS export fragment", error))?;
+            let client = &config.nfs_clients[&export.client_id].address_or_cidr;
+            let address_matches = actual.contains(&format!(" {client}("));
+            let access = match export.access_mode {
+                NfsAccessMode::ReadOnly => "ro",
+                NfsAccessMode::ReadWrite => "rw",
+            };
+            let access_mode_matches = actual.contains(&format!("({access},"));
+            (
+                if actual == expected && aggregate_ready {
+                    NfsExportRecoveryState::Ready
+                } else if !aggregate_ready {
+                    NfsExportRecoveryState::AggregateUnavailable
+                } else {
+                    NfsExportRecoveryState::FragmentConflict
+                },
+                actual == expected,
+                address_matches,
+                access_mode_matches,
+            )
+        }
+    };
+    Ok(NfsExportInspection {
+        mount_identity: export.mount_identity.clone(),
+        client_id: export.client_id.clone(),
+        resolved_address_or_cidr: config.nfs_clients[&export.client_id]
+            .address_or_cidr
+            .clone(),
+        state,
+        published,
+        root_squash: published,
+        address_matches,
+        access_mode_matches,
+    })
+}
+
+fn attach_nfs(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    export: &NfsExportPlan,
+) -> Result<NfsExportInspection, BrokerError> {
+    let before = inspect_nfs(config, workspace_id, export)?;
+    if before.state == NfsExportRecoveryState::Ready {
+        return Ok(before);
+    }
+    if before.state != NfsExportRecoveryState::Absent {
+        return Err(BrokerError::UnsafeEntry(format!(
+            "NFS export is not safely attachable: {:?}",
+            before.state
+        )));
+    }
+    let directory = exports_directory();
+    ensure_real_directory(&directory)?;
+    let path = export_fragment_path(workspace_id, &export.client_id);
+    let temporary = directory.join(format!(
+        ".dasobjectstore-workspace-{workspace_id}-{}.exports.{}.tmp",
+        export.client_id,
+        std::process::id(),
+    ));
+    let bytes = expected_export_line(config, workspace_id, export)?;
+    write_new_synced_file(&temporary, bytes.as_bytes())?;
+    if let Err(error) = fs::hard_link(&temporary, &path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(BrokerError::Io(
+            "publish NFS export fragment without replacement",
+            error,
+        ));
+    }
+    fs::remove_file(&temporary)
+        .map_err(|error| BrokerError::Io("remove NFS export temporary", error))?;
+    sync_directory(&directory)?;
+    if let Err(error) = reload_exports() {
+        let _ = fs::remove_file(&path);
+        let _ = sync_directory(&directory);
+        let _ = reload_exports();
+        return Err(error);
+    }
+    let after = inspect_nfs(config, workspace_id, export)?;
+    if after.state != NfsExportRecoveryState::Ready {
+        return Err(BrokerError::UnsafeEntry(
+            "NFS reload returned without the expected export becoming ready".to_string(),
+        ));
+    }
+    Ok(after)
+}
+
+fn detach_nfs(
+    config: &BrokerConfig,
+    workspace_id: &str,
+    export: &NfsExportPlan,
+) -> Result<NfsExportInspection, BrokerError> {
+    let before = inspect_nfs(config, workspace_id, export)?;
+    if before.state == NfsExportRecoveryState::Absent {
+        return Ok(before);
+    }
+    if before.state != NfsExportRecoveryState::Ready {
+        return Err(BrokerError::UnsafeEntry(
+            "refusing to detach an NFS export whose identity is not proven".to_string(),
+        ));
+    }
+    let directory = exports_directory();
+    let path = export_fragment_path(workspace_id, &export.client_id);
+    let retained = directory.join(format!(
+        ".dasobjectstore-workspace-{workspace_id}-{}.exports.{}.detaching",
+        export.client_id,
+        std::process::id(),
+    ));
+    fs::rename(&path, &retained)
+        .map_err(|error| BrokerError::Io("retain NFS export during detach", error))?;
+    sync_directory(&directory)?;
+    if let Err(error) = reload_exports() {
+        let _ = fs::rename(&retained, &path);
+        let _ = sync_directory(&directory);
+        let _ = reload_exports();
+        return Err(error);
+    }
+    fs::remove_file(&retained)
+        .map_err(|error| BrokerError::Io("remove detached NFS export", error))?;
+    sync_directory(&directory)?;
+    inspect_nfs(config, workspace_id, export)
+}
+
+fn write_new_synced_file(path: &Path, bytes: &[u8]) -> Result<(), BrokerError> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o644)
+        .open(path)
+        .map_err(|error| BrokerError::Io("create NFS export fragment", error))?;
+    file.write_all(bytes)
+        .map_err(|error| BrokerError::Io("write NFS export fragment", error))?;
+    file.sync_all()
+        .map_err(|error| BrokerError::Io("sync NFS export fragment", error))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644))
+        .map_err(|error| BrokerError::Io("set NFS export fragment permissions", error))
+}
+
+fn reload_exports() -> Result<(), BrokerError> {
+    let status = Command::new("/usr/sbin/exportfs")
+        .arg("-ra")
+        .status()
+        .map_err(|error| BrokerError::Io("reload NFS exports", error))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(BrokerError::Unsupported(format!(
+            "exportfs reload exited with {status}"
+        )))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -729,6 +988,12 @@ mod tests {
         let config = BrokerConfig {
             schema_version: 1,
             aggregate_root: Some(root.join("aggregates")),
+            nfs_clients: BTreeMap::from([(
+                "compute-a".to_string(),
+                crate::ManagedNfsClient {
+                    address_or_cidr: "192.168.1.48".to_string(),
+                },
+            )]),
             disks: BTreeMap::from([(
                 "disk-a".to_string(),
                 crate::ManagedDiskRoot {
@@ -744,6 +1009,50 @@ mod tests {
             quota_bytes: 4096,
         };
         (root, config, branch)
+    }
+
+    #[test]
+    fn nfs_export_is_derived_from_registered_client_and_forces_root_squash() {
+        let (root, config, _) = fixture();
+        let export = NfsExportPlan {
+            mount_identity: "workspace-a".to_string(),
+            client_id: "compute-a".to_string(),
+            access_mode: NfsAccessMode::ReadWrite,
+        };
+        let line = expected_export_line(&config, "workspace-a", &export).expect("export line");
+        assert_eq!(
+            line,
+            format!(
+                "{} 192.168.1.48(rw,sync,no_subtree_check,root_squash,secure)\n",
+                root.join("aggregates/workspace-a").display()
+            )
+        );
+        assert!(!line.contains("no_root_squash"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn nfs_request_rejects_unregistered_client_and_mismatched_mount() {
+        let (root, config, _) = fixture();
+        for (mount_identity, client_id) in [("other", "compute-a"), ("workspace-a", "unknown")] {
+            let request = BrokerRequest {
+                protocol_version: PROTOCOL_VERSION,
+                request_id: "request-nfs".to_string(),
+                workspace_id: "workspace-a".to_string(),
+                operation: WorkspaceHostOperation::InspectNfs {
+                    export: NfsExportPlan {
+                        mount_identity: mount_identity.to_string(),
+                        client_id: client_id.to_string(),
+                        access_mode: NfsAccessMode::ReadOnly,
+                    },
+                },
+            };
+            assert!(matches!(
+                execute_request(&config, &request),
+                Err(BrokerError::InvalidRequest(_))
+            ));
+        }
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

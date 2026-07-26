@@ -12,10 +12,17 @@ pub struct ManagedDiskRoot {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ManagedNfsClient {
+    pub address_or_cidr: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerConfig {
     pub schema_version: u32,
     #[serde(default)]
     pub aggregate_root: Option<PathBuf>,
+    #[serde(default)]
+    pub nfs_clients: BTreeMap<String, ManagedNfsClient>,
     pub disks: BTreeMap<String, ManagedDiskRoot>,
 }
 
@@ -81,8 +88,44 @@ impl BrokerConfig {
                 )));
             }
         }
+        for (client_id, client) in &self.nfs_clients {
+            validate_identity("client_id", client_id)?;
+            validate_private_address_or_cidr(&client.address_or_cidr)?;
+        }
         Ok(())
     }
+}
+
+fn validate_private_address_or_cidr(value: &str) -> Result<(), BrokerError> {
+    let (address, prefix) = value
+        .split_once('/')
+        .map_or((value, None), |(address, prefix)| (address, Some(prefix)));
+    let address = address.parse::<std::net::IpAddr>().map_err(|_| {
+        BrokerError::UnsafeConfig("NFS client must be an IP address or CIDR".to_string())
+    })?;
+    let private = match address {
+        std::net::IpAddr::V4(address) => address.is_private(),
+        std::net::IpAddr::V6(address) => {
+            (address.segments()[0] & 0xfe00) == 0xfc00 || address.is_unicast_link_local()
+        }
+    };
+    if !private {
+        return Err(BrokerError::UnsafeConfig(
+            "NFS client must be a private or local-network address".to_string(),
+        ));
+    }
+    if let Some(prefix) = prefix {
+        let prefix = prefix.parse::<u8>().map_err(|_| {
+            BrokerError::UnsafeConfig("NFS client CIDR prefix is invalid".to_string())
+        })?;
+        let maximum = if address.is_ipv4() { 32 } else { 128 };
+        if prefix == 0 || prefix > maximum {
+            return Err(BrokerError::UnsafeConfig(
+                "NFS client CIDR prefix is unsafe".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_identity(field: &'static str, value: &str) -> Result<(), BrokerError> {

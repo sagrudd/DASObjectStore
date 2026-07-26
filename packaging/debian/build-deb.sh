@@ -119,7 +119,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, mergerfs, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin
 Recommends: awscli
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
 X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker

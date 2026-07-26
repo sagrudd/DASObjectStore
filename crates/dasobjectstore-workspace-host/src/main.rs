@@ -75,6 +75,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
                 error_message: Some(error.to_string()),
                 branches: Vec::new(),
                 aggregate: None,
+                export: None,
             })
             .expect("serialize bounded error response")
         })
@@ -91,6 +92,7 @@ fn handle_connection(config: &BrokerConfig, mut stream: UnixStream) {
             error_message: Some(error),
             branches: Vec::new(),
             aggregate: None,
+            export: None,
         })
         .expect("serialize protocol error"),
     };

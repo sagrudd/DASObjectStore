@@ -141,6 +141,7 @@ Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       pam
 Requires:       mergerfs
+Requires:       nfs-utils
 Requires:       quota
 # Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
@@ -228,6 +229,19 @@ if [ -f /etc/dasobjectstore/workspace-host.json ]; then
       printf >&2 'DASObjectStore retained workspace broker config without aggregate_root; add it explicitly before workspace provisioning.\n'
     fi
   fi
+  if ! grep -q '"nfs_clients"' /etc/dasobjectstore/workspace-host.json; then
+    temporary="\$(mktemp /etc/dasobjectstore/workspace-host.json.tmp.XXXXXX)"
+    sed '/"aggregate_root"[[:space:]]*:/a\
+  "nfs_clients": {},' /etc/dasobjectstore/workspace-host.json >"\$temporary"
+    if grep -q '"nfs_clients"' "\$temporary"; then
+      chown root:root "\$temporary"
+      chmod 0640 "\$temporary"
+      mv -f "\$temporary" /etc/dasobjectstore/workspace-host.json
+    else
+      rm -f "\$temporary"
+      printf >&2 'DASObjectStore retained workspace broker config without nfs_clients; add the root-owned registry explicitly before NFS attachment.\n'
+    fi
+  fi
 fi
 if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
   chown root:"\$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
@@ -298,6 +312,7 @@ fi
 
 ensure_profile_layout "\$managed_root"
 install -d -o root -g root -m 0755 "\$workspace_aggregate_root"
+install -d -o root -g root -m 0755 /etc/exports.d
 repair_marked_managed_tree "\$managed_root/ssd"
 for root in "\$managed_root"/hdd/*; do
   repair_marked_managed_tree "\$root"

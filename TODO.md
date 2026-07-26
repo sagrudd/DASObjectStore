@@ -3738,7 +3738,7 @@ browser and appliance acceptance remain external validation gates.
   broker inspection evidence into workspace lifecycle state after restart.
 - [x] Implement the mergerfs aggregation provider and fail-closed health and
   readiness checks.
-- [ ] Implement managed host-restricted NFSv4 attach/detach/recovery with
+- [x] Implement managed host-restricted NFSv4 attach/detach/recovery with
   root-squash policy and machine-readable attachment contracts.
 - [ ] Implement durable, resumable, verified object materialization without
   exposing placement paths.

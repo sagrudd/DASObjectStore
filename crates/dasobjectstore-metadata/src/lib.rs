@@ -35,6 +35,7 @@ mod secure_fs;
 pub mod snapshot;
 pub mod store;
 pub mod workspace;
+pub mod workspace_attachments;
 pub mod workspace_operations;
 
 pub use assurance::{
@@ -183,6 +184,9 @@ pub use workspace::{
     list_workspace_reservations, publish_workspace_aggregate_ready, read_workspace_reservation,
     reserve_workspace, transition_workspace, MeasuredWorkspaceDisk, ReserveWorkspaceRequest,
     WorkspaceDiskAllocation, WorkspaceMetadataError, WorkspaceReservationSnapshot,
+};
+pub use workspace_attachments::{
+    list_workspace_attachments, publish_workspace_attachment_state, WorkspaceAttachmentSnapshot,
 };
 pub use workspace_operations::{
     checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,

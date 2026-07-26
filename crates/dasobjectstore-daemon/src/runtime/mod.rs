@@ -304,6 +304,8 @@ pub use subobject_capacity_persistence::{
     SubObjectCapacityLedgerPersistenceError,
 };
 pub use workspace_provision::{
-    reconcile_workspace_provision_operations, WorkspaceAggregateHealthReport,
-    WorkspaceProvisionRecoveryReport, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
+    reconcile_workspace_nfs_attachments, reconcile_workspace_provision_operations,
+    WorkspaceAggregateHealthReport, WorkspaceNfsReconciliationReport,
+    WorkspaceProvisionRecoveryReport, WorkspaceProvisionWorkerConfig,
+    DEFAULT_WORKSPACE_HOST_SOCKET,
 };

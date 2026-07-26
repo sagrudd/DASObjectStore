@@ -113,7 +113,7 @@ require_text "$storage_slice" "IOWeight=80"
 require_text "$storage_slice" "MemoryHigh=75%"
 require_text "$workspace_host_service" "User=root"
 require_text "$workspace_host_service" "ProtectSystem=strict"
-require_text "$workspace_host_service" "ReadWritePaths=/srv/dasobjectstore"
+require_text "$workspace_host_service" "ReadWritePaths=/srv/dasobjectstore /etc/exports.d"
 require_text "$workspace_host_service" "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN"
 require_text "$workspace_host_socket" "SocketGroup=dasobjectstore"
 require_text "$workspace_host_socket" "SocketMode=0660"
@@ -206,8 +206,9 @@ require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
-require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, mergerfs, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
 require_text "$workspace_host_config" '"aggregate_root": "/srv/dasobjectstore/workspaces"'
+require_text "$workspace_host_config" '"nfs_clients": {}'
 require_text "$postinst" 'ensure_workspace_aggregate_config'
 require_text "$postinst" 'workspace_aggregate_root="$managed_root/workspaces"'
 require_text "$build_deb" 'target/release/dasobjectstore-workspace-host'
@@ -241,6 +242,7 @@ require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_rpm" "cargo build --release -p dasobjectstore-workspace-host"
 require_text "$build_rpm" 'Requires:       quota'
 require_text "$build_rpm" 'Requires:       mergerfs'
+require_text "$build_rpm" 'Requires:       nfs-utils'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-workspace-host.socket'
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'

@@ -62,6 +62,24 @@ ensure_workspace_aggregate_config() {
   fi
 }
 
+ensure_workspace_nfs_config() {
+  local config="/etc/dasobjectstore/workspace-host.json"
+  local temporary
+  [[ -f "$config" ]] || return 0
+  grep -q '"nfs_clients"' "$config" && return 0
+  temporary="$(mktemp "${config}.tmp.XXXXXX")"
+  sed '/"aggregate_root"[[:space:]]*:/a\
+  "nfs_clients": {},' "$config" >"$temporary"
+  if grep -q '"nfs_clients"' "$temporary"; then
+    chown root:root "$temporary"
+    chmod 0640 "$temporary"
+    mv -f "$temporary" "$config"
+  else
+    rm -f "$temporary"
+    printf >&2 'DASObjectStore retained workspace broker config without nfs_clients; add the root-owned registry explicitly before NFS attachment.\n'
+  fi
+}
+
 ensure_report_provider() {
   local wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
   if [[ ! -x "$wrapper" ]]; then
@@ -199,6 +217,7 @@ if [[ -f /etc/dasobjectstore/workspace-host.json ]]; then
   chmod 0640 /etc/dasobjectstore/workspace-host.json
 fi
 ensure_workspace_aggregate_config
+ensure_workspace_nfs_config
 if [[ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]]; then
   chown root:"$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
   chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
@@ -207,6 +226,7 @@ fi
 reject_user_owned_managed_root "$managed_root"
 ensure_profile_layout "$managed_root"
 install -d -o root -g root -m 0755 "$workspace_aggregate_root"
+install -d -o root -g root -m 0755 /etc/exports.d
 repair_marked_managed_tree "$managed_root/ssd"
 if [[ -d "$managed_root/hdd" ]]; then
   chown root:root "$managed_root/hdd"

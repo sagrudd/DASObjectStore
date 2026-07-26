@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.140.0 - 2026-07-26
+
+- Add typed, path-free NFSv4 attach, inspect, and detach operations to the
+  root-owned workspace broker, with clients resolved exclusively through its
+  administrator-owned private-network registry.
+- Publish one exact root-squashed export fragment per workspace/client binding, validate the
+  mergerfs identity first, reload exports atomically, restore state on reload
+  failure, and refuse symlinks, foreign fragments, public clients, wildcard
+  clients, and caller-selected export options.
+- Reconcile durable workspace attachment intent after daemon restart, retain
+  conflicting evidence for review, persist the resolved client and hardened
+  option evidence, and package the NFS server and protected exports namespace
+  on Debian and RPM systems.
+
 ## 0.139.0 - 2026-07-26
 
 - Add typed mergerfs aggregate mount, inspection, recovery, and unmount

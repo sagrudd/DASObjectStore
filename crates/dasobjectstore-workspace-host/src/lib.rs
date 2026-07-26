@@ -11,11 +11,12 @@ mod protocol;
 mod quota;
 
 pub use broker::{execute_request, BrokerError};
-pub use config::{BrokerConfig, ManagedDiskRoot};
+pub use config::{BrokerConfig, ManagedDiskRoot, ManagedNfsClient};
 pub use marker::{BranchMarker, MARKER_FILE, MARKER_SCHEMA_VERSION};
 pub use protocol::{
     AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection, BranchPlan,
-    BrokerRequest, BrokerResponse, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
+    BrokerRequest, BrokerResponse, NfsAccessMode, NfsExportInspection, NfsExportPlan,
+    NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 
 use std::io::{BufRead, BufReader, Write};

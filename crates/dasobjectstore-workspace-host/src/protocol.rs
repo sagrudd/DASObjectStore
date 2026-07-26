@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BrokerRequest {
@@ -19,6 +19,23 @@ pub enum WorkspaceHostOperation {
     MountAggregate { aggregate: AggregatePlan },
     InspectAggregate { aggregate: AggregatePlan },
     UnmountAggregate { aggregate: AggregatePlan },
+    AttachNfs { export: NfsExportPlan },
+    InspectNfs { export: NfsExportPlan },
+    DetachNfs { export: NfsExportPlan },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NfsExportPlan {
+    pub mount_identity: String,
+    pub client_id: String,
+    pub access_mode: NfsAccessMode,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NfsAccessMode {
+    ReadOnly,
+    ReadWrite,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -47,6 +64,30 @@ pub struct BrokerResponse {
     pub branches: Vec<BranchInspection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aggregate: Option<AggregateInspection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export: Option<NfsExportInspection>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NfsExportInspection {
+    pub mount_identity: String,
+    pub client_id: String,
+    pub resolved_address_or_cidr: String,
+    pub state: NfsExportRecoveryState,
+    pub published: bool,
+    pub root_squash: bool,
+    pub address_matches: bool,
+    pub access_mode_matches: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NfsExportRecoveryState {
+    Absent,
+    Ready,
+    FragmentConflict,
+    AggregateUnavailable,
+    UnsafeFilesystemEntry,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

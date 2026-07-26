@@ -9,14 +9,15 @@ use dasobjectstore_core::workspace::{
 };
 use dasobjectstore_metadata::{
     checkpoint_workspace_operation, claim_workspace_operation, finish_workspace_operation,
-    list_workspace_operations, list_workspace_reservations, publish_workspace_aggregate_ready,
+    list_workspace_attachments, list_workspace_operations, list_workspace_reservations,
+    publish_workspace_aggregate_ready, publish_workspace_attachment_state,
     read_workspace_reservation, recover_expired_workspace_operations, transition_workspace,
     WorkspaceOperationRecoveryAction, WorkspaceReservationSnapshot,
 };
 use dasobjectstore_workspace_host::{
     request_broker, AggregateInspection, AggregatePlan, AggregateRecoveryState, BranchInspection,
-    BranchPlan, BrokerRequest, BrokerResponse, RecoveryState, WorkspaceHostOperation,
-    PROTOCOL_VERSION,
+    BranchPlan, BrokerRequest, BrokerResponse, NfsAccessMode, NfsExportInspection, NfsExportPlan,
+    NfsExportRecoveryState, RecoveryState, WorkspaceHostOperation, PROTOCOL_VERSION,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -49,6 +50,15 @@ pub struct WorkspaceAggregateHealthReport {
     pub state: String,
     pub reason: String,
     pub aggregate: Option<AggregateInspection>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkspaceNfsReconciliationReport {
+    pub workspace_id: String,
+    pub client_id: String,
+    pub state: String,
+    pub reason: String,
+    pub export: Option<NfsExportInspection>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -96,6 +106,117 @@ pub fn reconcile_workspace_provision_operations(
             request_broker(&config.broker_socket_path, request).map_err(|error| error.to_string())
         },
     )
+}
+
+/// Reconcile requested NFS attachments from durable metadata after startup.
+///
+/// Client network identities are deliberately resolved only by the root-owned
+/// broker registry. The daemon persists the resolved non-secret address as
+/// evidence, but never supplies an address, export path, or export option.
+pub fn reconcile_workspace_nfs_attachments(
+    config: &WorkspaceProvisionWorkerConfig,
+    now_utc: &str,
+) -> Result<Vec<WorkspaceNfsReconciliationReport>, WorkspaceProvisionError> {
+    let attachments =
+        list_workspace_attachments(&config.live_sqlite_path).map_err(metadata_error)?;
+    let mut reports = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        let access_mode = match attachment.mode.as_str() {
+            "read_only" => NfsAccessMode::ReadOnly,
+            "read_write" => NfsAccessMode::ReadWrite,
+            _ => {
+                reports.push(WorkspaceNfsReconciliationReport {
+                    workspace_id: attachment.workspace_id,
+                    client_id: attachment.client_id,
+                    state: "needs_review".to_string(),
+                    reason: "attachment mode is not recognized".to_string(),
+                    export: None,
+                });
+                continue;
+            }
+        };
+        let plan = NfsExportPlan {
+            mount_identity: attachment.workspace_id.clone(),
+            client_id: attachment.client_id.clone(),
+            access_mode,
+        };
+        let operation = match attachment.state.as_str() {
+            "requested" => WorkspaceHostOperation::AttachNfs {
+                export: plan.clone(),
+            },
+            "attached" => WorkspaceHostOperation::InspectNfs {
+                export: plan.clone(),
+            },
+            "detach_requested" => WorkspaceHostOperation::DetachNfs {
+                export: plan.clone(),
+            },
+            _ => {
+                reports.push(WorkspaceNfsReconciliationReport {
+                    workspace_id: attachment.workspace_id,
+                    client_id: attachment.client_id,
+                    state: "needs_review".to_string(),
+                    reason: "attachment state is not recognized".to_string(),
+                    export: None,
+                });
+                continue;
+            }
+        };
+        let request = BrokerRequest {
+            protocol_version: PROTOCOL_VERSION,
+            request_id: format!("nfs-{}-{}", attachment.workspace_id, attachment.client_id),
+            workspace_id: attachment.workspace_id.clone(),
+            operation,
+        };
+        let response = request_broker(&config.broker_socket_path, &request)
+            .map_err(|error| WorkspaceProvisionError::Broker(error.to_string()))?;
+        let export = response.export.ok_or_else(|| {
+            WorkspaceProvisionError::Broker(
+                "workspace broker omitted NFS export inspection".to_string(),
+            )
+        })?;
+        let (next_state, reason) = match attachment.state.as_str() {
+            "requested" if export.state == NfsExportRecoveryState::Ready => {
+                ("attached", "root-squashed NFS export attached")
+            }
+            "attached" if export.state == NfsExportRecoveryState::Ready => {
+                ("attached", "root-squashed NFS export remains verified")
+            }
+            "detach_requested" if export.state == NfsExportRecoveryState::Absent => {
+                ("detached", "NFS export detached and reload verified")
+            }
+            _ => (
+                "needs_review",
+                "NFS export evidence does not match authority",
+            ),
+        };
+        let options = serde_json::json!({
+            "nfs_version": 4,
+            "root_squash": true,
+            "access_mode": attachment.mode,
+        })
+        .to_string();
+        if next_state != attachment.state {
+            publish_workspace_attachment_state(
+                &config.live_sqlite_path,
+                &attachment.workspace_id,
+                &attachment.client_id,
+                &attachment.state,
+                next_state,
+                &export.resolved_address_or_cidr,
+                &options,
+                now_utc,
+            )
+            .map_err(metadata_error)?;
+        }
+        reports.push(WorkspaceNfsReconciliationReport {
+            workspace_id: attachment.workspace_id,
+            client_id: attachment.client_id,
+            state: next_state.to_string(),
+            reason: reason.to_string(),
+            export: Some(export),
+        });
+    }
+    Ok(reports)
 }
 
 fn reconcile_workspace_provision_operations_with<F>(
@@ -606,7 +727,10 @@ where
             .collect::<std::collections::BTreeSet<_>>(),
         WorkspaceHostOperation::MountAggregate { .. }
         | WorkspaceHostOperation::InspectAggregate { .. }
-        | WorkspaceHostOperation::UnmountAggregate { .. } => {
+        | WorkspaceHostOperation::UnmountAggregate { .. }
+        | WorkspaceHostOperation::AttachNfs { .. }
+        | WorkspaceHostOperation::InspectNfs { .. }
+        | WorkspaceHostOperation::DetachNfs { .. } => {
             return Err(WorkspaceProvisionError::InvalidAuthority(
                 "aggregate operation used through branch response validator".to_string(),
             ))
@@ -812,6 +936,9 @@ mod tests {
                     WorkspaceHostOperation::MountAggregate { .. } => "mount_aggregate",
                     WorkspaceHostOperation::InspectAggregate { .. } => "inspect_aggregate",
                     WorkspaceHostOperation::UnmountAggregate { .. } => "unmount_aggregate",
+                    WorkspaceHostOperation::AttachNfs { .. } => "attach_nfs",
+                    WorkspaceHostOperation::InspectNfs { .. } => "inspect_nfs",
+                    WorkspaceHostOperation::DetachNfs { .. } => "detach_nfs",
                 });
                 let mut response = response(
                     request,
@@ -887,6 +1014,7 @@ mod tests {
                         source_matches: false,
                         options_match: false,
                     }),
+                    export: None,
                 }),
                 _ => panic!("terminal workspace health must only inspect"),
             },
@@ -956,6 +1084,7 @@ mod tests {
                         source_matches: false,
                         options_match: false,
                     }),
+                    export: None,
                 }),
                 _ => Ok(response(request, RecoveryState::Ready)),
             },
@@ -979,7 +1108,10 @@ mod tests {
             | WorkspaceHostOperation::Rollback { branches } => Some(&branches[0]),
             WorkspaceHostOperation::MountAggregate { .. }
             | WorkspaceHostOperation::InspectAggregate { .. }
-            | WorkspaceHostOperation::UnmountAggregate { .. } => None,
+            | WorkspaceHostOperation::UnmountAggregate { .. }
+            | WorkspaceHostOperation::AttachNfs { .. }
+            | WorkspaceHostOperation::InspectNfs { .. }
+            | WorkspaceHostOperation::DetachNfs { .. } => None,
         };
         let aggregate = match &request.operation {
             WorkspaceHostOperation::InspectAggregate { aggregate } => Some(AggregateInspection {
@@ -1024,6 +1156,7 @@ mod tests {
                 })
                 .unwrap_or_default(),
             aggregate,
+            export: None,
         }
     }
 
