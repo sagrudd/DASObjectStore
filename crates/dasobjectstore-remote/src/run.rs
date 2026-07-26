@@ -5,8 +5,8 @@ use crate::authenticate::{
     authenticate, prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
 };
 use crate::aws_profile::{
-    default_profile_name, install_profile, status as s3_profile_status, AwsProfileAssociation,
-    AwsProfileError,
+    default_profile_name, install_profile, restore_profile_state, snapshot_profile_state,
+    status as s3_profile_status, AwsProfileAssociation, AwsProfileError,
 };
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
@@ -15,9 +15,11 @@ use crate::cli::{
     UploadArgs,
 };
 use crate::config::{
-    default_config_path, read_optional_config, write_config, RemoteConfig, RemoteConfigError,
-    RemoteConfigOverrides, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionCredentials,
-    RemoteSessionRenewalMetadata, RemoteUploadSession, DEFAULT_PROFILE, DEFAULT_REGION,
+    acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
+    repair_config, write_config, write_config_locked, RemoteConfig, RemoteConfigError,
+    RemoteConfigOverrides, RemoteObjectStoreGrant, RemotePairedAppliance, RemoteSessionBinding,
+    RemoteSessionCredentials, RemoteSessionRenewalMetadata, RemoteUploadSession, DEFAULT_PROFILE,
+    DEFAULT_REGION, REMOTE_CONFIG_SCHEMA_VERSION,
 };
 use crate::control::{
     renew_store_session_if_due, ReconcileS3Request, RemoteControlClient, RemoteControlError,
@@ -66,6 +68,10 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
             ConfigCommand::Show(args) => run_config_show(cli, args.json(), writer),
+            ConfigCommand::Doctor(args) => run_config_doctor(cli, args.json(), writer),
+            ConfigCommand::Repair(args) => {
+                run_config_repair(cli, args.apply(), args.json(), writer)
+            }
         },
         RemoteCommand::Stores(args) => match args.command() {
             StoresCommand::List(args) => run_store_list(cli, args, writer),
@@ -272,75 +278,134 @@ fn run_operation_wait(
 fn control_client_for_operation(
     config: &RemoteConfig,
 ) -> Result<RemoteControlClient, RemoteRunError> {
-    let appliance = config
-        .default_appliance_id
-        .as_deref()
-        .and_then(|id| {
-            config
-                .paired_appliances
-                .iter()
-                .find(|item| item.appliance_id == id)
-        })
-        .or_else(|| config.paired_appliances.first())
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting(
-                "no paired appliance is configured; authenticate first".to_string(),
-            )
-        })?;
-    let store = appliance
-        .default_object_store
-        .as_deref()
-        .or_else(|| {
-            appliance
-                .object_stores
-                .first()
-                .map(|grant| grant.object_store.as_str())
-        })
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting("paired appliance has no ObjectStore grant".to_string())
-        })?;
+    let appliance_id = config.default_appliance_id.as_deref().ok_or_else(|| {
+        RemoteRunError::UploadRouting(
+            "no canonical default appliance is configured; authenticate first".to_string(),
+        )
+    })?;
+    let stores = config
+        .session_bindings
+        .iter()
+        .filter(|binding| binding.appliance_id == appliance_id)
+        .map(|binding| binding.store_id.as_str())
+        .collect::<Vec<_>>();
+    let store =
+        match stores.as_slice() {
+            [store] => *store,
+            [] => {
+                return Err(RemoteRunError::UploadRouting(
+                    "the canonical default appliance has no active session generation".to_string(),
+                ))
+            }
+            _ => return Err(RemoteRunError::UploadRouting(
+                "ambiguous_session_state: operation status requires an exact ObjectStore binding"
+                    .to_string(),
+            )),
+        };
+    config
+        .session_binding(store)
+        .map_err(RemoteRunError::Config)?;
     RemoteControlClient::for_store(config, store, false)
         .map(|(client, _)| client)
         .map_err(Into::into)
 }
 
+fn operation_store(config: &RemoteConfig) -> Result<String, RemoteRunError> {
+    let appliance_id = config.default_appliance_id.as_deref().ok_or_else(|| {
+        RemoteRunError::UploadRouting(
+            "no canonical default appliance is configured; authenticate first".to_string(),
+        )
+    })?;
+    let stores = config
+        .session_bindings
+        .iter()
+        .filter(|binding| binding.appliance_id == appliance_id)
+        .map(|binding| binding.store_id.clone())
+        .collect::<Vec<_>>();
+    match stores.as_slice() {
+        [store] => Ok(store.clone()),
+        [] => Err(RemoteRunError::UploadRouting(
+            "the canonical default appliance has no active session generation".to_string(),
+        )),
+        _ => Err(RemoteRunError::UploadRouting(
+            "ambiguous_session_state: operation status requires an exact ObjectStore binding"
+                .to_string(),
+        )),
+    }
+}
+
 fn resolved_control_config(cli: &RemoteCli, store: &str) -> Result<RemoteConfig, RemoteRunError> {
+    let path = config_path(cli)?;
+    let _ = read_optional_config(&path)?;
+    let transaction_lock = acquire_config_transaction(&path)?;
     let mut config = resolved_valid_config(cli)?;
     if renew_store_session_if_due(&mut config, store)? {
-        write_config(&config_path(cli)?, &config)?;
+        let binding = config.session_binding(store)?.clone();
+        if let Some(profile) = &binding.s3_profile {
+            let backup = snapshot_profile_state()?;
+            let context = connection_context_from_binding(&binding)?;
+            let existing = config
+                .s3_profiles
+                .iter()
+                .find(|association| association.profile == *profile)
+                .cloned();
+            let update = install_profile(&context, profile, existing.as_ref(), true, true);
+            match update {
+                Ok((association, _)) => {
+                    config.s3_profiles.retain(|item| item.profile != *profile);
+                    config.s3_profiles.push(association);
+                }
+                Err(error) => {
+                    restore_profile_state(&backup)?;
+                    return Err(error.into());
+                }
+            }
+        }
+        write_config_locked(&path, &config, &transaction_lock)?;
     }
     Ok(config)
 }
 
+fn connection_context_from_binding(
+    binding: &RemoteSessionBinding,
+) -> Result<RemoteConnectionContext, RemoteRunError> {
+    let renewal = binding.session.renewal.as_ref().ok_or_else(|| {
+        RemoteRunError::UploadRouting(
+            "session_expired_reauthentication_required: renewal metadata is unavailable"
+                .to_string(),
+        )
+    })?;
+    Ok(RemoteConnectionContext {
+        schema_version: "dasobjectstore.remote_authenticate.v3".to_string(),
+        appliance_id: binding.appliance_id.clone(),
+        appliance_host: reqwest::Url::parse(&binding.control_base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .ok_or_else(|| {
+                RemoteRunError::UploadRouting(
+                    "configuration_migration_required: control endpoint is invalid".to_string(),
+                )
+            })?,
+        endpoint_url: binding.s3_endpoint_url.clone(),
+        region: binding.region.clone(),
+        addressing_style: binding.addressing_style.clone(),
+        object_store: binding.store_id.clone(),
+        bucket: binding.bucket.clone(),
+        access_key_id: binding.session.credentials.access_key_id.clone(),
+        secret_access_key: binding.session.credentials.secret_access_key.clone(),
+        session_token: binding.session.credentials.session_token.clone(),
+        session_id: binding.session.session_id.clone(),
+        issued_at_utc: binding.session.issued_at.clone(),
+        expires_at_utc: binding.session.expires_at.clone(),
+        renew_url: renewal.renew_url.clone(),
+        renew_after_utc: renewal.renew_after.clone(),
+        renewal_token: renewal.renewal_token.clone().unwrap_or_default(),
+    })
+}
+
 fn resolved_control_config_for_operation(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
     let config = resolved_valid_config(cli)?;
-    let appliance = config
-        .default_appliance_id
-        .as_deref()
-        .and_then(|id| {
-            config
-                .paired_appliances
-                .iter()
-                .find(|item| item.appliance_id == id)
-        })
-        .or_else(|| config.paired_appliances.first())
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting(
-                "no paired appliance is configured; authenticate first".to_string(),
-            )
-        })?;
-    let store = appliance
-        .default_object_store
-        .clone()
-        .or_else(|| {
-            appliance
-                .object_stores
-                .first()
-                .map(|grant| grant.object_store.clone())
-        })
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting("paired appliance has no ObjectStore grant".to_string())
-        })?;
+    let store = operation_store(&config)?;
     resolved_control_config(cli, &store)
 }
 
@@ -473,36 +538,97 @@ fn run_authenticate(
         args.object_store(),
         args.session_lifetime_seconds(),
     )?;
+    if trust
+        .appliance_id
+        .as_deref()
+        .is_some_and(|appliance_id| appliance_id != context.appliance_id)
+    {
+        return Err(RemoteRunError::Config(RemoteConfigError::Integrity {
+            code: "certificate_binding_mismatch",
+            message: "the authenticated appliance identity does not match enrolled TLS trust"
+                .to_string(),
+            remediation: format!(
+                "dasobjectstore-remote trust inspect {} --https-port {} --json",
+                args.host_or_ip(),
+                args.https_port()
+            ),
+        }));
+    }
     let profile_name = args
         .s3_profile()
         .map(str::to_string)
         .map(Ok)
         .unwrap_or_else(|| default_profile_name(&context.object_store))?;
-    let prior_config = read_optional_config(&config_path(cli)?)?.unwrap_or_else(empty_config);
+    let path = config_path(cli)?;
+    // Trigger a supported legacy migration before taking the transaction lock;
+    // then reload under the lock so concurrent authentication cannot publish
+    // from a stale base generation.
+    let _ = read_optional_config(&path)?;
+    let transaction_lock = acquire_config_transaction(&path)?;
+    let prior_config = read_optional_config(&path)?.unwrap_or_else(empty_config);
     let existing = prior_config
         .s3_profiles
         .iter()
-        .find(|entry| entry.profile == profile_name);
-    let (association, verified) = if args.set_s3_config() {
-        let (association, verified) = install_profile(
+        .find(|entry| entry.profile == profile_name)
+        .cloned();
+    let aws_backup = args
+        .set_s3_config()
+        .then(snapshot_profile_state)
+        .transpose()?;
+    let transaction = (|| -> Result<bool, RemoteRunError> {
+        let (association, verified) = if args.set_s3_config() {
+            let (association, verified) = install_profile(
+                &context,
+                &profile_name,
+                existing.as_ref(),
+                args.force(),
+                args.verify_s3(),
+            )?;
+            (Some(association), verified)
+        } else {
+            (None, false)
+        };
+        let trust_record = crate::trust::load_trust(args.host_or_ip(), args.https_port())?
+            .ok_or_else(|| {
+                RemoteRunError::UploadRouting(
+                    "certificate_binding_mismatch: enrolled appliance trust disappeared during authentication"
+                        .to_string(),
+                )
+            })?;
+        let candidate = authenticated_context_config(
+            prior_config,
+            &username,
             &context,
-            &profile_name,
-            existing,
-            args.force(),
-            args.verify_s3(),
+            args.https_port(),
+            association,
+            &trust_record.fingerprint_sha256,
+            &trust_record.spki_sha256,
         )?;
-        (Some(association), verified)
-    } else {
-        (None, false)
+        let (control, _) =
+            RemoteControlClient::for_store(&candidate, &context.object_store, false)?;
+        let readiness = control.readiness(&context.object_store)?;
+        if readiness
+            .get("catalogue_ready")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        {
+            return Err(RemoteRunError::UploadRouting(
+                "new HTTPS control session failed readiness verification; the previous generation remains authoritative"
+                    .to_string(),
+            ));
+        }
+        write_config_locked(&path, &candidate, &transaction_lock)?;
+        Ok(verified)
+    })();
+    let verified = match transaction {
+        Ok(verified) => verified,
+        Err(error) => {
+            if let Some(backup) = &aws_backup {
+                restore_profile_state(backup)?;
+            }
+            return Err(error);
+        }
     };
-    persist_authenticated_context(
-        cli,
-        &username,
-        &context,
-        trust.appliance_id.as_deref(),
-        args.https_port(),
-        association,
-    )?;
     let safe = serde_json::json!({
         "authenticated": true,
         "server": context.appliance_host,
@@ -524,29 +650,30 @@ fn run_authenticate(
     Ok(())
 }
 
-fn persist_authenticated_context(
-    cli: &RemoteCli,
+fn authenticated_context_config(
+    mut config: RemoteConfig,
     username: &str,
     context: &RemoteConnectionContext,
-    enrolled_appliance_id: Option<&str>,
     https_port: u16,
     association: Option<AwsProfileAssociation>,
-) -> Result<(), RemoteRunError> {
-    let path = config_path(cli)?;
-    let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    trust_fingerprint_sha256: &str,
+    trust_spki_sha256: &str,
+) -> Result<RemoteConfig, RemoteRunError> {
+    config.schema_version = REMOTE_CONFIG_SCHEMA_VERSION.to_string();
     config.endpoint_url = context.endpoint_url.clone();
     config.region = context.region.clone();
     config.auth_authority = RemoteAuthAuthority::LocalPassword;
     config.username = Some(username.to_string());
+    let profile = association
+        .as_ref()
+        .map(|association| association.profile.clone());
     if let Some(association) = association {
         config
             .s3_profiles
             .retain(|entry| entry.profile != association.profile);
         config.s3_profiles.push(association);
     }
-    let appliance_id = enrolled_appliance_id
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("standalone:{}", context.appliance_host));
+    let appliance_id = context.appliance_id.clone();
     config.default_appliance_id = Some(appliance_id.clone());
     let session = RemoteUploadSession {
         session_id: context.session_id.clone(),
@@ -572,6 +699,25 @@ fn persist_authenticated_context(
         writer_group: None,
         object_type: "store_scoped_session".to_string(),
     };
+    // Host aliases and historical endpoint spellings cannot create a second
+    // logical session. The server-returned appliance/store identities are the
+    // sole replacement key.
+    config
+        .session_bindings
+        .retain(|binding| binding.store_id != context.object_store);
+    config.session_bindings.push(RemoteSessionBinding {
+        appliance_id: appliance_id.clone(),
+        store_id: context.object_store.clone(),
+        control_base_url: format!("https://{}:{}", context.appliance_host, https_port),
+        s3_endpoint_url: context.endpoint_url.clone(),
+        bucket: context.bucket.clone(),
+        region: context.region.clone(),
+        addressing_style: context.addressing_style.clone(),
+        s3_profile: profile,
+        trust_fingerprint_sha256: trust_fingerprint_sha256.to_string(),
+        trust_spki_sha256: trust_spki_sha256.to_string(),
+        session: session.clone(),
+    });
     if let Some(existing) = config
         .paired_appliances
         .iter_mut()
@@ -585,7 +731,7 @@ fn persist_authenticated_context(
         existing.auth_authority = RemoteAuthAuthority::LocalPassword;
         existing.paired_actor = Some(username.to_string());
         existing.default_object_store = Some(context.object_store.clone());
-        existing.session = Some(session);
+        existing.session = None;
         existing
             .object_stores
             .retain(|entry| entry.object_store != context.object_store);
@@ -602,12 +748,12 @@ fn persist_authenticated_context(
             auth_authority: RemoteAuthAuthority::LocalPassword,
             paired_actor: Some(username.to_string()),
             default_object_store: Some(context.object_store.clone()),
-            session: Some(session),
+            session: None,
             object_stores: vec![grant],
         });
     }
-    write_config(&path, &config)?;
-    Ok(())
+    config.validate_session_integrity()?;
+    Ok(config)
 }
 
 fn run_s3_status(
@@ -618,18 +764,39 @@ fn run_s3_status(
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
     let config = read_optional_config(&config_path(cli)?)?.unwrap_or_else(empty_config);
-    let association = config
+    let binding = config.session_binding(store)?;
+    let associations = config
         .s3_profiles
         .iter()
-        .find(|entry| {
+        .filter(|entry| {
             entry.store_id == store
                 && requested_profile.is_none_or(|profile| profile == entry.profile)
         })
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting(format!(
+        .collect::<Vec<_>>();
+    let association = match associations.as_slice() {
+        [association] => *association,
+        [] => {
+            return Err(RemoteRunError::UploadRouting(format!(
                 "no DASObjectStore-managed AWS profile is associated with ObjectStore {store}; authenticate with --set-s3-config"
+            )))
+        }
+        _ => {
+            return Err(RemoteRunError::UploadRouting(
+                "profile_association_mismatch: multiple AWS profiles match the requested ObjectStore"
+                    .to_string(),
             ))
-        })?;
+        }
+    };
+    if binding.s3_profile.as_deref() != Some(association.profile.as_str())
+        || binding.s3_endpoint_url != association.endpoint_url
+        || binding.bucket != association.bucket
+        || binding.session.expires_at != association.expires_at.clone().unwrap_or_default()
+    {
+        return Err(RemoteRunError::UploadRouting(
+            "s3_control_generation_mismatch: AWS and HTTPS control state are not from the same committed generation; run `dasobjectstore-remote config repair --dry-run --json`"
+                .to_string(),
+        ));
+    }
     serde_json::to_writer_pretty(&mut *writer, &s3_profile_status(association, true)?)?;
     writer.write_all(b"\n")?;
     Ok(())
@@ -826,6 +993,29 @@ fn run_config_show(
             }
         }
     }
+    Ok(())
+}
+
+fn run_config_doctor(
+    cli: &RemoteCli,
+    _json: bool,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let report = doctor_config(&config_path(cli)?)?;
+    serde_json::to_writer_pretty(&mut *writer, &report)?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn run_config_repair(
+    cli: &RemoteCli,
+    apply: bool,
+    _json: bool,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let report = repair_config(&config_path(cli)?, apply)?;
+    serde_json::to_writer_pretty(&mut *writer, &report)?;
+    writer.write_all(b"\n")?;
     Ok(())
 }
 
@@ -1248,7 +1438,7 @@ fn resolve_upload_route(
     requested_object_store: &str,
     reviewed_bucket: Option<&str>,
 ) -> Result<RemoteUploadRoute, RemoteRunError> {
-    if config.paired_appliances.is_empty() {
+    if config.session_bindings.is_empty() && config.paired_appliances.is_empty() {
         return Ok(RemoteUploadRoute {
             object_store: requested_object_store.to_string(),
             bucket: reviewed_bucket
@@ -1259,21 +1449,31 @@ fn resolve_upload_route(
             session_renewal_status: None,
         });
     }
-
-    let Some((appliance, grant)) = config.paired_appliances.iter().find_map(|appliance| {
+    if config.paired_appliances.iter().any(|appliance| {
         appliance
-            .writable_object_store(requested_object_store)
-            .map(|grant| (appliance, grant))
-    }) else {
+            .object_stores
+            .iter()
+            .any(|grant| grant.bucket == requested_object_store)
+    }) {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "{requested_object_store} is an S3 bucket name; choose a writable ObjectStore name"
+        )));
+    }
+
+    let binding = config
+        .session_binding(requested_object_store)
+        .map_err(RemoteRunError::Config)?;
+    let Some(grant) = config
+        .paired_appliances
+        .iter()
+        .filter(|appliance| appliance.appliance_id == binding.appliance_id)
+        .find_map(|appliance| appliance.writable_object_store(requested_object_store))
+    else {
         return Err(RemoteRunError::UploadRouting(format!(
             "ObjectStore {requested_object_store} is not writable in the paired appliance grants; run easyconnect again or choose a writable ObjectStore name"
         )));
     };
-    let session = appliance.session.as_ref().ok_or_else(|| {
-        RemoteRunError::UploadRouting(format!(
-            "ObjectStore {requested_object_store} is paired but has no active remote upload session; run dasobjectstore-remote easyconnect"
-        ))
-    })?;
+    let session = &binding.session;
     reject_expired_session(requested_object_store, session, SystemTime::now())?;
 
     Ok(RemoteUploadRoute {
@@ -1356,6 +1556,8 @@ fn resolved_config(cli: &RemoteCli) -> Result<RemoteConfig, RemoteRunError> {
 
 fn empty_config() -> RemoteConfig {
     RemoteConfig {
+        schema_version: REMOTE_CONFIG_SCHEMA_VERSION.to_string(),
+        generation: 0,
         endpoint_url: String::new(),
         region: DEFAULT_REGION.to_string(),
         profile: DEFAULT_PROFILE.to_string(),
@@ -1365,6 +1567,7 @@ fn empty_config() -> RemoteConfig {
         default_appliance_id: None,
         paired_appliances: Vec::new(),
         s3_profiles: Vec::new(),
+        session_bindings: Vec::new(),
     }
 }
 
@@ -1515,10 +1718,11 @@ mod tests {
     };
     use crate::auth::RemoteAuthAuthority;
     use crate::cli::RemoteCli;
+    use crate::config::REMOTE_CONFIG_SCHEMA_VERSION;
     use crate::config::{
         read_optional_config, write_config, RemoteConfig, RemoteObjectStoreGrant,
-        RemotePairedAppliance, RemoteSessionCredentials, RemoteSessionRenewalMetadata,
-        RemoteUploadSession,
+        RemotePairedAppliance, RemoteSessionBinding, RemoteSessionCredentials,
+        RemoteSessionRenewalMetadata, RemoteUploadSession,
     };
     use clap::Parser;
     use dasobjectstore_daemon::{
@@ -1642,6 +1846,7 @@ mod tests {
     fn unpaired_daemon_route_keeps_logical_store_and_reviewed_bucket_distinct() {
         let mut config = paired_config();
         config.paired_appliances.clear();
+        config.session_bindings.clear();
 
         let route =
             resolve_upload_route(&config, "pinakotheke_media", Some("dos-pinakotheke-media"))
@@ -1684,21 +1889,18 @@ mod tests {
     #[test]
     fn paired_upload_rejects_missing_session_before_using_credentials() {
         let mut config = paired_config();
-        config.paired_appliances[0].session = None;
+        config.session_bindings.clear();
 
         let err = resolve_upload_route(&config, "zymo_fecal_2025.05", None)
             .expect_err("missing session rejected");
 
-        assert!(err.to_string().contains("no active remote upload session"));
+        assert!(err.to_string().contains("configuration_migration_required"));
     }
 
     #[test]
     fn paired_upload_rejects_expired_session_before_using_credentials() {
         let mut config = paired_config();
-        let session = config.paired_appliances[0]
-            .session
-            .as_mut()
-            .expect("session");
+        let session = &mut config.session_bindings[0].session;
         session.expires_at = "2000-01-01T00:00:00Z".to_string();
 
         let err =
@@ -1712,10 +1914,7 @@ mod tests {
     #[test]
     fn remote_session_expiry_uses_utc_timestamp_contract() {
         let mut config = paired_config();
-        let session = config.paired_appliances[0]
-            .session
-            .as_mut()
-            .expect("session");
+        let session = &mut config.session_bindings[0].session;
         session.expires_at = "2026-07-09T19:30:00Z".to_string();
         let before_expiry = UNIX_EPOCH
             + Duration::from_secs(parse_rfc3339_utc_seconds("2026-07-09T19:29:59Z").unwrap() as u64);
@@ -1731,25 +1930,16 @@ mod tests {
     #[test]
     fn session_renewal_status_reports_configured_missing_and_not_configured() {
         let config = paired_config_with_renewal();
-        let session = config.paired_appliances[0]
-            .session
-            .as_ref()
-            .expect("session");
+        let session = &config.session_bindings[0].session;
         assert_eq!(session_renewal_status(session), "renewal_configured");
 
         let mut missing = paired_config_with_renewal();
-        let session = missing.paired_appliances[0]
-            .session
-            .as_mut()
-            .expect("session");
+        let session = &mut missing.session_bindings[0].session;
         session.renewal.as_mut().expect("renewal").renewal_token = None;
         assert_eq!(session_renewal_status(session), "renewal_token_missing");
 
         let config = paired_config();
-        let session = config.paired_appliances[0]
-            .session
-            .as_ref()
-            .expect("session");
+        let session = &config.session_bindings[0].session;
         assert_eq!(session_renewal_status(session), "renewal_not_configured");
     }
 
@@ -1897,7 +2087,20 @@ mod tests {
     }
 
     fn paired_config() -> RemoteConfig {
+        let session = RemoteUploadSession {
+            session_id: "SESSIONREFERENCE7890".to_string(),
+            issued_at: "2099-07-09T11:30:00Z".to_string(),
+            expires_at: "2099-07-09T19:30:00Z".to_string(),
+            credentials: RemoteSessionCredentials {
+                access_key_id: "DOSREMOTEACCESSKEY1234".to_string(),
+                secret_access_key: "super-secret".to_string(),
+                session_token: Some("temporary-token".to_string()),
+            },
+            renewal: None,
+        };
         RemoteConfig {
+            schema_version: REMOTE_CONFIG_SCHEMA_VERSION.to_string(),
+            generation: 1,
             endpoint_url: "https://192.168.1.192:3900".to_string(),
             region: "garage".to_string(),
             profile: "dasobjectstore".to_string(),
@@ -1923,19 +2126,22 @@ mod tests {
                     writer_group: Some("mnemosyne".to_string()),
                     object_type: "metagenomics".to_string(),
                 }],
-                session: Some(RemoteUploadSession {
-                    session_id: "SESSIONREFERENCE7890".to_string(),
-                    issued_at: "2099-07-09T11:30:00Z".to_string(),
-                    expires_at: "2099-07-09T19:30:00Z".to_string(),
-                    credentials: RemoteSessionCredentials {
-                        access_key_id: "DOSREMOTEACCESSKEY1234".to_string(),
-                        secret_access_key: "super-secret".to_string(),
-                        session_token: Some("temporary-token".to_string()),
-                    },
-                    renewal: None,
-                }),
+                session: None,
             }],
             s3_profiles: Vec::new(),
+            session_bindings: vec![RemoteSessionBinding {
+                appliance_id: "appliance-1".to_string(),
+                store_id: "zymo_fecal_2025.05".to_string(),
+                control_base_url: "https://192.168.1.192:8448".to_string(),
+                s3_endpoint_url: "https://192.168.1.192:3900".to_string(),
+                bucket: "dos-zymo-fecal-2025-05".to_string(),
+                region: "garage".to_string(),
+                addressing_style: "path".to_string(),
+                s3_profile: None,
+                trust_fingerprint_sha256: "test-fingerprint".to_string(),
+                trust_spki_sha256: "test-spki".to_string(),
+                session,
+            }],
         }
     }
 
@@ -2005,10 +2211,7 @@ mod tests {
 
     fn paired_config_with_renewal() -> RemoteConfig {
         let mut config = paired_config();
-        let session = config.paired_appliances[0]
-            .session
-            .as_mut()
-            .expect("paired session");
+        let session = &mut config.session_bindings[0].session;
         session.renewal = Some(RemoteSessionRenewalMetadata {
             renew_url: "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/sessions/SESSIONREFERENCE7890/renew".to_string(),
             renew_after: "2026-07-09T18:30:00Z".to_string(),

@@ -23,6 +23,7 @@ struct RemoteAuthenticateRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct RemoteAuthenticateResponse {
     schema_version: String,
+    appliance_id: String,
     store_id: String,
     s3: RemoteAuthenticatedS3Descriptor,
 }
@@ -39,6 +40,7 @@ struct RemoteAuthenticatedS3Descriptor {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteConnectionContext {
     pub schema_version: String,
+    pub appliance_id: String,
     pub appliance_host: String,
     pub endpoint_url: String,
     pub region: String,
@@ -60,6 +62,7 @@ impl RemoteConnectionContext {
     pub fn redacted(&self) -> RedactedRemoteConnectionContext {
         RedactedRemoteConnectionContext {
             schema_version: self.schema_version.clone(),
+            appliance_id: self.appliance_id.clone(),
             appliance_host: self.appliance_host.clone(),
             endpoint_url: self.endpoint_url.clone(),
             region: self.region.clone(),
@@ -80,6 +83,7 @@ impl RemoteConnectionContext {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RedactedRemoteConnectionContext {
     pub schema_version: String,
+    pub appliance_id: String,
     pub appliance_host: String,
     pub endpoint_url: String,
     pub region: String,
@@ -348,6 +352,7 @@ pub fn authenticate(
     let s3 = response.s3;
     Ok(RemoteConnectionContext {
         schema_version: response.schema_version,
+        appliance_id: response.appliance_id,
         appliance_host: host.clone(),
         endpoint_url: s3.endpoint_url,
         region: s3.region,
@@ -419,6 +424,11 @@ fn validate_descriptor(
     response: &RemoteAuthenticateResponse,
     requested_store: &str,
 ) -> Result<(), RemoteAuthenticateError> {
+    if response.appliance_id.trim().is_empty() {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance returned a blank canonical appliance identity".to_string(),
+        ));
+    }
     if response.store_id != requested_store {
         return Err(RemoteAuthenticateError::Http(
             "appliance returned an S3 descriptor for a different ObjectStore".to_string(),
@@ -530,6 +540,7 @@ mod tests {
     fn redacted_context_does_not_expose_secret_values() {
         let context = RemoteConnectionContext {
             schema_version: "v1".to_string(),
+            appliance_id: "appliance-1".to_string(),
             appliance_host: "host".to_string(),
             endpoint_url: "https://objects.example:9443".to_string(),
             region: "garage".to_string(),

@@ -268,7 +268,9 @@ pub(super) async fn remote_authenticate(
             )
         })?;
     Ok(Json(RemoteAuthenticateResponse {
-        schema_version: "dasobjectstore.remote_authenticate.v2".to_string(),
+        schema_version: "dasobjectstore.remote_authenticate.v3".to_string(),
+        appliance_id: standalone_easyconnect_discovery_payload("https://standalone.invalid")
+            .appliance_id,
         store_id: request.object_store.clone(),
         s3: RemoteAuthenticatedS3Descriptor {
             endpoint_url: s3_descriptor.endpoint_url.clone(),

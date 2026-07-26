@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.137.0 - 2026-07-26
+
+- Replace ambiguous historical remote sessions with one canonical
+  appliance/ObjectStore binding shared by HTTPS control and temporary S3
+  credentials.
+- Commit remote authentication as immutable generations behind an atomic state
+  pointer, automatically migrate and archive legacy configuration, and add
+  secret-free ``config doctor`` and dry-run/apply repair workflows.
+- Make reauthentication verify both S3 and HTTPS readiness before committing,
+  roll back staged AWS profile changes on failure, bind sessions to the
+  server-returned appliance identity and enrolled certificate, and renew the
+  same coherent generation.
+
 ## 0.136.2 - 2026-07-26
 
 - Preserve typed daemon and catalogue failures across the authenticated HTTPS

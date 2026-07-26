@@ -31,6 +31,7 @@ pub struct RemoteAuthenticateRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteAuthenticateResponse {
     pub schema_version: String,
+    pub appliance_id: String,
     pub store_id: String,
     pub s3: RemoteAuthenticatedS3Descriptor,
     /// Deprecated v1 compatibility fields. New clients must consume `s3`.

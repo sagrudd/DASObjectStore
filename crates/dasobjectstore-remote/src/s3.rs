@@ -511,6 +511,8 @@ mod tests {
 
     fn config() -> RemoteConfig {
         RemoteConfig {
+            schema_version: crate::config::REMOTE_CONFIG_SCHEMA_VERSION.to_string(),
+            generation: 1,
             endpoint_url: "http://192.168.1.192:3900".to_string(),
             region: "garage".to_string(),
             profile: "dasobjectstore".to_string(),
@@ -520,6 +522,7 @@ mod tests {
             default_appliance_id: None,
             paired_appliances: Vec::new(),
             s3_profiles: Vec::new(),
+            session_bindings: Vec::new(),
         }
     }
 

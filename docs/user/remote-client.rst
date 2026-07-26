@@ -652,3 +652,23 @@ Operational Notes
 not write into DAS member disks and does not use the local
 ``dasobjectstored`` Unix socket. Use object prefixes that make upload batches
 easy to inspect and clean up if a transfer is interrupted or repeated.
+Authentication state
+--------------------
+
+Remote authentication is stored as immutable generations.  A small
+``state.json`` pointer selects exactly one active generation, and each
+ObjectStore has one canonical appliance-bound session used by both HTTPS
+control requests and its temporary S3 profile. Re-authentication replaces that
+binding only after both S3 verification and HTTPS readiness succeed; a failed
+attempt leaves the previous coherent generation active.
+
+Legacy ``remote.json`` files are migrated and privately archived
+automatically. Operators must not rename or edit them. Inspect state without
+revealing credentials with::
+
+   dasobjectstore-remote config doctor --json
+   dasobjectstore-remote config repair --dry-run --json
+
+Apply a reported safe migration with::
+
+   dasobjectstore-remote config repair --apply --json

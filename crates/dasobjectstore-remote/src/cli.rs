@@ -381,6 +381,10 @@ pub enum ConfigCommand {
     Set(ConfigSetArgs),
     /// Show the resolved remote client configuration.
     Show(ConfigShowArgs),
+    /// Diagnose authentication generations without exposing credentials.
+    Doctor(ConfigDoctorArgs),
+    /// Safely migrate or repair remote authentication state.
+    Repair(ConfigRepairArgs),
 }
 
 #[derive(Debug, Args)]
@@ -436,6 +440,41 @@ pub struct ConfigShowArgs {
     /// Emit JSON.
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigDoctorArgs {
+    /// Emit secret-free JSON diagnostics.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ConfigDoctorArgs {
+    pub fn json(&self) -> bool {
+        self.json
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct ConfigRepairArgs {
+    /// Inspect the proposed repair without changing files.
+    #[arg(long, conflicts_with = "apply")]
+    dry_run: bool,
+    /// Apply the supported repair and create a private diagnostic backup.
+    #[arg(long, conflicts_with = "dry_run")]
+    apply: bool,
+    /// Emit JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+impl ConfigRepairArgs {
+    pub fn apply(&self) -> bool {
+        self.apply
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
 }
 
 impl ConfigShowArgs {

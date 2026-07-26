@@ -206,6 +206,33 @@ struct AwsPaths {
     config: PathBuf,
     credentials: PathBuf,
 }
+
+pub struct AwsProfileBackup {
+    config_path: PathBuf,
+    credentials_path: PathBuf,
+    config: Option<Vec<u8>>,
+    credentials: Option<Vec<u8>>,
+}
+
+pub fn snapshot_profile_state() -> Result<AwsProfileBackup, AwsProfileError> {
+    let paths = AwsPaths::discover()?;
+    Ok(AwsProfileBackup {
+        config_path: paths.config.clone(),
+        credentials_path: paths.credentials.clone(),
+        config: fs::read(&paths.config).ok(),
+        credentials: fs::read(&paths.credentials).ok(),
+    })
+}
+
+pub fn restore_profile_state(backup: &AwsProfileBackup) -> Result<(), AwsProfileError> {
+    let paths = AwsPaths {
+        config: backup.config_path.clone(),
+        credentials: backup.credentials_path.clone(),
+    };
+    let _locks = lock_paths(&paths)?;
+    restore(&paths.config, backup.config.as_deref())?;
+    restore(&paths.credentials, backup.credentials.as_deref())
+}
 impl AwsPaths {
     fn discover() -> Result<Self, AwsProfileError> {
         let home = env::var_os("HOME")

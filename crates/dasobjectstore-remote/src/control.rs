@@ -31,24 +31,9 @@ pub fn renew_store_session_if_due(
     config: &mut RemoteConfig,
     store: &str,
 ) -> Result<bool, RemoteControlError> {
-    let appliance_index = config
-        .paired_appliances
-        .iter()
-        .position(|appliance| {
-            appliance
-                .object_stores
-                .iter()
-                .any(|grant| grant.object_store == store)
-        })
-        .ok_or_else(|| {
-            RemoteControlError::Authorization(format!(
-                "ObjectStore {store} is not present in this session's grants"
-            ))
-        })?;
-    let appliance = &config.paired_appliances[appliance_index];
-    let session = appliance.session.as_ref().ok_or_else(|| {
-        RemoteControlError::Authentication("paired appliance has no active session".to_string())
-    })?;
+    let binding_index = unique_binding_index(config, store)?;
+    let binding = &config.session_bindings[binding_index];
+    let session = &binding.session;
     let renewal = match &session.renewal {
         Some(renewal) => renewal,
         None => return Ok(false),
@@ -69,7 +54,7 @@ pub fn renew_store_session_if_due(
             "session is due for renewal but has no renewal token; authenticate again".to_string(),
         )
     })?;
-    let transport = pinned_client(appliance)?;
+    let transport = pinned_client_for_binding(binding)?;
     let renew_url = rewrite_url_for_transport(&renewal.renew_url, &transport.base_url)?;
     let response = transport
         .client
@@ -89,7 +74,7 @@ pub fn renew_store_session_if_due(
         .json::<RemoteEasyconnectRenewSessionResponse>()
         .map_err(RemoteControlError::Transport)?
         .session;
-    config.paired_appliances[appliance_index].session = Some(RemoteUploadSession {
+    config.session_bindings[binding_index].session = RemoteUploadSession {
         session_id: renewed.session_id,
         issued_at: renewed.issued_at_utc.clone(),
         expires_at: renewed.expires_at_utc,
@@ -104,7 +89,20 @@ pub fn renew_store_session_if_due(
             renewal_token: Some(renewed.renewal.renewal_token),
             last_renewed_at: Some(renewed.issued_at_utc),
         }),
-    });
+    };
+    let renewed_expiry = config.session_bindings[binding_index]
+        .session
+        .expires_at
+        .clone();
+    if let Some(profile) = config.session_bindings[binding_index].s3_profile.as_deref() {
+        for association in config
+            .s3_profiles
+            .iter_mut()
+            .filter(|association| association.profile == profile && association.store_id == store)
+        {
+            association.expires_at = Some(renewed_expiry.clone());
+        }
+    }
     Ok(true)
 }
 
@@ -132,12 +130,11 @@ impl RemoteControlClient {
         store: &str,
         write_required: bool,
     ) -> Result<(Self, RemoteObjectStoreGrant), RemoteControlError> {
-        let (appliance, grant) = find_grant(config, store, write_required)?;
-        let session = appliance.session.as_ref().ok_or_else(|| {
-            RemoteControlError::Authentication(
-                "paired appliance has no active session; authenticate again".to_string(),
-            )
-        })?;
+        let binding = config
+            .session_binding(store)
+            .map_err(|error| RemoteControlError::Configuration(error.to_string()))?;
+        let (_, grant) = find_grant(config, &binding.appliance_id, store, write_required)?;
+        let session = &binding.session;
         let token = session
             .credentials
             .session_token
@@ -148,7 +145,7 @@ impl RemoteControlClient {
                 )
             })?;
         reject_expired_session(session)?;
-        let transport = pinned_client(appliance)?;
+        let transport = pinned_client_for_binding(binding)?;
         Ok((
             Self {
                 client: transport.client,
@@ -256,12 +253,14 @@ impl RemoteControlClient {
 
 fn find_grant<'a>(
     config: &'a RemoteConfig,
+    appliance_id: &str,
     store: &str,
     write_required: bool,
 ) -> Result<(&'a RemotePairedAppliance, &'a RemoteObjectStoreGrant), RemoteControlError> {
     config
         .paired_appliances
         .iter()
+        .filter(|appliance| appliance.appliance_id == appliance_id)
         .find_map(|appliance| {
             appliance.object_stores.iter().find_map(|grant| {
                 (grant.object_store == store
@@ -280,6 +279,25 @@ fn find_grant<'a>(
                 }
             ))
         })
+}
+
+fn unique_binding_index(config: &RemoteConfig, store: &str) -> Result<usize, RemoteControlError> {
+    let matches = config
+        .session_bindings
+        .iter()
+        .enumerate()
+        .filter(|(_, binding)| binding.store_id == store)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(RemoteControlError::Authentication(format!(
+            "configuration_migration_required: ObjectStore {store} has no authoritative session; run `dasobjectstore-remote authenticate HOST {store} --username USER`"
+        ))),
+        _ => Err(RemoteControlError::Configuration(format!(
+            "ambiguous_session_state: ObjectStore {store} has multiple sessions; run `dasobjectstore-remote config repair --dry-run --json`"
+        ))),
+    }
 }
 
 struct PinnedControlTransport {
@@ -334,6 +352,45 @@ fn pinned_client(
     Ok(PinnedControlTransport { client, base_url })
 }
 
+fn pinned_client_for_binding(
+    binding: &crate::config::RemoteSessionBinding,
+) -> Result<PinnedControlTransport, RemoteControlError> {
+    let appliance = RemotePairedAppliance {
+        appliance_id: binding.appliance_id.clone(),
+        display_name: binding.appliance_id.clone(),
+        appliance_base_url: binding.control_base_url.clone(),
+        discovery_url: String::new(),
+        auth_authority: crate::auth::RemoteAuthAuthority::LocalPassword,
+        paired_actor: None,
+        default_object_store: Some(binding.store_id.clone()),
+        session: None,
+        object_stores: Vec::new(),
+    };
+    let transport = pinned_client(&appliance)?;
+    let url = reqwest::Url::parse(&binding.control_base_url).map_err(|_| {
+        RemoteControlError::Configuration("authoritative control endpoint is malformed".to_string())
+    })?;
+    let trust = crate::trust::load_trust(
+        url.host_str().unwrap_or_default(),
+        url.port_or_known_default().unwrap_or(8448),
+    )
+    .map_err(|error| RemoteControlError::Configuration(error.to_string()))?
+    .ok_or_else(|| {
+        RemoteControlError::Configuration(
+            "certificate_binding_mismatch: appliance trust is missing".to_string(),
+        )
+    })?;
+    if trust.fingerprint_sha256 != binding.trust_fingerprint_sha256
+        || trust.spki_sha256 != binding.trust_spki_sha256
+    {
+        return Err(RemoteControlError::Configuration(
+            "certificate_binding_mismatch: committed session generation does not match enrolled appliance trust; run `dasobjectstore-remote trust inspect HOST --json`"
+                .to_string(),
+        ));
+    }
+    Ok(transport)
+}
+
 fn rewrite_url_for_transport(
     absolute_url: &str,
     transport_base: &str,
@@ -360,7 +417,8 @@ fn reject_expired_session(session: &RemoteUploadSession) -> Result<(), RemoteCon
     let now = unix_now()?;
     if expiry <= now {
         return Err(RemoteControlError::Authentication(
-            "temporary session has expired; renew or authenticate again".to_string(),
+            "session_expired_reauthentication_required: the committed session has expired; run `dasobjectstore-remote authenticate HOST OBJECTSTORE --username USER --set-s3-config`"
+                .to_string(),
         ));
     }
     Ok(())
