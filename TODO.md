@@ -1810,7 +1810,9 @@ list until every temporary size-budget exception has been removed.
   operation polling. Temporary EasyConnect sessions now carry explicit
   operation/prefix capabilities; legacy sessions fail closed, provider secrets
   and managed paths remain daemon-private, and the EPIC migration sequence is
-  documented for `dasobjectstore-remote`.
+  documented for `dasobjectstore-remote`. Remote catalogue calls now preserve
+  typed daemon failures, explicit retryability, and correlation IDs, and their
+  bridge deadline exceeds the catalogue's bounded SQLite lock wait.
 - [x] Align remote-upload admission with the registry's canonical `s3_bucket`
   export label so writer-group users can authenticate to exported stores.
 - [x] Split global Web CSS by base primitives and feature-owned styles, and

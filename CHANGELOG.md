@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.136.2 - 2026-07-26
+
+- Preserve typed daemon and catalogue failures across the authenticated HTTPS
+  remote-control boundary, including explicit retryability and response/log
+  correlation IDs instead of an ambiguous blanket 503.
+- Give remote catalogue calls a five-second daemon idle deadline so SQLite's
+  bounded three-second lock wait can complete and report ``catalogue_locked``
+  without being preempted by the API bridge.
+
 ## 0.136.1 - 2026-07-26
 
 - Preserve the shared ``/run/dasobjectstore`` runtime directory across daemon

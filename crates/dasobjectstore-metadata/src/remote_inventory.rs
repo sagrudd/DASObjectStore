@@ -192,6 +192,31 @@ impl Display for RemoteObjectInventoryError {
 
 impl std::error::Error for RemoteObjectInventoryError {}
 
+impl RemoteObjectInventoryError {
+    /// Stable daemon/API classification for failures at the authoritative
+    /// catalogue boundary. Callers must not infer retryability from prose.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) => {
+                use rusqlite::ffi::ErrorCode;
+                match error.code {
+                    ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => "catalogue_locked",
+                    ErrorCode::PermissionDenied | ErrorCode::ReadOnly => {
+                        "catalogue_permission_denied"
+                    }
+                    ErrorCode::CannotOpen | ErrorCode::NotADatabase => "catalogue_unavailable",
+                    _ => "catalogue_query_failed",
+                }
+            }
+            Self::Sqlite(_) => "catalogue_query_failed",
+            Self::InvalidLimit | Self::InvalidPrefix => "invalid_remote_control_request",
+            Self::NegativeValue { .. } | Self::ValueOverflow { .. } => {
+                "catalogue_invariant_violation"
+            }
+        }
+    }
+}
+
 impl From<rusqlite::Error> for RemoteObjectInventoryError {
     fn from(error: rusqlite::Error) -> Self {
         Self::Sqlite(error)
@@ -200,13 +225,33 @@ impl From<rusqlite::Error> for RemoteObjectInventoryError {
 
 #[cfg(test)]
 mod tests {
-    use super::read_remote_object_inventory_page;
+    use super::{read_remote_object_inventory_page, RemoteObjectInventoryError};
     use crate::schema::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::StoreId;
     use rusqlite::{params, Connection};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn classifies_catalogue_failures_without_parsing_messages() {
+        let locked = RemoteObjectInventoryError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+            None,
+        ));
+        let denied = RemoteObjectInventoryError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_PERM),
+            None,
+        ));
+        let unavailable = RemoteObjectInventoryError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            None,
+        ));
+
+        assert_eq!(locked.code(), "catalogue_locked");
+        assert_eq!(denied.code(), "catalogue_permission_denied");
+        assert_eq!(unavailable.code(), "catalogue_unavailable");
+    }
 
     #[test]
     fn reads_twenty_thousand_objects_in_one_bounded_page() {

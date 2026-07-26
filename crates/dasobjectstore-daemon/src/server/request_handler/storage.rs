@@ -298,7 +298,7 @@ where
             match remote_object_snapshot(&handler.live_sqlite_path, &request) {
                 Ok(response) => Ok(DaemonApiResponse::RemoteObjectSnapshot(response)),
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "remote_object_snapshot_failed",
+                    error.code(),
                     error.to_string(),
                 ))),
             }
@@ -313,7 +313,7 @@ where
             match remote_object_group_status(&handler.live_sqlite_path, &request) {
                 Ok(response) => Ok(DaemonApiResponse::RemoteObjectGroupStatus(response)),
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "remote_object_group_status_failed",
+                    error.code(),
                     error.to_string(),
                 ))),
             }

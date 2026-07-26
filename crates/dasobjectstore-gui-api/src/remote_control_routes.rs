@@ -17,11 +17,15 @@ use dasobjectstore_daemon::api::{
     StoreRepairRequest, StoreRepairS3Expectation, STORE_REPAIR_CONFIRMATION,
 };
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClock, DaemonJobId, DaemonJobState, DaemonJobStatusRequest,
-    DaemonRuntimeConfig, ProfileReadinessRequest, UnixSocketDaemonTransport,
+    DaemonClient, DaemonClientError, DaemonClock, DaemonJobId, DaemonJobState,
+    DaemonJobStatusRequest, DaemonRuntimeConfig, ProfileReadinessRequest,
+    UnixSocketDaemonTransport,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path as FsPath, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static REMOTE_ERROR_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug)]
 pub struct RemoteControlRouteState {
@@ -431,14 +435,14 @@ async fn call_daemon<T: Send + 'static>(
         + 'static,
 ) -> Result<T, RemoteControlRouteError> {
     tokio::task::spawn_blocking(move || {
-        let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+        let client = DaemonClient::new(UnixSocketDaemonTransport::for_remote_control_bridge(
             DaemonRuntimeConfig::default_packaged().socket_path,
         ));
         call(client)
     })
     .await
     .map_err(|error| RemoteControlRouteError::unavailable(error.to_string()))?
-    .map_err(|error| RemoteControlRouteError::from_daemon(error.to_string()))
+    .map_err(RemoteControlRouteError::from_daemon)
 }
 
 async fn call_daemon_unbounded<T: Send + 'static>(
@@ -456,7 +460,7 @@ async fn call_daemon_unbounded<T: Send + 'static>(
     })
     .await
     .map_err(|error| RemoteControlRouteError::unavailable(error.to_string()))?
-    .map_err(|error| RemoteControlRouteError::from_daemon(error.to_string()))
+    .map_err(RemoteControlRouteError::from_daemon)
 }
 
 fn parse_store_id(value: String) -> Result<StoreId, RemoteControlRouteError> {
@@ -494,25 +498,96 @@ impl RemoteControlRouteError {
         }
     }
 
-    fn from_daemon(message: String) -> Self {
-        let lower = message.to_ascii_lowercase();
-        if lower.contains("database is locked") || lower.contains("database is busy") {
-            return Self {
+    fn from_daemon(error: DaemonClientError) -> Self {
+        match error {
+            DaemonClientError::RequestValidation(error) => Self::invalid(error.to_string()),
+            DaemonClientError::JobValidation(error) => Self::invalid(error.to_string()),
+            DaemonClientError::Api(error) => Self::from_daemon_api_code(&error.code),
+            DaemonClientError::UnexpectedResponse { .. } => Self {
                 status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                code: "catalogue_busy",
-                message: "the authoritative catalogue is busy; retry shortly".to_string(),
-                retry_after_seconds: Some(2),
-            };
+                code: "daemon_version_mismatch",
+                message: "the API service and daemon contracts are incompatible".to_string(),
+                retry_after_seconds: None,
+            },
+            DaemonClientError::Transport(message) => {
+                let lower = message.to_ascii_lowercase();
+                if lower.contains("permission denied") {
+                    Self {
+                        status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        code: "daemon_transport_permission_denied",
+                        message: "the API service is not permitted to contact the daemon"
+                            .to_string(),
+                        retry_after_seconds: None,
+                    }
+                } else {
+                    Self {
+                        status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        code: "daemon_transport_unavailable",
+                        message: "the daemon transport is temporarily unavailable".to_string(),
+                        retry_after_seconds: Some(2),
+                    }
+                }
+            }
+            DaemonClientError::Cancelled(_) => Self {
+                status: axum::http::StatusCode::CONFLICT,
+                code: "remote_control_cancelled",
+                message: "the daemon operation was cancelled".to_string(),
+                retry_after_seconds: None,
+            },
         }
-        if lower.contains("capacity") || lower.contains("server_busy") {
-            return Self {
+    }
+
+    fn from_daemon_api_code(code: &str) -> Self {
+        match code {
+            "catalogue_locked" => Self {
+                status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                code: "catalogue_locked",
+                message: "the authoritative catalogue is temporarily locked".to_string(),
+                retry_after_seconds: Some(2),
+            },
+            "catalogue_permission_denied" => Self {
+                status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                code: "catalogue_permission_denied",
+                message: "the daemon cannot read the authoritative catalogue".to_string(),
+                retry_after_seconds: None,
+            },
+            "catalogue_unavailable" | "catalogue_query_failed" => Self {
+                status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                code: "catalogue_unavailable",
+                message: "the authoritative catalogue is unavailable".to_string(),
+                retry_after_seconds: None,
+            },
+            "catalogue_invariant_violation" => Self {
+                status: axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                code: "catalogue_invariant_violation",
+                message: "the authoritative catalogue contains invalid metadata".to_string(),
+                retry_after_seconds: None,
+            },
+            "server_busy" | "capacity_unavailable" | "capacity_admission_rejected" => Self {
                 status: axum::http::StatusCode::TOO_MANY_REQUESTS,
                 code: "storage_backpressure",
                 message: "storage admission is temporarily backpressured".to_string(),
                 retry_after_seconds: Some(5),
-            };
+            },
+            "unknown_command" | "unsupported_operation" | "invalid_request" => Self {
+                status: axum::http::StatusCode::NOT_IMPLEMENTED,
+                code: "unsupported_daemon_operation",
+                message: "the running daemon does not support this operation".to_string(),
+                retry_after_seconds: None,
+            },
+            "object_browser_access_denied" | "endpoint_access_denied" => Self {
+                status: axum::http::StatusCode::FORBIDDEN,
+                code: "remote_control_not_authorized",
+                message: "the daemon denied access to this ObjectStore".to_string(),
+                retry_after_seconds: None,
+            },
+            _ => Self {
+                status: axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                code: "daemon_operation_failed",
+                message: "the daemon rejected the remote operation".to_string(),
+                retry_after_seconds: None,
+            },
         }
-        Self::unavailable("the daemon could not complete the remote request".to_string())
     }
 }
 
@@ -546,6 +621,17 @@ impl From<RemoteControlRejection> for RemoteControlRouteError {
 
 impl axum::response::IntoResponse for RemoteControlRouteError {
     fn into_response(self) -> axum::response::Response {
+        let correlation_id = format!(
+            "remote-{}-{}",
+            std::process::id(),
+            REMOTE_ERROR_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        );
+        eprintln!(
+            "remote control request failed correlation_id={} code={} retryable={}",
+            correlation_id,
+            self.code,
+            self.retry_after_seconds.is_some()
+        );
         let mut response = (
             self.status,
             Json(serde_json::json!({
@@ -554,9 +640,13 @@ impl axum::response::IntoResponse for RemoteControlRouteError {
                 "message": self.message,
                 "retryable": self.retry_after_seconds.is_some(),
                 "retry_after_seconds": self.retry_after_seconds,
+                "correlation_id": correlation_id,
             })),
         )
             .into_response();
+        if let Ok(value) = correlation_id.parse() {
+            response.headers_mut().insert("x-correlation-id", value);
+        }
         if let Some(seconds) = self.retry_after_seconds {
             if let Ok(value) = seconds.to_string().parse() {
                 response
@@ -565,5 +655,49 @@ impl axum::response::IntoResponse for RemoteControlRouteError {
             }
         }
         response
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RemoteControlRouteError;
+    use dasobjectstore_daemon::api::DaemonApiErrorResponse;
+    use dasobjectstore_daemon::DaemonClientError;
+
+    #[test]
+    fn catalogue_lock_is_the_only_catalogue_failure_marked_retryable() {
+        let locked = RemoteControlRouteError::from_daemon(DaemonClientError::Api(
+            DaemonApiErrorResponse::new("catalogue_locked", "database is locked"),
+        ));
+        let denied = RemoteControlRouteError::from_daemon(DaemonClientError::Api(
+            DaemonApiErrorResponse::new("catalogue_permission_denied", "permission denied"),
+        ));
+        let unavailable = RemoteControlRouteError::from_daemon(DaemonClientError::Api(
+            DaemonApiErrorResponse::new("catalogue_unavailable", "cannot open"),
+        ));
+
+        assert_eq!(locked.code, "catalogue_locked");
+        assert_eq!(locked.retry_after_seconds, Some(2));
+        assert_eq!(denied.code, "catalogue_permission_denied");
+        assert_eq!(denied.retry_after_seconds, None);
+        assert_eq!(unavailable.code, "catalogue_unavailable");
+        assert_eq!(unavailable.retry_after_seconds, None);
+    }
+
+    #[test]
+    fn protocol_and_permission_failures_are_not_retryable() {
+        let mismatch =
+            RemoteControlRouteError::from_daemon(DaemonClientError::UnexpectedResponse {
+                expected: "remote_object_snapshot",
+                actual: "error",
+            });
+        let denied = RemoteControlRouteError::from_daemon(DaemonClientError::Transport(
+            "Permission denied".to_string(),
+        ));
+
+        assert_eq!(mismatch.code, "daemon_version_mismatch");
+        assert_eq!(mismatch.retry_after_seconds, None);
+        assert_eq!(denied.code, "daemon_transport_permission_denied");
+        assert_eq!(denied.retry_after_seconds, None);
     }
 }

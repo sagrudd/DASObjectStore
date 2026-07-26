@@ -433,7 +433,12 @@ The HTTPS client uses the appliance certificate pinned during
 ``authenticate``. A changed certificate fails closed and requires deliberate
 out-of-band verification. An expired session, an unauthorized store or prefix,
 catalogue lock, and capacity pressure are returned as typed errors. Honour
-``retry_after`` for retryable lock or backpressure responses.
+``retry_after`` for retryable lock or backpressure responses. Catalogue locks,
+daemon restarts, and storage backpressure are retryable; unsupported daemon
+operations, API/daemon contract mismatch, catalogue configuration or
+permission failures, and transport permission failures are not. Error JSON and
+the ``x-correlation-id`` response header carry the same correlation ID for
+matching a client failure to the server journal without exposing credentials.
 
 Migrating an SSH-based harvester
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

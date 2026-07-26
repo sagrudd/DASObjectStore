@@ -39,6 +39,16 @@ impl UnixSocketDaemonTransport {
         Self::new(socket_path).with_idle_timeout(Duration::from_millis(1_500))
     }
 
+    /// Construct a transport for remote catalogue/control requests.
+    ///
+    /// Catalogue reads deliberately wait up to three seconds for a transient
+    /// SQLite writer. The transport deadline must exceed that interval so the
+    /// daemon can return a typed `catalogue_locked` response instead of the
+    /// bridge manufacturing an ambiguous socket timeout.
+    pub fn for_remote_control_bridge(socket_path: impl Into<PathBuf>) -> Self {
+        Self::new(socket_path).with_idle_timeout(Duration::from_secs(5))
+    }
+
     /// Construct a transport for durable multipart completion.
     ///
     /// Completion can legitimately remain silent while the daemon assembles,
@@ -861,6 +871,14 @@ mod tests {
         ));
         join.join().expect("server thread joins");
         let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn remote_control_deadline_exceeds_catalogue_lock_wait() {
+        let transport =
+            UnixSocketDaemonTransport::for_remote_control_bridge("/tmp/dasobjectstored.sock");
+
+        assert_eq!(transport.idle_timeout, Some(Duration::from_secs(5)));
     }
 
     #[test]
