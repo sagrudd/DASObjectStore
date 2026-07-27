@@ -105,6 +105,46 @@ no token, secret, private key, endpoint, bucket, or managed path. An
 Ergasterion deployment still requires a separately registered public key or
 mTLS mapping before it can exchange a signed request.
 
+### Ergasterion capability exchange v1
+
+`dasobjectstore.ergasterion-capability-exchange.v1` is the additive,
+jointly-approved profile for Ergasterion governed reads. It preserves
+`dasobjectstore.application_auth.v1` unchanged and accepts only the separately
+admitted `ergasterion.object-store-binding.v2` projection.
+
+It uses the registered Ed25519 application identity over a dedicated HTTPS
+route. TLS protects transport but does not replace proof verification. The
+proof signs the UTF-8 domain string
+`dasobjectstore.ergasterion-capability-exchange.v1\\n` followed by RFC 8785 JCS
+of the proof-free JSON request. Parsers reject duplicate keys and unknown
+members, then canonicalize the proof-free value; HTTP member order is not
+significant. Requests carry a UUID request ID, unique 32-byte base64url nonce,
+exact registered application/audience/key, active v2 binding, bounded
+no-wider read-only scope, and bounded correlation.
+
+The daemon retains request-ID and nonce replay records through expiry plus
+clock skew. An exact retry may return its still-valid result; a changed request
+ID payload or reused nonce is rejected. Before minting, a trusted daemon-side
+binding-authority verifier must compare v2 tenant, host
+mode/authority/project/revision, and Prosopikon authority/revision with current
+authority state. A caller proof is not that authority source; unavailable
+authority fails closed.
+
+A success contains a random opaque capability and opaque identifier, resolved
+scope, expiry, renewal window, revocation check time, and correlation only. It
+is never a JWT or claims envelope and is excluded from audit, replay records,
+logs, fixtures, and product responses. Renewal uses a fresh signed request in
+the final five-minute window and atomically replaces the prior capability.
+Key, identity, or binding revocation immediately blocks exchange and renewal
+and is checked before every authorised provider operation. Safe denials are
+`invalid_request`, `proof_invalid`, `governed_scope_denied`,
+`replay_detected`, `capability_revoked`, `unsupported_contract`,
+`rate_limited`, `authority_unavailable`, and `provider_unavailable`.
+
+This admits the profile and conformance target only. The live route, opaque
+custody, token validation, trusted binding verifier, and application-authorised
+logical-object API remain implementation work and must not be inferred here.
+
 An upload initiation response may include a short-lived, single-use completion
 capability bound to the paired session, ObjectStore, upload ID, object key,
 expected length, checksum, audience, expiry, and nonce. A client submits that
