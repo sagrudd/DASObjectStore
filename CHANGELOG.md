@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.2 - 2026-07-27
+
+- Make completion-bound daemon uploads ignore caller AWS profiles and
+  credentials, then resolve only the daemon-custodied credential matching the
+  exact ObjectStore and bucket. This removes stale-profile authorization
+  failures without exposing persistent Garage secrets.
+- Treat an independently proven existing provider catalogue object/version as
+  an exact completion replay and release the new capacity reservation instead
+  of charging logical usage twice.
+- Add regression coverage for credential replacement, profile-selector
+  removal, provider catalogue replay detection, and replay-safe quota
+  settlement.
+
 ## 0.145.1 - 2026-07-26
 
 - Add an explicitly gated, disposable Linux loopback acceptance that exercises

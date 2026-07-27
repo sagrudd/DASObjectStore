@@ -650,6 +650,7 @@ where
             completion,
         )
         .commit_catalogue(record)
+        .map(|_| ())
         .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
             operation: error.to_string(),
         })
@@ -951,8 +952,9 @@ mod tests {
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
         RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest,
-        SubmitIngestFilesRequest, SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
+        RemoteEasyconnectUploadCompletion, StoreDeleteRequest, StoreDrainRequest,
+        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
         UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, WorkspaceControlAction,
         WorkspaceControlRequest, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
@@ -4031,10 +4033,16 @@ mod tests {
                         "<source-redacted>".to_string(),
                         "s3://dos-zymo/raw/reads.fastq.gz".to_string(),
                     ],
-                    environment: vec![RemoteEasyconnectAwsCliEnvironmentVariable {
-                        name: "AWS_ACCESS_KEY_ID".to_string(),
-                        value: "AKIAEXAMPLE".to_string(),
-                    }],
+                    environment: vec![
+                        RemoteEasyconnectAwsCliEnvironmentVariable {
+                            name: "AWS_ACCESS_KEY_ID".to_string(),
+                            value: "AKIAEXAMPLE".to_string(),
+                        },
+                        RemoteEasyconnectAwsCliEnvironmentVariable {
+                            name: "AWS_SECRET_ACCESS_KEY".to_string(),
+                            value: "example-secret".to_string(),
+                        },
+                    ],
                     progress_telemetry: None,
                     progress_message: Some("completed".to_string()),
                     completion: None,
@@ -4061,7 +4069,122 @@ mod tests {
                 "zymo_fecal_2025.05".to_string(),
                 42,
                 "aws".to_string(),
-                1
+                2,
+                false
+            )]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_submission_replaces_client_keys_with_exact_store_scoped_credential() {
+        let root = temp_root("remote-easyconnect-managed-upload-credential");
+        let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
+            &root,
+        )));
+        let credential_registry_path = root.join("garage-credentials.json");
+        write_managed_credential_registry(
+            &credential_registry_path,
+            &ManagedCredentialRegistry {
+                format_version: 1,
+                updated_at_utc: "2026-07-27T06:00:00Z".to_string(),
+                credentials: vec![ManagedStoreCredentialRecord {
+                    store_id: StoreId::new("codex_completion_soak").expect("store id"),
+                    bucket_name: "codex-completion-soak".to_string(),
+                    credential_reference: "garage-ref-codex".to_string(),
+                    access_key_id: "DOSCODEXKEY".to_string(),
+                    secret_access_key: "managed-secret".to_string(),
+                    issued_at_utc: "2026-07-27T06:00:00Z".to_string(),
+                    rotated_at_utc: None,
+                    revision: 1,
+                }],
+                audit: Vec::new(),
+            },
+        )
+        .expect("credential registry written");
+        let handler = DaemonRequestHandler::new_with_admin_job_registry(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-27T06:00:00Z"),
+            registry,
+        )
+        .with_credential_registry_path(&credential_registry_path);
+
+        let response = handler
+            .handle(DaemonApiRequest::RemoteEasyconnectSubmitAwsCliUpload(
+                RemoteEasyconnectSubmitAwsCliUploadRequest {
+                    job_id: "remote-upload-job-managed".to_string(),
+                    object_store: "codex_completion_soak".to_string(),
+                    source_bytes: 42,
+                    policy: RemoteUploadBackpressurePolicy::default(),
+                    ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+                    program: "aws".to_string(),
+                    args: vec![
+                        "--profile".to_string(),
+                        "dasobjectstore".to_string(),
+                        "s3".to_string(),
+                        "cp".to_string(),
+                        "/generated/source.bin".to_string(),
+                        "s3://codex-completion-soak/soak/source.bin".to_string(),
+                    ],
+                    display_args: vec![
+                        "--profile".to_string(),
+                        "dasobjectstore".to_string(),
+                        "s3".to_string(),
+                        "cp".to_string(),
+                        "<source-redacted>".to_string(),
+                        "s3://codex-completion-soak/soak/source.bin".to_string(),
+                    ],
+                    environment: vec![
+                        RemoteEasyconnectAwsCliEnvironmentVariable {
+                            name: "AWS_ACCESS_KEY_ID".to_string(),
+                            value: "STALEKEY".to_string(),
+                        },
+                        RemoteEasyconnectAwsCliEnvironmentVariable {
+                            name: "AWS_SECRET_ACCESS_KEY".to_string(),
+                            value: "stale-secret".to_string(),
+                        },
+                        RemoteEasyconnectAwsCliEnvironmentVariable {
+                            name: "AWS_SESSION_TOKEN".to_string(),
+                            value: "stale-session".to_string(),
+                        },
+                    ],
+                    progress_telemetry: None,
+                    progress_message: Some("completed".to_string()),
+                    completion: Some(RemoteEasyconnectUploadCompletion {
+                        upload_id: "remote-upload-job-managed".to_string(),
+                        provider: "garage".to_string(),
+                        bucket: "codex-completion-soak".to_string(),
+                        object_id: "soak/source.bin".to_string(),
+                        object_version: 1,
+                        object_key: "soak/source.bin".to_string(),
+                        expected_checksum: format!("sha256:{}", "a".repeat(64)),
+                        endpoint_url: "http://127.0.0.1:3900".to_string(),
+                    }),
+                },
+            ))
+            .expect("request handled");
+
+        let DaemonApiResponse::RemoteEasyconnectSubmitAwsCliUpload(response) = response else {
+            panic!("expected remote easyconnect AWS CLI upload response");
+        };
+        assert!(matches!(
+            response.final_event,
+            crate::api::DaemonJobEvent::Complete(_)
+        ));
+        assert_eq!(
+            handler
+                .service_orchestrator
+                .remote_upload_calls
+                .borrow()
+                .as_slice(),
+            [(
+                "remote-upload-job-managed".to_string(),
+                "codex_completion_soak".to_string(),
+                42,
+                "aws".to_string(),
+                2,
+                false
             )]
         );
 
@@ -5679,7 +5802,7 @@ mod tests {
         endpoint_inventory_calls: RefCell<Vec<(String, String, bool)>>,
         profile_capacity_calls: RefCell<Vec<(StoreId, dasobjectstore_core::store::CapacityPolicy)>>,
         profile_capacity_rollback_calls: RefCell<Vec<StoreId>>,
-        remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize)>>,
+        remote_upload_calls: RefCell<Vec<(String, String, u64, String, usize, bool)>>,
         reconciliation_calls: RefCell<Vec<(String, Option<String>, bool, String)>>,
         job_status_calls: RefCell<Vec<String>>,
         cancel_job_calls: RefCell<Vec<(String, String)>>,
@@ -5794,6 +5917,7 @@ mod tests {
                 request.source_bytes,
                 request.program.clone(),
                 request.environment.len(),
+                request.args.iter().any(|argument| argument == "--profile"),
             ));
             let job = DaemonJobSummary {
                 job_id: DaemonJobId::new(request.job_id.clone())

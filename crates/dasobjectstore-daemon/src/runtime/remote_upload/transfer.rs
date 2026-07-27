@@ -28,7 +28,13 @@ pub trait RemoteUploadCompletionCommit {
     fn commit(
         &self,
         record: &RemoteUploadCompletionRecord,
-    ) -> Result<(), RemoteUploadCompletionCommitError>;
+    ) -> Result<RemoteUploadCompletionCommitOutcome, RemoteUploadCompletionCommitError>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteUploadCompletionCommitOutcome {
+    Committed,
+    AlreadyCommitted,
 }
 
 /// Optional object-level metadata for a completion handoff. Remote transfer
@@ -412,10 +418,10 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                         .map_err(|error| error.to_string())
                 })
                 .transpose()
-                .map(|_| ())
+                .map(|outcome| outcome.unwrap_or(RemoteUploadCompletionCommitOutcome::Committed))
         });
         let transfer_result = match (transfer_result, capacity_reservation) {
-            (Ok(()), Some(provider)) => {
+            (Ok(RemoteUploadCompletionCommitOutcome::Committed), Some(provider)) => {
                 let store_id = StoreId::new(job.object_store.clone()).map_err(|error| {
                     DaemonServiceRuntimeError::UnsupportedOperation {
                         operation: format!("remote upload object store is invalid: {error}"),
@@ -431,6 +437,16 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                     },
                 }
             }
+            (Ok(RemoteUploadCompletionCommitOutcome::AlreadyCommitted), Some(provider)) => {
+                let store_id = StoreId::new(job.object_store.clone()).map_err(|error| {
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!("remote upload object store is invalid: {error}"),
+                    }
+                })?;
+                provider
+                    .release(&store_id, &job.job_id)
+                    .map_err(|error| error.to_string())
+            }
             (Err(error), Some(provider)) => {
                 let store_id = StoreId::new(job.object_store.clone()).map_err(|error| {
                     DaemonServiceRuntimeError::UnsupportedOperation {
@@ -445,7 +461,8 @@ impl<'a> RemoteUploadS3TransferWorker<'a> {
                     }
                 }
             }
-            (result, None) => result,
+            (Ok(_), None) => Ok(()),
+            (Err(error), None) => Err(error),
         };
         let progress_events = progress_reporter.into_events();
         drop(permit);

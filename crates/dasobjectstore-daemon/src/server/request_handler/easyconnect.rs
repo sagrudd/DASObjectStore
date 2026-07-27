@@ -2,7 +2,7 @@ use super::*;
 use crate::api::{
     ApplicationObjectDeleteOutcome, ApplicationObjectDeleteReason, ApplicationObjectDeleteRequest,
     ApplicationObjectDeleteResponse, CapacityAdmissionDecision,
-    APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
+    RemoteEasyconnectAwsCliEnvironmentVariable, APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
 };
 use ring::rand::{SecureRandom, SystemRandom};
 use std::sync::Arc;
@@ -43,6 +43,57 @@ fn upload_error(message: impl Into<String>) -> DaemonServiceRuntimeError {
     DaemonServiceRuntimeError::UnsupportedOperation {
         operation: message.into(),
     }
+}
+
+fn resolve_daemon_custodied_upload_credentials(
+    credential_registry_path: &std::path::Path,
+    now_utc: &str,
+    mut request: RemoteEasyconnectSubmitAwsCliUploadRequest,
+) -> Result<RemoteEasyconnectSubmitAwsCliUploadRequest, DaemonServiceRuntimeError> {
+    let Some(completion) = request.completion.as_ref() else {
+        return Ok(request);
+    };
+    let credential = read_managed_credential_registry(credential_registry_path, now_utc)?
+        .credentials
+        .into_iter()
+        .find(|credential| {
+            credential.store_id.as_str() == request.object_store
+                && credential.bucket_name == completion.bucket
+        })
+        .ok_or_else(|| {
+            upload_error(
+                "no daemon-managed credential matches the remote upload ObjectStore and bucket",
+            )
+        })?;
+    request.environment.retain(|variable| {
+        !matches!(
+            variable.name.as_str(),
+            "AWS_ACCESS_KEY_ID" | "AWS_SECRET_ACCESS_KEY" | "AWS_SESSION_TOKEN"
+        )
+    });
+    let strip_profile = |args: &mut Vec<String>| {
+        let mut index = 0;
+        while index < args.len() {
+            if args[index] == "--profile" {
+                args.drain(index..args.len().min(index + 2));
+            } else {
+                index += 1;
+            }
+        }
+    };
+    strip_profile(&mut request.args);
+    strip_profile(&mut request.display_args);
+    request.environment.extend([
+        RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_ACCESS_KEY_ID".to_string(),
+            value: credential.access_key_id,
+        },
+        RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_SECRET_ACCESS_KEY".to_string(),
+            value: credential.secret_access_key,
+        },
+    ]);
+    Ok(request)
 }
 
 /// Handles Remote EasyConnect pairing, sessions, admission, and upload requests.
@@ -128,6 +179,19 @@ where
                 )));
             };
             let accepted_at_utc = handler.clock.now_utc();
+            let request = match resolve_daemon_custodied_upload_credentials(
+                &handler.credential_registry_path,
+                &accepted_at_utc,
+                request,
+            ) {
+                Ok(request) => request,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "remote_easyconnect_upload_credential_failed",
+                        error.to_string(),
+                    )));
+                }
+            };
             match handler
                 .service_orchestrator
                 .remote_easyconnect_aws_cli_upload_job(

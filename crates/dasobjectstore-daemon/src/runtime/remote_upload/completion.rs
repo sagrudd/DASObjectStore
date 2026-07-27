@@ -2,7 +2,8 @@
 
 use super::{
     RemoteUploadCompletionCommit, RemoteUploadCompletionCommitError,
-    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord,
+    RemoteUploadCompletionCommitOutcome, RemoteUploadCompletionMetadata,
+    RemoteUploadCompletionRecord,
 };
 use crate::runtime::service::ServiceCommandRunner;
 use dasobjectstore_core::ids::{ObjectId, PlacementId, StoreId};
@@ -117,11 +118,33 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
     pub fn commit_catalogue(
         &self,
         record: &RemoteUploadCompletionRecord,
-    ) -> Result<(), RemoteUploadCompletionCommitError> {
+    ) -> Result<RemoteUploadCompletionCommitOutcome, RemoteUploadCompletionCommitError> {
         let metadata = record.metadata.as_ref().expect("verified metadata");
         let store_id = StoreId::new(record.object_store.clone()).map_err(|error| {
             RemoteUploadCompletionCommitError::new(format!("invalid ObjectStore id: {error}"))
         })?;
+        let provider_object_key =
+            format!("{}/{}", self.completion.bucket, self.completion.object_key);
+        if dasobjectstore_metadata::profile_catalogue_object_matches(
+            &self.live_sqlite_path,
+            &dasobjectstore_metadata::ProfileCatalogueObjectWithdrawalRequest {
+                profile_namespace: "provider:garage",
+                store_id: &store_id,
+                object_id: &self.completion.object_id,
+                object_version: self.completion.object_version,
+                expected_size_bytes: metadata.expected_size_bytes,
+                expected_checksum: &metadata.expected_checksum,
+                expected_provider: &self.completion.provider,
+                expected_provider_object_key: &provider_object_key,
+            },
+        )
+        .map_err(|error| {
+            RemoteUploadCompletionCommitError::new(format!(
+                "remote upload catalogue replay proof failed: {error}"
+            ))
+        })? {
+            return Ok(RemoteUploadCompletionCommitOutcome::AlreadyCommitted);
+        }
         let digest = ObjectDigest {
             algorithm: "sha256".to_string(),
             value: metadata.expected_checksum[7..].to_ascii_lowercase(),
@@ -152,10 +175,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                     .map_err(|error| RemoteUploadCompletionCommitError::new(error.to_string()))?,
                     location: PortablePlacementLocation::Provider {
                         provider: self.completion.provider.clone(),
-                        object_key: format!(
-                            "{}/{}",
-                            self.completion.bucket, self.completion.object_key
-                        ),
+                        object_key: provider_object_key,
                     },
                     checksum: digest,
                     // The enclosing catalogue transaction records commit time.
@@ -181,7 +201,7 @@ impl<'a> GarageRemoteUploadCompletionAuthority<'a> {
                 "remote upload catalogue commit failed: {error}"
             ))
         })?;
-        Ok(())
+        Ok(RemoteUploadCompletionCommitOutcome::Committed)
     }
 }
 
@@ -189,7 +209,7 @@ impl RemoteUploadCompletionCommit for GarageRemoteUploadCompletionAuthority<'_> 
     fn commit(
         &self,
         record: &RemoteUploadCompletionRecord,
-    ) -> Result<(), RemoteUploadCompletionCommitError> {
+    ) -> Result<RemoteUploadCompletionCommitOutcome, RemoteUploadCompletionCommitError> {
         let metadata = record.metadata.as_ref().ok_or_else(|| {
             RemoteUploadCompletionCommitError::new("remote upload completion metadata is required")
         })?;
@@ -306,10 +326,16 @@ mod tests {
             completion.clone(),
         );
 
-        authority.commit(&record(&completion)).expect("completion");
-        authority
-            .commit(&record(&completion))
-            .expect("idempotent completion");
+        assert_eq!(
+            authority.commit(&record(&completion)).expect("completion"),
+            RemoteUploadCompletionCommitOutcome::Committed
+        );
+        assert_eq!(
+            authority
+                .commit(&record(&completion))
+                .expect("idempotent completion"),
+            RemoteUploadCompletionCommitOutcome::AlreadyCommitted
+        );
 
         let calls = runner.calls.lock().expect("calls lock");
         assert_eq!(calls.len(), 2);

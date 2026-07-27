@@ -178,6 +178,14 @@ Clients must treat the renewal token and one-time capability as bearer
 credentials, keep them out of logs, and never choose a provider endpoint that
 differs from the endpoint advertised by the appliance.
 
+Daemon-submitted uploads follow the same custody boundary. For an upload with
+completion metadata, ``dasobjectstored`` discards caller AWS key fields and any
+``--profile`` selector, then resolves the credential whose ObjectStore and
+bucket both match the request. The persistent provider secret remains inside
+the daemon process. An exact replay still performs provider verification, but
+reuses the existing immutable catalogue object/version and releases the new
+capacity reservation rather than charging logical usage again.
+
 Configure AWS CLI on the remote computer
 ----------------------------------------
 

@@ -289,10 +289,11 @@ mod tests {
         RemoteUploadCancellationCleanupRequest, RemoteUploadCancellationCleanupRuntime,
         RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
         RemoteUploadCancellationCleanupWorker, RemoteUploadCompletionCommit,
-        RemoteUploadCompletionCommitError, RemoteUploadCompletionMetadata,
-        RemoteUploadCompletionRecord, RemoteUploadMultipartAbortConfig,
-        RemoteUploadProgressTelemetry, RemoteUploadProviderCompletion, RemoteUploadQueueDepths,
-        RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+        RemoteUploadCompletionCommitError, RemoteUploadCompletionCommitOutcome,
+        RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord,
+        RemoteUploadMultipartAbortConfig, RemoteUploadProgressTelemetry,
+        RemoteUploadProviderCompletion, RemoteUploadQueueDepths, RemoteUploadS3ByteTransfer,
+        RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
         RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
         RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
         RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerRequest,
@@ -1087,6 +1088,49 @@ mod tests {
             vec![
                 "admit:zymo_fecal_2025.05:42:remote-upload-capacity-failure",
                 "release:zymo_fecal_2025.05:remote-upload-capacity-failure",
+            ]
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn exact_catalogue_replay_releases_new_capacity_reservation() {
+        let root = temp_root("remote-upload-capacity-replay");
+        let registry = FileBackedAdminJobRegistry::new(admin_job_registry_path(&root));
+        let gate = std::sync::Arc::new(RemoteUploadAdmissionGate::new());
+        let provider = std::sync::Arc::new(RecordingCapacityProvider {
+            events: Mutex::new(Vec::new()),
+            decision: CapacityAdmissionDecision::Admitted,
+            message: None,
+        });
+        let worker = RemoteUploadS3TransferWorker::new(std::sync::Arc::clone(&gate), &registry)
+            .with_capacity_admission_provider(provider.clone());
+        let completion = RecordingCompletionCommit {
+            already_committed: true,
+            ..RecordingCompletionCommit::default()
+        };
+
+        let report = worker
+            .run_with_completion_metadata(
+                worker_request("remote-upload-capacity-replay"),
+                &completion,
+                RemoteUploadCompletionMetadata {
+                    upload_id: "remote-upload-capacity-replay".to_string(),
+                    object_key: "reads/sample.fastq".to_string(),
+                    expected_size_bytes: 42,
+                    expected_checksum: format!("sha256:{}", "a".repeat(64)),
+                },
+                |_| Ok::<(), &'static str>(()),
+            )
+            .expect("exact replay succeeds");
+
+        assert!(matches!(report.final_event, DaemonJobEvent::Complete(_)));
+        assert_eq!(
+            *provider.events.lock().expect("events lock"),
+            vec![
+                "admit:zymo_fecal_2025.05:42:remote-upload-capacity-replay",
+                "release:zymo_fecal_2025.05:remote-upload-capacity-replay",
             ]
         );
 
@@ -2409,20 +2453,24 @@ mod tests {
     struct RecordingCompletionCommit {
         records: std::cell::RefCell<Vec<RemoteUploadCompletionRecord>>,
         fail: bool,
+        already_committed: bool,
     }
 
     impl RemoteUploadCompletionCommit for RecordingCompletionCommit {
         fn commit(
             &self,
             record: &RemoteUploadCompletionRecord,
-        ) -> Result<(), RemoteUploadCompletionCommitError> {
+        ) -> Result<RemoteUploadCompletionCommitOutcome, RemoteUploadCompletionCommitError>
+        {
             self.records.borrow_mut().push(record.clone());
             if self.fail {
                 Err(RemoteUploadCompletionCommitError::new(
                     "catalogue commit failed",
                 ))
+            } else if self.already_committed {
+                Ok(RemoteUploadCompletionCommitOutcome::AlreadyCommitted)
             } else {
-                Ok(())
+                Ok(RemoteUploadCompletionCommitOutcome::Committed)
             }
         }
     }

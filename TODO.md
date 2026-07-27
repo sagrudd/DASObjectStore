@@ -291,6 +291,16 @@ completion.
     Ubuntu ARM64 Lima surrogate, but Lima's user-session readiness check hung
     after SSH admission, so neither damaged environment is promoted as product
     evidence. Appliance acceptance remains separately host-gated.
+  - [x] Close the appliance credential and replay-accounting gaps found by the
+    2026-07-27 bounded CODEX-store soak. Completion-bound daemon submissions
+    now replace caller AWS credentials and profile selectors with the exact
+    daemon-custodied ObjectStore/bucket credential. Independently proven
+    catalogue replay releases its new capacity reservation, preventing the
+    previously observed duplicate logical charge. Live Garage HEAD, small and
+    multipart transfer, bounded concurrency/backpressure, retry, immutable
+    catalogue publication, and exact replay were exercised on the appliance.
+    Restart/cancellation and injected catalogue-failure soak cases remain part
+    of the final release acceptance run.
 - [~] Finish resumable/cancellable reconciliation with per-key manifests,
   collision/malformed-key reporting, provider progress, and restart recovery.
   Local manifest/checkpoint planning and cancellation are delivered; stable

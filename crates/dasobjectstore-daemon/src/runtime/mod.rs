@@ -280,14 +280,15 @@ pub use remote_upload::{
     RemoteUploadCancellationCleanupRunReport, RemoteUploadCancellationCleanupRuntime,
     RemoteUploadCancellationCleanupRuntimeConfig, RemoteUploadCancellationCleanupScope,
     RemoteUploadCancellationCleanupWorker, RemoteUploadCompletionCommit,
-    RemoteUploadCompletionCommitError, RemoteUploadCompletionMetadata,
-    RemoteUploadCompletionRecord, RemoteUploadMultipartAbortConfig, RemoteUploadProgressTelemetry,
-    RemoteUploadQueueDepths, RemoteUploadRuntimeSnapshot, RemoteUploadS3ByteTransfer,
-    RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob, RemoteUploadS3TransferJobOutcome,
-    RemoteUploadS3TransferJobSummary, RemoteUploadS3TransferPermit,
-    RemoteUploadS3TransferProgressReporter, RemoteUploadS3TransferProgressUpdate,
-    RemoteUploadS3TransferRunError, RemoteUploadS3TransferWorker,
-    RemoteUploadS3TransferWorkerReport, RemoteUploadS3TransferWorkerRequest,
+    RemoteUploadCompletionCommitError, RemoteUploadCompletionCommitOutcome,
+    RemoteUploadCompletionMetadata, RemoteUploadCompletionRecord, RemoteUploadMultipartAbortConfig,
+    RemoteUploadProgressTelemetry, RemoteUploadQueueDepths, RemoteUploadRuntimeSnapshot,
+    RemoteUploadS3ByteTransfer, RemoteUploadS3ByteTransferError, RemoteUploadS3TransferJob,
+    RemoteUploadS3TransferJobOutcome, RemoteUploadS3TransferJobSummary,
+    RemoteUploadS3TransferPermit, RemoteUploadS3TransferProgressReporter,
+    RemoteUploadS3TransferProgressUpdate, RemoteUploadS3TransferRunError,
+    RemoteUploadS3TransferWorker, RemoteUploadS3TransferWorkerReport,
+    RemoteUploadS3TransferWorkerRequest,
 };
 pub use remote_upload::{GarageRemoteUploadCompletionAuthority, RemoteUploadProviderCompletion};
 pub use service::{
