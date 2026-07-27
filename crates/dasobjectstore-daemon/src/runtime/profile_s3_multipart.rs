@@ -1440,6 +1440,12 @@ mod tests {
                     .to_string(),
             })
             .expect("committed manifest");
+        committed.manifest.completion_receipt = None;
+        std::fs::write(
+            committed.directory.join(MANIFEST_FILE),
+            serde_json::to_vec(&committed.manifest).expect("legacy terminal manifest"),
+        )
+        .expect("write legacy terminal manifest");
         drop(committed);
         assert!(
             list_recoverable_multipart_uploads(&root, request.store_id.as_str())

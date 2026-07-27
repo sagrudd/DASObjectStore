@@ -145,7 +145,6 @@ pub fn list_recoverable_multipart_uploads(
                 let bytes = fs::read(entry.path().join(MANIFEST_FILE)).map_err(io_error)?;
                 let manifest: JournalManifest = serde_json::from_slice(&bytes)
                     .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
-                validate_manifest(&manifest)?;
                 if manifest.store_id != store_id
                     || matches!(
                         manifest.lifecycle,
@@ -154,6 +153,7 @@ pub fn list_recoverable_multipart_uploads(
                 {
                     continue;
                 }
+                validate_manifest(&manifest)?;
                 uploads.push(MultipartUploadStatusRecord {
                     reservation_id: manifest.reservation_id.clone(),
                     object: manifest.object.clone(),

@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.2 - 2026-07-27
+
+- Keep standard S3 ``ListMultipartUploads`` compatible with historical
+  committed journals: terminal work is omitted before applying the strict
+  recoverable-journal schema, while malformed non-terminal work still fails
+  closed.
+
 ## 0.146.1 - 2026-07-27
 
 - Expose daemon-authoritative recoverable multipart journals through the
