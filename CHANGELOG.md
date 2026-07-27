@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.148.2 - 2026-07-27
+
+- Gate the appliance-wide logical identity backfill on committed migration
+  evidence so daemon restart does not replay multiple full-catalogue
+  inspections before opening its control socket.
+
 ## 0.148.1 - 2026-07-27
 
 - Redact daemon transport and join details from governed application HTTPS

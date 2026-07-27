@@ -1,4 +1,5 @@
 use super::*;
+use crate::logical_identity_migration_applied;
 use crate::schema::LIVE_SCHEMA_SQL;
 use dasobjectstore_core::ids::{ObjectId, PlacementId};
 use dasobjectstore_core::object_catalogue::{
@@ -402,4 +403,30 @@ fn database_lock_fails_without_partial_identity() {
         })
         .expect("count");
     assert_eq!(count, 0);
+}
+
+#[test]
+fn committed_migration_evidence_skips_repeated_appliance_backfill() {
+    let path = database("migration-evidence");
+    assert!(!logical_identity_migration_applied(&path).expect("new database"));
+    initialize(&path, &["store"]);
+    assert!(!logical_identity_migration_applied(&path).expect("unapplied schema"));
+
+    backfill_logical_identities(&path, false, NOW).expect("committed backfill");
+    assert!(logical_identity_migration_applied(&path).expect("applied migration"));
+
+    Connection::open(&path)
+        .expect("database")
+        .execute(
+            "UPDATE metadata_migrations SET name='conflicting-name'
+             WHERE migration_id=?1",
+            [LOGICAL_IDENTITY_MIGRATION_ID],
+        )
+        .expect("conflicting evidence");
+    assert!(matches!(
+        logical_identity_migration_applied(&path),
+        Err(LogicalIdentityError::MigrationEvidenceConflict(
+            LOGICAL_IDENTITY_MIGRATION_ID
+        ))
+    ));
 }

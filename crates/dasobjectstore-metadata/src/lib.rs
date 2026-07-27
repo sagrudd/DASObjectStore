@@ -21,6 +21,7 @@ pub mod inspect;
 pub mod integrity;
 pub mod local_object_store;
 pub mod logical_identity;
+mod logical_identity_migration;
 pub mod manifest;
 pub mod markers;
 pub mod object;
@@ -149,6 +150,7 @@ pub use logical_identity::{
     LogicalIdentityError, LogicalPlacementClaim, LogicalVersionClaim, LogicalVersionRecord,
     LOGICAL_IDENTITY_MIGRATION_ID, LOGICAL_IDENTITY_MIGRATION_NAME,
 };
+pub use logical_identity_migration::logical_identity_migration_applied;
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
     POOL_MANIFEST_FORMAT_VERSION,

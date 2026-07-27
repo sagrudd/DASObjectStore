@@ -214,16 +214,22 @@ fn run() -> Result<(), String> {
     let profile_registry = profile_binding_registry_path(&config.state_dir);
     let startup_timestamp = current_utc_timestamp();
     let live_sqlite_path = profile_catalogue_live_sqlite_path();
-    preserve_pre_logical_identity_metadata(
-        &live_sqlite_path,
-        &config.state_dir.join("metadata-migrations"),
-    )?;
-    dasobjectstore_metadata::backfill_logical_identities(
-        &live_sqlite_path,
-        true,
-        &startup_timestamp,
-    )
-    .map_err(|error| format!("logical object identity startup inspection failed: {error}"))?;
+    let logical_identity_migration_applied =
+        dasobjectstore_metadata::logical_identity_migration_applied(&live_sqlite_path).map_err(
+            |error| format!("logical object identity migration evidence failed: {error}"),
+        )?;
+    if !logical_identity_migration_applied {
+        preserve_pre_logical_identity_metadata(
+            &live_sqlite_path,
+            &config.state_dir.join("metadata-migrations"),
+        )?;
+        dasobjectstore_metadata::backfill_logical_identities(
+            &live_sqlite_path,
+            true,
+            &startup_timestamp,
+        )
+        .map_err(|error| format!("logical object identity startup inspection failed: {error}"))?;
+    }
     let s3_backfill =
         dasobjectstore_metadata::backfill_s3_object_bindings(&live_sqlite_path, &startup_timestamp)
             .map_err(|error| format!("native S3 binding startup recovery failed: {error}"))?;
@@ -233,18 +239,22 @@ fn run() -> Result<(), String> {
             s3_backfill.bindings_created, s3_backfill.objects_retained_unmapped
         );
     }
-    dasobjectstore_metadata::backfill_logical_identities(
-        &live_sqlite_path,
-        true,
-        &startup_timestamp,
-    )
-    .map_err(|error| format!("post-binding logical identity inspection failed: {error}"))?;
-    let logical_identity_backfill = dasobjectstore_metadata::backfill_logical_identities(
-        &live_sqlite_path,
-        false,
-        &startup_timestamp,
-    )
-    .map_err(|error| format!("logical object identity startup recovery failed: {error}"))?;
+    let logical_identity_backfill = if logical_identity_migration_applied {
+        dasobjectstore_metadata::LogicalIdentityBackfillReport::default()
+    } else {
+        dasobjectstore_metadata::backfill_logical_identities(
+            &live_sqlite_path,
+            true,
+            &startup_timestamp,
+        )
+        .map_err(|error| format!("post-binding logical identity inspection failed: {error}"))?;
+        dasobjectstore_metadata::backfill_logical_identities(
+            &live_sqlite_path,
+            false,
+            &startup_timestamp,
+        )
+        .map_err(|error| format!("logical object identity startup recovery failed: {error}"))?
+    };
     if logical_identity_backfill.logical_versions > 0
         || logical_identity_backfill.placements > 0
         || logical_identity_backfill.needs_review > 0
