@@ -904,6 +904,7 @@ mod tests {
                             version: 1,
                         },
                         committed: true,
+                        status: None,
                     },
                 ),
             )

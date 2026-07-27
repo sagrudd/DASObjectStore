@@ -238,13 +238,15 @@ pub use profile_s3::{
     head_profile_object, list_profile_objects, list_profile_objects_page, profile_diagnostics,
     profile_health, profile_s3_list_response, put_profile_object,
     put_profile_object_with_capacity_provider, put_profile_object_with_capacity_scope,
-    stream_profile_object, verify_profile_object, ProfileDiagnosticsSummary, ProfileS3ListPage,
-    ProfileS3MultipartCompletion, ProfileS3MultipartPart, ProfileS3MultipartPartSource,
-    ProfileS3MultipartReader, ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend,
-    PROFILE_S3_MAX_KEYS, PROFILE_S3_MAX_MULTIPART_PARTS,
+    recover_profile_s3_published_object, stream_profile_object, verify_profile_object,
+    ProfileDiagnosticsSummary, ProfileS3ListPage, ProfileS3MultipartCompletion,
+    ProfileS3MultipartPart, ProfileS3MultipartPartSource, ProfileS3MultipartReader,
+    ProfileS3Object, ProfileS3ReadBackend, ProfileS3WriteBackend, PROFILE_S3_MAX_KEYS,
+    PROFILE_S3_MAX_MULTIPART_PARTS,
 };
 pub use profile_s3_multipart::{
-    discover_multipart_reservation_ids, MultipartCompletionClaim, MultipartCompletionReceipt,
+    discover_multipart_reservation_ids, inspect_multipart_completion_status,
+    multipart_completion_job_id, MultipartCompletionClaim, MultipartCompletionReceipt,
     MultipartPartJournal, MultipartPartJournalError, MultipartPartRecord,
 };
 pub use reconciliation::{

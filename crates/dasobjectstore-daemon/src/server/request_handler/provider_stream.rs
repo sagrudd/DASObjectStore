@@ -18,6 +18,149 @@ use std::time::{Duration, Instant};
 const AFTER_HDD_ACK_DEADLINE: Duration = Duration::from_secs(300);
 const AFTER_HDD_ACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
+#[derive(Clone)]
+pub(super) struct MultipartCompletionWorkerContext {
+    pub live_sqlite_path: std::path::PathBuf,
+    pub hdd_root_path: std::path::PathBuf,
+    pub accepted_at_utc: String,
+}
+
+pub(super) fn publish_profile_s3_catalogue_at(
+    store_id: &StoreId,
+    backend: &FolderBackend,
+    live_sqlite_path: &std::path::Path,
+    committed_at_utc: &str,
+) -> Result<(), dasobjectstore_core::backend::BackendError> {
+    let profile_namespace = format!("profile-s3:{}", store_id.as_str());
+    crate::runtime::publish_profile_catalogue_with_metadata(
+        store_id,
+        backend,
+        live_sqlite_path,
+        backend
+            .root()
+            .join(".dasobjectstore/profile-catalogue-handoffs"),
+        &profile_namespace,
+        committed_at_utc,
+    )
+    .map(|_| ())
+}
+
+pub(super) fn commit_profile_s3_acceptance_at(
+    live_sqlite_path: &std::path::Path,
+    hdd_root_path: &std::path::Path,
+    committed_at_utc: &str,
+    definition: &dasobjectstore_object_service::StoreServiceDefinition,
+    binding: &crate::runtime::BackendProfileBinding,
+    backend: &FolderBackend,
+    record: &dasobjectstore_core::backend::BackendObjectRecord,
+    upload_id: &str,
+) -> Result<(), String> {
+    crate::runtime::select_managed_hdd_roots_with_capacity(
+        live_sqlite_path,
+        hdd_root_path,
+        definition.policy.copies,
+        record.size_bytes,
+        None,
+    )
+    .map_err(|error| error.to_string())?;
+    publish_profile_s3_catalogue_at(
+        &definition.store_id,
+        backend,
+        live_sqlite_path,
+        committed_at_utc,
+    )
+    .map_err(|error| error.to_string())?;
+    let object_id = match dasobjectstore_metadata::read_s3_object_binding(
+        live_sqlite_path,
+        &definition.store_id,
+        &record.key.object_id,
+        record.key.version,
+    )
+    .map_err(|error| error.to_string())?
+    {
+        Some(existing) => existing.object_id,
+        None => ObjectId::new(format!(
+            "{}/{}",
+            definition.store_id.as_str(),
+            record.key.object_id
+        ))
+        .map_err(|error| error.to_string())?,
+    };
+    let managed_ssd_root = binding
+        .ssd_staging_root
+        .as_deref()
+        .unwrap_or(&binding.backend_root);
+    let payload_path = backend
+        .root()
+        .join(".dasobjectstore/objects")
+        .join(&record.key.object_id);
+    let relative_path = payload_path
+        .strip_prefix(managed_ssd_root)
+        .map_err(|_| "direct S3 payload escaped its authoritative managed SSD root".to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let acknowledgement_policy = match definition.policy.acknowledgement_policy {
+        AcknowledgementPolicy::AfterSsdIngest => "after_ssd_ingest",
+        AcknowledgementPolicy::AfterHddPlacement => "after_hdd_placement",
+    };
+    let destage_job_id = format!("destage-direct-s3-{upload_id}");
+    commit_verified_ssd_and_enqueue(
+        live_sqlite_path,
+        VerifiedSsdCommitRequest {
+            destage_job_id: &destage_job_id,
+            store_id: &definition.store_id,
+            object_id: &object_id,
+            object_type: dasobjectstore_core::object_type::ObjectType::Naive.name(),
+            relative_path: &relative_path,
+            size_bytes: record.size_bytes,
+            content_hash_algorithm: "sha256",
+            content_hash: record.checksum.trim_start_matches("sha256:"),
+            acknowledgement_policy,
+            required_copy_count: definition.policy.copies,
+            max_attempts: 8,
+            priority: 0,
+            committed_at_utc,
+            ingest_job_id: Some(&format!("ingest-direct-s3-{upload_id}")),
+            ingress_origin: Some("remote_s3"),
+            s3_key: Some(&record.key.object_id),
+            s3_version: record.key.version,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    if definition.policy.acknowledgement_policy == AcknowledgementPolicy::AfterHddPlacement {
+        let deadline = Instant::now() + AFTER_HDD_ACK_DEADLINE;
+        loop {
+            let state = read_destage(live_sqlite_path, &object_id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "durable HDD acknowledgement job disappeared".to_string())?;
+            match state.state {
+                DestageState::HddCopyVerified
+                    if state.verified_copy_count >= state.required_copy_count =>
+                {
+                    break;
+                }
+                DestageState::DestageFailed
+                | DestageState::NeedsReview
+                | DestageState::Cancelled => {
+                    return Err(format!(
+                        "HDD placement did not satisfy acknowledgement policy: {:?}: {}",
+                        state.state,
+                        state.last_error.as_deref().unwrap_or("no detail")
+                    ));
+                }
+                _ if Instant::now() >= deadline => {
+                    return Err(
+                        "HDD placement acknowledgement exceeded its 300 second deadline"
+                            .to_string(),
+                    );
+                }
+                _ => std::thread::sleep(AFTER_HDD_ACK_POLL_INTERVAL),
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct ProviderStreamSource {
     pub reader: Box<dyn Read + Send>,
     pub expected_size_bytes: u64,
@@ -34,18 +177,12 @@ where
         store_id: &StoreId,
         backend: &FolderBackend,
     ) -> Result<(), dasobjectstore_core::backend::BackendError> {
-        let profile_namespace = format!("profile-s3:{}", store_id.as_str());
-        crate::runtime::publish_profile_catalogue_with_metadata(
+        publish_profile_s3_catalogue_at(
             store_id,
             backend,
             &self.live_sqlite_path,
-            backend
-                .root()
-                .join(".dasobjectstore/profile-catalogue-handoffs"),
-            &profile_namespace,
             &self.clock.now_utc(),
         )
-        .map(|_| ())
     }
 
     pub(super) fn commit_profile_s3_acceptance(
@@ -56,112 +193,24 @@ where
         record: &dasobjectstore_core::backend::BackendObjectRecord,
         upload_id: &str,
     ) -> Result<(), String> {
-        // AfterSsdIngest is an acknowledgement boundary, not permission to
-        // create an undrainable SSD backlog. Prove that the configured copy
-        // count fits on distinct managed HDDs before publishing catalogue
-        // acceptance. The worker repeats the same selection immediately
-        // before copying so a subsequent capacity race remains fail-closed.
-        crate::runtime::select_managed_hdd_roots_with_capacity(
+        commit_profile_s3_acceptance_at(
             &self.live_sqlite_path,
             &self.hdd_root_path,
-            definition.policy.copies,
-            record.size_bytes,
-            None,
+            &self.clock.now_utc(),
+            definition,
+            binding,
+            backend,
+            record,
+            upload_id,
         )
-        .map_err(|error| error.to_string())?;
-        self.publish_profile_s3_catalogue(&definition.store_id, backend)
-            .map_err(|error| error.to_string())?;
-        let object_id = match dasobjectstore_metadata::read_s3_object_binding(
-            &self.live_sqlite_path,
-            &definition.store_id,
-            &record.key.object_id,
-            record.key.version,
-        )
-        .map_err(|error| error.to_string())?
-        {
-            Some(existing) => existing.object_id,
-            None => ObjectId::new(format!(
-                "{}/{}",
-                definition.store_id.as_str(),
-                record.key.object_id
-            ))
-            .map_err(|error| error.to_string())?,
-        };
-        let managed_ssd_root = binding
-            .ssd_staging_root
-            .as_deref()
-            .unwrap_or(&binding.backend_root);
-        let payload_path = backend
-            .root()
-            .join(".dasobjectstore/objects")
-            .join(&record.key.object_id);
-        let relative_path = payload_path
-            .strip_prefix(managed_ssd_root)
-            .map_err(|_| {
-                "direct S3 payload escaped its authoritative managed SSD root".to_string()
-            })?
-            .to_string_lossy()
-            .into_owned();
-        let acknowledgement_policy = match definition.policy.acknowledgement_policy {
-            AcknowledgementPolicy::AfterSsdIngest => "after_ssd_ingest",
-            AcknowledgementPolicy::AfterHddPlacement => "after_hdd_placement",
-        };
-        let destage_job_id = format!("destage-direct-s3-{upload_id}");
-        commit_verified_ssd_and_enqueue(
-            &self.live_sqlite_path,
-            VerifiedSsdCommitRequest {
-                destage_job_id: &destage_job_id,
-                store_id: &definition.store_id,
-                object_id: &object_id,
-                object_type: dasobjectstore_core::object_type::ObjectType::Naive.name(),
-                relative_path: &relative_path,
-                size_bytes: record.size_bytes,
-                content_hash_algorithm: "sha256",
-                content_hash: record.checksum.trim_start_matches("sha256:"),
-                acknowledgement_policy,
-                required_copy_count: definition.policy.copies,
-                max_attempts: 8,
-                priority: 0,
-                committed_at_utc: &self.clock.now_utc(),
-                ingest_job_id: Some(&format!("ingest-direct-s3-{upload_id}")),
-                ingress_origin: Some("remote_s3"),
-                s3_key: Some(&record.key.object_id),
-                s3_version: record.key.version,
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        if definition.policy.acknowledgement_policy == AcknowledgementPolicy::AfterHddPlacement {
-            let deadline = Instant::now() + AFTER_HDD_ACK_DEADLINE;
-            loop {
-                let state = read_destage(&self.live_sqlite_path, &object_id)
-                    .map_err(|error| error.to_string())?
-                    .ok_or_else(|| "durable HDD acknowledgement job disappeared".to_string())?;
-                match state.state {
-                    DestageState::HddCopyVerified
-                        if state.verified_copy_count >= state.required_copy_count =>
-                    {
-                        break;
-                    }
-                    DestageState::DestageFailed
-                    | DestageState::NeedsReview
-                    | DestageState::Cancelled => {
-                        return Err(format!(
-                            "HDD placement did not satisfy acknowledgement policy: {:?}: {}",
-                            state.state,
-                            state.last_error.as_deref().unwrap_or("no detail")
-                        ));
-                    }
-                    _ if Instant::now() >= deadline => {
-                        return Err(
-                            "HDD placement acknowledgement exceeded its 300 second deadline"
-                                .to_string(),
-                        );
-                    }
-                    _ => std::thread::sleep(AFTER_HDD_ACK_POLL_INTERVAL),
-                }
-            }
+    }
+
+    pub(super) fn multipart_completion_worker_context(&self) -> MultipartCompletionWorkerContext {
+        MultipartCompletionWorkerContext {
+            live_sqlite_path: self.live_sqlite_path.clone(),
+            hdd_root_path: self.hdd_root_path.clone(),
+            accepted_at_utc: self.clock.now_utc(),
         }
-        Ok(())
     }
 
     pub(crate) fn handle_provider_stream_multipart_part_upload_for_actor(

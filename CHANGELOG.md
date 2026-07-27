@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.0 - 2026-07-27
+
+- Decouple direct-S3 multipart completion from the caller's Unix socket.
+  Completion now persists a deterministic daemon job identity and typed
+  phase/progress state before a daemon-owned worker assembles, publishes,
+  catalogues, and records the terminal receipt.
+- Make repeated completion requests attach to the same durable operation,
+  return committed receipts idempotently, resume retryable work after daemon
+  restart, and keep abort and garbage collection away from accepted work.
+- Poll completion through short-lived gateway requests so HTTP disconnects and
+  GUI restarts no longer cancel multi-GiB publication. Committed receipt
+  persistence remains authoritative even when redundant-part cleanup needs a
+  later garbage-collection pass.
+
 ## 0.145.5 - 2026-07-27
 
 - Establish one authoritative 0.146 MVP release-candidate dashboard with fixed

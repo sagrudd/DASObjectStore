@@ -18,7 +18,7 @@ use axum::{
 use dasobjectstore_core::{backend::BackendObjectKey, ids::StoreId};
 use dasobjectstore_daemon::api::{
     ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
-    ProfileS3MultipartPartRequest, ProviderStreamChunkHeader,
+    ProfileS3MultipartCompletionState, ProfileS3MultipartPartRequest, ProviderStreamChunkHeader,
     ProviderStreamMultipartPartUploadOpenRequest, PROVIDER_STREAM_MAX_CHUNK_BYTES,
     PROVIDER_STREAM_SCHEMA_VERSION,
 };
@@ -335,18 +335,56 @@ pub(crate) async fn complete_profile_s3_multipart(
     (StatusCode, axum::Json<AuthRouteError>),
 > {
     let deadline = multipart_completion_deadline(request.expected_size_bytes);
-    crate::daemon_bridge::DaemonBridge::shared_multipart_completion_packaged()
-        .call_with_deadline(deadline, move || {
-            let client = DaemonClient::new(UnixSocketDaemonTransport::for_multipart_completion(
-                DaemonRuntimeConfig::default_packaged().socket_path,
+    let expires = tokio::time::Instant::now() + deadline;
+    loop {
+        let request_for_attempt = request.clone();
+        let response = crate::daemon_bridge::DaemonBridge::shared_multipart_completion_packaged()
+            .call_with_deadline(Duration::from_secs(15), move || {
+                let client =
+                    DaemonClient::new(UnixSocketDaemonTransport::for_multipart_completion(
+                        DaemonRuntimeConfig::default_packaged().socket_path,
+                    ));
+                client
+                    .profile_s3_multipart_complete(request_for_attempt)
+                    .map_err(multipart_completion_client_error)
+            })
+            .await
+            .map_err(multipart_completion_bridge_error)?;
+        match response.status.as_ref().map(|status| status.state) {
+            Some(ProfileS3MultipartCompletionState::Committed) if response.committed => {
+                return Ok(axum::Json(response));
+            }
+            None if response.committed => {
+                return Ok(axum::Json(response));
+            }
+            Some(ProfileS3MultipartCompletionState::FailedTerminal) => {
+                let message = response
+                    .status
+                    .as_ref()
+                    .and_then(|status| status.error.as_ref())
+                    .map(|error| error.message.clone())
+                    .unwrap_or_else(|| "multipart completion failed terminally".to_string());
+                return Err(route_error(
+                    StatusCode::CONFLICT,
+                    "profile_s3_multipart_failed_terminal",
+                    message,
+                ));
+            }
+            Some(ProfileS3MultipartCompletionState::FailedRetryable)
+            | Some(ProfileS3MultipartCompletionState::Accepted)
+            | Some(ProfileS3MultipartCompletionState::InProgress)
+            | Some(ProfileS3MultipartCompletionState::Committed)
+            | None => {}
+        }
+        if tokio::time::Instant::now() >= expires {
+            return Err(route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "profile_s3_multipart_in_progress",
+                "multipart completion remains durable and in progress; retry the same request",
             ));
-            client
-                .profile_s3_multipart_complete(request)
-                .map_err(multipart_completion_client_error)
-        })
-        .await
-        .map(axum::Json)
-        .map_err(multipart_completion_bridge_error)
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 fn multipart_completion_client_error(

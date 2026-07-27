@@ -320,6 +320,102 @@ pub struct ProfileS3MultipartCompletionResponse {
     pub reservation_id: String,
     pub key: BackendObjectKey,
     pub committed: bool,
+    /// Durable daemon-owned operation state. Older peers may omit this field;
+    /// callers must then use `committed` for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ProfileS3MultipartCompletionStatus>,
+}
+
+/// Durable daemon-owned multipart completion lifecycle. The state is
+/// deliberately independent of an HTTP request or Unix-socket connection so a
+/// caller may safely disconnect and later inspect the same operation.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileS3MultipartCompletionState {
+    #[default]
+    Accepted,
+    InProgress,
+    Committed,
+    FailedRetryable,
+    FailedTerminal,
+}
+
+/// Stable completion phases used for operator telemetry and recovery. Missing
+/// phase fields from older persisted journals safely default to `queued`;
+/// serialized enum values remain explicit.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProfileS3MultipartCompletionPhase {
+    #[default]
+    Queued,
+    VerifyingParts,
+    Assembling,
+    Publishing,
+    Cataloguing,
+    PersistingReceipt,
+    Complete,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartCompletionError {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+}
+
+/// Path-free status for one deterministic multipart completion operation.
+/// `completed_bytes` is phase-local progress and must never exceed
+/// `total_bytes`. Error text must be safe for an authenticated caller and must
+/// not contain managed paths or provider credentials.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartCompletionStatus {
+    pub job_id: String,
+    #[serde(default)]
+    pub state: ProfileS3MultipartCompletionState,
+    #[serde(default)]
+    pub phase: ProfileS3MultipartCompletionPhase,
+    #[serde(default)]
+    pub attempts: u32,
+    #[serde(default)]
+    pub completed_bytes: u64,
+    #[serde(default)]
+    pub total_bytes: u64,
+    #[serde(default)]
+    pub error: Option<ProfileS3MultipartCompletionError>,
+    #[serde(default)]
+    pub updated_at_unix_seconds: u64,
+}
+
+impl ProfileS3MultipartCompletionStatus {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.job_id.trim().is_empty() {
+            return Err("multipart completion job identity must not be blank".to_string());
+        }
+        if self.completed_bytes > self.total_bytes {
+            return Err("multipart completion progress exceeds its total".to_string());
+        }
+        match self.state {
+            ProfileS3MultipartCompletionState::FailedRetryable
+            | ProfileS3MultipartCompletionState::FailedTerminal
+                if self.error.is_none() =>
+            {
+                Err("failed multipart completion status requires an error".to_string())
+            }
+            ProfileS3MultipartCompletionState::Committed
+                if self.phase != ProfileS3MultipartCompletionPhase::Complete
+                    || self.error.is_some() =>
+            {
+                Err("committed multipart completion status is inconsistent".to_string())
+            }
+            ProfileS3MultipartCompletionState::Accepted
+            | ProfileS3MultipartCompletionState::InProgress
+                if self.error.is_some() =>
+            {
+                Err("active multipart completion status cannot retain an error".to_string())
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -598,8 +694,53 @@ mod tests {
                 version: 1,
             },
             committed: true,
+            status: None,
         };
         response.validate().expect("response validates");
+    }
+
+    #[test]
+    fn multipart_completion_status_is_typed_path_free_and_backwards_compatible() {
+        let status = ProfileS3MultipartCompletionStatus {
+            job_id: "mpc-0123456789abcdef".to_string(),
+            state: ProfileS3MultipartCompletionState::InProgress,
+            phase: ProfileS3MultipartCompletionPhase::Assembling,
+            attempts: 1,
+            completed_bytes: 5,
+            total_bytes: 10,
+            error: None,
+            updated_at_unix_seconds: 42,
+        };
+        status.validate().expect("status validates");
+        let json = serde_json::to_string(&status).expect("status serializes");
+        assert!(!json.contains("root"));
+        assert!(!json.contains("credential"));
+
+        let legacy: ProfileS3MultipartCompletionStatus =
+            serde_json::from_str(r#"{"job_id":"mpc-legacy","total_bytes":10}"#)
+                .expect("missing additive fields use safe defaults");
+        assert_eq!(legacy.state, ProfileS3MultipartCompletionState::Accepted);
+        assert_eq!(legacy.phase, ProfileS3MultipartCompletionPhase::Queued);
+    }
+
+    #[test]
+    fn multipart_completion_status_rejects_impossible_terminal_evidence() {
+        let mut status = ProfileS3MultipartCompletionStatus {
+            job_id: "mpc-1".to_string(),
+            state: ProfileS3MultipartCompletionState::FailedRetryable,
+            phase: ProfileS3MultipartCompletionPhase::Publishing,
+            attempts: 1,
+            completed_bytes: 0,
+            total_bytes: 1,
+            error: None,
+            updated_at_unix_seconds: 42,
+        };
+        assert!(status.validate().is_err());
+        status.state = ProfileS3MultipartCompletionState::Committed;
+        status.phase = ProfileS3MultipartCompletionPhase::Complete;
+        assert!(status.validate().is_ok());
+        status.completed_bytes = 2;
+        assert!(status.validate().is_err());
     }
 
     #[test]

@@ -111,6 +111,7 @@ mod configuration;
 mod dispatch;
 mod errors;
 mod job_projection;
+mod multipart_completion_worker;
 mod orchestrator;
 mod provider_stream;
 mod request_helpers;

@@ -272,6 +272,39 @@ pub fn complete_profile_s3_multipart_with_admitted_capacity_scope<'a>(
     )
 }
 
+/// Recover the crash window after a payload was atomically finalized but
+/// before its private catalogue and logical reservation were committed.
+/// Independent size/checksum proof is required; no payload bytes are copied.
+pub fn recover_profile_s3_published_object(
+    capacity_provider: &dyn CapacityAdmissionProvider,
+    store_id: &str,
+    subobject: Option<&str>,
+    backend: &mut dyn ProfileS3WriteBackend,
+    reservation_id: &str,
+    key: &BackendObjectKey,
+    expected_size_bytes: u64,
+    expected_checksum: &str,
+) -> Result<BackendObjectRecord, BackendError> {
+    let record = backend.verify(key)?;
+    if record.size_bytes != expected_size_bytes || record.checksum != expected_checksum {
+        return Err(BackendError::InvalidRequest(
+            "published object conflicts with the durable multipart intent".to_string(),
+        ));
+    }
+    backend.commit_batch(std::slice::from_ref(&record))?;
+    let store_id = StoreId::new(store_id.to_string()).map_err(|error| {
+        BackendError::InvalidRequest(format!("invalid profile S3 ObjectStore id: {error}"))
+    })?;
+    commit_capacity_scope(capacity_provider, &store_id, subobject, reservation_id).map_err(
+        |error| {
+            BackendError::InvalidRequest(format!(
+                "profile S3 capacity recovery failed after publication proof: {error}"
+            ))
+        },
+    )?;
+    Ok(record)
+}
+
 impl Read for ProfileS3MultipartReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if buffer.is_empty() || self.finished {

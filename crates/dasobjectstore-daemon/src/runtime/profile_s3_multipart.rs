@@ -7,8 +7,10 @@
 //! client paths or keeping bytes in memory.
 
 use crate::api::{
-    ProviderStreamChunkHeader, ProviderStreamMultipartPartUploadOpenRequest,
-    ProviderStreamValidationError, ProviderStreamVerifier,
+    ProfileS3MultipartCompletionPhase, ProfileS3MultipartCompletionState,
+    ProfileS3MultipartCompletionStatus, ProviderStreamChunkHeader,
+    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamValidationError,
+    ProviderStreamVerifier,
 };
 use dasobjectstore_core::backend::BackendObjectKey;
 use serde::{Deserialize, Serialize};
@@ -25,6 +27,11 @@ const JOURNAL_SCHEMA_VERSION: &str = "dasobjectstore.profile_s3.multipart_journa
 const NAMESPACE: &str = ".dasobjectstore";
 const MULTIPART_DIR: &str = "multipart";
 const MANIFEST_FILE: &str = "manifest.json";
+
+#[path = "profile_s3_multipart_completion.rs"]
+mod completion;
+use completion::{completion_job_id, completion_status};
+pub use completion::{inspect_multipart_completion_status, multipart_completion_job_id};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct JournalManifest {
@@ -44,6 +51,8 @@ struct JournalManifest {
     completion_intent: Option<MultipartCompletionIntent>,
     #[serde(default)]
     completion_receipt: Option<MultipartCompletionReceipt>,
+    #[serde(default)]
+    completion_job: Option<ProfileS3MultipartCompletionStatus>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -137,6 +146,7 @@ impl MultipartPartJournal {
                 updated_at_unix_seconds: now_unix_seconds(),
                 completion_intent: None,
                 completion_receipt: None,
+                completion_job: None,
             }
         };
         Ok(Self {
@@ -376,6 +386,19 @@ impl MultipartPartJournal {
             MultipartLifecycle::Receiving => {
                 self.manifest.lifecycle = MultipartLifecycle::Completing;
                 self.manifest.completion_intent = Some(intent);
+                self.manifest.completion_job = Some(completion_status(
+                    &self.manifest.store_id,
+                    &self.manifest.reservation_id,
+                    self.manifest
+                        .completion_intent
+                        .as_ref()
+                        .expect("completion intent was just assigned"),
+                    ProfileS3MultipartCompletionState::Accepted,
+                    ProfileS3MultipartCompletionPhase::Queued,
+                    0,
+                    0,
+                    None,
+                ));
                 self.manifest.updated_at_unix_seconds = now_unix_seconds();
                 self.persist()?;
                 Ok(MultipartCompletionClaim::Started)
@@ -383,6 +406,23 @@ impl MultipartPartJournal {
             MultipartLifecycle::Completing => {
                 if self.manifest.completion_intent.as_ref() != Some(&intent) {
                     return Err(MultipartPartJournalError::CompletionConflict);
+                }
+                if self.manifest.completion_job.is_none() {
+                    // Upgrade an older v1 completing journal in place. The
+                    // immutable intent yields the same operation identity on
+                    // every restart.
+                    self.manifest.completion_job = Some(completion_status(
+                        &self.manifest.store_id,
+                        &self.manifest.reservation_id,
+                        &intent,
+                        ProfileS3MultipartCompletionState::InProgress,
+                        ProfileS3MultipartCompletionPhase::Queued,
+                        1,
+                        0,
+                        None,
+                    ));
+                    self.manifest.updated_at_unix_seconds = now_unix_seconds();
+                    self.persist()?;
                 }
                 Ok(MultipartCompletionClaim::Resuming)
             }
@@ -453,21 +493,34 @@ impl MultipartPartJournal {
         }
         self.manifest.lifecycle = MultipartLifecycle::Committed;
         self.manifest.completion_receipt = Some(receipt);
+        let status = self.ensure_completion_job()?;
+        status.state = ProfileS3MultipartCompletionState::Committed;
+        status.phase = ProfileS3MultipartCompletionPhase::Complete;
+        status.completed_bytes = status.total_bytes;
+        status.error = None;
+        status.updated_at_unix_seconds = now_unix_seconds();
         self.manifest.updated_at_unix_seconds = now_unix_seconds();
         self.persist()?;
         // The durable receipt is the idempotency checkpoint. Once it exists,
         // staged parts are redundant and must not remain as a second full-size
         // copy of the committed object.
+        let mut cleanup_complete = true;
         for part in &self.manifest.parts {
             match fs::remove_file(self.directory.join(&part.file_name)) {
                 Ok(()) => {}
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(io_error(error)),
+                Err(_) => cleanup_complete = false,
             }
         }
-        File::open(&self.directory)
-            .and_then(|directory| directory.sync_all())
-            .map_err(io_error)
+        if cleanup_complete {
+            File::open(&self.directory)
+                .and_then(|directory| directory.sync_all())
+                .map_err(io_error)?;
+        }
+        // Cleanup is downstream of the durable receipt. A retained part is
+        // safe, visible to daemon GC, and must never make an already committed
+        // completion appear to have failed.
+        Ok(())
     }
 
     /// Abort and reclaim a receiving multipart journal. The exclusive activity
@@ -493,6 +546,42 @@ impl MultipartPartJournal {
     /// Backwards-compatible alias for daemon-owned abort cleanup.
     pub fn remove(self) -> Result<(), MultipartPartJournalError> {
         self.abort()
+    }
+
+    fn require_completing(&self) -> Result<(), MultipartPartJournalError> {
+        if self.manifest.lifecycle == MultipartLifecycle::Completing
+            && self.manifest.completion_intent.is_some()
+        {
+            Ok(())
+        } else {
+            Err(MultipartPartJournalError::CompletionConflict)
+        }
+    }
+
+    fn ensure_completion_job(
+        &mut self,
+    ) -> Result<&mut ProfileS3MultipartCompletionStatus, MultipartPartJournalError> {
+        let intent = self
+            .manifest
+            .completion_intent
+            .as_ref()
+            .ok_or(MultipartPartJournalError::CompletionConflict)?;
+        if self.manifest.completion_job.is_none() {
+            self.manifest.completion_job = Some(completion_status(
+                &self.manifest.store_id,
+                &self.manifest.reservation_id,
+                intent,
+                ProfileS3MultipartCompletionState::InProgress,
+                ProfileS3MultipartCompletionPhase::Queued,
+                1,
+                0,
+                None,
+            ));
+        }
+        self.manifest
+            .completion_job
+            .as_mut()
+            .ok_or(MultipartPartJournalError::CompletionConflict)
     }
 
     fn persist(&self) -> Result<(), MultipartPartJournalError> {
@@ -699,6 +788,34 @@ fn validate_manifest(manifest: &JournalManifest) -> Result<(), MultipartPartJour
     if total > manifest.reservation_size_bytes {
         return Err(MultipartPartJournalError::ReservationExceeded);
     }
+    if let Some(status) = manifest.completion_job.as_ref() {
+        status
+            .validate()
+            .map_err(MultipartPartJournalError::Manifest)?;
+        let intent = manifest.completion_intent.as_ref().ok_or_else(|| {
+            MultipartPartJournalError::Manifest(
+                "multipart completion job has no immutable intent".to_string(),
+            )
+        })?;
+        if status.job_id != completion_job_id(&manifest.store_id, &manifest.reservation_id, intent)
+            || status.total_bytes != intent.expected_size_bytes
+        {
+            return Err(MultipartPartJournalError::Manifest(
+                "multipart completion job identity or size is inconsistent".to_string(),
+            ));
+        }
+        match manifest.lifecycle {
+            MultipartLifecycle::Completing
+                if status.state != ProfileS3MultipartCompletionState::Committed => {}
+            MultipartLifecycle::Committed
+                if status.state == ProfileS3MultipartCompletionState::Committed => {}
+            _ => {
+                return Err(MultipartPartJournalError::Manifest(
+                    "multipart completion job lifecycle is inconsistent".to_string(),
+                ));
+            }
+        }
+    }
     match manifest.lifecycle {
         MultipartLifecycle::Receiving | MultipartLifecycle::Aborted
             if manifest.completion_intent.is_none() && manifest.completion_receipt.is_none() => {}
@@ -743,6 +860,9 @@ pub enum MultipartPartJournalError {
     CompletionStarted,
     AlreadyCommitted,
     CompletionConflict,
+    InvalidProgress,
+    InvalidCompletionError,
+    AttemptOverflow,
     ActivityRegistry,
 }
 
@@ -770,6 +890,15 @@ impl Display for MultipartPartJournalError {
             Self::CompletionConflict => {
                 formatter.write_str("multipart completion conflicts with the durable intent")
             }
+            Self::InvalidProgress => {
+                formatter.write_str("multipart completion progress is invalid")
+            }
+            Self::InvalidCompletionError => {
+                formatter.write_str("multipart completion failure is invalid")
+            }
+            Self::AttemptOverflow => {
+                formatter.write_str("multipart completion attempt count overflowed")
+            }
             Self::ActivityRegistry => {
                 formatter.write_str("multipart activity registry is unavailable")
             }
@@ -782,7 +911,10 @@ impl std::error::Error for MultipartPartJournalError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{write_provider_stream_frame, PROVIDER_STREAM_SCHEMA_VERSION};
+    use crate::api::{
+        write_provider_stream_frame, ProfileS3MultipartCompletionError,
+        PROVIDER_STREAM_SCHEMA_VERSION,
+    };
     use dasobjectstore_core::ids::StoreId;
     use std::io::{Cursor, Read};
 
@@ -1076,6 +1208,196 @@ mod tests {
             "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
         drop(resumed);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn completion_job_identity_is_deterministic_and_intent_bound() {
+        let intent = MultipartCompletionIntent {
+            object: BackendObjectKey {
+                object_id: "object.bin".to_string(),
+                version: 1,
+            },
+            expected_size_bytes: 10,
+            parts: vec![MultipartPartRecord {
+                part_number: 1,
+                size_bytes: 10,
+                checksum: format!("sha256:{}", "a".repeat(64)),
+            }],
+        };
+        let first = completion_job_id("store-1", "reservation-1", &intent);
+        assert_eq!(
+            first,
+            completion_job_id("store-1", "reservation-1", &intent)
+        );
+        assert!(first.starts_with("mpc-"));
+        assert_eq!(first.len(), 68);
+
+        let mut changed = intent.clone();
+        changed.parts[0].checksum = format!("sha256:{}", "b".repeat(64));
+        assert_ne!(
+            first,
+            completion_job_id("store-1", "reservation-1", &changed)
+        );
+    }
+
+    #[test]
+    fn completion_status_inspection_does_not_wait_for_active_worker() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-inspect-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        journal
+            .begin_completion(request.object.clone(), 10, Vec::new())
+            .expect("begin");
+
+        // `journal` still owns the exclusive activity lease. Inspection reads
+        // only the atomically persisted manifest and therefore cannot wait on
+        // the worker lease.
+        let status = inspect_multipart_completion_status(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            &request.object,
+        )
+        .expect("inspect")
+        .expect("completion status");
+        assert_eq!(status.state, ProfileS3MultipartCompletionState::Accepted);
+        assert_eq!(status.phase, ProfileS3MultipartCompletionPhase::Queued);
+        assert_eq!(status.attempts, 0);
+        assert_eq!(status.total_bytes, 10);
+
+        drop(journal);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn completion_progress_and_failure_survive_restart_without_releasing_parts() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-progress-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        let part_path = journal.directory.join("part-00000001.bin");
+        std::fs::write(&part_path, b"0123456789").expect("part");
+        journal.manifest.parts.push(JournalPart {
+            part_number: 1,
+            size_bytes: 10,
+            checksum: format!("sha256:{}", "a".repeat(64)),
+            file_name: "part-00000001.bin".to_string(),
+        });
+        journal.persist().expect("manifest");
+        let parts = vec![MultipartPartRecord {
+            part_number: 1,
+            size_bytes: 10,
+            checksum: format!("sha256:{}", "a".repeat(64)),
+        }];
+        journal
+            .begin_completion(request.object.clone(), 10, parts.clone())
+            .expect("begin");
+        let running = journal
+            .mark_completion_in_progress(ProfileS3MultipartCompletionPhase::Assembling)
+            .expect("running");
+        assert_eq!(running.attempts, 1);
+        journal
+            .mark_completion_progress(ProfileS3MultipartCompletionPhase::Assembling, 4)
+            .expect("progress");
+        journal
+            .mark_completion_failed(
+                ProfileS3MultipartCompletionPhase::Publishing,
+                ProfileS3MultipartCompletionError {
+                    code: "backend_temporarily_unavailable".to_string(),
+                    message: "backend is temporarily unavailable".to_string(),
+                    retryable: true,
+                },
+            )
+            .expect("retryable failure");
+        drop(journal);
+
+        let mut reopened = MultipartPartJournal::open_for_completion(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            request.object.clone(),
+            10,
+        )
+        .expect("reopen");
+        assert_eq!(
+            reopened
+                .begin_completion(request.object, 10, parts)
+                .expect("resume"),
+            MultipartCompletionClaim::Resuming
+        );
+        let failed = reopened.completion_status().expect("status").expect("job");
+        assert_eq!(
+            failed.state,
+            ProfileS3MultipartCompletionState::FailedRetryable
+        );
+        assert_eq!(failed.attempts, 1);
+        assert_eq!(failed.completed_bytes, 4);
+        assert!(part_path.exists());
+        let retried = reopened
+            .mark_completion_in_progress(ProfileS3MultipartCompletionPhase::VerifyingParts)
+            .expect("retry");
+        assert_eq!(retried.attempts, 2);
+        assert!(retried.error.is_none());
+
+        drop(reopened);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_completing_manifest_gets_stable_synthesized_status() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-legacy-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.manifest.lifecycle = MultipartLifecycle::Completing;
+        journal.manifest.completion_intent = Some(MultipartCompletionIntent {
+            object: request.object.clone(),
+            expected_size_bytes: 10,
+            parts: Vec::new(),
+        });
+        journal.manifest.completion_job = None;
+        journal.persist().expect("legacy manifest");
+
+        let first = journal
+            .completion_status()
+            .expect("status")
+            .expect("synthesized");
+        let second = inspect_multipart_completion_status(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            &request.object,
+        )
+        .expect("inspect")
+        .expect("synthesized");
+        assert_eq!(first.job_id, second.job_id);
+        assert_eq!(first.state, ProfileS3MultipartCompletionState::InProgress);
+
+        drop(journal);
         let _ = std::fs::remove_dir_all(root);
     }
 }

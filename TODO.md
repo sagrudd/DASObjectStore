@@ -1271,6 +1271,12 @@ hardware acceptance.
     requires the exact verified part set, reopens daemon-owned readers, uses a
     pre-admitted transactional assembler, commits the catalogue and capacity
     reservation once, and removes the journal only after durable success.
+    Release 0.146.0 moves multi-GiB completion into a daemon-owned background
+    operation with a deterministic intent-bound job ID, typed durable
+    phase/progress/failure state, short submit/status transports, idempotent
+    committed receipts, retryable restart recovery, and receipt-before-cleanup
+    ordering. Physical 8/25-GiB and cached GSE230446 acceptance remains the
+    commit-bound appliance evidence for this release.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; daemon request routing and
     runtime store dispatch now complete through the journal-backed completion

@@ -439,6 +439,17 @@ shared metadata publication is interrupted, the payload remains durable and
 the journal remains ``profile_committed`` for restart replay; clients receive
 an error instead of a misleading successful write.
 
+Large multipart completion is a durable daemon operation rather than one long
+HTTP or Unix-socket transaction. The daemon records an intent-bound job ID,
+phase, byte progress, attempt count, and typed failure before assembly starts.
+The S3 gateway polls that state through short requests. Losing the browser/API
+process or client connection stops only the polling; it does not cancel the
+accepted operation. Repeating ``CompleteMultipartUpload`` with the exact same
+store, key, upload ID, size, and ordered part checksums attaches to the existing
+operation and returns its receipt after commit. A conflicting completion fails
+closed. Staged parts remain protected through retryable failure and are
+reclaimed only after the receipt and catalogue acceptance are durable.
+
 DELETE follows the same authority rule. The daemon removes the private
 catalogue record and payload, reconciles logical capacity, then atomically
 replaces that profile namespace in shared SQLite with the resulting exact
