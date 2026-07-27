@@ -11,10 +11,10 @@ use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_core::store::{AcknowledgementPolicy, IngestMode, StorePolicy};
 use dasobjectstore_metadata::{
-    acquire_disk_capacity_claims, commit_object_put, commit_verified_ssd_and_enqueue,
-    existing_object_payload_candidate_paths, measure_ssd_capacity,
-    put_object_direct_to_hdd_with_controlled_progress, read_destage, read_object_inspect,
-    read_outstanding_disk_capacity, release_disk_capacity_claims,
+    acquire_disk_capacity_claims, commit_object_put,
+    commit_verified_ssd_and_enqueue_with_capacity_claims, existing_object_payload_candidate_paths,
+    measure_ssd_capacity, put_object_direct_to_hdd_with_controlled_progress, read_destage,
+    read_object_inspect, read_outstanding_disk_capacity, release_disk_capacity_claims,
     settle_staged_object_to_hdd_with_controlled_progress,
     stage_object_on_ssd_with_controlled_progress, DirectObjectPutRequest,
     DiskCapacityClaimAllocation, DiskCapacityClaimKind, DiskCapacityClaimRequest, DiskCopyRoot,
@@ -50,10 +50,11 @@ mod source_classification;
 
 use capacity::{reservation_scope, IngestCapacityReservations};
 use endpoint::{collect_ingest_files, resolve_ingest_endpoint, FileIngestEntry};
+pub use environment::default_hdd_root;
 pub use environment::default_ssd_root;
+pub(crate) use environment::discover_managed_hdd_roots;
 #[cfg(test)]
 use environment::SSD_ROOT_ENV;
-pub(crate) use environment::{default_hdd_root, discover_managed_hdd_roots};
 use environment::{default_live_sqlite_path, validate_known_ssd_root};
 use pipeline_events::{drain_hdd_settlement_events, object_progress_event};
 use pipeline_state::{
@@ -769,7 +770,24 @@ impl LocalFileIngestExecutor {
             let object_type = request.object_type.to_string();
             let store_prefix = format!("{}/", summary.store_id.as_str());
             let s3_key = entry.object_id.as_str().strip_prefix(&store_prefix);
-            let report = match commit_verified_ssd_and_enqueue(
+            let destage_capacity = match crate::runtime::build_destage_capacity_claim(
+                &self.live_sqlite_path,
+                &self.hdd_root,
+                &entry.object_id,
+                &destage_job_id,
+                copies,
+                staged.bytes_staged,
+                &staged.content_hash,
+                accepted_at_utc,
+            ) {
+                Ok(capacity) => capacity,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&staged.job_root);
+                    capacity_reservations.release(entry)?;
+                    return Err(DaemonIngestFilesRuntimeError::CommandFailed(error));
+                }
+            };
+            let report = match commit_verified_ssd_and_enqueue_with_capacity_claims(
                 &self.live_sqlite_path,
                 VerifiedSsdCommitRequest {
                     destage_job_id: &destage_job_id,
@@ -790,6 +808,7 @@ impl LocalFileIngestExecutor {
                     s3_key,
                     s3_version: 1,
                 },
+                &destage_capacity,
             ) {
                 Ok(report) => report,
                 Err(error) => {
@@ -1755,6 +1774,12 @@ mod tests {
             "sha256:older-payload",
             21,
         );
+        dasobjectstore_metadata::backfill_logical_identities(
+            &live_sqlite_path,
+            false,
+            "2026-07-10T09:59:00Z",
+        )
+        .expect("adopt legacy identity before replacement");
         let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
         policy.ingest_mode = IngestMode::DirectToHdd;
         write_store_registry_with_policy(&registry_path, policy);

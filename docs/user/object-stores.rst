@@ -21,6 +21,20 @@ The command uses built-in defaults for the class. For ``generated_data`` this
 currently means two verified HDD copies, SSD-first ingest, and acknowledgement
 after HDD placement.
 
+Creation is a durable daemon operation. The daemon records the request before
+initializing capacity or publishing the definition and derives the
+administrator from the authenticated local peer. If the client disconnects or
+the daemon restarts, repeat the same create request with the same client
+request identity: an exact retry resumes or returns the original operation.
+Changing the requested policy while reusing that identity is rejected. Do not
+edit the registry to recover a partially completed creation.
+
+The ``generated_data`` default is deliberately
+``AfterHddPlacement``. Existing ObjectStores retain their stored policy; this
+default does not silently migrate them. ``AfterSsdIngest`` is an explicit
+lower-latency policy and is safe to acknowledge only when the daemon has
+reserved every required HDD copy and durably published its background work.
+
 Ingress landing is determined by the daemon from both the store policy and the
 submission origin:
 

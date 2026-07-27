@@ -1,14 +1,15 @@
 use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
-    default_ssd_root, garbage_collect_reconciliation_staging, profile_binding_registry_path,
-    reconcile_workspace_cleanups, reconcile_workspace_materializations,
-    reconcile_workspace_nfs_attachments, reconcile_workspace_promotions,
-    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
-    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
-    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
-    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceCleanupWorkerConfig,
-    WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
+    default_hdd_root, default_ssd_root, garbage_collect_reconciliation_staging,
+    profile_binding_registry_path, reconcile_workspace_cleanups,
+    reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
+    reconcile_workspace_promotions, reconcile_workspace_provision_operations,
+    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
+    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
+    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
+    WorkspaceCleanupWorkerConfig, WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig,
+    DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -24,10 +25,12 @@ use dasobjectstore_daemon::{
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
 use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
-use std::fs::File;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::thread;
@@ -41,6 +44,140 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn preserve_pre_logical_identity_metadata(
+    live_sqlite_path: &Path,
+    migration_root: &Path,
+) -> Result<(), String> {
+    if !live_sqlite_path.exists() {
+        return Ok(());
+    }
+    let migration_applied = rusqlite::Connection::open_with_flags(
+        live_sqlite_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .and_then(|connection| {
+        connection.query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM metadata_migrations
+                 WHERE migration_id=?1 AND name=?2
+             ) AND EXISTS(
+                 SELECT 1 FROM metadata_format_versions
+                 WHERE artifact=?3 AND (
+                     major>?4 OR (major=?4 AND minor>=?5)
+                 )
+             )",
+            rusqlite::params![
+                dasobjectstore_metadata::LOGICAL_IDENTITY_MIGRATION_ID,
+                dasobjectstore_metadata::LOGICAL_IDENTITY_MIGRATION_NAME,
+                dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION
+                    .artifact
+                    .name(),
+                dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION.major,
+                dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION.minor,
+            ],
+            |row| row.get::<_, bool>(0),
+        )
+    })
+    .unwrap_or(false);
+    if migration_applied {
+        return Ok(());
+    }
+    fs::create_dir_all(migration_root).map_err(|error| {
+        format!("could not create metadata migration backup directory: {error}")
+    })?;
+    protect_migration_directory(migration_root)?;
+    let temporary_path = migration_root.join("live-sqlite-pre-0.13.sqlite.tmp");
+    match fs::remove_file(&temporary_path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "could not remove stale metadata migration backup: {error}"
+            ));
+        }
+    }
+    let connection = rusqlite::Connection::open(live_sqlite_path)
+        .map_err(|error| format!("could not open live metadata for migration backup: {error}"))?;
+    connection
+        .execute(
+            "VACUUM INTO ?1",
+            [temporary_path.to_string_lossy().as_ref()],
+        )
+        .map_err(|error| format!("could not create logical-identity migration backup: {error}"))?;
+    validate_sqlite_backup(&temporary_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temporary_path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("could not protect metadata migration backup: {error}"))?;
+    }
+    let backup_digest = sha256_file(&temporary_path)?;
+    let backup_path = migration_root.join(format!("live-sqlite-pre-0.13-{backup_digest}.sqlite"));
+    if backup_path.exists() {
+        validate_sqlite_backup(&backup_path)?;
+        fs::remove_file(&temporary_path)
+            .map_err(|error| format!("could not remove duplicate migration backup: {error}"))?;
+    } else {
+        fs::rename(&temporary_path, &backup_path)
+            .map_err(|error| format!("could not publish metadata migration backup: {error}"))?;
+    }
+    File::open(migration_root)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("could not sync metadata migration backup directory: {error}"))?;
+    Ok(())
+}
+
+fn protect_migration_directory(path: &Path) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect metadata migration directory: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("metadata migration backup root is not a regular directory".to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err("metadata migration backup root has an unexpected owner".to_string());
+        }
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| {
+            format!("could not protect metadata migration backup directory: {error}")
+        })?;
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file =
+        File::open(path).map_err(|error| format!("could not hash migration backup: {error}"))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("could not hash migration backup: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn validate_sqlite_backup(path: &Path) -> Result<(), String> {
+    let connection =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|error| format!("could not open metadata migration backup: {error}"))?;
+    let integrity = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("could not verify metadata migration backup: {error}"))?;
+    if integrity != "ok" {
+        return Err(format!(
+            "metadata migration backup failed integrity verification: {integrity}"
+        ));
+    }
+    Ok(())
 }
 
 fn run() -> Result<(), String> {
@@ -75,15 +212,48 @@ fn run() -> Result<(), String> {
         eprintln!("marked {interrupted} interrupted daemon job(s) failed after restart");
     }
     let profile_registry = profile_binding_registry_path(&config.state_dir);
-    let s3_backfill = dasobjectstore_metadata::backfill_s3_object_bindings(
-        profile_catalogue_live_sqlite_path(),
-        &current_utc_timestamp(),
+    let startup_timestamp = current_utc_timestamp();
+    let live_sqlite_path = profile_catalogue_live_sqlite_path();
+    preserve_pre_logical_identity_metadata(
+        &live_sqlite_path,
+        &config.state_dir.join("metadata-migrations"),
+    )?;
+    dasobjectstore_metadata::backfill_logical_identities(
+        &live_sqlite_path,
+        true,
+        &startup_timestamp,
     )
-    .map_err(|error| format!("native S3 binding startup recovery failed: {error}"))?;
+    .map_err(|error| format!("logical object identity startup inspection failed: {error}"))?;
+    let s3_backfill =
+        dasobjectstore_metadata::backfill_s3_object_bindings(&live_sqlite_path, &startup_timestamp)
+            .map_err(|error| format!("native S3 binding startup recovery failed: {error}"))?;
     if s3_backfill.bindings_created > 0 || s3_backfill.objects_retained_unmapped > 0 {
         eprintln!(
             "native S3 binding recovery created {} binding(s); retained {} ambiguous object(s) unmapped",
             s3_backfill.bindings_created, s3_backfill.objects_retained_unmapped
+        );
+    }
+    dasobjectstore_metadata::backfill_logical_identities(
+        &live_sqlite_path,
+        true,
+        &startup_timestamp,
+    )
+    .map_err(|error| format!("post-binding logical identity inspection failed: {error}"))?;
+    let logical_identity_backfill = dasobjectstore_metadata::backfill_logical_identities(
+        &live_sqlite_path,
+        false,
+        &startup_timestamp,
+    )
+    .map_err(|error| format!("logical object identity startup recovery failed: {error}"))?;
+    if logical_identity_backfill.logical_versions > 0
+        || logical_identity_backfill.placements > 0
+        || logical_identity_backfill.needs_review > 0
+    {
+        eprintln!(
+            "logical identity recovery created {} version(s) and {} placement(s); retained {} conflict(s) for review",
+            logical_identity_backfill.logical_versions,
+            logical_identity_backfill.placements,
+            logical_identity_backfill.needs_review
         );
     }
     let retirement_recovery =
@@ -284,6 +454,7 @@ fn spawn_workspace_promotion_worker(
         let worker = WorkspacePromotionWorkerConfig {
             live_sqlite_path: profile_catalogue_live_sqlite_path(),
             ssd_root: default_ssd_root(),
+            hdd_root: default_hdd_root(),
             broker_socket_path: PathBuf::from(DEFAULT_WORKSPACE_HOST_SOCKET),
             lease_owner: format!("dasobjectstored.promotion.{}", std::process::id()),
             capacity_provider,
@@ -752,8 +923,12 @@ impl DaemonArgs {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_utc_timestamp, garage_runtime_config, host_id, DaemonArgs};
+    use super::{
+        current_utc_timestamp, garage_runtime_config, host_id,
+        preserve_pre_logical_identity_metadata, DaemonArgs,
+    };
     use dasobjectstore_daemon::DaemonRuntimeConfig;
+    use std::fs;
     use std::path::PathBuf;
 
     #[test]
@@ -834,5 +1009,122 @@ mod tests {
     #[test]
     fn daemon_host_id_is_nonblank() {
         assert!(!host_id().trim().is_empty());
+    }
+
+    #[test]
+    fn startup_preserves_one_private_backup_before_identity_migration() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-logical-identity-backup-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("root");
+        let live = root.join("live.sqlite");
+        let connection = rusqlite::Connection::open(&live).expect("live sqlite");
+        connection
+            .execute_batch(
+                "CREATE TABLE metadata_migrations (
+                     migration_id INTEGER PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     applied_at_utc TEXT NOT NULL
+                 );
+                 CREATE TABLE sentinel(value TEXT NOT NULL);
+                 INSERT INTO sentinel(value) VALUES ('preserved');",
+            )
+            .expect("legacy schema");
+        drop(connection);
+
+        let backups = root.join("migration-backups");
+        preserve_pre_logical_identity_metadata(&live, &backups).expect("backup");
+        let backup = fs::read_dir(&backups)
+            .expect("backup directory")
+            .map(|entry| entry.expect("backup entry").path())
+            .find(|path| {
+                path.file_name().is_some_and(|name| {
+                    let name = name.to_string_lossy();
+                    name.starts_with("live-sqlite-pre-0.13-") && name.ends_with(".sqlite")
+                })
+            })
+            .expect("content-bound backup");
+        assert!(backup.is_file());
+        let backup_connection = rusqlite::Connection::open(&backup).expect("backup sqlite");
+        assert_eq!(
+            backup_connection
+                .query_row("SELECT value FROM sentinel", [], |row| row
+                    .get::<_, String>(0))
+                .expect("sentinel"),
+            "preserved"
+        );
+        drop(backup_connection);
+
+        preserve_pre_logical_identity_metadata(&live, &backups).expect("idempotent backup");
+        fs::remove_file(&backup).expect("remove test backup");
+        let connection = rusqlite::Connection::open(&live).expect("live sqlite");
+        connection
+            .execute(
+                "INSERT INTO metadata_migrations(migration_id,name,applied_at_utc)
+                 VALUES(?1,?2,'now')",
+                rusqlite::params![
+                    dasobjectstore_metadata::LOGICAL_IDENTITY_MIGRATION_ID,
+                    "conflicting-migration"
+                ],
+            )
+            .expect("migration marker");
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS metadata_format_versions(
+                     artifact TEXT PRIMARY KEY,major INTEGER NOT NULL,
+                     minor INTEGER NOT NULL,updated_at_utc TEXT NOT NULL
+                 )",
+                [],
+            )
+            .expect("format schema");
+        connection
+            .execute(
+                "INSERT INTO metadata_format_versions(
+                     artifact,major,minor,updated_at_utc
+                 ) VALUES(?1,?2,?3,'now')",
+                rusqlite::params![
+                    dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION
+                        .artifact
+                        .name(),
+                    dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION.major,
+                    dasobjectstore_metadata::LIVE_SCHEMA_FORMAT_VERSION.minor
+                ],
+            )
+            .expect("format marker");
+        drop(connection);
+        preserve_pre_logical_identity_metadata(&live, &backups)
+            .expect("conflicting marker still requires backup");
+        for entry in fs::read_dir(&backups).expect("conflict backups") {
+            let path = entry.expect("conflict backup").path();
+            if path
+                .extension()
+                .is_some_and(|extension| extension == "sqlite")
+            {
+                fs::remove_file(path).expect("remove conflict backup");
+            }
+        }
+        let connection = rusqlite::Connection::open(&live).expect("live sqlite");
+        connection
+            .execute(
+                "UPDATE metadata_migrations SET name=?1 WHERE migration_id=?2",
+                rusqlite::params![
+                    dasobjectstore_metadata::LOGICAL_IDENTITY_MIGRATION_NAME,
+                    dasobjectstore_metadata::LOGICAL_IDENTITY_MIGRATION_ID
+                ],
+            )
+            .expect("canonical migration marker");
+        drop(connection);
+        preserve_pre_logical_identity_metadata(&live, &backups).expect("marked migration");
+        assert_eq!(
+            fs::read_dir(&backups)
+                .expect("marked backups")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "sqlite"))
+                .count(),
+            0
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

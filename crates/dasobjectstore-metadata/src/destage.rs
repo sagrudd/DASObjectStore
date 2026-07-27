@@ -1,5 +1,9 @@
 //! Durable managed-SSD acknowledgement and asynchronous HDD settlement.
 
+use crate::disk_capacity::{acquire_disk_capacity_claims_in_transaction, DiskCapacityClaimRequest};
+use crate::scheduler::{
+    cancel_destage_scheduler_job_tx, submit_destage_scheduler_job_tx, DestageSchedulerSubmission,
+};
 use crate::schema::LIVE_SCHEMA_SQL;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
@@ -7,6 +11,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::Path;
 use std::time::Duration;
+
+#[cfg(test)]
+use crate::destage_control::{
+    pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
+};
 
 const PUBLICATION_BUSY_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -131,19 +140,57 @@ pub struct SsdPlacementRecord {
     pub evicted_at_utc: Option<String>,
 }
 
-pub fn commit_verified_ssd_and_enqueue(
+#[cfg(test)]
+pub(crate) fn commit_verified_ssd_and_enqueue(
     path: impl AsRef<Path>,
     request: VerifiedSsdCommitRequest<'_>,
 ) -> Result<VerifiedSsdCommitReport, DestageMetadataError> {
-    validate_ssd_request(&request)?;
-    let size = to_i64(request.size_bytes)?;
     let mut connection = Connection::open(path)?;
     connection.busy_timeout(PUBLICATION_BUSY_TIMEOUT)?;
     connection.execute_batch(LIVE_SCHEMA_SQL)?;
     let tx = connection.transaction()?;
-    ensure_store(&tx, request.store_id)?;
+    let report = commit_verified_ssd_and_enqueue_tx(&tx, &request)?;
+    tx.commit()?;
+    Ok(report)
+}
 
-    if let Some(existing) = read_identity(&tx, request.object_id)? {
+/// Atomically publishes the verified SSD copy and reserves physical capacity
+/// for every required HDD copy. A successful return is the safety boundary
+/// permitting `AfterSsdIngest` acknowledgement.
+pub fn commit_verified_ssd_and_enqueue_with_capacity_claims(
+    path: impl AsRef<Path>,
+    request: VerifiedSsdCommitRequest<'_>,
+    capacity: &DiskCapacityClaimRequest,
+) -> Result<VerifiedSsdCommitReport, DestageMetadataError> {
+    let mut connection = Connection::open(path)?;
+    connection.busy_timeout(PUBLICATION_BUSY_TIMEOUT)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if capacity.kind != crate::disk_capacity::DiskCapacityClaimKind::Destage
+        || capacity.owner_id != request.object_id.as_str()
+        || capacity.allocations.len() != usize::from(request.required_copy_count)
+        || capacity
+            .allocations
+            .iter()
+            .any(|allocation| allocation.requested_bytes != request.size_bytes)
+    {
+        return Err(DestageMetadataError::InvalidCapacityReservation);
+    }
+    acquire_disk_capacity_claims_in_transaction(&tx, capacity)?;
+    let report = commit_verified_ssd_and_enqueue_tx(&tx, &request)?;
+    tx.commit()?;
+    Ok(report)
+}
+
+fn commit_verified_ssd_and_enqueue_tx(
+    tx: &Transaction<'_>,
+    request: &VerifiedSsdCommitRequest<'_>,
+) -> Result<VerifiedSsdCommitReport, DestageMetadataError> {
+    validate_ssd_request(request)?;
+    let size = to_i64(request.size_bytes)?;
+    ensure_store(tx, request.store_id)?;
+
+    if let Some(existing) = read_identity(tx, request.object_id)? {
         let matches = existing
             == (
                 request.store_id.as_str().to_string(),
@@ -158,14 +205,28 @@ pub fn commit_verified_ssd_and_enqueue(
                 request.object_id.to_string(),
             ));
         }
-        insert_ingress_job(&tx, &request, size)?;
-        bind_s3_identity(&tx, &request)?;
+        insert_ingress_job(tx, request, size)?;
+        bind_s3_identity(tx, request)?;
+        claim_native_ssd_identity(tx, request)?;
         let job_id: String = tx.query_row(
             "SELECT destage_job_id FROM destage_queue WHERE object_id = ?1",
             [request.object_id.as_str()],
             |row| row.get(0),
         )?;
-        tx.commit()?;
+        submit_destage_scheduler_job_tx(
+            tx,
+            &DestageSchedulerSubmission {
+                destage_job_id: &job_id,
+                store_id: request.store_id,
+                object_id: request.object_id,
+                byte_cost: request.size_bytes,
+                acknowledgement_policy: request.acknowledgement_policy,
+                required_copy_count: request.required_copy_count,
+                priority: request.priority,
+                origin: request.ingress_origin.unwrap_or("native_ingest"),
+                created_at_utc: request.committed_at_utc,
+            },
+        )?;
         return Ok(VerifiedSsdCommitReport {
             destage_job_id: job_id,
             state: DestageState::QueuedForHdd,
@@ -174,16 +235,78 @@ pub fn commit_verified_ssd_and_enqueue(
     }
 
     tx.execute("INSERT INTO objects (object_id, store_id, object_type, state, size_bytes, content_hash, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'PlacementPlanned',?4,?5,?6,?6)", params![request.object_id.as_str(), request.store_id.as_str(), request.object_type, size, request.content_hash, request.committed_at_utc])?;
-    bind_s3_identity(&tx, &request)?;
-    insert_ingress_job(&tx, &request, size)?;
+    bind_s3_identity(tx, request)?;
+    insert_ingress_job(tx, request, size)?;
     tx.execute("INSERT INTO ssd_object_placements (object_id, store_id, relative_path, size_bytes, content_hash_algorithm, content_hash, verified_at_utc, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,?4,?5,?6,?7,?7,?7)", params![request.object_id.as_str(), request.store_id.as_str(), request.relative_path, size, request.content_hash_algorithm, request.content_hash, request.committed_at_utc])?;
+    claim_native_ssd_identity(tx, request)?;
     tx.execute("INSERT INTO destage_queue (destage_job_id, store_id, object_id, state, expected_size_bytes, content_hash_algorithm, content_hash, acknowledgement_policy, required_copy_count, priority, max_attempts, created_at_utc, updated_at_utc) VALUES (?1,?2,?3,'queued_for_hdd',?4,?5,?6,?7,?8,?9,?10,?11,?11)", params![request.destage_job_id, request.store_id.as_str(), request.object_id.as_str(), size, request.content_hash_algorithm, request.content_hash, request.acknowledgement_policy, request.required_copy_count, request.priority, request.max_attempts, request.committed_at_utc])?;
-    tx.commit()?;
+    submit_destage_scheduler_job_tx(
+        tx,
+        &DestageSchedulerSubmission {
+            destage_job_id: request.destage_job_id,
+            store_id: request.store_id,
+            object_id: request.object_id,
+            byte_cost: request.size_bytes,
+            acknowledgement_policy: request.acknowledgement_policy,
+            required_copy_count: request.required_copy_count,
+            priority: request.priority,
+            origin: request.ingress_origin.unwrap_or("native_ingest"),
+            created_at_utc: request.committed_at_utc,
+        },
+    )?;
     Ok(VerifiedSsdCommitReport {
         destage_job_id: request.destage_job_id.to_string(),
         state: DestageState::QueuedForHdd,
         idempotent: false,
     })
+}
+
+fn claim_native_ssd_identity(
+    tx: &Transaction<'_>,
+    request: &VerifiedSsdCommitRequest<'_>,
+) -> Result<(), DestageMetadataError> {
+    let object_key = request.s3_key.unwrap_or_else(|| request.object_id.as_str());
+    let object_version = if request.s3_key.is_some() {
+        request.s3_version
+    } else {
+        1
+    };
+    let (version, _) = crate::logical_identity::claim_logical_version_in_transaction(
+        tx,
+        &crate::logical_identity::LogicalVersionClaim {
+            store_id: request.store_id,
+            object_key,
+            object_version,
+            size_bytes: request.size_bytes,
+            content_hash_algorithm: request.content_hash_algorithm,
+            content_hash: request.content_hash,
+            recorded_at_utc: request.committed_at_utc,
+        },
+    )
+    .map_err(|error| DestageMetadataError::LogicalIdentity(error.to_string()))?;
+    crate::logical_identity::bind_native_object_in_transaction(
+        tx,
+        request.object_id.as_str(),
+        &version.logical_version_id,
+        request.committed_at_utc,
+    )
+    .map_err(|error| DestageMetadataError::LogicalIdentity(error.to_string()))?;
+    crate::logical_identity::claim_logical_placement_in_transaction(
+        tx,
+        &crate::logical_identity::LogicalPlacementClaim {
+            logical_version_id: &version.logical_version_id,
+            placement_kind: "ssd",
+            placement_namespace: "native",
+            source_placement_id: request.object_id.as_str(),
+            location: request.relative_path,
+            content_hash_algorithm: request.content_hash_algorithm,
+            content_hash: request.content_hash,
+            verified_at_utc: Some(request.committed_at_utc),
+            recorded_at_utc: request.committed_at_utc,
+        },
+    )
+    .map_err(|error| DestageMetadataError::LogicalIdentity(error.to_string()))?;
+    Ok(())
 }
 
 fn bind_s3_identity(
@@ -302,6 +425,40 @@ pub fn claim_next_destage(
     Ok(Some(record))
 }
 
+pub fn claim_destage_for_scheduler(
+    path: impl AsRef<Path>,
+    object_id: &ObjectId,
+    worker: &str,
+    lease_expires_at_utc: &str,
+    now_utc: &str,
+) -> Result<DestageQueueRecord, DestageMetadataError> {
+    if worker.trim().is_empty() {
+        return Err(DestageMetadataError::BlankField("worker"));
+    }
+    let mut connection = Connection::open(path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let tx = connection.transaction()?;
+    let changed = tx.execute(
+        "UPDATE destage_queue SET state='hdd_copying',lease_owner=?1,
+             lease_expires_at_utc=?2,attempt_count=attempt_count+1,updated_at_utc=?3
+         WHERE object_id=?4 AND state IN ('queued_for_hdd','destage_failed','hdd_copying')
+           AND cancellation_requested=0 AND attempt_count<max_attempts
+           AND (next_retry_at_utc IS NULL OR next_retry_at_utc<=?3)
+           AND (lease_owner IS NULL OR lease_expires_at_utc<=?3 OR lease_owner=?1)",
+        params![worker, lease_expires_at_utc, now_utc, object_id.as_str()],
+    )?;
+    if changed != 1 {
+        return Err(DestageMetadataError::ClaimConflict);
+    }
+    tx.execute(
+        "UPDATE objects SET state='CopyingToHdd',updated_at_utc=?1 WHERE object_id=?2",
+        params![now_utc, object_id.as_str()],
+    )?;
+    let record = read_record_tx(&tx, object_id.as_str())?;
+    tx.commit()?;
+    Ok(record)
+}
+
 pub fn fail_destage(
     path: impl AsRef<Path>,
     object_id: &ObjectId,
@@ -322,46 +479,6 @@ pub fn fail_destage(
     Ok(())
 }
 
-pub fn pause_destage(
-    path: impl AsRef<Path>,
-    object_id: &ObjectId,
-    updated_at_utc: &str,
-) -> Result<(), DestageMetadataError> {
-    control(
-        path,
-        object_id,
-        "paused",
-        updated_at_utc,
-        "state IN ('queued_for_hdd','destage_failed')",
-    )
-}
-pub fn resume_destage(
-    path: impl AsRef<Path>,
-    object_id: &ObjectId,
-    updated_at_utc: &str,
-) -> Result<(), DestageMetadataError> {
-    control(
-        path,
-        object_id,
-        "queued_for_hdd",
-        updated_at_utc,
-        "state='paused'",
-    )
-}
-pub fn retry_destage(
-    path: impl AsRef<Path>,
-    object_id: &ObjectId,
-    updated_at_utc: &str,
-) -> Result<(), DestageMetadataError> {
-    control(
-        path,
-        object_id,
-        "queued_for_hdd",
-        updated_at_utc,
-        "state IN ('destage_failed','needs_review')",
-    )
-}
-
 pub fn cancel_destage(
     path: impl AsRef<Path>,
     object_id: &ObjectId,
@@ -379,6 +496,7 @@ pub fn cancel_destage(
     if changed != 1 {
         return Err(DestageMetadataError::InvalidTransition);
     }
+    cancel_destage_scheduler_job_tx(&tx, object_id, updated_at_utc)?;
     tx.commit()?;
     Ok(())
 }
@@ -408,6 +526,12 @@ pub fn promote_hdd_settlement(
         |r| r.get(0),
     )?;
     if existing == "hdd_copy_verified" {
+        claim_native_hdd_identities(
+            &tx,
+            request.object_id,
+            request.placements,
+            request.verified_at_utc,
+        )?;
         release_destage_capacity_claims_tx(&tx, request.object_id, request.verified_at_utc)?;
         tx.commit()?;
         return Ok(true);
@@ -433,6 +557,12 @@ pub fn promote_hdd_settlement(
         }
         tx.execute("INSERT INTO placements(placement_id,object_id,disk_id,relative_path,content_hash,verified_at_utc,created_at_utc) VALUES(?1,?2,?3,?4,?5,?6,?6) ON CONFLICT(placement_id) DO UPDATE SET content_hash=excluded.content_hash,verified_at_utc=excluded.verified_at_utc", params![placement.placement_id,request.object_id.as_str(),placement.disk_id,placement.relative_path,placement.content_hash,request.verified_at_utc])?;
     }
+    claim_native_hdd_identities(
+        &tx,
+        request.object_id,
+        request.placements,
+        request.verified_at_utc,
+    )?;
     let changed=tx.execute("UPDATE destage_queue SET state='hdd_copy_verified', verified_copy_count=?1, last_error=NULL, next_retry_at_utc=NULL, lease_owner=NULL, lease_expires_at_utc=NULL, updated_at_utc=?2 WHERE object_id=?3 AND state='hdd_copying' AND lease_owner=?4",params![verified_copy_count,request.verified_at_utc,request.object_id.as_str(),request.worker])?;
     if changed != 1 {
         return Err(DestageMetadataError::ClaimConflict);
@@ -445,6 +575,51 @@ pub fn promote_hdd_settlement(
     release_destage_capacity_claims_tx(&tx, request.object_id, request.verified_at_utc)?;
     tx.commit()?;
     Ok(false)
+}
+
+fn claim_native_hdd_identities(
+    transaction: &Transaction<'_>,
+    object_id: &ObjectId,
+    placements: &[VerifiedHddPlacement<'_>],
+    verified_at_utc: &str,
+) -> Result<(), DestageMetadataError> {
+    let version = crate::logical_identity::read_native_logical_version_in_transaction(
+        transaction,
+        object_id.as_str(),
+    )
+    .map_err(|error| DestageMetadataError::LogicalIdentity(error.to_string()))?
+    .ok_or_else(|| {
+        DestageMetadataError::LogicalIdentity(format!(
+            "native object {object_id} has no canonical logical version"
+        ))
+    })?;
+    for placement in placements {
+        let location = format!("{}:{}", placement.disk_id, placement.relative_path);
+        let recorded_verification = transaction
+            .query_row(
+                "SELECT verified_at_utc FROM placements WHERE placement_id=?1",
+                [placement.placement_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        crate::logical_identity::claim_logical_placement_in_transaction(
+            transaction,
+            &crate::logical_identity::LogicalPlacementClaim {
+                logical_version_id: &version.logical_version_id,
+                placement_kind: "hdd",
+                placement_namespace: "native",
+                source_placement_id: placement.placement_id,
+                location: &location,
+                content_hash_algorithm: &version.content_hash_algorithm,
+                content_hash: placement.content_hash,
+                verified_at_utc: recorded_verification.as_deref().or(Some(verified_at_utc)),
+                recorded_at_utc: verified_at_utc,
+            },
+        )
+        .map_err(|error| DestageMetadataError::LogicalIdentity(error.to_string()))?;
+    }
+    Ok(())
 }
 
 fn release_destage_capacity_claims_tx(
@@ -593,21 +768,6 @@ pub fn destage_queue_diagnostics(
     connection.query_row("SELECT COUNT(*) FILTER (WHERE state IN ('queued_for_hdd','hdd_copying','destage_failed','paused')), COUNT(*) FILTER (WHERE state IN ('destage_failed','needs_review')), COALESCE(SUM(CASE WHEN state IN ('queued_for_hdd','destage_failed','paused') THEN expected_size_bytes ELSE 0 END),0), COALESCE(SUM(CASE WHEN state='hdd_copying' THEN expected_size_bytes ELSE 0 END),0), MIN(CASE WHEN state IN ('queued_for_hdd','destage_failed','paused') THEN created_at_utc END) FROM destage_queue",[],|r|Ok(DestageQueueDiagnostics{pending_object_count:r.get(0)?,failed_object_count:r.get(1)?,queued_bytes:r.get(2)?,active_bytes:r.get(3)?,oldest_queued_at_utc:r.get(4)?})).map_err(Into::into)
 }
 
-fn control(
-    path: impl AsRef<Path>,
-    object_id: &ObjectId,
-    state: &str,
-    at: &str,
-    predicate: &str,
-) -> Result<(), DestageMetadataError> {
-    let connection = Connection::open(path)?;
-    connection.execute_batch(LIVE_SCHEMA_SQL)?;
-    let sql=format!("UPDATE destage_queue SET state=?1, next_retry_at_utc=NULL, lease_owner=NULL, lease_expires_at_utc=NULL, updated_at_utc=?2 WHERE object_id=?3 AND {predicate}");
-    if connection.execute(&sql, params![state, at, object_id.as_str()])? != 1 {
-        return Err(DestageMetadataError::InvalidTransition);
-    }
-    Ok(())
-}
 fn validate_ssd_request(r: &VerifiedSsdCommitRequest<'_>) -> Result<(), DestageMetadataError> {
     for (n, v) in [
         ("destage_job_id", r.destage_job_id),
@@ -699,7 +859,11 @@ pub enum DestageMetadataError {
     ObjectConflict(String),
     IngestJobConflict(String),
     S3Binding(String),
+    LogicalIdentity(String),
     ClaimConflict,
+    CapacityClaim(crate::disk_capacity::DiskCapacityClaimError),
+    InvalidCapacityReservation,
+    Scheduler(crate::scheduler::SchedulerError),
     InvalidTransition,
     WouldRemoveOnlyVerifiedCopy,
     InsufficientCopies { required: u8, verified: u8 },
@@ -709,6 +873,16 @@ pub enum DestageMetadataError {
 impl From<rusqlite::Error> for DestageMetadataError {
     fn from(e: rusqlite::Error) -> Self {
         Self::Sqlite(e)
+    }
+}
+impl From<crate::disk_capacity::DiskCapacityClaimError> for DestageMetadataError {
+    fn from(error: crate::disk_capacity::DiskCapacityClaimError) -> Self {
+        Self::CapacityClaim(error)
+    }
+}
+impl From<crate::scheduler::SchedulerError> for DestageMetadataError {
+    fn from(error: crate::scheduler::SchedulerError) -> Self {
+        Self::Scheduler(error)
     }
 }
 impl Display for DestageMetadataError {
@@ -728,6 +902,14 @@ impl Display for DestageMetadataError {
                 write!(f, "immutable ingest job identity conflict for {v}")
             }
             Self::S3Binding(v) => write!(f, "S3 identity publication failed: {v}"),
+            Self::LogicalIdentity(v) => {
+                write!(f, "logical object identity publication failed: {v}")
+            }
+            Self::CapacityClaim(error) => write!(f, "destage capacity reservation failed: {error}"),
+            Self::InvalidCapacityReservation => {
+                f.write_str("destage capacity reservation does not cover every required HDD copy")
+            }
+            Self::Scheduler(error) => write!(f, "destage scheduler publication failed: {error}"),
             Self::ClaimConflict => f.write_str("destage lease is not owned by this worker"),
             Self::InvalidTransition => f.write_str("invalid durable destage state transition"),
             Self::WouldRemoveOnlyVerifiedCopy => {
@@ -770,6 +952,18 @@ mod tests {
         assert_eq!(count(&connection, "objects"), 1);
         assert_eq!(count(&connection, "ssd_object_placements"), 1);
         assert_eq!(count(&connection, "destage_queue"), 1);
+        assert_eq!(count(&connection, "scheduler_jobs"), 1);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT work_class FROM scheduler_jobs
+                     WHERE idempotency_key='destage:object-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("scheduler class"),
+            "native_ingest"
+        );
         cleanup(path);
     }
 
@@ -806,6 +1000,154 @@ mod tests {
         assert!(matches!(error, DestageMetadataError::ObjectConflict(_)));
         let connection = Connection::open(&path).expect("reopen");
         assert_eq!(count(&connection, "destage_queue"), 1);
+        cleanup(path);
+    }
+
+    #[test]
+    fn ssd_ack_publication_atomically_holds_every_hdd_copy() {
+        let path = database("reserved-ack");
+        prepare(&path, &["store-a"]);
+        let connection = Connection::open(&path).expect("open");
+        connection.execute("INSERT INTO disks(disk_id,pool_id,role,state,created_at_utc,updated_at_utc) VALUES('disk-b','pool-a','hdd_capacity','Healthy','now','now')", []).expect("disk");
+        drop(connection);
+        let store = StoreId::new("store-a").expect("store");
+        let object = ObjectId::new("object-reserved").expect("object");
+        let request = VerifiedSsdCommitRequest {
+            destage_job_id: "destage-reserved",
+            store_id: &store,
+            object_id: &object,
+            object_type: "naive",
+            relative_path: "ingest/object-reserved",
+            size_bytes: 5,
+            content_hash_algorithm: "sha256",
+            content_hash: "abcde",
+            acknowledgement_policy: "after_ssd_ingest",
+            required_copy_count: 2,
+            max_attempts: 3,
+            priority: 0,
+            committed_at_utc: "2026-01-01T00:00:00Z",
+            ingest_job_id: None,
+            ingress_origin: None,
+            s3_key: None,
+            s3_version: 1,
+        };
+        let capacity = crate::disk_capacity::DiskCapacityClaimRequest {
+            live_sqlite_path: path.clone(),
+            kind: crate::disk_capacity::DiskCapacityClaimKind::Destage,
+            owner_id: object.as_str().to_string(),
+            request_id: "reserve-object".to_string(),
+            request_digest: "object-reserved:5:2:abcde".to_string(),
+            lease_owner: None,
+            lease_expires_at_utc: None,
+            created_at_utc: "2026-01-01T00:00:00Z".to_string(),
+            allocations: ["disk-a", "disk-b"]
+                .into_iter()
+                .map(|disk| crate::disk_capacity::DiskCapacityClaimAllocation {
+                    disk_id: dasobjectstore_core::ids::DiskId::new(disk).expect("disk"),
+                    measured_available_bytes: 5,
+                    requested_bytes: 5,
+                })
+                .collect(),
+        };
+        commit_verified_ssd_and_enqueue_with_capacity_claims(&path, request, &capacity)
+            .expect("atomic publication");
+        let connection = Connection::open(&path).expect("reopen");
+        assert_eq!(count(&connection, "objects"), 1);
+        assert_eq!(count(&connection, "destage_queue"), 1);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM disk_capacity_claims
+                     WHERE owner_id='object-reserved' AND state='active'",
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .expect("claims"),
+            2
+        );
+        drop(connection);
+        let replay_capacity = capacity.clone();
+        let replay_request = VerifiedSsdCommitRequest {
+            destage_job_id: "different-id-is-ignored",
+            store_id: &store,
+            object_id: &object,
+            object_type: "naive",
+            relative_path: "ingest/object-reserved",
+            size_bytes: 5,
+            content_hash_algorithm: "sha256",
+            content_hash: "abcde",
+            acknowledgement_policy: "after_ssd_ingest",
+            required_copy_count: 2,
+            max_attempts: 3,
+            priority: 0,
+            committed_at_utc: "2026-01-01T00:00:00Z",
+            ingest_job_id: None,
+            ingress_origin: None,
+            s3_key: None,
+            s3_version: 1,
+        };
+        assert!(
+            commit_verified_ssd_and_enqueue_with_capacity_claims(
+                &path,
+                replay_request,
+                &replay_capacity
+            )
+            .expect("replay")
+            .idempotent
+        );
+        cleanup(path);
+    }
+
+    #[test]
+    fn insufficient_capacity_rolls_back_ssd_ack_publication() {
+        let path = database("reservation-rollback");
+        prepare(&path, &["store-a"]);
+        let store = StoreId::new("store-a").expect("store");
+        let object = ObjectId::new("object-no-capacity").expect("object");
+        let request = VerifiedSsdCommitRequest {
+            destage_job_id: "destage-no-capacity",
+            store_id: &store,
+            object_id: &object,
+            object_type: "naive",
+            relative_path: "ingest/object-no-capacity",
+            size_bytes: 6,
+            content_hash_algorithm: "sha256",
+            content_hash: "abcdef",
+            acknowledgement_policy: "after_ssd_ingest",
+            required_copy_count: 1,
+            max_attempts: 3,
+            priority: 0,
+            committed_at_utc: "2026-01-01T00:00:00Z",
+            ingest_job_id: None,
+            ingress_origin: None,
+            s3_key: None,
+            s3_version: 1,
+        };
+        let capacity = crate::disk_capacity::DiskCapacityClaimRequest {
+            live_sqlite_path: path.clone(),
+            kind: crate::disk_capacity::DiskCapacityClaimKind::Destage,
+            owner_id: object.as_str().to_string(),
+            request_id: "reserve-object".to_string(),
+            request_digest: "object-no-capacity:6:1:abcdef".to_string(),
+            lease_owner: None,
+            lease_expires_at_utc: None,
+            created_at_utc: "2026-01-01T00:00:00Z".to_string(),
+            allocations: vec![crate::disk_capacity::DiskCapacityClaimAllocation {
+                disk_id: dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk"),
+                measured_available_bytes: 5,
+                requested_bytes: 6,
+            }],
+        };
+        assert!(matches!(
+            commit_verified_ssd_and_enqueue_with_capacity_claims(&path, request, &capacity),
+            Err(DestageMetadataError::CapacityClaim(
+                crate::disk_capacity::DiskCapacityClaimError::InsufficientCapacity { .. }
+            ))
+        ));
+        let connection = Connection::open(&path).expect("reopen");
+        assert_eq!(count(&connection, "objects"), 0);
+        assert_eq!(count(&connection, "destage_queue"), 0);
+        assert_eq!(count(&connection, "disk_capacity_claims"), 0);
         cleanup(path);
     }
 
@@ -939,6 +1281,124 @@ mod tests {
     }
 
     #[test]
+    fn pause_resume_and_retry_are_transactional_with_scheduler_state() {
+        let path = database("scheduler-controls");
+        prepare(&path, &["store-a"]);
+        commit(&path, "store-a", "object-a", "job-a", 5).expect("commit");
+        let object = ObjectId::new("object-a").expect("object");
+        pause_destage(&path, &object, "2026-01-01T00:01:00Z").expect("pause");
+        let connection = Connection::open(&path).expect("open");
+        let states: (String, String) = connection
+            .query_row(
+                "SELECT d.state,s.state FROM destage_queue d JOIN scheduler_jobs s
+                 ON s.object_id=d.object_id WHERE d.object_id='object-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("states");
+        assert_eq!(states, ("paused".to_string(), "paused".to_string()));
+        drop(connection);
+        resume_destage(&path, &object, "2026-01-01T00:02:00Z").expect("resume");
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute(
+                "UPDATE destage_queue SET state='needs_review',attempt_count=max_attempts
+                 WHERE object_id='object-a'",
+                [],
+            )
+            .expect("simulate exhausted destage");
+        connection
+            .execute(
+                "UPDATE scheduler_jobs SET state='needs_review',attempt_count=max_attempts
+                 WHERE object_id='object-a'",
+                [],
+            )
+            .expect("simulate exhausted scheduler");
+        drop(connection);
+        retry_destage(&path, &object, "2026-01-01T00:03:00Z").expect("operator retry");
+        let connection = Connection::open(&path).expect("open");
+        let states: (String, u32, String, u32) = connection
+            .query_row(
+                "SELECT d.state,d.attempt_count,s.state,s.attempt_count FROM destage_queue d
+                 JOIN scheduler_jobs s ON s.object_id=d.object_id
+                 WHERE d.object_id='object-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("states");
+        assert_eq!(
+            states,
+            ("queued_for_hdd".to_string(), 0, "queued".to_string(), 0)
+        );
+        cleanup(path);
+    }
+
+    #[test]
+    fn combined_lease_renewal_is_epoch_fenced_and_prevents_reclaim() {
+        let path = database("combined-renewal");
+        prepare(&path, &["store-a"]);
+        commit(&path, "store-a", "object-a", "job-a", 5).expect("commit");
+        let scheduled =
+            crate::scheduler::claim_next_scheduler_job(&crate::scheduler::SchedulerClaimRequest {
+                live_sqlite_path: path.clone(),
+                worker: "worker".to_string(),
+                now_utc: "2026-01-01T00:01:00Z".to_string(),
+                lease_expires_at_utc: "2026-01-01T00:02:00Z".to_string(),
+            })
+            .expect("scheduler claim")
+            .expect("scheduler work");
+        let object = ObjectId::new("object-a").expect("object");
+        claim_destage_for_scheduler(
+            &path,
+            &object,
+            "worker",
+            "2026-01-01T00:02:00Z",
+            "2026-01-01T00:01:00Z",
+        )
+        .expect("destage claim");
+        renew_destage_and_scheduler_leases(
+            &path,
+            &object,
+            &scheduled.scheduler_job_id,
+            "worker",
+            scheduled.lease_epoch,
+            "2026-01-01T00:04:00Z",
+            "2026-01-01T00:01:30Z",
+        )
+        .expect("renew");
+        assert!(matches!(
+            renew_destage_and_scheduler_leases(
+                &path,
+                &object,
+                &scheduled.scheduler_job_id,
+                "worker",
+                scheduled.lease_epoch + 1,
+                "2026-01-01T00:05:00Z",
+                "2026-01-01T00:02:00Z",
+            ),
+            Err(DestageMetadataError::ClaimConflict)
+        ));
+        let connection = Connection::open(&path).expect("open");
+        let expiries: (String, String) = connection
+            .query_row(
+                "SELECT d.lease_expires_at_utc,s.lease_expires_at_utc
+                 FROM destage_queue d JOIN scheduler_jobs s ON s.object_id=d.object_id
+                 WHERE d.object_id='object-a'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("expiries");
+        assert_eq!(
+            expiries,
+            (
+                "2026-01-01T00:04:00Z".to_string(),
+                "2026-01-01T00:04:00Z".to_string()
+            )
+        );
+        cleanup(path);
+    }
+
+    #[test]
     fn hdd_promotion_is_atomic_and_marks_ssd_eviction_eligible() {
         let path = database("promotion");
         prepare(&path, &["store-a"]);
@@ -996,6 +1456,17 @@ mod tests {
         let connection = Connection::open(&path).expect("open");
         let row: (String, bool) = connection.query_row("SELECT o.state, s.eviction_eligible FROM objects o JOIN ssd_object_placements s USING(object_id) WHERE o.object_id='object-a'", [], |r| Ok((r.get(0)?, r.get(1)?))).expect("state");
         assert_eq!(row, ("HddCopyVerified".to_string(), true));
+        let logical_placements: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM logical_placements p
+                 JOIN native_logical_version_bindings b
+                   ON b.logical_version_id=p.logical_version_id
+                 WHERE b.object_id='object-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("canonical SSD and HDD placements");
+        assert_eq!(logical_placements, 2);
         let capacity_claim_state: String = connection
             .query_row(
                 "SELECT state FROM disk_capacity_claims

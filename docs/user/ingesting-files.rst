@@ -180,11 +180,22 @@ per-object and includes the queue identity; a client must not infer safety from
 transport completion alone.
 
 The daemon resumes queued HDD work after restart, leases only one worker per
-object, rotates work across ObjectStores, and applies bounded retry backoff.
-Failed work remains inspectable instead of disappearing. Reads and the Web
-Object Browser continue to use the verified SSD copy while HDD settlement is
-pending. Once all required HDD placements verify and their catalogue promotion
-commits, a separate guarded pass removes the managed SSD staging directory.
+object, arbitrates persistent work by weighted class and ObjectStore fairness,
+and applies bounded retry backoff. Its durable scheduler retains origin,
+priority, byte cost, retry, lease, and cancellation state so restart does not
+create a second operation. Failed work remains inspectable instead of
+disappearing. Reads and the Web Object Browser continue to use the verified SSD
+copy while HDD settlement is pending. Once all required HDD placements verify
+and their catalogue promotion commits, a separate guarded pass removes the
+managed SSD staging directory.
+
+For ``AfterSsdIngest``, queue publication alone is insufficient. The accepting
+transaction must also hold one durable physical-capacity claim per required HDD
+copy, each sized for the complete object and selected without consuming the
+configured reserve. If those claims cannot be made, intake fails before the
+client is told that its source copy may be released. Claims remain associated
+with the durable work across retry and are released only after verified
+promotion or an explicit safe terminal transition.
 
 New intake is rejected before copying when the complete file would cross the
 critical SSD reserve. This is intentional backpressure: inspect the ingest and

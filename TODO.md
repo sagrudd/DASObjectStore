@@ -31,9 +31,11 @@ requirement unless the dashboard links it.
 Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
-compatibility, and SSD-to-HDD durability. The workspace version will advance
-through ``0.146.0-rc.N`` candidates and then ``0.146.0``. A ``1.0.0`` release
-requires a separate explicit compatibility decision.
+compatibility, and SSD-to-HDD durability. Development continues through
+compatible pre-1.0 semantic-version releases (currently ``0.147.0``); EPIC E
+will bind the first promoted release-candidate tag to its exact accepted
+commit. A ``1.0.0`` release requires a separate explicit compatibility
+decision.
 
 Work is dependency ordered. Only these entries define open release work:
 
@@ -47,11 +49,21 @@ Work is dependency ordered. Only these entries define open release work:
   workspace test suite, the Rust module budget, lockfile validation, package
   guards, release-evidence script parsing, and the 12-case visual matrix pass
   for version ``0.145.5``.
-- [ ] **EPIC B — appliance data-lifecycle closure.** Deliver durable,
-  idempotent ObjectStore creation intent/recovery; one persistent multi-class
-  fair scheduler; one logical-object identity across SSD, HDD, and Garage
-  placements; generated-data ``AfterHdd`` acknowledgement by default; and
-  SSD-first acknowledgement only when a durable destage reservation is held.
+- [x] **EPIC B — appliance data-lifecycle closure.** Durable, idempotent
+  ObjectStore creation intent/recovery is implemented with peer-derived
+  administrator authority. Additive live metadata now provides canonical
+  logical object-version and placement identity for native SSD/HDD and
+  portable/provider catalogue commits, plus a safe dry-run/apply legacy
+  backfill that also runs idempotently during daemon startup. A persistent
+  weighted lifecycle scheduler provides origin-class and ObjectStore fairness,
+  leases, retry, cancellation, and restart recovery for the common durable HDD
+  settlement stage. ``generated_data`` defaults to ``AfterHddPlacement``.
+  Native ingest, reconciliation adoption, workspace promotion, and direct S3
+  now share the only public SSD-publication boundary: one transaction publishes
+  identity/catalogue/destage/scheduler state while holding one physical
+  capacity claim for every required HDD copy. The unreserved compatibility
+  helper is test-only. Packaged physical acceptance remains correctly owned by
+  EPIC E rather than reopening this source-contract EPIC.
 - [ ] **EPIC C — durability maintenance, availability, and observability.**
   Complete idle maintenance/reverification and balanced placement, retain
   bounded control capacity and cancellation under ingest, prove telemetry

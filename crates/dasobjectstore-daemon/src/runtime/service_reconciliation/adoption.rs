@@ -303,10 +303,22 @@ fn adopt_completed_reconciliation_snapshot(
             })?
             .to_string_lossy()
             .into_owned();
-        let result = dasobjectstore_metadata::commit_verified_ssd_and_enqueue(
+        let destage_job_id = format!("destage-{}", staged.object_id);
+        let capacity = crate::runtime::build_destage_capacity_claim(
             &live_sqlite_path,
-            dasobjectstore_metadata::VerifiedSsdCommitRequest {
-                destage_job_id: &format!("destage-{}", staged.object_id),
+            &crate::runtime::default_hdd_root(),
+            &staged.object_id,
+            &destage_job_id,
+            required_copies,
+            staged.bytes_staged,
+            &staged.content_hash,
+            accepted_at_utc,
+        );
+        let result = capacity.and_then(|capacity| {
+            dasobjectstore_metadata::commit_verified_ssd_and_enqueue_with_capacity_claims(
+                &live_sqlite_path,
+                dasobjectstore_metadata::VerifiedSsdCommitRequest {
+                    destage_job_id: &destage_job_id,
                 store_id: &store_id,
                 object_id: &staged.object_id,
                 object_type: &ObjectType::Naive.to_string(),
@@ -320,14 +332,17 @@ fn adopt_completed_reconciliation_snapshot(
                 priority: 0,
                 committed_at_utc: accepted_at_utc,
                 ingest_job_id: Some(per_object_job),
-                ingress_origin: Some("remote_s3"),
+                ingress_origin: Some("remote_reconcile"),
                 s3_key: staged
                     .object_id
                     .as_str()
                     .strip_prefix(&format!("{}/", store_id.as_str())),
                 s3_version: 1,
-            },
-        );
+                },
+                &capacity,
+            )
+            .map_err(|error| error.to_string())
+        });
         if let Err(error) = result {
             return Ok(Some(completed_snapshot_response(
                 bucket_name,

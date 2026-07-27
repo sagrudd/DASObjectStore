@@ -6,6 +6,7 @@ pub mod capacity;
 pub mod contents;
 pub mod copy;
 pub mod destage;
+mod destage_control;
 pub mod direct_import;
 pub mod disk;
 pub mod disk_capacity;
@@ -19,6 +20,7 @@ pub mod initialize;
 pub mod inspect;
 pub mod integrity;
 pub mod local_object_store;
+pub mod logical_identity;
 pub mod manifest;
 pub mod markers;
 pub mod object;
@@ -30,6 +32,7 @@ pub mod recovery;
 pub mod remote_inventory;
 pub mod repair_activity;
 pub mod s3_access;
+pub mod scheduler;
 pub mod schema;
 mod secure_fs;
 pub mod snapshot;
@@ -69,12 +72,15 @@ pub use copy::{
     HDD_COPY_CONTENT_HASH_ALGORITHM,
 };
 pub use destage::{
-    cancel_destage, claim_next_destage, commit_verified_ssd_and_enqueue, destage_queue_diagnostics,
-    fail_destage, list_destage_queue, list_ssd_eviction_candidates, mark_ssd_evicted,
-    pause_destage, promote_hdd_settlement, read_destage, read_ssd_placement, resume_destage,
-    retry_destage, DestageMetadataError, DestageQueueDiagnostics, DestageQueueRecord, DestageState,
-    HddSettlementPromotionRequest, SsdPlacementRecord, VerifiedHddPlacement,
-    VerifiedSsdCommitReport, VerifiedSsdCommitRequest,
+    cancel_destage, claim_destage_for_scheduler, claim_next_destage,
+    commit_verified_ssd_and_enqueue_with_capacity_claims, destage_queue_diagnostics, fail_destage,
+    list_destage_queue, list_ssd_eviction_candidates, mark_ssd_evicted, promote_hdd_settlement,
+    read_destage, read_ssd_placement, DestageMetadataError, DestageQueueDiagnostics,
+    DestageQueueRecord, DestageState, HddSettlementPromotionRequest, SsdPlacementRecord,
+    VerifiedHddPlacement, VerifiedSsdCommitReport, VerifiedSsdCommitRequest,
+};
+pub use destage_control::{
+    pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
 };
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
@@ -84,7 +90,7 @@ pub use disk::{
     force_retire_disk, request_disk_retirement, DiskRetirementError, DiskRetirementReport,
 };
 pub use disk_capacity::{
-    acquire_disk_capacity_claims, read_outstanding_disk_capacity,
+    acquire_disk_capacity_claims, read_disk_capacity_claims, read_outstanding_disk_capacity,
     read_outstanding_disk_capacity_excluding, release_disk_capacity_claims,
     update_disk_capacity_claim_consumption, DiskCapacityClaim, DiskCapacityClaimAllocation,
     DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
@@ -131,6 +137,18 @@ pub use local_object_store::{
     ObjectPutPlacementReport, ObjectPutProgress, ObjectPutProgressStage, ObjectPutReport,
     ObjectPutRequest, StagedObjectPut,
 };
+pub use logical_identity::{
+    backfill_logical_identities, bind_native_object_in_transaction, canonical_logical_version_id,
+    claim_logical_placement_in_transaction, claim_logical_version,
+    claim_logical_version_in_transaction, logical_profile_object_key,
+    logical_profile_placement_namespace, read_native_logical_version_in_transaction,
+    replace_native_object_binding_in_transaction,
+    withdraw_logical_placement_namespace_in_transaction,
+    withdraw_logical_placement_sources_in_transaction,
+    withdraw_logical_version_placements_in_transaction, LogicalIdentityBackfillReport,
+    LogicalIdentityError, LogicalPlacementClaim, LogicalVersionClaim, LogicalVersionRecord,
+    LOGICAL_IDENTITY_MIGRATION_ID, LOGICAL_IDENTITY_MIGRATION_NAME,
+};
 pub use manifest::{
     ArtifactReference, DiskManifest, DiskManifestEntry, PoolManifest, DISK_MANIFEST_FORMAT_VERSION,
     POOL_MANIFEST_FORMAT_VERSION,
@@ -173,6 +191,12 @@ pub use repair_activity::{
 pub use s3_access::{
     backfill_s3_object_bindings, list_s3_object_bindings, read_s3_object_binding,
     store_has_s3_object_bindings, S3AccessError, S3BindingBackfillReport, S3ObjectBinding,
+};
+pub use scheduler::{
+    backfill_destage_scheduler_jobs, claim_next_scheduler_job, claim_next_scheduler_job_in_class,
+    complete_scheduler_job, renew_scheduler_lease, request_scheduler_cancellation,
+    retry_scheduler_job, submit_scheduler_job, SchedulerClaimRequest, SchedulerClassPolicy,
+    SchedulerError, SchedulerJob, SchedulerJobRequest,
 };
 pub use schema::{LIVE_SCHEMA_FORMAT_VERSION, LIVE_SCHEMA_SQL};
 pub use snapshot::{

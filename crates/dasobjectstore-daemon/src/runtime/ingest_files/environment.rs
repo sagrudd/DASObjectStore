@@ -18,7 +18,7 @@ pub fn default_ssd_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SSD_ROOT))
 }
 
-pub(crate) fn default_hdd_root() -> PathBuf {
+pub fn default_hdd_root() -> PathBuf {
     std::env::var_os(HDD_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_HDD_ROOT))

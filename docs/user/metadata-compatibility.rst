@@ -55,3 +55,31 @@ ObjectStore manifest or make private folder/drive catalogue files authoritative;
 daemon transaction wiring and profile adoption remain separate decisions.
 Export adapters use the same validation boundary before emitting JSON, so an
 export cannot contain an unsafe placement or duplicate logical version.
+
+Canonical live identity
+-----------------------
+
+The appliance live database maintains one canonical immutable version identity
+for an ObjectStore key and version. Native SSD/HDD rows and portable
+folder/drive/provider catalogue entries bind placements to that identity using
+their size and checksum evidence. A matching retry is idempotent; a changed
+size or checksum for the same ObjectStore key and version is rejected.
+
+This is an additive compatibility layer. Existing native and portable
+catalogues are not rewritten or discarded. The daemon runs the idempotent
+backfill during startup; its underlying dry-run/apply authority reports
+deterministic additions and ``needs_review`` results. Apply mode creates only
+unambiguous identity and placement rows; it does not rename, move, truncate, or
+delete payloads.
+
+On the first ``0.13`` startup, the daemon runs a rollback-only inspection and
+creates a content-bound, integrity-checked private SQLite backup before
+applying the additive transaction. The backup directory is mode ``0700`` and
+the published backup is mode ``0600``. The schema marker, migration identity,
+canonical rows, and review records commit together. A conflicting migration
+identity is a hard startup failure and requires operator review.
+
+The same live schema records the persistent lifecycle scheduler. Its job
+identity, request digest, class, origin, store, byte cost, lease, retry, and
+cancellation state survive daemon restart. Legacy durable destage rows are
+adopted idempotently so a package upgrade does not duplicate HDD work.

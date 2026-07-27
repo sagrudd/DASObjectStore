@@ -1469,6 +1469,15 @@ mod tests {
         .expect("bounded store registry written");
         let profile_registry = root.join("profile-bindings.json");
         let live_sqlite = create_live_sqlite(&root.join("metadata"), "upload-store");
+        rusqlite::Connection::open(&live_sqlite)
+            .expect("live metadata")
+            .execute(
+                "INSERT INTO disks (
+                    disk_id,pool_id,role,state,size_bytes,created_at_utc,updated_at_utc
+                 ) VALUES ('disk-a','pool-a','Hdd','Healthy',4096,'now','now')",
+                [],
+            )
+            .expect("managed HDD metadata");
         let provider = crate::runtime::FileBackedCapacityAdmissionProvider::new(
             &store_registry,
             root.join("capacity-ledgers"),
@@ -2596,22 +2605,52 @@ mod tests {
     }
 
     #[test]
-    fn non_dry_run_object_store_create_publishes_live_catalogue_store() {
-        let root = temp_root("create-objectstore-catalogue");
-        let live_sqlite = root.join("metadata/live.sqlite");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-27T12:00:00Z"),
-        )
-        .with_live_sqlite_path(&live_sqlite);
+    fn rejects_non_dry_run_object_store_creation_without_administrator() {
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:45:00Z"));
         let mut request = create_object_store_request();
-        request.store_id = "pinakotheke-rcb-proof".to_string();
         request.dry_run = false;
+        request.administrator_actor = Some("spoofed".to_string());
 
         let response = handler
             .handle(DaemonApiRequest::CreateObjectStore(request))
-            .expect("store create publishes catalogue");
-        assert!(matches!(response, DaemonApiResponse::CreateObjectStore(_)));
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authentication_required"
+        ));
+    }
+
+    #[test]
+    fn object_store_creation_uses_peer_derived_administrator() {
+        let root = temp_root("create-objectstore-catalogue");
+        let live_sqlite = root.join("metadata/live.sqlite");
+        let service = FakeService::default();
+        let handler =
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-08T20:45:00Z"))
+                .with_live_sqlite_path(&live_sqlite);
+        let mut request = create_object_store_request();
+        request.store_id = "pinakotheke-rcb-proof".to_string();
+        request.dry_run = false;
+        request.administrator_actor = Some("spoofed".to_string());
+        let actor = DaemonLocalActor::new(0).with_username("root");
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CreateObjectStore(request),
+                Some(&actor),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::CreateObjectStore(response)
+                if response.administrator_actor.as_deref() == Some("root")
+        ));
 
         let connection = Connection::open(&live_sqlite).expect("open catalogue");
         let row = connection
@@ -2656,6 +2695,50 @@ mod tests {
             .expect("new store is deletable");
         assert!(deletion.store_metadata_removed);
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn object_store_creation_rejects_writer_but_accepts_trusted_web_peer() {
+        let root = temp_root("create-objectstore-trusted-web-peer");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-08T20:45:00Z"),
+        )
+        .with_live_sqlite_path(root.join("metadata/live.sqlite"));
+        let mut request = create_object_store_request();
+        request.dry_run = false;
+        let writer = DaemonLocalActor::new(1000)
+            .with_username("writer")
+            .with_groups(["mnemosyne"]);
+        let rejected = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CreateObjectStore(request.clone()),
+                Some(&writer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            rejected,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authorization_required"
+        ));
+
+        request.administrator_actor = Some("spoofed".to_string());
+        let web_peer = DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
+        let accepted = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::CreateObjectStore(request),
+                Some(&web_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            accepted,
+            DaemonApiResponse::CreateObjectStore(response)
+                if response.administrator_actor.as_deref()
+                    == Some(crate::DEFAULT_DAEMON_SERVICE_USER)
+        ));
         cleanup(&root);
     }
 

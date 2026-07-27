@@ -10,7 +10,8 @@ use dasobjectstore_core::backend::ObjectStoreBackend;
 use dasobjectstore_core::ids::ObjectId;
 use dasobjectstore_core::store::AcknowledgementPolicy;
 use dasobjectstore_metadata::{
-    commit_verified_ssd_and_enqueue, read_destage, DestageState, VerifiedSsdCommitRequest,
+    commit_verified_ssd_and_enqueue_with_capacity_claims, read_destage, DestageState,
+    VerifiedSsdCommitRequest,
 };
 use std::io::{self, Read, Seek, SeekFrom};
 use std::time::{Duration, Instant};
@@ -55,21 +56,6 @@ pub(super) fn commit_profile_s3_acceptance_at(
     record: &dasobjectstore_core::backend::BackendObjectRecord,
     upload_id: &str,
 ) -> Result<(), String> {
-    crate::runtime::select_managed_hdd_roots_with_capacity(
-        live_sqlite_path,
-        hdd_root_path,
-        definition.policy.copies,
-        record.size_bytes,
-        None,
-    )
-    .map_err(|error| error.to_string())?;
-    publish_profile_s3_catalogue_at(
-        &definition.store_id,
-        backend,
-        live_sqlite_path,
-        committed_at_utc,
-    )
-    .map_err(|error| error.to_string())?;
     let object_id = match dasobjectstore_metadata::read_s3_object_binding(
         live_sqlite_path,
         &definition.store_id,
@@ -104,7 +90,17 @@ pub(super) fn commit_profile_s3_acceptance_at(
         AcknowledgementPolicy::AfterHddPlacement => "after_hdd_placement",
     };
     let destage_job_id = format!("destage-direct-s3-{upload_id}");
-    commit_verified_ssd_and_enqueue(
+    let capacity_request = crate::runtime::build_destage_capacity_claim(
+        live_sqlite_path,
+        hdd_root_path,
+        &object_id,
+        &destage_job_id,
+        definition.policy.copies,
+        record.size_bytes,
+        &record.checksum,
+        committed_at_utc,
+    )?;
+    commit_verified_ssd_and_enqueue_with_capacity_claims(
         live_sqlite_path,
         VerifiedSsdCommitRequest {
             destage_job_id: &destage_job_id,
@@ -125,6 +121,14 @@ pub(super) fn commit_profile_s3_acceptance_at(
             s3_key: Some(&record.key.object_id),
             s3_version: record.key.version,
         },
+        &capacity_request,
+    )
+    .map_err(|error| error.to_string())?;
+    publish_profile_s3_catalogue_at(
+        &definition.store_id,
+        backend,
+        live_sqlite_path,
+        committed_at_utc,
     )
     .map_err(|error| error.to_string())?;
     if definition.policy.acknowledgement_policy == AcknowledgementPolicy::AfterHddPlacement {

@@ -470,14 +470,32 @@ where
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
         }
-        DaemonApiRequest::CreateObjectStore(request) => {
-            // A registry definition alone is not a usable ObjectStore.  All
-            // catalogue-backed operations (contents, admission, drain, and
-            // deletion) resolve the store from live metadata, so publish the
-            // matching live record before reporting the create job accepted.
-            // Keep the original request here because the service response is
-            // intentionally a projection and must not be trusted to recreate
-            // authority fields.
+        DaemonApiRequest::CreateObjectStore(mut request) => {
+            // Creation mutates daemon-owned capacity and registry authority.
+            // The actor carried by the request is untrusted display metadata;
+            // replace it with the peer-credential-derived actor.
+            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "ObjectStore creation requires an authenticated local administrator",
+                    )));
+                };
+                let trusted_web_peer =
+                    actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER);
+                if !actor.is_administrator() && !trusted_web_peer {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authorization_required",
+                        "ObjectStore creation requires root, sudo, dasobjectstore-admin membership, or the trusted authenticated Web service peer",
+                    )));
+                }
+            }
+            // Catalogue-backed operations resolve the store from live
+            // metadata, not the portable registry. Preserve the validated
+            // authority fields before moving the request into the durable
+            // creation saga, then publish the matching live record before
+            // acknowledging the operation.
             let definition = if request.dry_run {
                 None
             } else {
@@ -1062,8 +1080,8 @@ where
 }
 
 /// Publish a registry-defined store into the daemon's authoritative live
-/// catalogue.  The operation is idempotent for an identical store id and
-/// updates its policy projection during an explicit configuration update.
+/// catalogue. The transaction is idempotent for an identical store and
+/// refreshes its policy projection during an explicit configuration update.
 fn ensure_catalogue_store(
     live_sqlite_path: &std::path::Path,
     definition: &dasobjectstore_object_service::StoreServiceDefinition,

@@ -5,11 +5,12 @@ use dasobjectstore_core::store::StorePolicy;
 use dasobjectstore_core::workspace::{WorkspaceOperationState, WorkspaceRecoveryDisposition};
 use dasobjectstore_metadata::{
     accept_workspace_promotion_member, cancel_workspace_promotion, checkpoint_workspace_operation,
-    claim_workspace_operation, commit_verified_ssd_and_enqueue, complete_workspace_promotion,
-    list_active_workspace_promotions, measure_ssd_capacity, read_workspace_operation,
-    recover_expired_workspace_operations, renew_workspace_operation_lease, IngestStagingLayout,
-    SsdCapacityPolicy, SsdPressure, VerifiedSsdCommitRequest, WorkspaceOperationSnapshot,
-    WorkspacePromotionMemberSnapshot, WorkspacePromotionSnapshot,
+    claim_workspace_operation, commit_verified_ssd_and_enqueue_with_capacity_claims,
+    complete_workspace_promotion, list_active_workspace_promotions, measure_ssd_capacity,
+    read_workspace_operation, recover_expired_workspace_operations,
+    renew_workspace_operation_lease, IngestStagingLayout, SsdCapacityPolicy, SsdPressure,
+    VerifiedSsdCommitRequest, WorkspaceOperationSnapshot, WorkspacePromotionMemberSnapshot,
+    WorkspacePromotionSnapshot,
 };
 use dasobjectstore_workspace_host::{
     request_broker, BrokerRequest, BrokerResponse, PromotionInspection, PromotionPlan,
@@ -29,6 +30,7 @@ use crate::runtime::CapacityAdmissionProvider;
 pub struct WorkspacePromotionWorkerConfig {
     pub live_sqlite_path: PathBuf,
     pub ssd_root: PathBuf,
+    pub hdd_root: PathBuf,
     pub broker_socket_path: PathBuf,
     pub lease_owner: String,
     pub capacity_provider: Arc<dyn CapacityAdmissionProvider>,
@@ -460,7 +462,18 @@ fn publish_member(
     let policy = read_store_policy(config, &store_id)?;
     let job_id = promotion_ingest_job_id(promotion, member);
     let destage_job_id = format!("destage-{}", hex_identity(&member.object_id));
-    commit_verified_ssd_and_enqueue(
+    let destage_capacity = crate::runtime::build_destage_capacity_claim(
+        &config.live_sqlite_path,
+        &config.hdd_root,
+        &object_id,
+        &destage_job_id,
+        policy.copies,
+        member.size_bytes,
+        &member.sha256,
+        now_utc,
+    )
+    .map_err(WorkspacePromotionError::Metadata)?;
+    commit_verified_ssd_and_enqueue_with_capacity_claims(
         &config.live_sqlite_path,
         VerifiedSsdCommitRequest {
             destage_job_id: &destage_job_id,
@@ -483,6 +496,7 @@ fn publish_member(
                 .strip_prefix(&format!("{}/", promotion.target_store_id)),
             s3_version: 1,
         },
+        &destage_capacity,
     )
     .map_err(|error| WorkspacePromotionError::Metadata(error.to_string()))?;
     Ok(())

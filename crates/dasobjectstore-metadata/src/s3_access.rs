@@ -413,7 +413,8 @@ impl From<rusqlite::Error> for S3AccessError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{commit_verified_ssd_and_enqueue, VerifiedSsdCommitRequest, LIVE_SCHEMA_SQL};
+    use crate::destage::commit_verified_ssd_and_enqueue;
+    use crate::{VerifiedSsdCommitRequest, LIVE_SCHEMA_SQL};
 
     fn prepared() -> (std::path::PathBuf, std::path::PathBuf, StoreId) {
         let root = std::env::var_os("DASOBJECTSTORE_CODEX_VALIDATION_ROOT")

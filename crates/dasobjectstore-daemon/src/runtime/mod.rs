@@ -13,6 +13,7 @@ mod capacity_lease_audit;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
+mod destage_admission;
 mod destage_worker;
 mod direct_s3_ingress;
 pub(crate) mod disk_lockdown;
@@ -30,6 +31,7 @@ mod migration_provenance;
 mod migration_worker;
 mod object_browser;
 mod object_download;
+mod object_store_creation;
 mod performance_policy;
 mod profile_catalogue;
 mod profile_migration;
@@ -45,6 +47,7 @@ mod service;
 mod service_reconciliation;
 mod storage_assurance;
 mod subobject_capacity_persistence;
+mod work_scheduler;
 mod workspace_checkpoint;
 mod workspace_cleanup;
 mod workspace_materialize;
@@ -135,6 +138,7 @@ pub use config::{
     DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
     LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
 };
+pub(crate) use destage_admission::build_destage_capacity_claim;
 pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;
 pub use destage_worker::{
     run_one_durable_destage, DurableDestageOutcome, DurableDestageWorkerConfig,
@@ -166,8 +170,8 @@ pub use garbage_collection::{
     GarbageCollectReport, GarbageCollectTrigger, GarbageCollectorConfig, PerformanceGcMarker,
     GARBAGE_COLLECTION_REPORT_SCHEMA, PERFORMANCE_GC_MARKER_FILE, PERFORMANCE_GC_MARKER_SCHEMA,
 };
-pub use ingest_files::default_ssd_root;
-pub(crate) use ingest_files::{default_hdd_root, discover_managed_hdd_roots};
+pub(crate) use ingest_files::discover_managed_hdd_roots;
+pub use ingest_files::{default_hdd_root, default_ssd_root};
 pub use ingest_files::{
     submit_ingest_files_to_local_store, submit_ingest_files_to_local_store_with_capacity_provider,
     submit_ingest_files_to_local_store_with_progress, DaemonFileIngestSummary,
@@ -198,6 +202,12 @@ pub use object_browser::{
 };
 pub(crate) use object_download::{
     resolve_object_download_with_hdd_root, resolve_object_folder_download_with_hdd_root,
+};
+pub use object_store_creation::{
+    advance_object_store_creation_intent, begin_object_store_creation_intent,
+    object_store_creation_intent_path, ObjectStoreCreationIntent, ObjectStoreCreationIntentError,
+    ObjectStoreCreationPhase, OBJECT_STORE_CREATION_INTENT_FILE_NAME,
+    OBJECT_STORE_CREATION_INTENT_SCHEMA,
 };
 pub use performance_policy::{
     authoritative_performance_recommendation_path, read_authoritative_ingest_policy,
@@ -311,6 +321,7 @@ pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,
     SubObjectCapacityLedgerPersistenceError,
 };
+pub use work_scheduler::{DaemonWorkClass, DaemonWorkSubmission, PersistentWorkScheduler};
 pub use workspace_checkpoint::{
     register_bounded_workspace_checkpoint, WorkspaceCheckpointConfig, WorkspaceCheckpointError,
     WorkspaceCheckpointReport, WorkspaceCheckpointRequest,

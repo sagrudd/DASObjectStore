@@ -1,6 +1,6 @@
 use crate::schema::LIVE_SCHEMA_SQL;
 use dasobjectstore_core::ids::DiskId;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display};
@@ -156,7 +156,29 @@ pub fn acquire_disk_capacity_claims(
     validate_request(request)?;
     let mut connection = open(&request.live_sqlite_path)?;
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let existing = read_owner_claims(&transaction, request.kind, &request.owner_id)?;
+    let claims = acquire_disk_capacity_claims_in_transaction(&transaction, request)?;
+    transaction.commit()?;
+    Ok(claims)
+}
+
+pub fn read_disk_capacity_claims(
+    live_sqlite_path: impl AsRef<Path>,
+    kind: DiskCapacityClaimKind,
+    owner_id: &str,
+) -> Result<Vec<DiskCapacityClaim>, DiskCapacityClaimError> {
+    let connection = open(live_sqlite_path.as_ref())?;
+    read_owner_claims(&connection, kind, owner_id)
+}
+
+/// Acquire claims inside an existing immediate transaction. This is used when
+/// SSD acknowledgement metadata and its mandatory HDD capacity reservation
+/// must become visible atomically.
+pub(crate) fn acquire_disk_capacity_claims_in_transaction(
+    transaction: &Transaction<'_>,
+    request: &DiskCapacityClaimRequest,
+) -> Result<Vec<DiskCapacityClaim>, DiskCapacityClaimError> {
+    validate_request(request)?;
+    let existing = read_owner_claims(transaction, request.kind, &request.owner_id)?;
     if !existing.is_empty() {
         let stored_digest: String = transaction.query_row(
             "SELECT request_digest FROM disk_capacity_claims
@@ -180,7 +202,6 @@ pub fn acquire_disk_capacity_claims(
                     request.owner_id,
                 ],
             )?;
-            transaction.commit()?;
             return Ok(existing);
         }
         return Err(DiskCapacityClaimError::RequestConflict {
@@ -203,7 +224,7 @@ pub fn acquire_disk_capacity_claims(
                 state,
             });
         }
-        let outstanding = outstanding_claim_bytes(&transaction, &allocation.disk_id)?;
+        let outstanding = outstanding_claim_bytes(transaction, &allocation.disk_id)?;
         let available_after_claims = allocation
             .measured_available_bytes
             .saturating_sub(outstanding);
@@ -239,8 +260,7 @@ pub fn acquire_disk_capacity_claims(
             ],
         )?;
     }
-    let claims = read_owner_claims(&transaction, request.kind, &request.owner_id)?;
-    transaction.commit()?;
+    let claims = read_owner_claims(transaction, request.kind, &request.owner_id)?;
     Ok(claims)
 }
 

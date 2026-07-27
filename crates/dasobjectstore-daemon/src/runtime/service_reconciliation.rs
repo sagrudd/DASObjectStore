@@ -365,7 +365,9 @@ mod tests {
     fn write_ssd_acknowledgement(live_sqlite_path: &std::path::Path) {
         use dasobjectstore_core::ids::{ObjectId, StoreId};
         use dasobjectstore_metadata::{
-            commit_verified_ssd_and_enqueue, VerifiedSsdCommitRequest, LIVE_SCHEMA_SQL,
+            commit_verified_ssd_and_enqueue_with_capacity_claims, DiskCapacityClaimAllocation,
+            DiskCapacityClaimKind, DiskCapacityClaimRequest, VerifiedSsdCommitRequest,
+            LIVE_SCHEMA_SQL,
         };
         let connection = rusqlite::Connection::open(live_sqlite_path).expect("catalogue");
         connection
@@ -383,6 +385,13 @@ mod tests {
                 [],
             )
             .expect("store");
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO disks (disk_id,pool_id,role,state,size_bytes,created_at_utc,updated_at_utc)
+                 VALUES ('disk-a','pool-a','Hdd','Healthy',1000,'now','now')",
+                [],
+            )
+            .expect("disk");
         drop(connection);
         let store_id = StoreId::new("epic_collection").expect("store id");
         let object_id = ObjectId::new("epic_collection/archive.bin").expect("object id");
@@ -392,7 +401,7 @@ mod tests {
         fs::write(&payload, b"payload").expect("managed payload");
         let content_hash =
             dasobjectstore_metadata::hash_file_sha256(&payload).expect("payload hash");
-        commit_verified_ssd_and_enqueue(
+        commit_verified_ssd_and_enqueue_with_capacity_claims(
             live_sqlite_path,
             VerifiedSsdCommitRequest {
                 destage_job_id: "destage-archive",
@@ -413,6 +422,21 @@ mod tests {
                 s3_key: Some("archive.bin"),
                 s3_version: 1,
             },
+            &DiskCapacityClaimRequest {
+                live_sqlite_path: live_sqlite_path.to_path_buf(),
+                kind: DiskCapacityClaimKind::Destage,
+                owner_id: object_id.to_string(),
+                request_id: "destage:destage-archive".to_string(),
+                request_digest: "archive-capacity-v1".to_string(),
+                lease_owner: None,
+                lease_expires_at_utc: None,
+                created_at_utc: "2026-07-19T00:00:00Z".to_string(),
+                allocations: vec![DiskCapacityClaimAllocation {
+                    disk_id: dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id"),
+                    measured_available_bytes: 1000,
+                    requested_bytes: 7,
+                }],
+            },
         )
         .expect("SSD acknowledgement");
     }
@@ -421,7 +445,7 @@ mod tests {
         let connection = rusqlite::Connection::open(live_sqlite_path).expect("catalogue");
         connection
             .execute(
-                "INSERT INTO disks (
+                "INSERT OR IGNORE INTO disks (
                     disk_id,pool_id,role,state,size_bytes,created_at_utc,updated_at_utc
                  ) VALUES ('disk-a','pool-a','Hdd','Active',1000,'now','now')",
                 [],

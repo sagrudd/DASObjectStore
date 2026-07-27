@@ -28,11 +28,55 @@ Five dependency-ordered EPICs close the candidate:
    authority; and
 5. run commit-bound synthetic physical acceptance before promotion.
 
-The release sequence is ``0.146.0-rc.N`` followed by ``0.146.0``. Release
-candidate scope is frozen except for defects required to satisfy these EPICs.
-Performance promotion requires a recorded baseline, no unexplained staging
-growth, and investigation of regressions greater than 20 percent. ``1.0.0``
-remains a later, explicit compatibility decision.
+Development continues through compatible pre-1.0 semantic-version releases
+(currently ``0.147.0``). EPIC E binds the first promoted release-candidate tag
+to the exact installed and accepted commit; it does not reuse a superseded
+version number. Release-candidate scope is frozen except for defects required
+to satisfy these EPICs. Performance promotion requires a recorded baseline, no
+unexplained staging growth, and investigation of regressions greater than 20
+percent. ``1.0.0`` remains a later, explicit compatibility decision.
+
+### EPIC B implementation evidence
+
+The first data-lifecycle slice establishes three restart-safe authorities.
+ObjectStore creation records a strict, atomically published creation intent
+before capacity or registry mutation. Exact retries reuse the deterministic
+job identity, changed requests conflict, non-terminal phases resume, and the
+daemon records a peer-derived administrator rather than trusting a
+client-supplied actor. Capacity created by a failed first publication is rolled
+back before the intent returns to its validated phase. A
+``CapacityInitializing`` checkpoint closes the restart window before the
+external capacity-ledger write.
+
+Live metadata schema ``0.13`` adds canonical logical object versions,
+profile-neutral placement identity, and native-object bindings without
+replacing the existing native or portable catalogues. Native SSD publication,
+verified HDD promotion, and portable/provider catalogue commits converge on
+that identity. A conservative backfill supports dry-run inspection, exact
+idempotent application, and explicit ``needs_review`` results for ambiguous
+legacy evidence; it never mutates payloads.
+
+A persistent weighted scheduler records idempotency, work class, origin,
+ObjectStore, byte cost, priority, leases, retry, cancellation, and terminal
+state. Arbitration is bounded by per-class job/byte limits and rotates fairly
+between stores. Durable HDD destage now submits and leases work through this
+authority and reconstructs scheduler rows for pre-existing queue records after
+restart. ``generated_data`` continues to default to
+``AfterHddPlacement``. Native ingest, reconciliation adoption, workspace
+promotion, and direct S3 may acknowledge SSD-first publication only after one
+immediate SQLite transaction has reserved physical capacity for each required
+HDD copy and published the verified SSD placement, canonical identity, destage
+queue row, and scheduler row. The unreserved helper is test-only.
+
+Canonical backfill runs idempotently during daemon startup and retains
+conflicting evidence for review without mutating payloads. This closes EPIC B's
+source and metadata contracts; package installation and physical restart/replay
+acceptance remain dependency-ordered EPIC E evidence.
+
+Startup convergence first executes the complete identity migration as a
+rollback-only inspection, retains a private content-bound pre-``0.13`` SQLite
+backup, and only then applies the additive transaction. Migration ID conflicts
+fail closed.
 
 ## Product Direction and Campaign Gates
 

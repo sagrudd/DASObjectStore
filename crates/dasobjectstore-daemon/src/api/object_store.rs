@@ -338,7 +338,9 @@ mod tests {
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::api::{DaemonJobId, DaemonJobKind};
-    use dasobjectstore_core::store::{CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass};
+    use dasobjectstore_core::store::{
+        AcknowledgementPolicy, CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass,
+    };
     use std::path::PathBuf;
 
     fn valid_request() -> CreateObjectStoreRequest {
@@ -378,6 +380,10 @@ mod tests {
         assert_eq!(definition.store_id.as_str(), "generated-data");
         assert_eq!(definition.policy.class, StoreClass::GeneratedData);
         assert_eq!(definition.policy.copies, 2);
+        assert_eq!(
+            definition.policy.acknowledgement_policy,
+            AcknowledgementPolicy::AfterHddPlacement
+        );
         assert_eq!(
             definition.policy.capacity_behavior,
             CapacityBehavior::BackpressureByPriority

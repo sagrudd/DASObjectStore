@@ -8,6 +8,34 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.147.0 - 2026-07-27
+
+- Persist strict ObjectStore-creation intents before mutation, derive
+  administrator authority from the local peer, reuse deterministic job
+  identities for exact retries, reject changed replays, resume non-terminal
+  phases, checkpoint capacity initialization before its side effect, and roll
+  back intent-owned orphan capacity when definition publication fails.
+- Add canonical logical object-version and placement identity across native
+  SSD/HDD and portable/provider catalogue commits, with a non-destructive
+  dry-run/apply legacy backfill that retains ambiguous evidence for review and
+  runs idempotently at daemon startup.
+- Add a persistent weighted lifecycle scheduler with per-class bounds,
+  ObjectStore fairness, leases, retry, cancellation, restart recovery, and
+  compatibility backfill for durable HDD-destage queue rows. Atomic byte-cap
+  claims, independently renewed copy leases, and transactional
+  pause/resume/retry keep the queue and scheduler from diverging.
+- Preserve direct-to-HDD force replacement as a new immutable logical version,
+  withdraw superseded native/provider placement evidence without deleting
+  logical history, and fail closed on changed store or migration identity.
+- Inspect logical-identity convergence before applying it at startup and retain
+  a private, content-bound SQLite backup until the exact migration ``13`` name
+  and ``0.13`` format marker are durably recorded.
+- Preserve ``AfterHddPlacement`` as the ``generated_data`` default. Native
+  ingest, reconciliation adoption, workspace promotion, and direct S3 now use
+  one SSD-publication transaction that must hold a durable physical-capacity
+  claim for every required HDD copy before ``AfterSsdIngest``
+  acknowledgement; the unreserved helper is test-only.
+
 ## 0.146.4 - 2026-07-27
 
 - Publish every non-dry-run generic ObjectStore creation to the daemon's live

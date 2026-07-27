@@ -3,22 +3,27 @@
 use crate::runtime::ingest_files::discover_managed_hdd_roots;
 use dasobjectstore_core::ids::ObjectId;
 use dasobjectstore_core::object_type::ObjectType;
-use dasobjectstore_core::utc::add_seconds_to_utc_timestamp;
+use dasobjectstore_core::utc::{add_seconds_to_utc_timestamp, format_utc_timestamp_seconds};
 use dasobjectstore_metadata::{
-    acquire_disk_capacity_claims, claim_next_destage, fail_destage, list_ssd_eviction_candidates,
-    mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement,
+    acquire_disk_capacity_claims, backfill_destage_scheduler_jobs, claim_destage_for_scheduler,
+    claim_next_scheduler_job, complete_scheduler_job, fail_destage, list_ssd_eviction_candidates,
+    mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement, read_disk_capacity_claims,
     read_outstanding_disk_capacity_excluding, read_ssd_placement,
+    renew_destage_and_scheduler_leases, retry_scheduler_job,
     settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
     DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
-    DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, StagedObjectPut,
-    VerifiedHddPlacement,
+    DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, SchedulerClaimRequest,
+    SchedulerError, StagedObjectPut, VerifiedHddPlacement,
 };
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs::{self, File};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_DESTAGE_LEASE_SECONDS: u64 = 60 * 60;
+const DESTAGE_LEASE_RENEWAL_SECONDS: u64 = DEFAULT_DESTAGE_LEASE_SECONDS / 3;
 pub const MAX_DESTAGE_RETRY_SECONDS: u64 = 60 * 60;
 
 #[derive(Clone, Debug)]
@@ -71,23 +76,66 @@ pub fn run_one_durable_destage(
 ) -> Result<DurableDestageOutcome, DurableDestageWorkerError> {
     let lease_expires_at_utc = add_seconds_to_utc_timestamp(now_utc, DEFAULT_DESTAGE_LEASE_SECONDS)
         .ok_or_else(|| DurableDestageWorkerError::InvalidTimestamp(now_utc.to_string()))?;
-    let Some(record) = claim_next_destage(
-        &config.live_sqlite_path,
-        &config.worker_id,
-        &lease_expires_at_utc,
-        now_utc,
-        previously_served_store,
-    )?
+    let _ = previously_served_store;
+    backfill_destage_scheduler_jobs(&config.live_sqlite_path, now_utc)?;
+    let Some(scheduled) = claim_next_scheduler_job(&SchedulerClaimRequest {
+        live_sqlite_path: config.live_sqlite_path.clone(),
+        worker: config.worker_id.clone(),
+        now_utc: now_utc.to_string(),
+        lease_expires_at_utc: lease_expires_at_utc.clone(),
+    })?
     else {
         return evict_one_settled_ssd_copy(config, now_utc);
     };
+    let object_id = scheduled.object_id.clone().ok_or_else(|| {
+        DurableDestageWorkerError::SchedulerJobMissingObject(scheduled.scheduler_job_id.clone())
+    })?;
+    let record = match claim_destage_for_scheduler(
+        &config.live_sqlite_path,
+        &object_id,
+        &config.worker_id,
+        &lease_expires_at_utc,
+        now_utc,
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            let retry_at = add_seconds_to_utc_timestamp(now_utc, 30)
+                .ok_or_else(|| DurableDestageWorkerError::InvalidTimestamp(now_utc.to_string()))?;
+            retry_scheduler_job(
+                &config.live_sqlite_path,
+                &scheduled.scheduler_job_id,
+                &config.worker_id,
+                scheduled.lease_epoch,
+                &error.to_string(),
+                &retry_at,
+                now_utc,
+            )?;
+            return Err(error.into());
+        }
+    };
 
-    match settle_claimed_record(config, &record, now_utc, &lease_expires_at_utc) {
-        Ok(copies) => Ok(DurableDestageOutcome::Settled {
-            store_id: record.store_id.clone(),
-            object_id: record.object_id,
-            copies,
-        }),
+    match settle_claimed_record(
+        config,
+        &record,
+        &scheduled.scheduler_job_id,
+        scheduled.lease_epoch,
+        now_utc,
+        &lease_expires_at_utc,
+    ) {
+        Ok(copies) => {
+            complete_scheduler_job(
+                &config.live_sqlite_path,
+                &scheduled.scheduler_job_id,
+                &config.worker_id,
+                scheduled.lease_epoch,
+                now_utc,
+            )?;
+            Ok(DurableDestageOutcome::Settled {
+                store_id: record.store_id.clone(),
+                object_id: record.object_id,
+                copies,
+            })
+        }
         Err(error) => {
             let retry_at =
                 add_seconds_to_utc_timestamp(now_utc, retry_delay_seconds(record.attempt_count))
@@ -100,6 +148,15 @@ pub fn run_one_durable_destage(
                 &config.worker_id,
                 &error.to_string(),
                 Some(&retry_at),
+                now_utc,
+            )?;
+            retry_scheduler_job(
+                &config.live_sqlite_path,
+                &scheduled.scheduler_job_id,
+                &config.worker_id,
+                scheduled.lease_epoch,
+                &error.to_string(),
+                &retry_at,
                 now_utc,
             )?;
             Ok(DurableDestageOutcome::Deferred {
@@ -154,6 +211,8 @@ fn evict_one_settled_ssd_copy(
 fn settle_claimed_record(
     config: &DurableDestageWorkerConfig,
     record: &DestageQueueRecord,
+    scheduler_job_id: &str,
+    scheduler_lease_epoch: u64,
     now_utc: &str,
     lease_expires_at_utc: &str,
 ) -> Result<u8, DurableDestageWorkerError> {
@@ -176,45 +235,29 @@ fn settle_claimed_record(
         });
     }
     let object_type = parse_queued_object_type(&record.object_type)?;
-    let roots = select_managed_hdd_roots_with_capacity(
+    let held_claims = read_disk_capacity_claims(
         &config.live_sqlite_path,
-        &config.hdd_root,
-        record.required_copy_count,
-        record.expected_size_bytes,
-        Some(record.object_id.as_str()),
-    )?;
-    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
-        live_sqlite_path: config.live_sqlite_path.clone(),
-        kind: DiskCapacityClaimKind::Destage,
-        owner_id: record.object_id.as_str().to_string(),
-        request_id: format!("destage:{}", record.destage_job_id),
-        request_digest: format!(
-            "{}:{}:{}:{}",
-            record.object_id.as_str(),
-            record.expected_size_bytes,
+        DiskCapacityClaimKind::Destage,
+        record.object_id.as_str(),
+    )?
+    .into_iter()
+    .filter(|claim| claim.state == "active")
+    .collect::<Vec<_>>();
+    let roots = if held_claims.is_empty() {
+        // Compatibility for SSD acknowledgements created before reservations
+        // became mandatory. New publication paths reserve before returning.
+        let roots = select_managed_hdd_roots_with_capacity(
+            &config.live_sqlite_path,
+            &config.hdd_root,
             record.required_copy_count,
-            record.content_hash
-        ),
-        lease_owner: Some(config.worker_id.clone()),
-        lease_expires_at_utc: Some(lease_expires_at_utc.to_string()),
-        created_at_utc: now_utc.to_string(),
-        allocations: roots
-            .iter()
-            .map(|root| {
-                let capacity = measure_ssd_capacity(&root.root_path).map_err(|error| {
-                    DurableDestageWorkerError::CapacityMeasurement {
-                        disk_id: root.disk_id.as_str().to_string(),
-                        message: error.to_string(),
-                    }
-                })?;
-                Ok(DiskCapacityClaimAllocation {
-                    disk_id: root.disk_id.clone(),
-                    measured_available_bytes: capacity.available_bytes,
-                    requested_bytes: record.expected_size_bytes,
-                })
-            })
-            .collect::<Result<Vec<_>, DurableDestageWorkerError>>()?,
-    })?;
+            record.expected_size_bytes,
+            Some(record.object_id.as_str()),
+        )?;
+        acquire_destage_claims(config, record, now_utc, lease_expires_at_utc, &roots)?;
+        roots
+    } else {
+        roots_for_held_claims(config, record, &held_claims)?
+    };
     let job_root = payload_path
         .parent()
         .ok_or_else(|| DurableDestageWorkerError::UnsafeSsdPlacement(ssd.relative_path.clone()))?
@@ -231,8 +274,67 @@ fn settle_claimed_record(
         disk_roots: roots.clone(),
         copy_count: record.required_copy_count,
     };
-    let report =
-        settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress(&staged, |_| Ok(()))?;
+    let lease_error = Arc::new(Mutex::new(None::<String>));
+    let (stop_tx, stop_rx) = mpsc::channel();
+    let report = std::thread::scope(|scope| {
+        let heartbeat_lease_error = Arc::clone(&lease_error);
+        scope.spawn(move || loop {
+            match stop_rx.recv_timeout(Duration::from_secs(DESTAGE_LEASE_RENEWAL_SECONDS)) {
+                Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let renewed_at = current_utc_timestamp();
+                    let Some(expires_at) =
+                        add_seconds_to_utc_timestamp(&renewed_at, DEFAULT_DESTAGE_LEASE_SECONDS)
+                    else {
+                        *heartbeat_lease_error
+                            .lock()
+                            .expect("lease error lock poisoned") =
+                            Some("could not calculate renewed lease expiry".to_string());
+                        break;
+                    };
+                    if let Err(error) = renew_destage_and_scheduler_leases(
+                        &config.live_sqlite_path,
+                        &record.object_id,
+                        scheduler_job_id,
+                        &config.worker_id,
+                        scheduler_lease_epoch,
+                        &expires_at,
+                        &renewed_at,
+                    ) {
+                        *heartbeat_lease_error
+                            .lock()
+                            .expect("lease error lock poisoned") = Some(error.to_string());
+                        break;
+                    }
+                }
+            }
+        });
+        let result =
+            settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress(&staged, |_| {
+                if lease_error
+                    .lock()
+                    .expect("lease error lock poisoned")
+                    .is_some()
+                {
+                    Err(ObjectPutError::Cancelled)
+                } else {
+                    Ok(())
+                }
+            });
+        let _ = stop_tx.send(());
+        result
+    });
+    if let Some(message) = lease_error
+        .lock()
+        .expect("lease error lock poisoned")
+        .take()
+    {
+        return Err(DurableDestageWorkerError::LeaseFenceLost {
+            object_id: record.object_id.clone(),
+            message,
+        });
+    }
+    let report = report?;
 
     let placement_values = report
         .placements
@@ -287,6 +389,77 @@ fn settle_claimed_record(
     // left to the separate eviction pass so a cleanup failure can never turn
     // a successfully settled queue row back into a failed destage attempt.
     Ok(u8::try_from(placements.len()).unwrap_or(u8::MAX))
+}
+
+fn acquire_destage_claims(
+    config: &DurableDestageWorkerConfig,
+    record: &DestageQueueRecord,
+    now_utc: &str,
+    lease_expires_at_utc: &str,
+    roots: &[dasobjectstore_metadata::DiskCopyRoot],
+) -> Result<(), DurableDestageWorkerError> {
+    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
+        live_sqlite_path: config.live_sqlite_path.clone(),
+        kind: DiskCapacityClaimKind::Destage,
+        owner_id: record.object_id.as_str().to_string(),
+        request_id: format!("destage:{}", record.destage_job_id),
+        request_digest: format!(
+            "{}:{}:{}:{}",
+            record.object_id.as_str(),
+            record.expected_size_bytes,
+            record.required_copy_count,
+            record.content_hash
+        ),
+        lease_owner: Some(config.worker_id.clone()),
+        lease_expires_at_utc: Some(lease_expires_at_utc.to_string()),
+        created_at_utc: now_utc.to_string(),
+        allocations: roots
+            .iter()
+            .map(|root| {
+                let capacity = measure_ssd_capacity(&root.root_path).map_err(|error| {
+                    DurableDestageWorkerError::CapacityMeasurement {
+                        disk_id: root.disk_id.as_str().to_string(),
+                        message: error.to_string(),
+                    }
+                })?;
+                Ok(DiskCapacityClaimAllocation {
+                    disk_id: root.disk_id.clone(),
+                    measured_available_bytes: capacity.available_bytes,
+                    requested_bytes: record.expected_size_bytes,
+                })
+            })
+            .collect::<Result<Vec<_>, DurableDestageWorkerError>>()?,
+    })?;
+    Ok(())
+}
+
+fn roots_for_held_claims(
+    config: &DurableDestageWorkerConfig,
+    record: &DestageQueueRecord,
+    claims: &[dasobjectstore_metadata::DiskCapacityClaim],
+) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    if claims.len() != usize::from(record.required_copy_count)
+        || claims.iter().any(|claim| {
+            claim.reserved_bytes != record.expected_size_bytes || claim.consumed_bytes != 0
+        })
+    {
+        return Err(DurableDestageWorkerError::InvalidHeldCapacityClaims {
+            object_id: record.object_id.clone(),
+        });
+    }
+    let discovered = discover_managed_hdd_roots(&config.hdd_root)?;
+    claims
+        .iter()
+        .map(|claim| {
+            discovered
+                .iter()
+                .find(|root| root.disk_id == claim.disk_id)
+                .cloned()
+                .ok_or_else(|| DurableDestageWorkerError::ReservedDiskUnavailable {
+                    disk_id: claim.disk_id.as_str().to_string(),
+                })
+        })
+        .collect()
 }
 
 /// Select distinct managed HDD roots that can hold a complete copy before
@@ -522,6 +695,14 @@ fn retry_delay_seconds(attempt_count: u32) -> u64 {
     (30_u64.saturating_mul(1_u64 << exponent)).min(MAX_DESTAGE_RETRY_SECONDS)
 }
 
+fn current_utc_timestamp() -> String {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs();
+    format_utc_timestamp_seconds(i64::try_from(seconds).unwrap_or(i64::MAX))
+}
+
 fn placement_id(object_id: &ObjectId, disk_id: &str, relative_path: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(object_id.as_str().as_bytes());
@@ -536,6 +717,7 @@ fn placement_id(object_id: &ObjectId, disk_id: &str, relative_path: &str) -> Str
 pub enum DurableDestageWorkerError {
     Metadata(DestageMetadataError),
     CapacityClaim(DiskCapacityClaimError),
+    Scheduler(SchedulerError),
     Ingest(crate::runtime::DaemonIngestFilesRuntimeError),
     ObjectPut(ObjectPutError),
     Io(std::io::Error),
@@ -568,6 +750,17 @@ pub enum DurableDestageWorkerError {
         disk_id: String,
         message: String,
     },
+    InvalidHeldCapacityClaims {
+        object_id: ObjectId,
+    },
+    ReservedDiskUnavailable {
+        disk_id: String,
+    },
+    SchedulerJobMissingObject(String),
+    LeaseFenceLost {
+        object_id: ObjectId,
+        message: String,
+    },
 }
 
 impl Display for DurableDestageWorkerError {
@@ -575,6 +768,7 @@ impl Display for DurableDestageWorkerError {
         match self {
             Self::Metadata(error) => Display::fmt(error, formatter),
             Self::CapacityClaim(error) => Display::fmt(error, formatter),
+            Self::Scheduler(error) => Display::fmt(error, formatter),
             Self::Ingest(error) => Display::fmt(error, formatter),
             Self::ObjectPut(error) => Display::fmt(error, formatter),
             Self::Io(error) => write!(formatter, "durable destage IO failed: {error}"),
@@ -626,6 +820,20 @@ impl Display for DurableDestageWorkerError {
             Self::CapacityMeasurement { disk_id, message } => {
                 write!(formatter, "failed to measure HDD {disk_id} capacity: {message}")
             }
+            Self::InvalidHeldCapacityClaims { object_id } => write!(
+                formatter,
+                "held destage capacity claims do not cover every copy for {object_id}"
+            ),
+            Self::ReservedDiskUnavailable { disk_id } => {
+                write!(formatter, "reserved HDD disk {disk_id} is unavailable")
+            }
+            Self::SchedulerJobMissingObject(job_id) => {
+                write!(formatter, "destage scheduler job {job_id} has no object identity")
+            }
+            Self::LeaseFenceLost { object_id, message } => write!(
+                formatter,
+                "destage lease fence was lost for {object_id}; copy stopped: {message}"
+            ),
         }
     }
 }
@@ -641,6 +849,11 @@ impl From<DestageMetadataError> for DurableDestageWorkerError {
 impl From<DiskCapacityClaimError> for DurableDestageWorkerError {
     fn from(error: DiskCapacityClaimError) -> Self {
         Self::CapacityClaim(error)
+    }
+}
+impl From<SchedulerError> for DurableDestageWorkerError {
+    fn from(error: SchedulerError) -> Self {
+        Self::Scheduler(error)
     }
 }
 

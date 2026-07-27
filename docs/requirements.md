@@ -24,6 +24,15 @@ storage authority for normal operation.
 DASObjectStore SHALL treat the `dasobjectstore` CLI as a client to the daemon
 for normal storage-mutating workflows.
 
+ObjectStore creation SHALL be a durable idempotent daemon operation. Before
+capacity or registry mutation, the daemon SHALL persist a strict creation
+intent containing a normalized request digest, deterministic job identity,
+peer-derived administrator identity, and explicit phase. An exact retry SHALL
+resume or return the same operation; reusing its client request identity with
+changed parameters SHALL fail closed. Failure before definition publication
+SHALL roll back capacity created solely by that attempt. A client-supplied
+actor string SHALL NOT grant administrator authority.
+
 Bringing DASObjectStore under the Synoptikon umbrella as a formal Mnemosyne
 product/plugin SHALL be the priority integration path. The standalone monolith
 SHALL reuse the same domain model and SHALL NOT fork into a separate
@@ -258,11 +267,31 @@ durable-finalization terminology in future compatibility-sensitive contracts.
 
 `AfterSsdIngest` success SHALL be returned only after one transaction makes
 the object catalogue-visible, records a verified and synchronized managed-SSD
-placement, and registers a durable restart-safe HDD destage job. The response
+placement, registers a durable restart-safe HDD destage job, registers its
+persistent scheduler work, and holds one physical-capacity claim for every
+required HDD copy. Capacity selection SHALL prove that each claimed target can
+accept the complete object while retaining configured reserves. The response
 SHALL carry per-object, path-free evidence and SHALL be the only authority for
 a client to release its local staging copy. HDD settlement SHALL continue
-asynchronously with bounded leases, retries, fairness across stores, and
-operator-visible failed or review-required states.
+asynchronously with bounded leases, retries, weighted fairness across work
+classes and stores, cancellation, restart recovery, and operator-visible failed
+or review-required states.
+
+Lifecycle work SHALL use one persistent scheduler contract. Each submission
+SHALL carry an idempotency key and immutable request digest, work class,
+submission origin, ObjectStore, priority, byte cost, acknowledgement policy,
+and retry bound. Class policy SHALL bound active jobs and bytes. Claims SHALL
+be leased and restart-safe; expired leases SHALL become recoverable without
+creating a second logical operation. Exact replay SHALL reuse the existing job,
+while changed evidence under an existing idempotency key SHALL fail closed.
+
+Every immutable object version SHALL have one canonical identity scoped by
+ObjectStore, logical key, and version. Verified SSD, HDD, folder, drive, and
+provider representations SHALL be placements of that version rather than
+independent objects. Identity claims SHALL require matching size and checksum
+evidence. Legacy convergence SHALL support a non-mutating dry run, idempotent
+application, and explicit review state for ambiguity; it SHALL NOT rename,
+move, or delete payloads.
 
 The managed SSD copy SHALL remain readable until HDD policy is satisfied.
 After verified HDD placements and catalogue promotion commit atomically, an

@@ -128,6 +128,13 @@ pub fn withdraw_profile_catalogue_object(
         });
     };
     validate_object_withdrawal_evidence(&request, &object_json)?;
+    withdraw_profile_object_logical_placements(
+        &transaction,
+        request.profile_namespace,
+        request.store_id,
+        &object_json,
+        &transaction_timestamp(&transaction)?,
+    )?;
     let removed = transaction.execute(
         "DELETE FROM profile_catalogue_objects
          WHERE profile_namespace = ?1 AND store_id = ?2
@@ -267,6 +274,16 @@ pub fn withdraw_profile_catalogue(
         |row| row.get::<_, usize>(0),
     )?;
     if !dry_run {
+        let placement_namespace = crate::logical_identity::logical_profile_placement_namespace(
+            profile_namespace,
+            store_id,
+        );
+        crate::logical_identity::withdraw_logical_placement_namespace_in_transaction(
+            &transaction,
+            &placement_namespace,
+            &transaction_timestamp(&transaction)?,
+        )
+        .map_err(|error| ProfileCatalogueCommitError::LogicalIdentity(error.to_string()))?;
         transaction.execute(
             "DELETE FROM profile_catalogue_objects WHERE profile_namespace = ?1 AND store_id = ?2",
             params![profile_namespace, store_id.as_str()],
@@ -379,6 +396,7 @@ pub fn commit_profile_catalogue(
             && existing.3 == request.source_retained
             && existing.4 == catalogue_json;
         if matches {
+            claim_profile_logical_identities(&transaction, &request)?;
             transaction.commit()?;
             return Ok(ProfileCatalogueCommitReport {
                 object_count: request.catalogue.objects.len(),
@@ -428,6 +446,25 @@ pub fn commit_profile_catalogue(
 
     for (object_id, object_version) in existing_keys {
         if request.exact_snapshot && !expected_keys.contains(&(object_id.clone(), object_version)) {
+            let object_json: String = transaction.query_row(
+                "SELECT object_json FROM profile_catalogue_objects
+                 WHERE profile_namespace=?1 AND store_id=?2
+                   AND object_id=?3 AND object_version=?4",
+                params![
+                    request.profile_namespace,
+                    request.store_id.as_str(),
+                    object_id,
+                    object_version
+                ],
+                |row| row.get(0),
+            )?;
+            withdraw_profile_object_logical_placements(
+                &transaction,
+                request.profile_namespace,
+                request.store_id,
+                &object_json,
+                request.committed_at_utc,
+            )?;
             transaction.execute(
                 "DELETE FROM profile_catalogue_objects
                  WHERE profile_namespace = ?1 AND store_id = ?2
@@ -485,11 +522,115 @@ pub fn commit_profile_catalogue(
         )?;
     }
 
+    claim_profile_logical_identities(&transaction, &request)?;
     transaction.commit()?;
     Ok(ProfileCatalogueCommitReport {
         object_count: request.catalogue.objects.len(),
         idempotent: false,
     })
+}
+
+fn withdraw_profile_object_logical_placements(
+    transaction: &Transaction<'_>,
+    profile_namespace: &str,
+    store_id: &StoreId,
+    object_json: &str,
+    recorded_at_utc: &str,
+) -> Result<(), ProfileCatalogueCommitError> {
+    let object: dasobjectstore_core::object_catalogue::PortableObjectVersion =
+        serde_json::from_str(object_json)
+            .map_err(|error| ProfileCatalogueCommitError::InvalidCatalogue(error.to_string()))?;
+    let placement_namespace =
+        crate::logical_identity::logical_profile_placement_namespace(profile_namespace, store_id);
+    let source_ids = object
+        .placements
+        .iter()
+        .map(|placement| placement.placement_id.as_str())
+        .collect::<Vec<_>>();
+    crate::logical_identity::withdraw_logical_placement_sources_in_transaction(
+        transaction,
+        &placement_namespace,
+        &source_ids,
+        recorded_at_utc,
+    )
+    .map_err(|error| ProfileCatalogueCommitError::LogicalIdentity(error.to_string()))?;
+    Ok(())
+}
+
+fn transaction_timestamp(
+    transaction: &Transaction<'_>,
+) -> Result<String, ProfileCatalogueCommitError> {
+    transaction
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
+            row.get(0)
+        })
+        .map_err(Into::into)
+}
+
+fn claim_profile_logical_identities(
+    transaction: &Transaction<'_>,
+    request: &ProfileCatalogueCommitRequest<'_>,
+) -> Result<(), ProfileCatalogueCommitError> {
+    let placement_namespace = crate::logical_identity::logical_profile_placement_namespace(
+        request.profile_namespace,
+        request.store_id,
+    );
+    for object in &request.catalogue.objects {
+        let (version, _) = crate::logical_identity::claim_logical_version_in_transaction(
+            transaction,
+            &crate::logical_identity::LogicalVersionClaim {
+                store_id: request.store_id,
+                object_key: crate::logical_identity::logical_profile_object_key(object),
+                object_version: object.version,
+                size_bytes: object.size_bytes,
+                content_hash_algorithm: &object.checksum.algorithm,
+                content_hash: &object.checksum.value,
+                recorded_at_utc: request.committed_at_utc,
+            },
+        )
+        .map_err(|error| ProfileCatalogueCommitError::LogicalIdentity(error.to_string()))?;
+        for placement in &object.placements {
+            let (kind, location) = portable_logical_location(&placement.location);
+            crate::logical_identity::claim_logical_placement_in_transaction(
+                transaction,
+                &crate::logical_identity::LogicalPlacementClaim {
+                    logical_version_id: &version.logical_version_id,
+                    placement_kind: kind,
+                    placement_namespace: &placement_namespace,
+                    source_placement_id: placement.placement_id.as_str(),
+                    location: &location,
+                    content_hash_algorithm: &placement.checksum.algorithm,
+                    content_hash: &placement.checksum.value,
+                    verified_at_utc: placement.verified_at_utc.as_deref(),
+                    recorded_at_utc: request.committed_at_utc,
+                },
+            )
+            .map_err(|error| ProfileCatalogueCommitError::LogicalIdentity(error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+fn portable_logical_location(
+    location: &dasobjectstore_core::object_catalogue::PortablePlacementLocation,
+) -> (&'static str, String) {
+    use dasobjectstore_core::object_catalogue::PortablePlacementLocation;
+    match location {
+        PortablePlacementLocation::Folder { relative_path } => ("folder", relative_path.clone()),
+        PortablePlacementLocation::Drive { relative_path } => ("drive", relative_path.clone()),
+        PortablePlacementLocation::Appliance {
+            pool_id,
+            disk_id,
+            relative_path,
+        } => (
+            "hdd",
+            format!("{pool_id}:{}:{relative_path}", disk_id.as_str()),
+        ),
+        PortablePlacementLocation::Provider {
+            provider,
+            object_key,
+        } => ("provider", format!("{provider}:{object_key}")),
+    }
 }
 
 fn validate_request(
@@ -557,6 +698,7 @@ pub enum ProfileCatalogueCommitError {
         object_id: String,
         version: u64,
     },
+    LogicalIdentity(String),
 }
 
 impl Display for ProfileCatalogueCommitError {
@@ -595,6 +737,12 @@ impl Display for ProfileCatalogueCommitError {
                 formatter,
                 "object {object_id} version {version} does not match deletion evidence"
             ),
+            Self::LogicalIdentity(message) => {
+                write!(
+                    formatter,
+                    "logical object identity publication failed: {message}"
+                )
+            }
         }
     }
 }
@@ -695,6 +843,22 @@ mod tests {
                 .expect("count"),
             1
         );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM logical_object_versions", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("logical version count"),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM logical_placements", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .expect("logical placement count"),
+            1
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -789,6 +953,18 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("object ids");
         assert_eq!(rows, vec!["object-a"]);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='folder:primary:store-a'
+                       AND source_placement_id='placement-b'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("removed snapshot placement"),
+            "withdrawn"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -842,6 +1018,19 @@ mod tests {
                 transactions_removed: 1,
             }
         );
+        let connection = Connection::open(&db).expect("db");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='folder:retire:store-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("preview placement state"),
+            "active"
+        );
+        drop(connection);
         assert_eq!(
             withdraw_profile_catalogue(&db, "folder:retire", &store_id, false).expect("withdraw"),
             ProfileCatalogueWithdrawalReport {
@@ -858,6 +1047,28 @@ mod tests {
             )
             .expect("remaining object count");
         assert_eq!(remaining, 1);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='folder:retire:store-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("withdrawn namespace"),
+            "withdrawn"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='folder:keep:store-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("retained namespace"),
+            "active"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -903,6 +1114,7 @@ mod tests {
         retained.checksum.value = "bbb".into();
         retained.placements[0].placement_id =
             PlacementId::new("placement-b").expect("placement id");
+        retained.placements[0].checksum.value = "bbb".into();
         retained.placements[0].location = PortablePlacementLocation::Provider {
             provider: "garage".into(),
             object_key: "bucket-a/media/object-b".into(),
@@ -928,6 +1140,9 @@ mod tests {
         other_namespace_catalogue.objects[0].checksum.value = "ccc".into();
         other_namespace_catalogue.objects[0].placements[0].placement_id =
             PlacementId::new("placement-c").expect("placement id");
+        other_namespace_catalogue.objects[0].placements[0]
+            .checksum
+            .value = "ccc".into();
         other_namespace_catalogue.objects[0].placements[0].location =
             PortablePlacementLocation::Provider {
                 provider: "garage".into(),
@@ -992,6 +1207,31 @@ mod tests {
                 remaining_logical_bytes: 16,
             }
         );
+        let connection = Connection::open(&db).expect("db");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='provider:garage:store-a'
+                       AND source_placement_id='placement-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("withdrawn exact placement"),
+            "withdrawn"
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='provider:archive:store-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("independent namespace"),
+            "active"
+        );
+        drop(connection);
         assert_eq!(
             withdraw_profile_catalogue_object(&db, request()).expect("idempotent replay"),
             ProfileCatalogueObjectWithdrawalReport {
@@ -1000,6 +1240,38 @@ mod tests {
                 remaining_logical_bytes: 16,
             }
         );
+        let mut restored = sample_catalogue();
+        restored.objects[0].placements[0].location = PortablePlacementLocation::Provider {
+            provider: "garage".into(),
+            object_key: "bucket-a/media/object-a".into(),
+        };
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-provider-restore",
+                profile_namespace: "provider:garage",
+                store_id: &store_id,
+                catalogue: &restored,
+                source_retained: true,
+                exact_snapshot: false,
+                committed_at_utc: "2026-07-23T00:00:03Z",
+            },
+        )
+        .expect("restore exact placement");
+        let connection = Connection::open(&db).expect("db");
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT state FROM logical_placements
+                     WHERE placement_namespace='provider:garage:store-a'
+                       AND source_placement_id='placement-a'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .expect("reactivated placement"),
+            "active"
+        );
+        drop(connection);
         assert_eq!(
             withdraw_profile_catalogue_object(
                 &db,

@@ -116,6 +116,33 @@ error across daemon restarts. HDD settlement promotion records concrete
 verified placements and marks the SSD copy eviction-eligible atomically; the
 payload is removed only by a later guarded eviction pass.
 
+Live schema ``0.13`` adds a canonical identity overlay for immutable logical
+object versions and their native or portable placements, plus a binding from
+legacy native object rows to the canonical version. Identity is scoped by
+ObjectStore, logical key, and version; size or checksum disagreement is a
+conflict rather than a second interpretation of the same version. Existing
+native and portable catalogues remain the operational records during the
+additive migration.
+
+Schema ``0.13`` also adds persistent lifecycle scheduler classes, jobs,
+per-store fairness state, and service sequence. Jobs retain their idempotency
+key and request digest, origin, work class, byte cost, acknowledgement policy,
+lease epoch, retry state, and cancellation request across restart. Existing
+durable destage rows can be reconstructed into scheduler jobs idempotently.
+
+Canonical legacy convergence is an explicit inspection operation. Dry-run
+reports rows that would be created and evidence that needs review. Apply mode
+uses the same deterministic identities and exact-replay checks, but never
+moves, rewrites, or deletes payload data. Ambiguous size, checksum, key, or
+placement evidence remains ``needs_review`` rather than being guessed.
+
+On first startup with schema ``0.13``, the daemon runs that inspection as a
+rollback-only transaction and preserves a content-bound SQLite backup inside a
+mode-``0700`` metadata-migration directory before applying. The backup is
+integrity checked and published with mode ``0600``. The format marker,
+migration identity, canonical rows, and review evidence commit together. A
+conflicting migration identity stops startup rather than reinterpreting data.
+
 DASObjectStore does not claim that local metadata snapshots are a backup. Users
 still need independent backup for data that cannot be redownloaded or
 recomputed.

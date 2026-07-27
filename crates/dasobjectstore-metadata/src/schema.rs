@@ -1,7 +1,7 @@
 use crate::format::{FormatVersion, MetadataArtifact};
 
 pub const LIVE_SCHEMA_FORMAT_VERSION: FormatVersion =
-    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 12);
+    FormatVersion::new(MetadataArtifact::LiveSqlite, 0, 13);
 
 pub const LIVE_SCHEMA_SQL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -169,6 +169,135 @@ CREATE TABLE IF NOT EXISTS s3_object_bindings (
 
 CREATE INDEX IF NOT EXISTS idx_s3_object_bindings_list
 ON s3_object_bindings (store_id, object_key, object_version);
+
+-- Canonical logical identity is additive to the legacy native and portable
+-- catalogues. Existing object IDs, S3 keys, and provider revisions remain
+-- stable aliases; this bridge gives every logical object version one identity
+-- across SSD, HDD, and provider placements without rewriting payloads.
+CREATE TABLE IF NOT EXISTS logical_object_versions (
+    logical_version_id TEXT PRIMARY KEY NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_key TEXT NOT NULL,
+    object_version INTEGER NOT NULL CHECK (object_version > 0),
+    size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
+    content_hash_algorithm TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (store_id, object_key, object_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_logical_object_versions_store_key
+ON logical_object_versions (store_id, object_key, object_version);
+
+CREATE TABLE IF NOT EXISTS native_logical_version_bindings (
+    object_id TEXT PRIMARY KEY NOT NULL REFERENCES objects(object_id),
+    logical_version_id TEXT NOT NULL REFERENCES logical_object_versions(logical_version_id),
+    created_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_native_logical_version
+ON native_logical_version_bindings (logical_version_id);
+
+CREATE TABLE IF NOT EXISTS logical_placements (
+    placement_id TEXT PRIMARY KEY NOT NULL,
+    logical_version_id TEXT NOT NULL REFERENCES logical_object_versions(logical_version_id),
+    placement_kind TEXT NOT NULL,
+    placement_namespace TEXT NOT NULL,
+    source_placement_id TEXT NOT NULL,
+    location TEXT NOT NULL,
+    content_hash_algorithm TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'active',
+    verified_at_utc TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (
+        logical_version_id, placement_kind, placement_namespace, location
+    ),
+    UNIQUE (placement_namespace, source_placement_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_logical_placements_version_state
+ON logical_placements (logical_version_id, state, placement_kind);
+
+-- Backfill never guesses through conflicting immutable evidence. Ambiguous
+-- legacy rows receive a deterministic review record while both source
+-- catalogues and every payload remain untouched.
+CREATE TABLE IF NOT EXISTS logical_identity_reviews (
+    review_id TEXT PRIMARY KEY NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_key TEXT NOT NULL,
+    object_version INTEGER NOT NULL CHECK (object_version > 0),
+    source_kind TEXT NOT NULL,
+    source_identity TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    evidence_digest TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'needs_review',
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    UNIQUE (source_kind, source_identity, evidence_digest)
+);
+
+CREATE INDEX IF NOT EXISTS idx_logical_identity_reviews_state
+ON logical_identity_reviews (state, store_id, object_key, object_version);
+
+CREATE TABLE IF NOT EXISTS scheduler_classes (
+    work_class TEXT PRIMARY KEY NOT NULL,
+    weight INTEGER NOT NULL CHECK (weight > 0),
+    max_active_jobs INTEGER NOT NULL CHECK (max_active_jobs > 0),
+    max_active_bytes INTEGER NOT NULL CHECK (max_active_bytes > 0),
+    deficit_bytes INTEGER NOT NULL DEFAULT 0 CHECK (deficit_bytes >= 0),
+    last_served_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_served_sequence >= 0),
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scheduler_jobs (
+    scheduler_job_id TEXT PRIMARY KEY NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    request_digest TEXT NOT NULL,
+    work_class TEXT NOT NULL REFERENCES scheduler_classes(work_class),
+    origin TEXT NOT NULL,
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    object_id TEXT REFERENCES objects(object_id),
+    state TEXT NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 0,
+    byte_cost INTEGER NOT NULL CHECK (byte_cost > 0),
+    acknowledgement_policy TEXT NOT NULL,
+    required_copy_count INTEGER NOT NULL CHECK (required_copy_count > 0),
+    cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK (cancellation_requested IN (0,1)),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 8 CHECK (max_attempts > 0),
+    next_retry_at_utc TEXT,
+    lease_owner TEXT,
+    lease_epoch INTEGER NOT NULL DEFAULT 0 CHECK (lease_epoch >= 0),
+    lease_expires_at_utc TEXT,
+    last_error TEXT,
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_runnable
+ON scheduler_jobs (
+    state, next_retry_at_utc, work_class, priority DESC, created_at_utc
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_jobs_store
+ON scheduler_jobs (store_id, state, priority DESC, created_at_utc);
+
+CREATE TABLE IF NOT EXISTS scheduler_store_fairness (
+    work_class TEXT NOT NULL REFERENCES scheduler_classes(work_class),
+    store_id TEXT NOT NULL REFERENCES stores(store_id),
+    last_served_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_served_sequence >= 0),
+    updated_at_utc TEXT NOT NULL,
+    PRIMARY KEY (work_class, store_id)
+);
+
+CREATE TABLE IF NOT EXISTS scheduler_state (
+    singleton INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+    service_sequence INTEGER NOT NULL DEFAULT 0 CHECK (service_sequence >= 0),
+    updated_at_utc TEXT NOT NULL
+);
 
 -- Profile-neutral catalogue handoffs are deliberately isolated from the
 -- legacy objects/placements tables.  The latter derive appliance paths from
@@ -447,7 +576,7 @@ mod tests {
             MetadataArtifact::LiveSqlite
         );
         assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.major, 0);
-        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 12);
+        assert_eq!(LIVE_SCHEMA_FORMAT_VERSION.minor, 13);
     }
 
     #[test]
@@ -478,8 +607,12 @@ mod tests {
                 "disk_capacity_claims",
                 "disks",
                 "ingest_jobs",
+                "logical_identity_reviews",
+                "logical_object_versions",
+                "logical_placements",
                 "metadata_format_versions",
                 "metadata_migrations",
+                "native_logical_version_bindings",
                 "objects",
                 "placements",
                 "pool_state_markers",
@@ -487,6 +620,10 @@ mod tests {
                 "profile_catalogue_objects",
                 "profile_catalogue_transactions",
                 "s3_object_bindings",
+                "scheduler_classes",
+                "scheduler_jobs",
+                "scheduler_state",
+                "scheduler_store_fairness",
                 "ssd_object_placements",
                 "stores",
             ]
