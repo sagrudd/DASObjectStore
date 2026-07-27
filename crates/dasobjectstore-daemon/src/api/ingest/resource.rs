@@ -111,10 +111,7 @@ impl DaemonIngestResourceBudget {
             .saturating_add(policy.worker_counts.hdd_write)
             .max(1);
         let resource_limit = cpu_cores
-            .min(
-                (memory_bytes / Self::TRANSACTION_MEMORY_BYTES)
-                    .min(u64::from(u16::MAX)) as u16,
-            )
+            .min((memory_bytes / Self::TRANSACTION_MEMORY_BYTES).min(u64::from(u16::MAX)) as u16)
             .min(io_workers / Self::TRANSACTION_IO_WORKERS)
             .clamp(
                 Self::MIN_CONCURRENT_TRANSACTIONS,
@@ -139,8 +136,8 @@ impl DaemonIngestResourceBudget {
     pub fn concurrent_transaction_limit(self) -> u16 {
         self.cpu_cores
             .min(
-                (self.memory_bytes / Self::TRANSACTION_MEMORY_BYTES)
-                    .min(u64::from(u16::MAX)) as u16,
+                (self.memory_bytes / Self::TRANSACTION_MEMORY_BYTES).min(u64::from(u16::MAX))
+                    as u16,
             )
             .min(self.socket_workers)
             .min(self.io_workers / Self::TRANSACTION_IO_WORKERS)

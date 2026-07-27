@@ -99,10 +99,7 @@ impl DaemonRuntimeConfig {
         validate_absolute_path("product_root", &self.product_root)?;
         self.telemetry.validate()?;
         self.object_service.validate()?;
-        if let Some(limit) = self
-            .ingest_resource_policy
-            .max_concurrent_transactions
-        {
+        if let Some(limit) = self.ingest_resource_policy.max_concurrent_transactions {
             if !(crate::api::DaemonIngestResourceBudget::MIN_CONCURRENT_TRANSACTIONS
                 ..=crate::api::DaemonIngestResourceBudget::MAX_CONCURRENT_TRANSACTIONS)
                 .contains(&limit)
