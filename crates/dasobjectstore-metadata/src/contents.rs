@@ -61,6 +61,10 @@ impl StoreContentsSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct StoreContentsObject {
     pub object_id: String,
+    /// Immutable object revision exposed to trusted local host adapters.
+    pub object_version: u64,
+    /// SHA-256 evidence for the immutable revision, including its algorithm.
+    pub checksum: String,
     pub path: String,
     pub kind: String,
     pub object_type: String,
@@ -90,7 +94,7 @@ pub fn read_store_contents(
     }
     ensure_store_exists(&connection, &request.store_id)?;
     let mut statement = connection.prepare(
-        "SELECT object_id, object_type, state, COALESCE(size_bytes, 0), updated_at_utc
+        "SELECT object_id, object_type, state, COALESCE(size_bytes, 0), COALESCE(content_hash, ''), updated_at_utc
          FROM objects
          WHERE store_id = ?1
          ORDER BY object_id ASC",
@@ -126,12 +130,17 @@ pub fn read_store_contents(
         );
         objects.push(StoreContentsObject {
             object_id: object_id.clone(),
+            // Native catalogue rows have no independently versioned external
+            // key. Version one remains the immutable identity until a future
+            // native revision is introduced.
+            object_version: 1,
+            checksum: format!("sha256:{}", row.get::<_, String>(4)?),
             path: display_path,
             kind: "file".to_string(),
             object_type: row.get(1)?,
             state: row.get(2)?,
             size_bytes,
-            updated_at_utc: row.get(4)?,
+            updated_at_utc: row.get(5)?,
         });
         seen_object_ids.insert(object_id);
     }
@@ -200,6 +209,12 @@ pub fn read_store_contents(
             };
             objects.push(StoreContentsObject {
                 object_id: object_id.clone(),
+                object_version: object.version,
+                checksum: format!(
+                    "{}:{}",
+                    object.checksum.algorithm,
+                    object.checksum.value.trim_start_matches("sha256:")
+                ),
                 path: display_path,
                 kind: "file".to_string(),
                 object_type: "profile_object".to_string(),
@@ -489,6 +504,11 @@ mod tests {
         assert_eq!(snapshot.objects[0].state, "Protected");
         assert_eq!(snapshot.objects[0].object_type, "profile_object");
         assert_eq!(snapshot.objects[0].size_bytes, 512);
+        assert_eq!(snapshot.objects[0].object_version, 7);
+        assert_eq!(
+            snapshot.objects[0].checksum,
+            format!("sha256:{}", "a".repeat(64))
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -542,6 +562,11 @@ mod tests {
         assert_eq!(snapshot.objects[0].object_id, native_object_id);
         assert_eq!(snapshot.objects[0].path, key);
         assert_eq!(snapshot.objects[0].object_type, "naive");
+        assert_eq!(snapshot.objects[0].object_version, 1);
+        assert_eq!(
+            snapshot.objects[0].checksum,
+            format!("sha256:{}", "a".repeat(64))
+        );
 
         let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
         let profile_rows: u64 = connection

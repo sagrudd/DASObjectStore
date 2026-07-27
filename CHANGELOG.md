@@ -8,6 +8,14 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.4 - 2026-07-27
+
+- Extend the daemon-owned local ``store contents --json`` inventory evidence
+  with immutable object version and SHA-256 fields. Trusted local host
+  adapters can now reject a same-key replacement instead of treating key and
+  length alone as a readable representation. This is catalogue evidence only;
+  it does not expose a provider listing or application credentials.
+
 ## 0.145.3 - 2026-07-27
 
 - Reconcile store-global logical used bytes after every terminal

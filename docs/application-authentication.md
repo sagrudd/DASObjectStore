@@ -166,6 +166,19 @@ The v1 request is defined at
 `/api/v1/application-auth/object-deletions`; its first consumer helper and live
 synthetic deployment remain separate integration work.
 
+### Trusted local catalogue inventory
+
+Release `0.145.4` extends the daemon-owned local
+``dasobjectstore store contents STORE --json`` view with ``object_version``
+and ``checksum`` for every returned catalogue object. A reviewed local host
+adapter may use that bounded evidence to compare an already-authorized
+application projection against its immutable catalogue binding. It is not a
+provider listing, credential-bearing protocol, or substitute for a future
+application-scoped remote inventory API. Consumers must still restrict the
+logical ObjectStore and prefix before invoking the local host adapter, reject
+missing/changed version, checksum, or length evidence, and never use this view
+to discover unrelated objects.
+
 ## Development self-signing mode
 
 For software development and generated-data tests, the workspace provides an
