@@ -67,6 +67,24 @@ shape, exact ObjectStore, logical prefixes, and the read-only operation set
 before issuing resolved claims. A missing, expired, cross-store, cross-prefix,
 or excessive binding fails closed before any provider request.
 
+`ergasterion.object-store-binding.v2` adds the current Monas or Synoptikon
+project authority and Prosopikon authority revisions without changing the v1
+wire shape. The nested `hostProject.projectId` must equal the top-level
+`projectId`. Before v2 token issuance, the daemon integration must supply
+trusted current tenant, host mode, authority identities, project identity, and
+both revisions from authenticated host dispatch. Missing or mismatched
+authority context, or a revision other than the exact current revision, fails
+closed before token issuance and therefore before storage-provider access.
+Exchange callers cannot supply that trusted comparison context. This is a
+greenfield v2 contract: v1 remains readable and unchanged, but there is no
+automatic migration or revision inference.
+
+The normative provider schema is
+`docs/schemas/ergasterion.object-store-binding.v2.schema.json`; the synthetic
+capability fixture and compatible application registration are
+`docs/user/examples/ergasterion-object-store-binding-v2.json` and
+`docs/user/examples/ergasterion-application-identity-registration-v2.json`.
+
 The assigned opaque service principal is `app-7e4a31c9b260`, with audience
 `ergasterion-governed-data-service` and audit purpose
 `ergasterion.governed-data-access`. Its v1 operation vocabulary is `list`,

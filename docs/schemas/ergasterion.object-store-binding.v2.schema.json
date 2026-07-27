@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dasobjectstore.example/schemas/ergasterion.object-store-binding.v2.schema.json",
+  "title": "Ergasterion governed ObjectStore binding v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "bindingId",
+    "tenantId",
+    "projectId",
+    "objectStoreId",
+    "scope",
+    "issuedAt",
+    "expiresAt",
+    "status",
+    "hostProject",
+    "prosopikonAuthority"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "ergasterion.object-store-binding.v2" },
+    "bindingId": { "$ref": "#/$defs/opaqueId" },
+    "tenantId": { "$ref": "#/$defs/opaqueId" },
+    "projectId": { "$ref": "#/$defs/opaqueId" },
+    "objectStoreId": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefixes", "operations"],
+      "properties": {
+        "prefixes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["list", "read", "verify"] }
+        }
+      }
+    },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "status": { "const": "active" },
+    "hostProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "authorityId", "projectId", "revision"],
+      "properties": {
+        "mode": { "enum": ["monas", "synoptikon"] },
+        "authorityId": { "$ref": "#/$defs/opaqueId" },
+        "projectId": { "$ref": "#/$defs/opaqueId" },
+        "revision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "prosopikonAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorityId", "revision"],
+      "properties": {
+        "authorityId": { "$ref": "#/$defs/opaqueId" },
+        "revision": { "type": "integer", "minimum": 1 }
+      }
+    }
+  },
+  "$defs": {
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[ -~]+$"
+    }
+  }
+}

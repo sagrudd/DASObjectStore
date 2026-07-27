@@ -17,6 +17,7 @@ pub const MAX_UPLOAD_COMPLETION_TTL_SECONDS: u64 = 15 * 60;
 pub const MAX_DEVELOPMENT_ACCESS_TOKEN_TTL_SECONDS: u64 = 24 * 60 * 60;
 pub const APPLICATION_AUTH_CONTRACT_REVISION: &str = "1.2";
 pub const GOVERNED_BINDING_SCHEMA_VERSION: &str = "ergasterion.object-store-binding.v1";
+pub const GOVERNED_BINDING_SCHEMA_VERSION_V2: &str = "ergasterion.object-store-binding.v2";
 pub const GOVERNED_CAPABILITY_RENEWAL_WINDOW_SECONDS: u64 = 5 * 60;
 pub const GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS: u64 = 30;
 pub const GOVERNED_REVOCATION_PROPAGATION_SECONDS: u64 = MAX_ACCESS_TOKEN_TTL_SECONDS;
@@ -26,6 +27,40 @@ pub const GOVERNED_REVOCATION_PROPAGATION_SECONDS: u64 = MAX_ACCESS_TOKEN_TTL_SE
 pub struct GovernedObjectStoreBindingScope {
     pub prefixes: Vec<String>,
     pub operations: Vec<ApplicationOperation>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GovernedHostMode {
+    Monas,
+    Synoptikon,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GovernedHostProjectAuthority {
+    pub mode: GovernedHostMode,
+    pub authority_id: String,
+    pub project_id: String,
+    pub revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GovernedProsopikonAuthority {
+    pub authority_id: String,
+    pub revision: u64,
+}
+
+/// Daemon-trusted current authority state used to reject stale v2 bindings.
+///
+/// This context must come from the authenticated host/provider integration,
+/// never from the capability exchange caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GovernedBindingAuthorityContext {
+    pub tenant_id: String,
+    pub host_project: GovernedHostProjectAuthority,
+    pub prosopikon_authority: GovernedProsopikonAuthority,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -40,6 +75,10 @@ pub struct GovernedObjectStoreBinding {
     pub issued_at: String,
     pub expires_at: String,
     pub status: GovernedBindingStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_project: Option<GovernedHostProjectAuthority>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prosopikon_authority: Option<GovernedProsopikonAuthority>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -50,7 +89,9 @@ pub enum GovernedBindingStatus {
 
 impl GovernedObjectStoreBinding {
     pub fn validate_at(&self, now_unix_seconds: u64) -> Result<(), ApplicationAuthValidationError> {
-        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION {
+        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION
+            && self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION_V2
+        {
             return Err(ApplicationAuthValidationError::UnsupportedBindingSchema);
         }
         for (field, value) in [
@@ -59,6 +100,33 @@ impl GovernedObjectStoreBinding {
             ("project_id", self.project_id.as_str()),
         ] {
             validate_binding_id(field, value)?;
+        }
+        match self.schema_version.as_str() {
+            GOVERNED_BINDING_SCHEMA_VERSION => {
+                if self.host_project.is_some() || self.prosopikon_authority.is_some() {
+                    return Err(ApplicationAuthValidationError::InvalidBinding);
+                }
+            }
+            GOVERNED_BINDING_SCHEMA_VERSION_V2 => {
+                let host = self
+                    .host_project
+                    .as_ref()
+                    .ok_or(ApplicationAuthValidationError::InvalidBinding)?;
+                let prosopikon = self
+                    .prosopikon_authority
+                    .as_ref()
+                    .ok_or(ApplicationAuthValidationError::InvalidBinding)?;
+                validate_authority_id("host authority_id", &host.authority_id)?;
+                validate_authority_id("host project_id", &host.project_id)?;
+                validate_authority_id("prosopikon authority_id", &prosopikon.authority_id)?;
+                if host.project_id != self.project_id
+                    || host.revision == 0
+                    || prosopikon.revision == 0
+                {
+                    return Err(ApplicationAuthValidationError::InvalidBinding);
+                }
+            }
+            _ => unreachable!("schema checked above"),
         }
         if self.scope.prefixes.is_empty() || self.scope.operations.is_empty() {
             return Err(ApplicationAuthValidationError::InvalidBinding);
@@ -86,6 +154,37 @@ impl GovernedObjectStoreBinding {
             || now_unix_seconds >= expires.saturating_add(GOVERNED_CAPABILITY_CLOCK_SKEW_SECONDS)
         {
             return Err(ApplicationAuthValidationError::BindingInactiveOrExpired);
+        }
+        Ok(())
+    }
+
+    pub fn validate_authority_context(
+        &self,
+        context: &GovernedBindingAuthorityContext,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION_V2 {
+            return Err(ApplicationAuthValidationError::BindingAuthorityMismatch);
+        }
+        let host = self
+            .host_project
+            .as_ref()
+            .ok_or(ApplicationAuthValidationError::InvalidBinding)?;
+        let prosopikon = self
+            .prosopikon_authority
+            .as_ref()
+            .ok_or(ApplicationAuthValidationError::InvalidBinding)?;
+        if self.tenant_id != context.tenant_id
+            || host.mode != context.host_project.mode
+            || host.authority_id != context.host_project.authority_id
+            || host.project_id != context.host_project.project_id
+            || prosopikon.authority_id != context.prosopikon_authority.authority_id
+        {
+            return Err(ApplicationAuthValidationError::BindingAuthorityMismatch);
+        }
+        if host.revision != context.host_project.revision
+            || prosopikon.revision != context.prosopikon_authority.revision
+        {
+            return Err(ApplicationAuthValidationError::BindingAuthorityStale);
         }
         Ok(())
     }
@@ -121,6 +220,7 @@ pub struct DynamicBindingPolicy {
 impl DynamicBindingPolicy {
     fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
         if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION
+            && self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION_V2
             || self.audience.trim().is_empty()
             || self.audit_purpose != "ergasterion.governed-data-access"
             || self.max_object_bytes == 0
@@ -600,6 +700,39 @@ impl AccessTokenExchangeRequest {
         token_id: String,
         verifier: &impl ApplicationExchangeProofVerifier,
     ) -> Result<AccessTokenClaims, ApplicationAuthValidationError> {
+        if self
+            .governed_binding
+            .as_ref()
+            .is_some_and(|binding| binding.schema_version == GOVERNED_BINDING_SCHEMA_VERSION_V2)
+        {
+            return Err(ApplicationAuthValidationError::BindingAuthorityMismatch);
+        }
+        self.issue_access_token_after_authority_validation(identity, key, token_id, verifier)
+    }
+
+    pub fn issue_access_token_with_authority_context(
+        &self,
+        identity: &ApplicationIdentity,
+        key: &ApplicationKeyDescriptor,
+        token_id: String,
+        verifier: &impl ApplicationExchangeProofVerifier,
+        context: &GovernedBindingAuthorityContext,
+    ) -> Result<AccessTokenClaims, ApplicationAuthValidationError> {
+        let binding = self
+            .governed_binding
+            .as_ref()
+            .ok_or(ApplicationAuthValidationError::BindingRequired)?;
+        binding.validate_authority_context(context)?;
+        self.issue_access_token_after_authority_validation(identity, key, token_id, verifier)
+    }
+
+    fn issue_access_token_after_authority_validation(
+        &self,
+        identity: &ApplicationIdentity,
+        key: &ApplicationKeyDescriptor,
+        token_id: String,
+        verifier: &impl ApplicationExchangeProofVerifier,
+    ) -> Result<AccessTokenClaims, ApplicationAuthValidationError> {
         self.validate_against(identity, key)?;
         verifier.verify(self, key)?;
         validate_slug("token_id", &token_id)?;
@@ -776,6 +909,8 @@ pub enum ApplicationAuthValidationError {
     UnexpectedBinding,
     BindingInactiveOrExpired,
     BindingScopeNotContained,
+    BindingAuthorityMismatch,
+    BindingAuthorityStale,
     Invalid(String),
 }
 
@@ -816,6 +951,12 @@ impl Display for ApplicationAuthValidationError {
             }
             Self::BindingScopeNotContained => {
                 formatter.write_str("requested scope exceeds governed binding")
+            }
+            Self::BindingAuthorityMismatch => {
+                formatter.write_str("governed binding authority context does not match")
+            }
+            Self::BindingAuthorityStale => {
+                formatter.write_str("governed binding authority revision is stale")
             }
             Self::Invalid(message) => formatter.write_str(message),
         }
@@ -878,6 +1019,21 @@ fn validate_binding_id(
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(ApplicationAuthValidationError::UnsafeField(field));
+    }
+    Ok(())
+}
+
+fn validate_authority_id(
+    field: &'static str,
+    value: &str,
+) -> Result<(), ApplicationAuthValidationError> {
+    if value.is_empty()
+        || value.len() > 256
+        || value
+            .chars()
+            .any(|character| character.is_control() || !character.is_ascii())
     {
         return Err(ApplicationAuthValidationError::UnsafeField(field));
     }
@@ -1410,6 +1566,8 @@ mod tests {
             issued_at: "2026-07-19T00:00:00Z".to_string(),
             expires_at: "2026-07-19T01:00:00Z".to_string(),
             status: GovernedBindingStatus::Active,
+            host_project: None,
+            prosopikon_authority: None,
         };
         let request_scope = ApplicationScope {
             store_ids: vec![binding.object_store_id.clone()],
@@ -1454,5 +1612,114 @@ mod tests {
             missing.validate_against(&identity, &key),
             Err(ApplicationAuthValidationError::BindingRequired)
         );
+    }
+
+    #[test]
+    fn governed_binding_v2_requires_exact_current_authority_context() {
+        let binding = GovernedObjectStoreBinding {
+            schema_version: GOVERNED_BINDING_SCHEMA_VERSION_V2.to_string(),
+            binding_id: "binding-governed-inputs".to_string(),
+            tenant_id: "tenant-laboratory".to_string(),
+            project_id: "project-rna-counts".to_string(),
+            object_store_id: StoreId::new("pinakotheke_media").expect("store"),
+            scope: GovernedObjectStoreBindingScope {
+                prefixes: vec!["project-rna/inputs".to_string()],
+                operations: vec![ApplicationOperation::List, ApplicationOperation::Read],
+            },
+            issued_at: "2026-07-19T00:00:00Z".to_string(),
+            expires_at: "2026-07-19T01:00:00Z".to_string(),
+            status: GovernedBindingStatus::Active,
+            host_project: Some(GovernedHostProjectAuthority {
+                mode: GovernedHostMode::Monas,
+                authority_id: "1fda5cc0-7180-4cef-aef3-4942458f7a9e".to_string(),
+                project_id: "project-rna-counts".to_string(),
+                revision: 7,
+            }),
+            prosopikon_authority: Some(GovernedProsopikonAuthority {
+                authority_id: "8b1aaf69-74b8-48bc-a163-883fd3c693a3".to_string(),
+                revision: 11,
+            }),
+        };
+        binding.validate_at(1_784_419_260).expect("valid v2");
+        let context = GovernedBindingAuthorityContext {
+            tenant_id: binding.tenant_id.clone(),
+            host_project: binding.host_project.clone().expect("host"),
+            prosopikon_authority: binding.prosopikon_authority.clone().expect("prosopikon"),
+        };
+        binding
+            .validate_authority_context(&context)
+            .expect("exact current authority");
+
+        let mut stale_host = context.clone();
+        stale_host.host_project.revision += 1;
+        assert_eq!(
+            binding.validate_authority_context(&stale_host),
+            Err(ApplicationAuthValidationError::BindingAuthorityStale)
+        );
+        let mut stale_prosopikon = context.clone();
+        stale_prosopikon.prosopikon_authority.revision += 1;
+        assert_eq!(
+            binding.validate_authority_context(&stale_prosopikon),
+            Err(ApplicationAuthValidationError::BindingAuthorityStale)
+        );
+        let mut wrong_tenant = context.clone();
+        wrong_tenant.tenant_id = "tenant-other".to_string();
+        assert_eq!(
+            binding.validate_authority_context(&wrong_tenant),
+            Err(ApplicationAuthValidationError::BindingAuthorityMismatch)
+        );
+        let mut wrong_mode = context.clone();
+        wrong_mode.host_project.mode = GovernedHostMode::Synoptikon;
+        assert_eq!(
+            binding.validate_authority_context(&wrong_mode),
+            Err(ApplicationAuthValidationError::BindingAuthorityMismatch)
+        );
+        let mut wrong_project = binding.clone();
+        wrong_project
+            .host_project
+            .as_mut()
+            .expect("host")
+            .project_id = "project-other".to_string();
+        assert_eq!(
+            wrong_project.validate_at(1_784_419_260),
+            Err(ApplicationAuthValidationError::InvalidBinding)
+        );
+
+        let mut missing_host = binding.clone();
+        missing_host.host_project = None;
+        assert_eq!(
+            missing_host.validate_at(1_784_419_260),
+            Err(ApplicationAuthValidationError::InvalidBinding)
+        );
+
+        let fixture: GovernedObjectStoreBinding = serde_json::from_str(include_str!(
+            "../../../docs/user/examples/ergasterion-object-store-binding-v2.json"
+        ))
+        .expect("v2 fixture");
+        let fixture_issued = parse_rfc3339_seconds(&fixture.issued_at).expect("fixture issued");
+        fixture
+            .validate_at(fixture_issued + 1)
+            .expect("v2 provider fixture");
+    }
+
+    #[test]
+    fn governed_binding_v1_json_shape_remains_unchanged() {
+        let value = serde_json::json!({
+            "schemaVersion": GOVERNED_BINDING_SCHEMA_VERSION,
+            "bindingId": "binding-governed-inputs",
+            "tenantId": "tenant-laboratory",
+            "projectId": "project-rna-counts",
+            "objectStoreId": "pinakotheke_media",
+            "scope": {
+                "prefixes": ["project-rna/inputs"],
+                "operations": ["list", "read"]
+            },
+            "issuedAt": "2026-07-19T00:00:00Z",
+            "expiresAt": "2026-07-19T01:00:00Z",
+            "status": "active"
+        });
+        let binding: GovernedObjectStoreBinding =
+            serde_json::from_value(value.clone()).expect("v1 fixture");
+        assert_eq!(serde_json::to_value(binding).expect("encode"), value);
     }
 }
