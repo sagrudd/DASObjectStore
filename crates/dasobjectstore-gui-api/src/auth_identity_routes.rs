@@ -275,7 +275,18 @@ fn application_daemon_error(
             }
         }
     }
-    admin_daemon_bridge_error_with_code(error, "provider_unavailable")
+    let status = match error {
+        crate::daemon_bridge::DaemonBridgeError::Busy => StatusCode::TOO_MANY_REQUESTS,
+        crate::daemon_bridge::DaemonBridgeError::CircuitOpen
+        | crate::daemon_bridge::DaemonBridgeError::Deadline
+        | crate::daemon_bridge::DaemonBridgeError::Join(_)
+        | crate::daemon_bridge::DaemonBridgeError::Client(_) => StatusCode::SERVICE_UNAVAILABLE,
+    };
+    route_error(
+        status,
+        "provider_unavailable",
+        "application capability authority is temporarily unavailable",
+    )
 }
 
 fn application_bearer(
@@ -671,5 +682,26 @@ fn local_password_auth_route_error(
             "local_auth_unavailable",
             err.to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod governed_application_error_tests {
+    use super::application_daemon_error;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn transport_details_are_redacted() {
+        let (status, error) =
+            application_daemon_error(crate::daemon_bridge::DaemonBridgeError::Join(
+                "/run/private/daemon.sock failed".to_string(),
+            ));
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.code, "provider_unavailable");
+        assert_eq!(
+            error.message,
+            "application capability authority is temporarily unavailable"
+        );
     }
 }

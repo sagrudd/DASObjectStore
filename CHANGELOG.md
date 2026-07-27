@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.148.1 - 2026-07-27
+
+- Redact daemon transport and join details from governed application HTTPS
+  failures while preserving the safe typed status and ``no-store`` response
+  policy.
+
 ## 0.148.0 - 2026-07-27
 
 - Promote the strict Ergasterion governed binding-v2 capability exchange with
