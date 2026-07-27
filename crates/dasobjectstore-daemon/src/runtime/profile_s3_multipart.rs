@@ -31,7 +31,10 @@ const MANIFEST_FILE: &str = "manifest.json";
 #[path = "profile_s3_multipart_completion.rs"]
 mod completion;
 use completion::{completion_job_id, completion_status};
-pub use completion::{inspect_multipart_completion_status, multipart_completion_job_id};
+pub use completion::{
+    inspect_multipart_completion_status, list_recoverable_multipart_uploads,
+    multipart_completion_job_id, MultipartUploadStatusRecord,
+};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct JournalManifest {
@@ -1398,6 +1401,51 @@ mod tests {
         assert_eq!(first.state, ProfileS3MultipartCompletionState::InProgress);
 
         drop(journal);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn recoverable_upload_listing_is_store_scoped_and_excludes_committed() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-listing-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        drop(journal);
+        let uploads =
+            list_recoverable_multipart_uploads(&root, request.store_id.as_str()).expect("list");
+        assert_eq!(uploads.len(), 1);
+        assert_eq!(uploads[0].reservation_id, request.reservation_id);
+        assert_eq!(uploads[0].object, request.object);
+        assert!(uploads[0].completion.is_none());
+        assert!(list_recoverable_multipart_uploads(&root, "another-store")
+            .expect("other store")
+            .is_empty());
+        let mut committed = MultipartPartJournal::open(&root, &request).expect("reopen");
+        committed
+            .begin_completion(request.object.clone(), 0, Vec::new())
+            .expect("completion");
+        committed
+            .mark_committed(MultipartCompletionReceipt {
+                object: request.object.clone(),
+                size_bytes: 0,
+                checksum: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .to_string(),
+            })
+            .expect("committed manifest");
+        drop(committed);
+        assert!(
+            list_recoverable_multipart_uploads(&root, request.store_id.as_str())
+                .expect("committed list")
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

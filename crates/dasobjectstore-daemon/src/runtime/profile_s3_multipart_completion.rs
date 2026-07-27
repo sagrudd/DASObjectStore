@@ -8,6 +8,14 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultipartUploadStatusRecord {
+    pub reservation_id: String,
+    pub object: BackendObjectKey,
+    pub initiated_at_unix_seconds: u64,
+    pub completion: Option<ProfileS3MultipartCompletionStatus>,
+}
+
 impl MultipartPartJournal {
     pub fn completion_status(
         &self,
@@ -117,6 +125,52 @@ pub fn inspect_multipart_completion_status(
         return Err(MultipartPartJournalError::IdentityMismatch);
     }
     completion_status_from_manifest(&manifest)
+}
+
+pub fn list_recoverable_multipart_uploads(
+    root: impl AsRef<Path>,
+    store_id: &str,
+) -> Result<Vec<MultipartUploadStatusRecord>, MultipartPartJournalError> {
+    let namespace = root.as_ref().join(NAMESPACE).join(MULTIPART_DIR);
+    let mut uploads = Vec::new();
+    match fs::read_dir(namespace) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry.map_err(io_error)?;
+                if entry.file_type().map_err(io_error)?.is_symlink()
+                    || !entry.file_type().map_err(io_error)?.is_dir()
+                {
+                    continue;
+                }
+                let bytes = fs::read(entry.path().join(MANIFEST_FILE)).map_err(io_error)?;
+                let manifest: JournalManifest = serde_json::from_slice(&bytes)
+                    .map_err(|error| MultipartPartJournalError::Manifest(error.to_string()))?;
+                validate_manifest(&manifest)?;
+                if manifest.store_id != store_id
+                    || matches!(
+                        manifest.lifecycle,
+                        MultipartLifecycle::Committed | MultipartLifecycle::Aborted
+                    )
+                {
+                    continue;
+                }
+                uploads.push(MultipartUploadStatusRecord {
+                    reservation_id: manifest.reservation_id.clone(),
+                    object: manifest.object.clone(),
+                    initiated_at_unix_seconds: manifest.created_at_unix_seconds,
+                    completion: completion_status_from_manifest(&manifest)?,
+                });
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(uploads),
+        Err(error) => return Err(io_error(error)),
+    }
+    uploads.sort_by(|left, right| {
+        left.initiated_at_unix_seconds
+            .cmp(&right.initiated_at_unix_seconds)
+            .then_with(|| left.reservation_id.cmp(&right.reservation_id))
+    });
+    Ok(uploads)
 }
 
 pub(super) fn completion_status_from_manifest(

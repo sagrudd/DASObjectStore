@@ -251,6 +251,36 @@ pub struct ProfileS3MultipartPartRequest {
     pub checksum: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartUploadsRequest {
+    pub store_id: StoreId,
+}
+
+impl ProfileS3MultipartUploadsRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.store_id.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartUploadView {
+    pub reservation_id: String,
+    pub key: BackendObjectKey,
+    pub initiated_at_unix_seconds: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion: Option<ProfileS3MultipartCompletionStatus>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartUploadsResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub uploads: Vec<ProfileS3MultipartUploadView>,
+}
+
 impl ProfileS3MultipartCompletionRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         if self.store_id.as_str().trim().is_empty() {

@@ -285,6 +285,65 @@ where
                 },
             ))
         }
+        DaemonApiRequest::ProfileS3MultipartUploads(request) => {
+            let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        "multipart listing requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            let (backend_root, _) = match crate::runtime::direct_s3_profile_backend(&binding) {
+                Ok(specification) => specification,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            let uploads = match crate::runtime::list_recoverable_multipart_uploads(
+                backend_root,
+                store_id.as_str(),
+            ) {
+                Ok(uploads) => uploads,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileS3MultipartUploads(
+                crate::api::ProfileS3MultipartUploadsResponse {
+                    schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    uploads: uploads
+                        .into_iter()
+                        .map(|upload| crate::api::ProfileS3MultipartUploadView {
+                            reservation_id: upload.reservation_id,
+                            key: upload.object,
+                            initiated_at_unix_seconds: upload.initiated_at_unix_seconds,
+                            completion: upload.completion,
+                        })
+                        .collect(),
+                },
+            ))
+        }
         DaemonApiRequest::ProfileS3MultipartAbort(request) => {
             let authorized = match handler.authorize_endpoint_write_scope(actor, &request.store_id)
             {

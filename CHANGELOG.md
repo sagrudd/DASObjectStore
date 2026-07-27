@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.1 - 2026-07-27
+
+- Expose daemon-authoritative recoverable multipart journals through the
+  standard S3 ``ListMultipartUploads`` operation. Receiving, completing, and
+  retryable work remains visible; committed and aborted journals are omitted.
+
 ## 0.146.0 - 2026-07-27
 
 - Decouple direct-S3 multipart completion from the caller's Unix socket.

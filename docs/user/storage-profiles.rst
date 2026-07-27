@@ -449,6 +449,9 @@ store, key, upload ID, size, and ordered part checksums attaches to the existing
 operation and returns its receipt after commit. A conflicting completion fails
 closed. Staged parts remain protected through retryable failure and are
 reclaimed only after the receipt and catalogue acceptance are durable.
+``ListMultipartUploads`` reads the same daemon journals: receiving,
+in-progress, and retryable operations remain visible, while committed and
+aborted operations are omitted.
 
 DELETE follows the same authority rule. The daemon removes the private
 catalogue record and payload, reconciles logical capacity, then atomically

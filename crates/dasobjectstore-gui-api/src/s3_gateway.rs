@@ -20,7 +20,8 @@ use axum::Router;
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_daemon::api::{
     ProfileS3MultipartAbortRequest, ProfileS3MultipartCompletionRequest,
-    ProfileS3MultipartPartRequest, ProviderStreamMultipartPartUploadOpenRequest,
+    ProfileS3MultipartPartRequest, ProfileS3MultipartUploadsRequest,
+    ProviderStreamMultipartPartUploadOpenRequest,
 };
 use dasobjectstore_daemon::runtime::{
     remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,
@@ -491,6 +492,46 @@ async fn s3_list_objects(
         Err(response) => return response,
     };
     let query = parse_list_query(uri.query().unwrap_or_default());
+    if query.iter().any(|(name, _)| name == "uploads") {
+        let request = ProfileS3MultipartUploadsRequest {
+            store_id: verified.store_id,
+        };
+        let result = crate::daemon_bridge::DaemonBridge::shared_packaged()
+            .call_message(move || {
+                DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                    DaemonRuntimeConfig::default_packaged().socket_path,
+                ))
+                .profile_s3_multipart_uploads(request)
+                .map_err(|error| error.to_string())
+            })
+            .await;
+        return match result {
+            Ok(uploads) => {
+                let mut xml = format!(
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListMultipartUploadsResult><Bucket>{}</Bucket>",
+                    xml_escape(&bucket)
+                );
+                for upload in uploads.uploads {
+                    let initiated = dasobjectstore_core::utc::format_utc_timestamp_seconds(
+                        upload.initiated_at_unix_seconds as i64,
+                    );
+                    xml.push_str(&format!(
+                        "<Upload><Key>{}</Key><UploadId>{}</UploadId><Initiated>{}</Initiated></Upload>",
+                        xml_escape(&upload.key.object_id),
+                        xml_escape(&upload.reservation_id),
+                        initiated
+                    ));
+                }
+                xml.push_str("</ListMultipartUploadsResult>");
+                s3_xml(StatusCode::OK, xml)
+            }
+            Err(_) => s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "daemon could not list recoverable multipart uploads",
+            ),
+        };
+    }
     let limit = query
         .iter()
         .find(|(name, _)| name == "max-keys")

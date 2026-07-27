@@ -2,6 +2,7 @@
 
 mod error;
 mod in_process;
+mod profile_s3;
 mod unix_socket;
 mod workspace;
 
@@ -40,28 +41,23 @@ use crate::api::{
     ProfileCatalogueImportResponse, ProfileDiagnosticsRequest, ProfileDiagnosticsResponse,
     ProfileInspectionRequest, ProfileInspectionResponse, ProfileMigrationRequest,
     ProfileMigrationResponse, ProfileReadinessRequest, ProfileReadinessResponse,
-    ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,
-    ProfileS3HealthRequest, ProfileS3HealthResponse, ProfileS3ListRequest, ProfileS3ListResponse,
-    ProfileS3MultipartAbortRequest, ProfileS3MultipartAbortResponse,
-    ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
-    ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-    RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-    RemoteEasyconnectUploadAdmissionRequest, RemoteObjectGroupStatusRequest,
-    RemoteObjectGroupStatusResponse, RemoteObjectSnapshotRequest, RemoteObjectSnapshotResponse,
-    StoreDeduplicateRequest, StoreDeduplicateResponse, StoreDeleteRequest, StoreDeleteResponse,
-    StoreDrainRequest, StoreDrainResponse, StoreInventoryRequest, StoreInventoryResponse,
-    StoreRepairRequest, StoreRepairResponse, StoreVerifyRequest, StoreVerifyResponse,
-    SubmitIngestFilesRequest, SubmitIngestFilesResponse, TestEndpointConnectionRequest,
-    TestEndpointConnectionResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
-    UpdateObjectStoreAcknowledgementPolicyResponse, UpdateObjectStoreIngestPolicyRequest,
-    UpdateObjectStoreIngestPolicyResponse, UpsertEndpointInventoryRequest,
-    UpsertEndpointInventoryResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+    RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+    RemoteObjectGroupStatusRequest, RemoteObjectGroupStatusResponse, RemoteObjectSnapshotRequest,
+    RemoteObjectSnapshotResponse, StoreDeduplicateRequest, StoreDeduplicateResponse,
+    StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
+    StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
+    StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    TestEndpointConnectionRequest, TestEndpointConnectionResponse,
+    UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
+    UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
+    UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
 };
 
 pub trait DaemonClientTransport {
@@ -226,16 +222,6 @@ where
         }
     }
 
-    pub fn profile_s3_list(
-        &self,
-        request: ProfileS3ListRequest,
-    ) -> Result<ProfileS3ListResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3List(request))? {
-            DaemonApiResponse::ProfileS3List(response) => Ok(response),
-            response => Err(unexpected("profile_s3_list", response)),
-        }
-    }
-
     pub fn profile_catalogue_export(
         &self,
         request: ProfileCatalogueExportRequest,
@@ -253,66 +239,6 @@ where
         match self.send(DaemonApiRequest::ProfileCatalogueImport(request))? {
             DaemonApiResponse::ProfileCatalogueImport(response) => Ok(response),
             response => Err(unexpected("profile_catalogue_import", response)),
-        }
-    }
-
-    pub fn profile_s3_head(
-        &self,
-        request: ProfileS3VerifyRequest,
-    ) -> Result<ProfileS3HeadResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3Head(request))? {
-            DaemonApiResponse::ProfileS3Head(response) => Ok(response),
-            response => Err(unexpected("profile_s3_head", response)),
-        }
-    }
-
-    pub fn profile_s3_delete(
-        &self,
-        request: ProfileS3DeleteRequest,
-    ) -> Result<ProfileS3DeleteResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3Delete(request))? {
-            DaemonApiResponse::ProfileS3Delete(response) => Ok(response),
-            response => Err(unexpected("profile_s3_delete", response)),
-        }
-    }
-
-    pub fn profile_s3_verify(
-        &self,
-        request: ProfileS3HeadRequest,
-    ) -> Result<ProfileS3VerifyResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3Verify(request))? {
-            DaemonApiResponse::ProfileS3Verify(response) => Ok(response),
-            response => Err(unexpected("profile_s3_verify", response)),
-        }
-    }
-
-    pub fn profile_s3_health(
-        &self,
-        request: ProfileS3HealthRequest,
-    ) -> Result<ProfileS3HealthResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3Health(request))? {
-            DaemonApiResponse::ProfileS3Health(response) => Ok(response),
-            response => Err(unexpected("profile_s3_health", response)),
-        }
-    }
-
-    pub fn profile_s3_multipart_complete(
-        &self,
-        request: ProfileS3MultipartCompletionRequest,
-    ) -> Result<ProfileS3MultipartCompletionResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3MultipartComplete(request))? {
-            DaemonApiResponse::ProfileS3MultipartComplete(response) => Ok(response),
-            response => Err(unexpected("profile_s3_multipart_complete", response)),
-        }
-    }
-
-    pub fn profile_s3_multipart_abort(
-        &self,
-        request: ProfileS3MultipartAbortRequest,
-    ) -> Result<ProfileS3MultipartAbortResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::ProfileS3MultipartAbort(request))? {
-            DaemonApiResponse::ProfileS3MultipartAbort(response) => Ok(response),
-            response => Err(unexpected("profile_s3_multipart_abort", response)),
         }
     }
 
@@ -939,6 +865,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileS3Delete(_) => "profile_s3_delete",
         DaemonApiResponse::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
+        DaemonApiResponse::ProfileS3MultipartUploads(_) => "profile_s3_multipart_uploads",
         DaemonApiResponse::ProfileS3MultipartAbort(_) => "profile_s3_multipart_abort",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",
         DaemonApiResponse::ProfileS3Verify(_) => "profile_s3_verify",
