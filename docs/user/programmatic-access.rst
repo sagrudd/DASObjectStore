@@ -146,6 +146,19 @@ the resulting short-lived capability in process memory only.
 
 The reviewed non-secret registration request is shipped as
 ``docs/user/examples/ergasterion-application-identity-registration.json``.
+
+The greenfield authority-revision profile is
+``ergasterion.object-store-binding.v2``. It retains every v1 top-level field
+and adds required ``hostProject`` and ``prosopikonAuthority`` objects. The
+daemon compares tenant, host mode, authority identities, project identity, and
+both revisions against trusted current host-dispatch state before issuing a
+token. Missing, stale, or mismatched context is denied before backend access;
+caller-provided comparison state is never authoritative. See
+``docs/user/examples/ergasterion-object-store-binding-v2.json`` and
+``docs/user/examples/ergasterion-application-identity-registration-v2.json``.
+Version 1 remains unchanged and readable; no migration or inferred authority
+revision is provided.
+
 Run it first with ``"dry_run": true`` and inspect the returned registration
 record; only a local DASObjectStore administrator may apply it. The example
 contains no credential material.

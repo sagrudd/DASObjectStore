@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.0 - 2026-07-27
+
+- Admit the greenfield `ergasterion.object-store-binding.v2` capability while
+  preserving the v1 wire contract unchanged. Version 2 binds storage scope to
+  explicit Monas/Synoptikon project and Prosopikon authority identities and
+  monotonic revisions.
+- Fail closed unless provider-side token issuance receives an exact,
+  authenticated current authority context. Missing, stale, cross-tenant,
+  cross-host, cross-project, or cross-authority context is denied before any
+  storage backend access.
+- Publish the strict v2 JSON Schema, synthetic capability fixture, compatible
+  application-registration fixture, and provider conformance regressions.
+
 ## 0.145.3 - 2026-07-27
 
 - Reconcile store-global logical used bytes after every terminal

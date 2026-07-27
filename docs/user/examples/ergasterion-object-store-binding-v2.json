@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "ergasterion.object-store-binding.v2",
+  "bindingId": "binding-governed-inputs",
+  "tenantId": "tenant-laboratory",
+  "projectId": "project-rna-counts",
+  "objectStoreId": "pinakotheke_media",
+  "scope": {
+    "prefixes": ["project-rna/inputs"],
+    "operations": ["list", "read", "verify"]
+  },
+  "issuedAt": "2026-07-27T10:00:00Z",
+  "expiresAt": "2026-07-27T10:10:00Z",
+  "status": "active",
+  "hostProject": {
+    "mode": "monas",
+    "authorityId": "1fda5cc0-7180-4cef-aef3-4942458f7a9e",
+    "projectId": "project-rna-counts",
+    "revision": 7
+  },
+  "prosopikonAuthority": {
+    "authorityId": "8b1aaf69-74b8-48bc-a163-883fd3c693a3",
+    "revision": 11
+  }
+}
