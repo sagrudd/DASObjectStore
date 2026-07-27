@@ -2596,6 +2596,70 @@ mod tests {
     }
 
     #[test]
+    fn non_dry_run_object_store_create_publishes_live_catalogue_store() {
+        let root = temp_root("create-objectstore-catalogue");
+        let live_sqlite = root.join("metadata/live.sqlite");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-27T12:00:00Z"),
+        )
+        .with_live_sqlite_path(&live_sqlite);
+        let mut request = create_object_store_request();
+        request.store_id = "pinakotheke-rcb-proof".to_string();
+        request.dry_run = false;
+
+        let response = handler
+            .handle(DaemonApiRequest::CreateObjectStore(request))
+            .expect("store create publishes catalogue");
+        assert!(matches!(response, DaemonApiResponse::CreateObjectStore(_)));
+
+        let connection = Connection::open(&live_sqlite).expect("open catalogue");
+        let row = connection
+            .query_row(
+                "SELECT pool_id, class, policy_json FROM stores WHERE store_id = ?1",
+                ["pinakotheke-rcb-proof"],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .expect("created store is visible to metadata consumers");
+        assert_eq!(row.0, "profile-pool");
+        assert_eq!(row.1, "generated_data");
+        assert!(row.2.contains("copies"));
+
+        let store_id = StoreId::new("pinakotheke-rcb-proof").expect("store id");
+        let contents = dasobjectstore_metadata::read_store_contents(
+            &dasobjectstore_metadata::StoreContentsRequest::new(&live_sqlite, store_id.clone()),
+        )
+        .expect("new store has a readable contents projection");
+        assert!(contents.objects.is_empty());
+        let drain =
+            dasobjectstore_metadata::drain_store(&dasobjectstore_metadata::StoreDrainRequest {
+                live_sqlite_path: live_sqlite.clone(),
+                store_id: store_id.clone(),
+                disk_roots: Vec::new(),
+                dry_run: true,
+            })
+            .expect("new store is drainable");
+        assert_eq!(drain.objects_removed, 0);
+        let deletion =
+            dasobjectstore_metadata::delete_store(&dasobjectstore_metadata::StoreDeleteRequest {
+                live_sqlite_path: live_sqlite.clone(),
+                store_id,
+                disk_roots: Vec::new(),
+                dry_run: false,
+            })
+            .expect("new store is deletable");
+        assert!(deletion.store_metadata_removed);
+
+        cleanup(&root);
+    }
+
+    #[test]
     fn persists_non_dry_run_object_store_definition_before_accepting_job() {
         let root = temp_root("persist-create-objectstore");
         let registry_path = root.join("stores.json");

@@ -471,11 +471,45 @@ where
             Ok(DaemonApiResponse::DiskLockdown(response))
         }
         DaemonApiRequest::CreateObjectStore(request) => {
+            // A registry definition alone is not a usable ObjectStore.  All
+            // catalogue-backed operations (contents, admission, drain, and
+            // deletion) resolve the store from live metadata, so publish the
+            // matching live record before reporting the create job accepted.
+            // Keep the original request here because the service response is
+            // intentionally a projection and must not be trusted to recreate
+            // authority fields.
+            let definition = if request.dry_run {
+                None
+            } else {
+                Some(request.registry_definition().map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: format!(
+                                "create ObjectStore definition became invalid before catalogue publication: {error}"
+                            ),
+                        },
+                    )
+                })?)
+            };
             let now = handler.clock.now_utc();
             let response = handler
                 .service_orchestrator
                 .create_object_store(request, &now)
                 .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            if let Some(definition) = definition.as_ref() {
+                ensure_catalogue_store(&handler.live_sqlite_path, definition, &now).map_err(
+                    |error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::UnsupportedOperation {
+                                operation: format!(
+                                    "ObjectStore {} was not published to the live catalogue: {error}",
+                                    definition.store_id
+                                ),
+                            },
+                        )
+                    },
+                )?;
+            }
             handler.record_admin_job(daemon_job_summary_from_create_object_store(&response))?;
             Ok(DaemonApiResponse::CreateObjectStore(response))
         }
@@ -620,14 +654,15 @@ where
                             },
                         )
                     })?;
-                ensure_profile_catalogue_store(&handler.live_sqlite_path, definition, &now)
-                    .map_err(|error| {
+                ensure_catalogue_store(&handler.live_sqlite_path, definition, &now).map_err(
+                    |error| {
                         DaemonRequestHandlerError::ServiceRuntime(
                             DaemonServiceRuntimeError::UnsupportedOperation {
                                 operation: error.to_string(),
                             },
                         )
-                    })?;
+                    },
+                )?;
             }
             handler.record_admin_job(daemon_job_summary_from_profile_binding(&response))?;
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
@@ -1026,7 +1061,10 @@ where
     }
 }
 
-fn ensure_profile_catalogue_store(
+/// Publish a registry-defined store into the daemon's authoritative live
+/// catalogue.  The operation is idempotent for an identical store id and
+/// updates its policy projection during an explicit configuration update.
+fn ensure_catalogue_store(
     live_sqlite_path: &std::path::Path,
     definition: &dasobjectstore_object_service::StoreServiceDefinition,
     recorded_at_utc: &str,

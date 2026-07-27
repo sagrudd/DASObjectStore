@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.4 - 2026-07-27
+
+- Publish every non-dry-run generic ObjectStore creation to the daemon's live
+  catalogue before accepting it. Fresh managed stores can therefore be safely
+  inspected, drained, and deleted without leaving a registry-only record.
+
 ## 0.146.3 - 2026-07-27
 
 - Route ``ProfileS3MultipartUploads`` through the production daemon storage
