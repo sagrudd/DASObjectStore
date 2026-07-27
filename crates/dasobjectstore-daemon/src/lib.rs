@@ -6,6 +6,7 @@ pub mod auth;
 pub mod client;
 #[cfg(feature = "development-self-signing")]
 pub mod development_self_signing;
+pub(crate) mod ergasterion_proof_verifier;
 pub mod runtime;
 pub mod server;
 

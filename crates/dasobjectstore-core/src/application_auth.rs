@@ -4,6 +4,7 @@
 //! material. Cryptographic signing, key custody, token exchange, and daemon
 //! authorization are layered above this path-free core contract.
 
+use crate::application_auth_v2::GOVERNED_BINDING_SCHEMA_VERSION_V2;
 use crate::ids::StoreId;
 use crate::ingress::IngressOrigin;
 use crate::object_type::ObjectType;
@@ -121,6 +122,7 @@ pub struct DynamicBindingPolicy {
 impl DynamicBindingPolicy {
     fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
         if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION
+            && self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION_V2
             || self.audience.trim().is_empty()
             || self.audit_purpose != "ergasterion.governed-data-access"
             || self.max_object_bytes == 0
@@ -776,6 +778,8 @@ pub enum ApplicationAuthValidationError {
     UnexpectedBinding,
     BindingInactiveOrExpired,
     BindingScopeNotContained,
+    BindingAuthorityMismatch,
+    BindingAuthorityStale,
     Invalid(String),
 }
 
@@ -816,6 +820,12 @@ impl Display for ApplicationAuthValidationError {
             }
             Self::BindingScopeNotContained => {
                 formatter.write_str("requested scope exceeds governed binding")
+            }
+            Self::BindingAuthorityMismatch => {
+                formatter.write_str("governed binding authority context does not match")
+            }
+            Self::BindingAuthorityStale => {
+                formatter.write_str("governed binding authority revision is stale")
             }
             Self::Invalid(message) => formatter.write_str(message),
         }
@@ -1454,5 +1464,26 @@ mod tests {
             missing.validate_against(&identity, &key),
             Err(ApplicationAuthValidationError::BindingRequired)
         );
+    }
+
+    #[test]
+    fn governed_binding_v1_json_shape_remains_unchanged() {
+        let value = serde_json::json!({
+            "schemaVersion": GOVERNED_BINDING_SCHEMA_VERSION,
+            "bindingId": "binding-governed-inputs",
+            "tenantId": "tenant-laboratory",
+            "projectId": "project-rna-counts",
+            "objectStoreId": "pinakotheke_media",
+            "scope": {
+                "prefixes": ["project-rna/inputs"],
+                "operations": ["list", "read"]
+            },
+            "issuedAt": "2026-07-19T00:00:00Z",
+            "expiresAt": "2026-07-19T01:00:00Z",
+            "status": "active"
+        });
+        let binding: GovernedObjectStoreBinding =
+            serde_json::from_value(value.clone()).expect("v1 fixture");
+        assert_eq!(serde_json::to_value(binding).expect("encode"), value);
     }
 }

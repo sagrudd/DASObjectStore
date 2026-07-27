@@ -146,9 +146,90 @@ the resulting short-lived capability in process memory only.
 
 The reviewed non-secret registration request is shipped as
 ``docs/user/examples/ergasterion-application-identity-registration.json``.
-Run it first with ``"dry_run": true`` and inspect the returned registration
-record; only a local DASObjectStore administrator may apply it. The example
-contains no credential material.
+
+The greenfield authority-revision profile is
+``ergasterion.object-store-binding.v2``. It is an additive contract with
+required nested ``hostAuthority`` and ``prosopikonAuthority`` objects, UUID
+tenant and authority identities, and positive ``projectRevision`` and
+``authorityRevision`` values. The daemon compares these fields against trusted
+current host-dispatch state before issuing a capability. Missing, stale, or
+mismatched context is denied before backend access; caller-provided comparison
+state is never authoritative. See
+``docs/user/examples/ergasterion-object-store-binding-v2.json`` and
+``docs/user/examples/ergasterion-capability-exchange-request-v1.json``.
+Version 1 remains unchanged and readable; no migration or inferred authority
+revision is provided.
+
+Live v2 authority admission and exchange
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The v2 binding authority must be admitted separately from the application
+identity and public credential. Prepare a reviewed request containing the exact
+``binding`` and run it first with ``"dry_run": true``. Only a root
+DASObjectStore administrator may apply it:
+
+.. code-block:: console
+
+   sudo dasobjectstore application-auth trust-binding \
+     --request ./trusted-binding-authority.json --json
+
+The apply request uses ``"dry_run": false`` and the exact confirmation
+``ADMIT TRUSTED GOVERNED BINDING AUTHORITY``. This operation records the
+trusted authority context; it does not grant object access and must contain no
+private key, bearer capability, provider credential, or managed path.
+
+The live HTTPS routes are:
+
+* ``GET /api/v1/application-auth/ergasterion/capability-discovery``;
+* ``POST /api/v1/application-auth/ergasterion/capability-exchanges``;
+* ``POST /api/v1/application-auth/ergasterion/capability-exchanges/renewals``;
+* ``POST /api/v1/application-auth/ergasterion/objects/snapshot``;
+* ``POST /api/v1/application-auth/ergasterion/objects/group-status``;
+* ``GET /api/v1/application-auth/ergasterion/objects/{store_id}/{version}/{object_key}``.
+
+Application-auth request bodies are limited to 64 KiB. Discovery, exchange,
+renewal, and JSON object responses are marked ``Cache-Control: no-store``.
+Treat streamed responses the same way. Snapshot and group-status requests and
+object reads require ``Authorization: Bearer <opaque-capability>``. The
+capability is deliberately opaque: do not parse it for claims or place it in a
+configuration file, shell history, log, or environment inherited by other
+processes. Keep it in the authorised service's process memory.
+
+A snapshot body identifies ``store_id``, optional ``prefix`` and ``cursor``,
+and a bounded ``limit``. Follow ``next_cursor`` until ``complete`` is true;
+the daemon preserves the snapshot high-water mark across those pages.
+Group-status accepts the authorised ``store_id`` and ``key``. Object content
+is read from the final route using the version returned by the catalogue API.
+These routes expose logical object identity and verified state, never a Garage
+credential or server filesystem location.
+
+Each exchange or renewal needs a fresh request ID, nonce, and proof in the
+correct signing domain. The durable replay ledger makes an identical retry
+idempotent while rejecting changed request payloads or nonce reuse as
+``replay_detected``. Renewal is available only in the final five minutes,
+rechecks the registered identity/key, current binding authority and scope, and
+atomically replaces the old capability. There is no reusable bearer renewal
+secret.
+
+Application, key, and binding revocation are checked again on every authorised
+snapshot, group-status, and read request, so revocation also stops an issued
+capability. Capabilities expire within 15 minutes. Contract, configuration,
+authority, scope, and permission failures are permanent; retry only typed
+transient authority/provider availability or admission-pressure responses.
+
+Use this deployment order:
+
+#. Install and restart the HTTPS/API service and daemon from one build and
+   compare their build identities.
+#. Register the identity, then its public key or mTLS fingerprint.
+#. Dry-run and apply the trusted binding authority admission as root.
+#. Confirm discovery reports the expected contracts, timing, algorithms, and a
+   ready authority.
+#. Exchange a signed request and retain the opaque capability in memory.
+#. Verify snapshot pagination, group status, and a bounded object read through
+   HTTPS.
+#. Exercise key, binding, and application revocation before enabling the
+   consumer.
 
 Profile readiness
 -----------------

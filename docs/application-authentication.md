@@ -67,6 +67,30 @@ shape, exact ObjectStore, logical prefixes, and the read-only operation set
 before issuing resolved claims. A missing, expired, cross-store, cross-prefix,
 or excessive binding fails closed before any provider request.
 
+`ergasterion.object-store-binding.v2` is the additive task-036 projection. It
+uses a nested `hostAuthority` (`mode`, UUID `authorityId`, opaque `projectId`,
+positive `projectRevision`) and a nested `prosopikonAuthority` (UUID
+`authorityId`, positive `authorityRevision`), plus a UUID `tenantId`. Before
+capability issuance, the daemon integration must independently obtain the
+trusted current tenant, host mode, authority identities, project identity, and
+both revisions from authenticated host dispatch. Missing or mismatched
+authority context, or a revision other than the exact current revision, fails
+closed before capability issuance and therefore before storage-provider access.
+Exchange callers cannot supply that trusted comparison context. This is a
+greenfield v2 contract: v1 remains readable and unchanged, but there is no
+automatic migration or revision inference.
+
+The normative provider schema is
+`docs/schemas/ergasterion.object-store-binding.v2.schema.json`; the exact
+exchange schema is
+`docs/schemas/dasobjectstore.ergasterion-capability-exchange.v1.schema.json`.
+The synthetic binding, exchange, discovery, and compatible application
+registration fixtures are under `docs/user/examples/`, including
+`ergasterion-object-store-binding-v2.json`,
+`ergasterion-capability-exchange-request-v1.json`, and
+`ergasterion-capability-discovery-v1.json`, plus
+`docs/user/examples/ergasterion-application-identity-registration-v2.json`.
+
 The assigned opaque service principal is `app-7e4a31c9b260`, with audience
 `ergasterion-governed-data-service` and audit purpose
 `ergasterion.governed-data-access`. Its v1 operation vocabulary is `list`,
@@ -86,6 +110,73 @@ incident revocation, compatibility, and deprovisioning procedures. It contains
 no token, secret, private key, endpoint, bucket, or managed path. An
 Ergasterion deployment still requires a separately registered public key or
 mTLS mapping before it can exchange a signed request.
+
+#### Live v2 exchange and object API
+
+The live task-036 HTTPS surface is:
+
+| Method and route | Purpose |
+| --- | --- |
+| `GET /api/v1/application-auth/ergasterion/capability-discovery` | Publish supported contracts, algorithms, timing policy, and readiness without issuing authority |
+| `POST /api/v1/application-auth/ergasterion/capability-exchanges` | Verify a signed v2 binding request and issue an opaque, scoped capability |
+| `POST /api/v1/application-auth/ergasterion/capability-exchanges/renewals` | Replace an eligible capability using a fresh signed request |
+| `POST /api/v1/application-auth/ergasterion/objects/snapshot` | Return a stable, cursor-paginated catalogue snapshot within the authorised scope |
+| `POST /api/v1/application-auth/ergasterion/objects/group-status` | Return authoritative catalogue/durability status for one authorised key |
+| `GET /api/v1/application-auth/ergasterion/objects/{store_id}/{version}/{object_key}` | Stream an authorised object without exposing provider credentials or managed paths |
+
+Application-auth request bodies are limited to 64 KiB. Discovery, exchange,
+renewal, and JSON object responses use `Cache-Control: no-store`; clients must
+also treat streamed object responses and opaque capabilities as sensitive.
+Snapshot and group-status requests, and object reads, carry
+`Authorization: Bearer <opaque-capability>`. The capability contains no
+client-readable claims and must remain in process memory rather than a config
+file, command history, log, or environment exported to child processes.
+
+Before exchange can become ready, a root administrator admits the reviewed
+binding authority through the daemon:
+
+```console
+sudo dasobjectstore application-auth trust-binding \
+  --request ./trusted-binding-authority.json --json
+```
+
+The request wraps the exact v2 `binding`, first with `"dry_run": true`. Applying
+it requires `"dry_run": false` and the confirmation
+`ADMIT TRUSTED GOVERNED BINDING AUTHORITY`. Admission records trusted authority
+identity and revision context; it does not grant access, import a private key,
+or make caller-supplied authority state trustworthy.
+
+Exchange and renewal proofs use their distinct signing domains and a fresh
+request ID and nonce. The replay ledger retains `(applicationId, requestId)`
+and `(applicationId, nonce)` through expiry plus skew. An exact retry may
+recover the original still-valid result; a changed payload with the same
+request ID or any conflicting nonce reuse returns `replay_detected`.
+Concurrent retries can issue at most one capability. Renewal is allowed only
+in the final five minutes, revalidates the identity, public key, binding
+authority, and requested scope, and atomically replaces the old capability.
+It is not authorised by a reusable bearer renewal secret.
+
+Every snapshot, group-status, and read request rechecks application, key, and
+binding revocation. Revocation therefore blocks both new exchanges and use of
+an already issued capability; expiry remains bounded to 15 minutes. Permanent
+contract, deployment, authority, scope, and permission failures are
+non-retryable. Only genuine transient authority/provider availability or
+admission pressure should invite a bounded retry.
+
+Deploy this surface in the following order:
+
+1. Install and restart the API service and daemon from the same build, then
+   verify both build identities.
+2. Register the application identity and its public key or mTLS fingerprint.
+3. Dry-run and then admit the reviewed binding authority as root.
+4. Require discovery to report the expected schemas, algorithms, timing
+   policy, and ready authority state.
+5. Perform one signed exchange and retain the returned capability only in the
+   consumer process.
+6. Exercise snapshot pagination, group status, and a bounded read through the
+   HTTPS API; do not validate by exporting Garage credentials or reading a
+   managed filesystem path.
+7. Prove key, binding, and application revocation before enabling consumers.
 
 An upload initiation response may include a short-lived, single-use completion
 capability bound to the paired session, ObjectStore, upload ID, object key,

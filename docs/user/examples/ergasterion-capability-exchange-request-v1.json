@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "dasobjectstore.ergasterion-capability-exchange.v1",
+  "requestId": "00000000-0000-0000-0000-000000000036",
+  "applicationId": "app-7e4a31c9b260",
+  "keyId": "ergasterion-ed25519-2026-07-19",
+  "audience": "ergasterion-governed-data-service",
+  "issuedAt": "2026-07-27T12:00:00Z",
+  "expiresAt": "2026-07-27T12:15:00Z",
+  "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "binding": {
+    "schemaVersion": "ergasterion.object-store-binding.v2",
+    "bindingId": "binding-synthetic-001",
+    "hostAuthority": { "mode": "monas", "authorityId": "00000000-0000-0000-0000-00000000000a", "projectId": "project-opaque-001", "projectRevision": 17 },
+    "prosopikonAuthority": { "authorityId": "00000000-0000-0000-0000-000000000028", "authorityRevision": 41 },
+    "tenantId": "00000000-0000-0000-0000-000000000014",
+    "objectStoreId": "store-synthetic-001",
+    "scope": { "prefixes": ["projects/project-opaque-001/"], "operations": ["list", "read", "verify"] },
+    "issuedAt": "2026-07-27T12:00:00Z",
+    "expiresAt": "2026-07-27T12:05:00Z",
+    "status": "active"
+  },
+  "requestedScope": { "objectStoreId": "store-synthetic-001", "prefixes": ["projects/project-opaque-001/"], "operations": ["list", "read", "verify"], "maxObjectBytes": 1048576, "maxTotalBytes": 4194304 },
+  "correlationId": "synthetic-capability-exchange-036",
+  "proof": { "algorithm": "ed25519", "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }
+}

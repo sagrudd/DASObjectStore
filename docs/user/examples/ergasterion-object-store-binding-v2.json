@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "ergasterion.object-store-binding.v2",
+  "bindingId": "binding-synthetic-001",
+  "hostAuthority": {
+    "mode": "monas",
+    "authorityId": "00000000-0000-0000-0000-00000000000a",
+    "projectId": "project-opaque-001",
+    "projectRevision": 17
+  },
+  "prosopikonAuthority": {
+    "authorityId": "00000000-0000-0000-0000-000000000028",
+    "authorityRevision": 41
+  },
+  "tenantId": "00000000-0000-0000-0000-000000000014",
+  "objectStoreId": "store-synthetic-001",
+  "scope": {
+    "prefixes": ["projects/project-opaque-001/"],
+    "operations": ["list", "read", "verify"]
+  },
+  "issuedAt": "2026-07-27T12:00:00Z",
+  "expiresAt": "2026-07-27T12:05:00Z",
+  "status": "active"
+}

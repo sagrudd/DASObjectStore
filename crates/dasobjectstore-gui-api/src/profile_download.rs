@@ -75,6 +75,47 @@ pub(crate) async fn provider_stream_download(
     headers: HeaderMap,
     socket_path: PathBuf,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    provider_stream_download_authorized(
+        store_id,
+        object_id,
+        version,
+        delegated_actor,
+        None,
+        headers,
+        socket_path,
+    )
+    .await
+}
+
+pub(crate) async fn application_provider_stream_download(
+    store_id: dasobjectstore_core::ids::StoreId,
+    object_id: String,
+    version: u64,
+    application_capability: dasobjectstore_daemon::api::OpaqueApplicationCapability,
+    headers: HeaderMap,
+    socket_path: PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    provider_stream_download_authorized(
+        store_id,
+        object_id,
+        version,
+        None,
+        Some(application_capability),
+        headers,
+        socket_path,
+    )
+    .await
+}
+
+async fn provider_stream_download_authorized(
+    store_id: dasobjectstore_core::ids::StoreId,
+    object_id: String,
+    version: u64,
+    delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    application_capability: Option<dasobjectstore_daemon::api::OpaqueApplicationCapability>,
+    headers: HeaderMap,
+    socket_path: PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let range = parse_range(&headers)?;
     let condition = parse_condition(&headers)?;
     let request = ProviderStreamOpenRequest {
@@ -83,6 +124,7 @@ pub(crate) async fn provider_stream_download(
         store_id,
         object: dasobjectstore_core::backend::BackendObjectKey { object_id, version },
         delegated_actor,
+        application_capability,
         range,
         condition,
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,

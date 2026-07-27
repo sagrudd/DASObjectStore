@@ -59,6 +59,8 @@ pub struct ProviderStreamOpenRequest {
     pub object: BackendObjectKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_capability: Option<super::OpaqueApplicationCapability>,
     #[serde(default)]
     pub range: Option<ProviderStreamRange>,
     #[serde(default)]
@@ -232,6 +234,12 @@ impl ProviderStreamOpenRequest {
             actor.validate().map_err(|error| {
                 ProviderStreamValidationError::InvalidDelegatedActor(error.to_string())
             })?;
+        }
+        if self.delegated_actor.is_some() && self.application_capability.is_some() {
+            return Err(ProviderStreamValidationError::InvalidDelegatedActor(
+                "application capability and delegated user authority are mutually exclusive"
+                    .to_string(),
+            ));
         }
         if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
             return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
@@ -764,6 +772,7 @@ mod tests {
                 version: 1,
             },
             delegated_actor: None,
+            application_capability: None,
             range: Some(ProviderStreamRange {
                 start: 0,
                 end_exclusive: Some(4096),

@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.148.0 - 2026-07-27
+
+- Promote the strict Ergasterion governed binding-v2 capability exchange with
+  RFC 8785-compatible Ed25519 proof verification, an independently admitted
+  current host/Prosopikon authority, durable request/nonce replay protection,
+  digest-only opaque capability custody, and atomic final-window renewal.
+- Revalidate application, key, binding digest, tenant, host project revision,
+  Prosopikon revision, revocation, scope, and byte budgets before every
+  application-authorised catalogue, verification-status, or verified byte
+  stream operation.
+- Add non-secret readiness discovery, bounded no-store HTTPS routes, a
+  root-admin trusted-binding admission command, and path-free application
+  object snapshot, group-status, and read APIs.
+
 ## 0.147.0 - 2026-07-27
 
 - Persist strict ObjectStore-creation intents before mutation, derive

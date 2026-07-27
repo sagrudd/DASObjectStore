@@ -582,4 +582,24 @@ mod tests {
             assert!(!encoded.contains(forbidden), "must omit {forbidden}");
         }
     }
+
+    #[test]
+    fn governed_v2_registration_fixture_is_provider_compatible() {
+        let request: ApplicationIdentityRegistrationRequest = serde_json::from_str(include_str!(
+            "../../../../docs/user/examples/ergasterion-application-identity-registration-v2.json"
+        ))
+        .expect("governed v2 registration fixture");
+        request
+            .validate()
+            .expect("governed v2 registration validates");
+        assert_eq!(
+            request
+                .identity
+                .dynamic_binding
+                .as_ref()
+                .expect("dynamic binding")
+                .schema_version,
+            dasobjectstore_core::application_auth_v2::GOVERNED_BINDING_SCHEMA_VERSION_V2
+        );
+    }
 }

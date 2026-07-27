@@ -24,6 +24,14 @@ where
 {
     match request {
         DaemonApiRequest::LiveStatus(_) => Ok(DaemonApiResponse::LiveStatus(handler.live_status())),
+        governed_request @ (DaemonApiRequest::ExchangeErgasterionCapability(_)
+        | DaemonApiRequest::RenewErgasterionCapability(_)
+        | DaemonApiRequest::DiscoverErgasterionCapability
+        | DaemonApiRequest::AdmitGovernedBindingAuthority(_)
+        | DaemonApiRequest::ErgasterionObjectSnapshot(_)
+        | DaemonApiRequest::ErgasterionObjectGroupStatus(_)) => {
+            ergasterion::request(handler, governed_request, actor)
+        }
         service_request @ (DaemonApiRequest::ServiceStatus(_)
         | DaemonApiRequest::ServiceLifecycle(_)
         | DaemonApiRequest::ServiceProvision(_)

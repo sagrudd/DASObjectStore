@@ -32,7 +32,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.147.0``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.148.0``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -69,7 +69,13 @@ Work is dependency ordered. Only these entries define open release work:
   bounded control capacity and cancellation under ingest, prove telemetry
   device mapping, and expose every retained or blocked staging byte with a
   typed reason.
-- [ ] **EPIC D — security and package authority.** Make Monas/Prosopikon the
+- [~] **EPIC D — security and package authority.** The strict Ergasterion
+  binding-v2 exchange is live behind dedicated HTTPS routes: Ed25519/JCS
+  proof verification, independently admitted current host/Prosopikon
+  authority, durable request/nonce replay protection, daemon-custodied opaque
+  capabilities, atomic final-window renewal, per-request revocation and
+  authority revalidation, and application-authorised catalogue/status/read
+  operations are delivered in ``0.148.0``. Make Monas/Prosopikon the
   sole human identity/session authority, keep product roles audience-bound,
   prove application registration/rotation/revocation, enforce APT-owned
   install/upgrade/restart, and verify that production packages contain no

@@ -112,6 +112,201 @@ pub(super) async fn exchange_application_access_token(
         })
 }
 
+pub(super) async fn discover_ergasterion_capability() -> Result<
+    (
+        HeaderMap,
+        Json<DaemonErgasterionCapabilityDiscoveryResponse>,
+    ),
+    (StatusCode, Json<AuthRouteError>),
+> {
+    let response =
+        application_daemon_call(|client| client.discover_ergasterion_capability()).await?;
+    Ok((no_store_headers(), Json(response)))
+}
+
+pub(super) async fn exchange_ergasterion_capability(
+    Json(request): Json<DaemonErgasterionCapabilityExchangeRequest>,
+) -> Result<
+    (HeaderMap, Json<DaemonErgasterionCapabilityExchangeResponse>),
+    (StatusCode, Json<AuthRouteError>),
+> {
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            error.to_string(),
+        )
+    })?;
+    let response =
+        application_daemon_call(move |client| client.exchange_ergasterion_capability(request))
+            .await?;
+    Ok((no_store_headers(), Json(response)))
+}
+
+pub(super) async fn renew_ergasterion_capability(
+    Json(request): Json<DaemonErgasterionCapabilityRenewalRequest>,
+) -> Result<
+    (HeaderMap, Json<DaemonErgasterionCapabilityExchangeResponse>),
+    (StatusCode, Json<AuthRouteError>),
+> {
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            error.to_string(),
+        )
+    })?;
+    let response =
+        application_daemon_call(move |client| client.renew_ergasterion_capability(request)).await?;
+    Ok((no_store_headers(), Json(response)))
+}
+
+pub(super) async fn ergasterion_object_snapshot(
+    headers: HeaderMap,
+    Json(snapshot): Json<RemoteObjectSnapshotRequest>,
+) -> Result<
+    (HeaderMap, Json<DaemonErgasterionObjectSnapshotResponse>),
+    (StatusCode, Json<AuthRouteError>),
+> {
+    let capability = application_bearer(&headers)?;
+    let request = DaemonErgasterionObjectSnapshotRequest {
+        capability,
+        snapshot,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            error.to_string(),
+        )
+    })?;
+    let response =
+        application_daemon_call(move |client| client.ergasterion_object_snapshot(request)).await?;
+    Ok((no_store_headers(), Json(response)))
+}
+
+pub(super) async fn ergasterion_object_group_status(
+    headers: HeaderMap,
+    Json(status): Json<RemoteObjectGroupStatusRequest>,
+) -> Result<
+    (HeaderMap, Json<DaemonErgasterionObjectGroupStatusResponse>),
+    (StatusCode, Json<AuthRouteError>),
+> {
+    let capability = application_bearer(&headers)?;
+    let request = DaemonErgasterionObjectGroupStatusRequest { capability, status };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            error.to_string(),
+        )
+    })?;
+    let response =
+        application_daemon_call(move |client| client.ergasterion_object_group_status(request))
+            .await?;
+    Ok((no_store_headers(), Json(response)))
+}
+
+pub(super) async fn ergasterion_object_read(
+    Path((store_id, version, object_key)): Path<(String, u64, String)>,
+    headers: HeaderMap,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let capability = application_bearer(&headers)?;
+    let store_id = store_id.parse::<StoreId>().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            error.to_string(),
+        )
+    })?;
+    profile_download::application_provider_stream_download(
+        store_id,
+        object_key,
+        version,
+        capability,
+        headers,
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    )
+    .await
+}
+
+async fn application_daemon_call<T: Send + 'static>(
+    call: impl FnOnce(
+            DaemonClient<UnixSocketDaemonTransport>,
+        ) -> Result<T, dasobjectstore_daemon::DaemonClientError>
+        + Send
+        + 'static,
+) -> Result<T, (StatusCode, Json<AuthRouteError>)> {
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            call(DaemonClient::new(
+                UnixSocketDaemonTransport::for_bounded_bridge(
+                    DaemonRuntimeConfig::default_packaged().socket_path,
+                ),
+            ))
+            .map_err(|error| match error {
+                dasobjectstore_daemon::DaemonClientError::Api(error) => {
+                    format!("__application_api__:{}:{}", error.code, error.message)
+                }
+                error => error.to_string(),
+            })
+        })
+        .await
+        .map_err(application_daemon_error)
+}
+
+fn application_daemon_error(
+    error: crate::daemon_bridge::DaemonBridgeError,
+) -> (StatusCode, Json<AuthRouteError>) {
+    if let crate::daemon_bridge::DaemonBridgeError::Client(client) = &error {
+        if let Some(encoded) = client.message.strip_prefix("__application_api__:") {
+            if let Some((code, message)) = encoded.split_once(':') {
+                let status = match code {
+                    "invalid_request" => StatusCode::BAD_REQUEST,
+                    "proof_invalid" | "capability_revoked" => StatusCode::UNAUTHORIZED,
+                    "governed_scope_denied" => StatusCode::FORBIDDEN,
+                    "replay_detected" => StatusCode::CONFLICT,
+                    "authority_unavailable" | "provider_unavailable" => {
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                    _ => StatusCode::BAD_GATEWAY,
+                };
+                return route_error(status, code, message);
+            }
+        }
+    }
+    admin_daemon_bridge_error_with_code(error, "provider_unavailable")
+}
+
+fn application_bearer(
+    headers: &HeaderMap,
+) -> Result<DaemonOpaqueApplicationCapability, (StatusCode, Json<AuthRouteError>)> {
+    let value = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::UNAUTHORIZED,
+                "capability_revoked",
+                "a bearer capability is required",
+            )
+        })?;
+    DaemonOpaqueApplicationCapability::new(value.to_string()).map_err(|error| {
+        route_error(
+            StatusCode::UNAUTHORIZED,
+            "capability_revoked",
+            error.to_string(),
+        )
+    })
+}
+
+fn no_store_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers
+}
+
 pub(super) async fn issue_application_upload_capability(
     Json(request): Json<DaemonApplicationUploadCapabilityIssueRequest>,
 ) -> Result<Json<DaemonApplicationUploadCapabilityIssueResponse>, (StatusCode, Json<AuthRouteError>)>

@@ -11,6 +11,7 @@ mod disk_lockdown;
 mod disk_mutation;
 mod enclosure;
 mod endpoint;
+mod ergasterion_capability;
 mod health;
 mod ingest;
 #[path = "ingest/control.rs"]
@@ -105,6 +106,17 @@ pub use endpoint::{
     TestEndpointConnectionRequest, TestEndpointConnectionResponse, UpsertEndpointInventoryRequest,
     UpsertEndpointInventoryResponse, ENDPOINT_CONNECTION_TEST_SCHEMA_VERSION,
     ENDPOINT_RECORD_CONFIRMATION,
+};
+pub use ergasterion_capability::{
+    ErgasterionCapabilityDiscoveryResponse, ErgasterionCapabilityExchangeRequest,
+    ErgasterionCapabilityExchangeResponse, ErgasterionCapabilityRenewalRequest,
+    ErgasterionObjectGroupStatusRequest, ErgasterionObjectGroupStatusResponse,
+    ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
+    GovernedBindingAuthorityAdmissionRequest, GovernedBindingAuthorityAdmissionResponse,
+    OpaqueApplicationCapability, ERGASTERION_CAPABILITY_DISCOVERY_ROUTE,
+    ERGASTERION_CAPABILITY_EXCHANGE_ROUTE, ERGASTERION_CAPABILITY_RENEWAL_ROUTE,
+    ERGASTERION_OBJECT_GROUP_STATUS_ROUTE, ERGASTERION_OBJECT_READ_ROUTE,
+    ERGASTERION_OBJECT_SNAPSHOT_ROUTE, GOVERNED_BINDING_AUTHORITY_ADMISSION_CONFIRMATION,
 };
 pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
@@ -339,6 +351,12 @@ pub enum DaemonApiRequest {
     RevokeApplicationCredential(ApplicationCredentialRevocationRequest),
     AuthorizeApplicationMtls(ApplicationMtlsAuthorizationRequest),
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeRequest),
+    ExchangeErgasterionCapability(ErgasterionCapabilityExchangeRequest),
+    RenewErgasterionCapability(ErgasterionCapabilityRenewalRequest),
+    DiscoverErgasterionCapability,
+    AdmitGovernedBindingAuthority(GovernedBindingAuthorityAdmissionRequest),
+    ErgasterionObjectSnapshot(ErgasterionObjectSnapshotRequest),
+    ErgasterionObjectGroupStatus(ErgasterionObjectGroupStatusRequest),
     IssueApplicationUploadCapability(ApplicationUploadCapabilityIssueRequest),
     CompleteApplicationUpload(ApplicationUploadCompletionRequest),
     DeleteApplicationObject(ApplicationObjectDeleteRequest),
@@ -417,6 +435,12 @@ impl DaemonApiRequest {
             Self::RevokeApplicationCredential(_) => "revoke_application_credential",
             Self::AuthorizeApplicationMtls(_) => "authorize_application_mtls",
             Self::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
+            Self::ExchangeErgasterionCapability(_) => "exchange_ergasterion_capability",
+            Self::RenewErgasterionCapability(_) => "renew_ergasterion_capability",
+            Self::DiscoverErgasterionCapability => "discover_ergasterion_capability",
+            Self::AdmitGovernedBindingAuthority(_) => "admit_governed_binding_authority",
+            Self::ErgasterionObjectSnapshot(_) => "ergasterion_object_snapshot",
+            Self::ErgasterionObjectGroupStatus(_) => "ergasterion_object_group_status",
             Self::IssueApplicationUploadCapability(_) => "issue_application_upload_capability",
             Self::CompleteApplicationUpload(_) => "complete_application_upload",
             Self::DeleteApplicationObject(_) => "delete_application_object",
@@ -516,6 +540,11 @@ impl DaemonApiRequest {
                 .map_err(application_credential_revocation_validation_error),
             Self::AuthorizeApplicationMtls(request) => request.validate(),
             Self::ExchangeApplicationAccessToken(request) => request.validate(),
+            Self::ExchangeErgasterionCapability(request) => request.validate(),
+            Self::RenewErgasterionCapability(request) => request.validate(),
+            Self::AdmitGovernedBindingAuthority(request) => request.validate(),
+            Self::ErgasterionObjectSnapshot(request) => request.validate(),
+            Self::ErgasterionObjectGroupStatus(request) => request.validate(),
             Self::IssueApplicationUploadCapability(request) => request
                 .validate()
                 .map_err(|message| DaemonRequestValidationError::InvalidPolicy { message }),
@@ -621,6 +650,7 @@ impl DaemonApiRequest {
             | Self::JobStatus(_)
             | Self::ServiceStatus(_)
             | Self::ApplianceTelemetry(_)
+            | Self::DiscoverErgasterionCapability
             | Self::RemoteEasyconnectDiscovery(_)
             | Self::RemoteEasyconnectUploadAdmission(_) => Ok(()),
         }
@@ -662,6 +692,12 @@ pub enum DaemonApiResponse {
     RevokeApplicationCredential(ApplicationCredentialRevocationResponse),
     AuthorizeApplicationMtls(ApplicationMtlsAuthorizationResponse),
     ExchangeApplicationAccessToken(ApplicationAccessTokenExchangeResponse),
+    ExchangeErgasterionCapability(ErgasterionCapabilityExchangeResponse),
+    RenewErgasterionCapability(ErgasterionCapabilityExchangeResponse),
+    DiscoverErgasterionCapability(ErgasterionCapabilityDiscoveryResponse),
+    AdmitGovernedBindingAuthority(GovernedBindingAuthorityAdmissionResponse),
+    ErgasterionObjectSnapshot(ErgasterionObjectSnapshotResponse),
+    ErgasterionObjectGroupStatus(ErgasterionObjectGroupStatusResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
     RegisterProfileBinding(ProfileBindingResponse),

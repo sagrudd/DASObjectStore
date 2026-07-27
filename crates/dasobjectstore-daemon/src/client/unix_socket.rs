@@ -570,6 +570,7 @@ mod tests {
                 version: 1,
             },
             delegated_actor: None,
+            application_capability: None,
             range: None,
             condition: Default::default(),
             chunk_size_bytes: 1024,

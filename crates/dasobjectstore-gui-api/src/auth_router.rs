@@ -4,12 +4,16 @@ use super::*;
 use crate::{FederatedHostSessionResponse, VerifiedHostAuthenticatedContext};
 use axum::{
     extract::DefaultBodyLimit,
+    middleware,
     routing::{get, post},
     Extension, Router,
 };
 use dasobjectstore_daemon::api::{
     APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
-    APPLICATION_UPLOAD_COMPLETION_ROUTE, PROFILE_S3_MULTIPART_PART_ROUTE,
+    APPLICATION_UPLOAD_COMPLETION_ROUTE, ERGASTERION_CAPABILITY_DISCOVERY_ROUTE,
+    ERGASTERION_CAPABILITY_EXCHANGE_ROUTE, ERGASTERION_CAPABILITY_RENEWAL_ROUTE,
+    ERGASTERION_OBJECT_GROUP_STATUS_ROUTE, ERGASTERION_OBJECT_READ_ROUTE,
+    ERGASTERION_OBJECT_SNAPSHOT_ROUTE, PROFILE_S3_MULTIPART_PART_ROUTE,
 };
 
 pub fn standalone_gui_api_router(auth_store: LocalAuthStore) -> Router {
@@ -150,6 +154,27 @@ fn standalone_session_auth_router_with_state(state: StandaloneAuthRouteState) ->
 fn standalone_application_auth_router() -> Router {
     Router::new()
         .route(
+            ERGASTERION_CAPABILITY_DISCOVERY_ROUTE,
+            get(discover_ergasterion_capability),
+        )
+        .route(
+            ERGASTERION_CAPABILITY_EXCHANGE_ROUTE,
+            post(exchange_ergasterion_capability),
+        )
+        .route(
+            ERGASTERION_CAPABILITY_RENEWAL_ROUTE,
+            post(renew_ergasterion_capability),
+        )
+        .route(
+            ERGASTERION_OBJECT_SNAPSHOT_ROUTE,
+            post(ergasterion_object_snapshot),
+        )
+        .route(
+            ERGASTERION_OBJECT_GROUP_STATUS_ROUTE,
+            post(ergasterion_object_group_status),
+        )
+        .route(ERGASTERION_OBJECT_READ_ROUTE, get(ergasterion_object_read))
+        .route(
             APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE,
             post(exchange_application_access_token),
         )
@@ -161,6 +186,16 @@ fn standalone_application_auth_router() -> Router {
             APPLICATION_UPLOAD_COMPLETION_ROUTE,
             post(complete_application_upload),
         )
+        .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(middleware::map_response(application_no_store))
+}
+
+async fn application_no_store(mut response: axum::response::Response) -> axum::response::Response {
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
 }
 
 pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {

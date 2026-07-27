@@ -3,6 +3,7 @@
 mod admin_jobs;
 mod appliance_telemetry;
 mod application_audit;
+mod application_capability_ledger;
 mod application_capability_replay;
 mod application_delete;
 mod application_identity_registry;
@@ -24,6 +25,7 @@ mod folder_backend;
 mod folder_catalogue;
 mod folder_paths;
 mod garbage_collection;
+mod governed_binding_authority;
 mod ingest_files;
 mod live_status;
 mod local_admin;
@@ -81,6 +83,15 @@ pub use application_audit::{
     application_audit_log_path, read_application_audit_events, record_application_audit_event,
     ApplicationAuditEvent, APPLICATION_AUDIT_FILE_NAME, APPLICATION_AUDIT_MAX_EVENTS,
     APPLICATION_AUDIT_PATH_ENV, APPLICATION_AUDIT_SCHEMA,
+};
+pub use application_capability_ledger::{
+    application_capability_ledger_path, application_capability_master_key_path,
+    issue_opaque_application_capability, renew_opaque_application_capability,
+    revoke_application_capabilities, validate_and_account_application_capability,
+    ApplicationCapabilityClaims, ApplicationCapabilityIssue, ApplicationCapabilityUse,
+    IssuedApplicationCapability, ValidatedApplicationCapability,
+    APPLICATION_CAPABILITY_LEDGER_FILE_NAME, APPLICATION_CAPABILITY_LEDGER_SCHEMA,
+    APPLICATION_CAPABILITY_MASTER_KEY_FILE_NAME, APPLICATION_OPAQUE_CAPABILITY_PREFIX,
 };
 pub use application_capability_replay::{
     application_capability_replay_path, complete_upload_with_capability,
@@ -169,6 +180,13 @@ pub use garbage_collection::{
     GarbageCollectError, GarbageCollectItem, GarbageCollectKind, GarbageCollectMode,
     GarbageCollectReport, GarbageCollectTrigger, GarbageCollectorConfig, PerformanceGcMarker,
     GARBAGE_COLLECTION_REPORT_SCHEMA, PERFORMANCE_GC_MARKER_FILE, PERFORMANCE_GC_MARKER_SCHEMA,
+};
+pub use governed_binding_authority::{
+    governed_binding_authority_path, governed_binding_authority_ready,
+    revoke_trusted_governed_binding_authority, upsert_trusted_governed_binding_authority,
+    verify_current_governed_authority_claims, verify_current_governed_binding_authority,
+    TrustedGovernedBindingAuthority, GOVERNED_BINDING_AUTHORITY_FILE_NAME,
+    GOVERNED_BINDING_AUTHORITY_SCHEMA,
 };
 pub(crate) use ingest_files::discover_managed_hdd_roots;
 pub use ingest_files::{default_hdd_root, default_ssd_root};

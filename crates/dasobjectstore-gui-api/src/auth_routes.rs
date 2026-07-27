@@ -73,6 +73,16 @@ use dasobjectstore_daemon::api::{
     ApplicationUploadCapabilityIssueResponse as DaemonApplicationUploadCapabilityIssueResponse,
     ApplicationUploadCompletionRequest as DaemonApplicationUploadCompletionRequest,
     ApplicationUploadCompletionResponse as DaemonApplicationUploadCompletionResponse,
+    ErgasterionCapabilityDiscoveryResponse as DaemonErgasterionCapabilityDiscoveryResponse,
+    ErgasterionCapabilityExchangeRequest as DaemonErgasterionCapabilityExchangeRequest,
+    ErgasterionCapabilityExchangeResponse as DaemonErgasterionCapabilityExchangeResponse,
+    ErgasterionCapabilityRenewalRequest as DaemonErgasterionCapabilityRenewalRequest,
+    ErgasterionObjectGroupStatusRequest as DaemonErgasterionObjectGroupStatusRequest,
+    ErgasterionObjectGroupStatusResponse as DaemonErgasterionObjectGroupStatusResponse,
+    ErgasterionObjectSnapshotRequest as DaemonErgasterionObjectSnapshotRequest,
+    ErgasterionObjectSnapshotResponse as DaemonErgasterionObjectSnapshotResponse,
+    OpaqueApplicationCapability as DaemonOpaqueApplicationCapability,
+    RemoteObjectGroupStatusRequest, RemoteObjectSnapshotRequest,
 };
 use dasobjectstore_daemon::runtime::LOCAL_ADMIN_CONFIRMATION_MARKER;
 use dasobjectstore_daemon::{
@@ -1154,6 +1164,30 @@ mod tests {
             .expect("response body");
         let error: crate::AuthRouteError = serde_json::from_slice(&bytes).expect("error JSON");
         assert_eq!(error.code, "invalid_application_access_token_exchange");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn governed_application_errors_are_never_cacheable() {
+        let root = temp_root("governed-application-no-store");
+        let response = test_auth_router(LocalAuthStore::new(&root), Vec::new())
+            .oneshot(
+                Request::post(dasobjectstore_daemon::api::ERGASTERION_CAPABILITY_EXCHANGE_ROUTE)
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("route response");
+
+        assert!(response.status().is_client_error());
+        assert_eq!(
+            response
+                .headers()
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store")
+        );
         cleanup(&root);
     }
 

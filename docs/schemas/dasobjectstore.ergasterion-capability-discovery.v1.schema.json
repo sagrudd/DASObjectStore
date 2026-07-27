@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ergasterion.mnemosyne.example/contracts/dasobjectstore-ergasterion-capability-discovery-v1.schema.json",
+  "title": "DASObjectStore Ergasterion Capability Discovery v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "exchangeContract", "bindingSchema", "state", "maxCapabilityLifetimeSeconds", "renewalWindowSeconds", "clockSkewSeconds", "operations"],
+  "properties": {
+    "schemaVersion": { "const": "dasobjectstore.ergasterion-capability-discovery.v1" },
+    "exchangeContract": { "const": "dasobjectstore.ergasterion-capability-exchange.v1" },
+    "bindingSchema": { "const": "ergasterion.object-store-binding.v2" },
+    "state": { "enum": ["ready", "unavailable", "disabled"] },
+    "maxCapabilityLifetimeSeconds": { "const": 900 },
+    "renewalWindowSeconds": { "const": 300 },
+    "clockSkewSeconds": { "const": 30 },
+    "operations": { "const": ["list", "read", "verify"] }
+  }
+}

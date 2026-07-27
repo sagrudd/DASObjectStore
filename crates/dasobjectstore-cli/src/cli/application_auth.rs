@@ -23,6 +23,8 @@ pub(crate) enum ApplicationAuthCommand {
     RegisterKey(ApplicationAuthRequestArgs),
     /// Revoke an application identity or public key from path-free JSON.
     Revoke(ApplicationAuthRequestArgs),
+    /// Admit one independently verified governed binding as current authority.
+    TrustBinding(ApplicationAuthRequestArgs),
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]

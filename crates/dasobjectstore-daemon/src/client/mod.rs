@@ -30,6 +30,11 @@ use crate::api::{
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
     DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
     DiskLockdownRequest, DiskLockdownResponse, DiskRetireRequest, DiskRetireResponse,
+    ErgasterionCapabilityDiscoveryResponse, ErgasterionCapabilityExchangeRequest,
+    ErgasterionCapabilityExchangeResponse, ErgasterionCapabilityRenewalRequest,
+    ErgasterionObjectGroupStatusRequest, ErgasterionObjectGroupStatusResponse,
+    ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
+    GovernedBindingAuthorityAdmissionRequest, GovernedBindingAuthorityAdmissionResponse,
     IngestControlRequest, IngestControlResponse, IngestJobStatusRequest, IngestJobStatusResponse,
     IngestQueueDrainRequest, IngestQueueDrainResponse, LiveStatusRequest, LiveStatusResponse,
     ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
@@ -437,6 +442,65 @@ where
                 Ok(response)
             }
             response => Err(unexpected("exchange_application_access_token", response)),
+        }
+    }
+
+    pub fn exchange_ergasterion_capability(
+        &self,
+        request: ErgasterionCapabilityExchangeRequest,
+    ) -> Result<ErgasterionCapabilityExchangeResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ExchangeErgasterionCapability(request))? {
+            DaemonApiResponse::ExchangeErgasterionCapability(response) => Ok(response),
+            response => Err(unexpected("exchange_ergasterion_capability", response)),
+        }
+    }
+
+    pub fn renew_ergasterion_capability(
+        &self,
+        request: ErgasterionCapabilityRenewalRequest,
+    ) -> Result<ErgasterionCapabilityExchangeResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RenewErgasterionCapability(request))? {
+            DaemonApiResponse::RenewErgasterionCapability(response) => Ok(response),
+            response => Err(unexpected("renew_ergasterion_capability", response)),
+        }
+    }
+
+    pub fn discover_ergasterion_capability(
+        &self,
+    ) -> Result<ErgasterionCapabilityDiscoveryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::DiscoverErgasterionCapability)? {
+            DaemonApiResponse::DiscoverErgasterionCapability(response) => Ok(response),
+            response => Err(unexpected("discover_ergasterion_capability", response)),
+        }
+    }
+
+    pub fn admit_governed_binding_authority(
+        &self,
+        request: GovernedBindingAuthorityAdmissionRequest,
+    ) -> Result<GovernedBindingAuthorityAdmissionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::AdmitGovernedBindingAuthority(request))? {
+            DaemonApiResponse::AdmitGovernedBindingAuthority(response) => Ok(response),
+            response => Err(unexpected("admit_governed_binding_authority", response)),
+        }
+    }
+
+    pub fn ergasterion_object_snapshot(
+        &self,
+        request: ErgasterionObjectSnapshotRequest,
+    ) -> Result<ErgasterionObjectSnapshotResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ErgasterionObjectSnapshot(request))? {
+            DaemonApiResponse::ErgasterionObjectSnapshot(response) => Ok(response),
+            response => Err(unexpected("ergasterion_object_snapshot", response)),
+        }
+    }
+
+    pub fn ergasterion_object_group_status(
+        &self,
+        request: ErgasterionObjectGroupStatusRequest,
+    ) -> Result<ErgasterionObjectGroupStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ErgasterionObjectGroupStatus(request))? {
+            DaemonApiResponse::ErgasterionObjectGroupStatus(response) => Ok(response),
+            response => Err(unexpected("ergasterion_object_group_status", response)),
         }
     }
 
@@ -855,6 +919,12 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RevokeApplicationCredential(_) => "revoke_application_credential",
         DaemonApiResponse::AuthorizeApplicationMtls(_) => "authorize_application_mtls",
         DaemonApiResponse::ExchangeApplicationAccessToken(_) => "exchange_application_access_token",
+        DaemonApiResponse::ExchangeErgasterionCapability(_) => "exchange_ergasterion_capability",
+        DaemonApiResponse::RenewErgasterionCapability(_) => "renew_ergasterion_capability",
+        DaemonApiResponse::DiscoverErgasterionCapability(_) => "discover_ergasterion_capability",
+        DaemonApiResponse::AdmitGovernedBindingAuthority(_) => "admit_governed_binding_authority",
+        DaemonApiResponse::ErgasterionObjectSnapshot(_) => "ergasterion_object_snapshot",
+        DaemonApiResponse::ErgasterionObjectGroupStatus(_) => "ergasterion_object_group_status",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",

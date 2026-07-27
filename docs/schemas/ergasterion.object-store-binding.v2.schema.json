@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ergasterion.mnemosyne.example/contracts/ergasterion-object-store-binding-v2.schema.json",
+  "title": "Ergasterion ObjectStore Binding v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "bindingId", "hostAuthority", "prosopikonAuthority", "tenantId", "objectStoreId", "scope", "issuedAt", "expiresAt", "status"],
+  "properties": {
+    "schemaVersion": { "const": "ergasterion.object-store-binding.v2" },
+    "bindingId": { "$ref": "#/$defs/opaqueId" },
+    "hostAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "authorityId", "projectId", "projectRevision"],
+      "properties": {
+        "mode": { "enum": ["monas", "synoptikon"] },
+        "authorityId": { "$ref": "#/$defs/uuid" },
+        "projectId": { "$ref": "#/$defs/opaqueId" },
+        "projectRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "prosopikonAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authorityId", "authorityRevision"],
+      "properties": {
+        "authorityId": { "$ref": "#/$defs/uuid" },
+        "authorityRevision": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "tenantId": { "$ref": "#/$defs/uuid" },
+    "objectStoreId": { "$ref": "#/$defs/opaqueId" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prefixes", "operations"],
+      "properties": {
+        "prefixes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/logicalPrefix" } },
+        "operations": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["read", "list", "verify"] } }
+      }
+    },
+    "issuedAt": { "$ref": "#/$defs/timestamp" },
+    "expiresAt": { "$ref": "#/$defs/timestamp" },
+    "status": { "const": "active" }
+  },
+  "$defs": {
+    "opaqueId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,127}$" },
+    "uuid": { "type": "string", "format": "uuid" },
+    "logicalPrefix": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$" },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}

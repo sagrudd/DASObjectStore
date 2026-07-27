@@ -14,6 +14,18 @@ where
         self.application_capability_replay_path = replay_path.into();
         self
     }
+
+    pub fn with_ergasterion_capability_paths(
+        mut self,
+        governed_binding_authority_path: impl Into<PathBuf>,
+        capability_ledger_path: impl Into<PathBuf>,
+        capability_master_key_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.governed_binding_authority_path = governed_binding_authority_path.into();
+        self.application_capability_ledger_path = capability_ledger_path.into();
+        self.application_capability_master_key_path = capability_master_key_path.into();
+        self
+    }
     pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
         self.live_sqlite_path = live_sqlite_path.into();
         self

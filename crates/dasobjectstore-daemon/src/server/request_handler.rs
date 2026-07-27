@@ -109,6 +109,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 mod configuration;
 mod dispatch;
+mod ergasterion;
 mod errors;
 mod job_projection;
 mod multipart_completion_worker;
@@ -163,6 +164,9 @@ pub struct DaemonRequestHandler<S, C> {
     application_audit_log_path: PathBuf,
     application_upload_capability_path: PathBuf,
     application_capability_replay_path: PathBuf,
+    governed_binding_authority_path: PathBuf,
+    application_capability_ledger_path: PathBuf,
+    application_capability_master_key_path: PathBuf,
     live_status_registry: Arc<crate::runtime::LiveStatusRegistry>,
 }
 
@@ -209,6 +213,14 @@ where
             application_capability_replay_path: crate::runtime::application_capability_replay_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            governed_binding_authority_path: crate::runtime::governed_binding_authority_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_ledger_path: crate::runtime::application_capability_ledger_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_master_key_path:
+                crate::runtime::application_capability_master_key_path(DEFAULT_DAEMON_STATE_DIR),
             live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
@@ -254,6 +266,14 @@ where
             application_capability_replay_path: crate::runtime::application_capability_replay_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            governed_binding_authority_path: crate::runtime::governed_binding_authority_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_ledger_path: crate::runtime::application_capability_ledger_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
+            application_capability_master_key_path:
+                crate::runtime::application_capability_master_key_path(DEFAULT_DAEMON_STATE_DIR),
             live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
@@ -1266,6 +1286,7 @@ mod tests {
                 primary_gid: None,
                 groups: vec!["readers".to_string()],
             }),
+            application_capability: None,
             range: None,
             condition: Default::default(),
             chunk_size_bytes: 1024,
@@ -1418,6 +1439,7 @@ mod tests {
             store_id: StoreId::new("allele-anchor").expect("store id"),
             object: key,
             delegated_actor: None,
+            application_capability: None,
             range: Some(crate::api::ProviderStreamRange {
                 start: 10,
                 end_exclusive: Some(23),

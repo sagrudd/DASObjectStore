@@ -1,6 +1,7 @@
 //! Core domain types for DASObjectStore.
 
 pub mod application_auth;
+pub mod application_auth_v2;
 pub mod backend;
 pub mod capacity;
 pub mod config;

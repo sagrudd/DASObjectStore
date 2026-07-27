@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "dasobjectstore.ergasterion-capability-discovery.v1",
+  "exchangeContract": "dasobjectstore.ergasterion-capability-exchange.v1",
+  "bindingSchema": "ergasterion.object-store-binding.v2",
+  "state": "ready",
+  "maxCapabilityLifetimeSeconds": 900,
+  "renewalWindowSeconds": 300,
+  "clockSkewSeconds": 30,
+  "operations": ["list", "read", "verify"]
+}

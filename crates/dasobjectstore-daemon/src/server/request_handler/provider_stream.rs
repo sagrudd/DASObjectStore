@@ -628,26 +628,8 @@ where
         request: &ProviderStreamOpenRequest,
         actor: Option<&DaemonLocalActor>,
     ) -> Result<ProviderStreamSource, DaemonApiResponse> {
-        let delegated_actor =
-            match self.delegated_object_browser_actor(actor, request.delegated_actor.as_ref()) {
-                Ok(actor) => actor,
-                Err(error) => {
-                    return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        error.code(),
-                        error.to_string(),
-                    )))
-                }
-            };
-        let effective_actor = delegated_actor.as_ref().or(actor);
-        let store_id = match self.authorize_endpoint_read(effective_actor, &request.store_id) {
-            Ok(store_id) => store_id,
-            Err(error) => {
-                return Err(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    error.code(),
-                    error.to_string(),
-                )))
-            }
-        };
+        let application_capability = request.application_capability.as_ref();
+        let store_id = super::ergasterion::authorize_provider_store(self, request, actor)?;
         let native = dasobjectstore_metadata::read_s3_object_binding(
             &self.live_sqlite_path,
             &store_id,
@@ -661,6 +643,15 @@ where
             ))
         })?;
         if let Some(native) = native {
+            if let Some(capability) = application_capability {
+                super::ergasterion::authorize_provider_read(
+                    self,
+                    capability,
+                    store_id.as_str(),
+                    &request.object.object_id,
+                    native.size_bytes,
+                )?;
+            }
             if request
                 .condition
                 .if_match_sha256
@@ -811,6 +802,15 @@ where
                 )))
             }
         };
+        if let Some(capability) = application_capability {
+            super::ergasterion::authorize_provider_read(
+                self,
+                capability,
+                store_id.as_str(),
+                &request.object.object_id,
+                object.size_bytes,
+            )?;
+        }
         if request
             .condition
             .if_match_sha256

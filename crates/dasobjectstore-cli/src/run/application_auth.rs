@@ -9,6 +9,7 @@ use crate::cli::{ApplicationAuthArgs, ApplicationAuthCommand};
 use dasobjectstore_daemon::api::{
     ApplicationAccessTokenExchangeRequest, ApplicationCredentialRevocationRequest,
     ApplicationIdentityRegistrationRequest, ApplicationKeyRegistrationRequest,
+    GovernedBindingAuthorityAdmissionRequest,
 };
 use std::fs::File;
 use std::io::Write;
@@ -85,6 +86,22 @@ pub(super) fn run_application_auth(
                 }
                 writeln!(writer, "Revoked: {}", response.revoked)?;
                 writeln!(writer, "Job: {}", response.accepted.job_id)?;
+            }
+            Ok(())
+        }
+        ApplicationAuthCommand::TrustBinding(request) => {
+            let json = request.json();
+            let request: GovernedBindingAuthorityAdmissionRequest =
+                read_request(request.request())?;
+            let response = client().admit_governed_binding_authority(request)?;
+            if json {
+                serde_json::to_writer_pretty(&mut *writer, &response)?;
+                writer.write_all(b"\n")?;
+            } else {
+                writeln!(writer, "Governed binding authority admitted")?;
+                writeln!(writer, "Binding: {}", response.binding_id)?;
+                writeln!(writer, "ObjectStore: {}", response.object_store_id)?;
+                writeln!(writer, "Dry run: {}", response.dry_run)?;
             }
             Ok(())
         }
