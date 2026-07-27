@@ -26,7 +26,7 @@ pub(super) fn execute_performance_scenarios(
                     scenario_plan.scenario_names().join(", "),
                     format_concurrency_list(&scenario_plan.concurrency_values())
                 ),
-                bounds: performance_selected_matrix_bounds(&workload, &scenario_plan),
+                bounds: performance_selected_matrix_bounds(workload, scenario_plan),
                 scenario_done,
                 scenario_total,
                 file_done: 0,
@@ -42,8 +42,8 @@ pub(super) fn execute_performance_scenarios(
                 hdd_disk_rates: Vec::new(),
                 active_hdd_landing: Vec::new(),
                 aggregate_rate: None,
-                report_path: &report_path,
-                json_path: &json_path,
+                report_path,
+                json_path,
             },
         )?;
     }
@@ -52,7 +52,7 @@ pub(super) fn execute_performance_scenarios(
     let mut ssd_pipeline = Vec::new();
     let mut direct_hdd = Vec::new();
     for &file_order in file_orders {
-        let workload = ordered_performance_workload(&workload, file_order);
+        let workload = ordered_performance_workload(workload, file_order);
         if !tui {
             writeln!(
                 writer,
@@ -70,11 +70,11 @@ pub(super) fn execute_performance_scenarios(
             let tui_context = tui.then_some(PerformanceTuiContext {
                 scenario_done,
                 scenario_total,
-                report_path: &report_path,
-                json_path: &json_path,
+                report_path,
+                json_path,
             });
             let scenario =
-                benchmark_ssd_only(&ssd_bench_root, &workload, writer, !tui, tui_context)?;
+                benchmark_ssd_only(ssd_bench_root, &workload, writer, !tui, tui_context)?;
             scenario_done += 1;
             if tui {
                 render_performance_tui_snapshot(
@@ -113,8 +113,8 @@ pub(super) fn execute_performance_scenarios(
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                         ),
-                        report_path: &report_path,
-                        json_path: &json_path,
+                        report_path,
+                        json_path,
                     },
                 )?;
             }
@@ -130,8 +130,8 @@ pub(super) fn execute_performance_scenarios(
             )?;
             }
             let scenario = benchmark_ssd_stage_then_drain(
-                &ssd_bench_root,
-                &hdd_bench_roots,
+                ssd_bench_root,
+                hdd_bench_roots,
                 &workload,
                 concurrency,
                 redundancy,
@@ -140,8 +140,8 @@ pub(super) fn execute_performance_scenarios(
                 tui.then_some(PerformanceTuiContext {
                     scenario_done,
                     scenario_total,
-                    report_path: &report_path,
-                    json_path: &json_path,
+                    report_path,
+                    json_path,
                 }),
             )?;
             scenario_done += 1;
@@ -185,8 +185,8 @@ pub(super) fn execute_performance_scenarios(
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                         ),
-                        report_path: &report_path,
-                        json_path: &json_path,
+                        report_path,
+                        json_path,
                     },
                 )?;
             }
@@ -202,8 +202,8 @@ pub(super) fn execute_performance_scenarios(
             )?;
             }
             let scenario = benchmark_ssd_pipeline(
-                &ssd_bench_root,
-                &hdd_bench_roots,
+                ssd_bench_root,
+                hdd_bench_roots,
                 &workload,
                 concurrency,
                 redundancy,
@@ -212,8 +212,8 @@ pub(super) fn execute_performance_scenarios(
                 tui.then_some(PerformanceTuiContext {
                     scenario_done,
                     scenario_total,
-                    report_path: &report_path,
-                    json_path: &json_path,
+                    report_path,
+                    json_path,
                 }),
             )?;
             scenario_done += 1;
@@ -257,8 +257,8 @@ pub(super) fn execute_performance_scenarios(
                     aggregate_rate: Some(
                         scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                     ),
-                    report_path: &report_path,
-                    json_path: &json_path,
+                    report_path,
+                    json_path,
                 },
             )?;
             }
@@ -305,13 +305,13 @@ pub(super) fn execute_performance_scenarios(
                         hdd_disk_rates: Vec::new(),
                         active_hdd_landing: Vec::new(),
                         aggregate_rate: None,
-                        report_path: &report_path,
-                        json_path: &json_path,
+                        report_path,
+                        json_path,
                     },
                 )?;
             }
             let scenario = benchmark_direct_hdd(
-                &hdd_bench_roots,
+                hdd_bench_roots,
                 &workload,
                 concurrency,
                 redundancy,
@@ -321,8 +321,8 @@ pub(super) fn execute_performance_scenarios(
                     Some(PerformanceTuiContext {
                         scenario_done,
                         scenario_total,
-                        report_path: &report_path,
-                        json_path: &json_path,
+                        report_path,
+                        json_path,
                     })
                 } else {
                     None
@@ -365,8 +365,8 @@ pub(super) fn execute_performance_scenarios(
                         aggregate_rate: Some(
                             scenario.total_bytes as f64 / scenario.elapsed_seconds.max(0.001),
                         ),
-                        report_path: &report_path,
-                        json_path: &json_path,
+                        report_path,
+                        json_path,
                     },
                 )?;
             }

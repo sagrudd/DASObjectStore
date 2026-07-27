@@ -357,75 +357,6 @@ pub(super) fn create_object_store_request(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use clap::Parser;
-
-    #[test]
-    fn daemon_create_request_maps_store_policy_contract() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "store",
-            "create",
-            "generated-data",
-            "--class",
-            "generated_data",
-            "--copies",
-            "2",
-            "--bucket",
-            "generated-data",
-            "--reader-group",
-            "bioinformatics-readers",
-            "--writer-group",
-            "bioinformatics-writers",
-            "--public",
-        ])
-        .expect("store create parses");
-        let Some(Command::Store(store_args)) = cli.command() else {
-            panic!("expected store command")
-        };
-        let Some(StoreCommand::Create(args)) = store_args.command() else {
-            panic!("expected store create command")
-        };
-        let definition = StoreServiceDefinition {
-            store_id: args.store_id().clone(),
-            policy: StorePolicy::defaults_for(args.class()),
-            bucket_name: args.bucket().map(ToOwned::to_owned),
-            reader_group: args.reader_group().map(ToOwned::to_owned),
-            writer_group: args.writer_group().map(ToOwned::to_owned),
-            public: args.public(),
-        };
-        let request = create_object_store_request(args, &definition);
-
-        assert_eq!(request.store_id, "generated-data");
-        assert_eq!(request.store_class, "generated_data");
-        assert_eq!(request.required_copies, 2);
-        assert_eq!(request.bucket.as_deref(), Some("generated-data"));
-        assert_eq!(
-            request.reader_group.as_deref(),
-            Some("bioinformatics-readers")
-        );
-        assert_eq!(request.writer_group, "bioinformatics-writers");
-        assert_eq!(request.object_type, "naive");
-        assert!(request.public);
-        assert!(request.writeable);
-        assert_eq!(request.capacity_behavior, "backpressure_by_priority");
-        assert_eq!(request.retention, "tombstone_then_gc");
-        assert_eq!(request.endpoint_export_mode, "s3_bucket");
-        assert!(!request.dry_run);
-        assert_eq!(
-            request.client_request_id.as_deref(),
-            Some("cli-store-create-generated-data")
-        );
-        assert_eq!(
-            request.confirmation_marker,
-            OBJECT_STORE_CREATE_CONFIRMATION
-        );
-        request.validate().expect("daemon request validates");
-    }
-}
-
 pub(super) fn run_store_adopt(
     args: &StoreAdoptArgs,
     writer: &mut impl Write,
@@ -778,4 +709,73 @@ pub(super) fn run_store_deduplicate(
         writeln!(writer, "Warning: {}", report.warning)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn daemon_create_request_maps_store_policy_contract() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "create",
+            "generated-data",
+            "--class",
+            "generated_data",
+            "--copies",
+            "2",
+            "--bucket",
+            "generated-data",
+            "--reader-group",
+            "bioinformatics-readers",
+            "--writer-group",
+            "bioinformatics-writers",
+            "--public",
+        ])
+        .expect("store create parses");
+        let Some(Command::Store(store_args)) = cli.command() else {
+            panic!("expected store command")
+        };
+        let Some(StoreCommand::Create(args)) = store_args.command() else {
+            panic!("expected store create command")
+        };
+        let definition = StoreServiceDefinition {
+            store_id: args.store_id().clone(),
+            policy: StorePolicy::defaults_for(args.class()),
+            bucket_name: args.bucket().map(ToOwned::to_owned),
+            reader_group: args.reader_group().map(ToOwned::to_owned),
+            writer_group: args.writer_group().map(ToOwned::to_owned),
+            public: args.public(),
+        };
+        let request = create_object_store_request(args, &definition);
+
+        assert_eq!(request.store_id, "generated-data");
+        assert_eq!(request.store_class, "generated_data");
+        assert_eq!(request.required_copies, 2);
+        assert_eq!(request.bucket.as_deref(), Some("generated-data"));
+        assert_eq!(
+            request.reader_group.as_deref(),
+            Some("bioinformatics-readers")
+        );
+        assert_eq!(request.writer_group, "bioinformatics-writers");
+        assert_eq!(request.object_type, "naive");
+        assert!(request.public);
+        assert!(request.writeable);
+        assert_eq!(request.capacity_behavior, "backpressure_by_priority");
+        assert_eq!(request.retention, "tombstone_then_gc");
+        assert_eq!(request.endpoint_export_mode, "s3_bucket");
+        assert!(!request.dry_run);
+        assert_eq!(
+            request.client_request_id.as_deref(),
+            Some("cli-store-create-generated-data")
+        );
+        assert_eq!(
+            request.confirmation_marker,
+            OBJECT_STORE_CREATE_CONFIRMATION
+        );
+        request.validate().expect("daemon request validates");
+    }
 }

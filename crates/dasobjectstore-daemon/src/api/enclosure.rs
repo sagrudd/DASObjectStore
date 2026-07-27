@@ -2,7 +2,7 @@ use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const ENCLOSURE_PREPARE_CONFIRMATION: &str = "confirm prepare das";
 
@@ -205,12 +205,12 @@ fn validate_hdd_device(
 
 fn validate_absolute_path(
     field: &'static str,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<(), PrepareEnclosureValidationError> {
     if !path.is_absolute() {
         return Err(PrepareEnclosureValidationError::RelativePath {
             field,
-            path: path.clone(),
+            path: path.to_path_buf(),
         });
     }
     Ok(())

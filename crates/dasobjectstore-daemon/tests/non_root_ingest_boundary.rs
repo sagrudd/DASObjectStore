@@ -195,6 +195,7 @@ impl DaemonServiceOrchestrator for FakeIngestService {
             job_id: IngestJobId::new("job-zymo").expect("job id"),
             accepted_at_utc: accepted_at_utc.to_string(),
             dry_run: request.dry_run,
+            objects: Vec::new(),
         })
     }
 }

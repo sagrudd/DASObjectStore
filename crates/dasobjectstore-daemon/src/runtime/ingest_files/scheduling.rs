@@ -231,7 +231,5 @@ pub(super) fn default_hdd_worker_count(managed_hdd_count: usize, copies: usize) 
     if copies == 0 {
         return 0;
     }
-    (managed_hdd_count / copies)
-        .min(DEFAULT_MAX_HDD_SETTLEMENT_WORKERS)
-        .max(1)
+    (managed_hdd_count / copies).clamp(1, DEFAULT_MAX_HDD_SETTLEMENT_WORKERS)
 }

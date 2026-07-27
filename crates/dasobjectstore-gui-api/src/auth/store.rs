@@ -401,6 +401,11 @@ fn logout_response_from_prosopikon(response: ProsopikonLogoutResponse) -> Logout
 }
 
 #[cfg(test)]
+fn normalize_username(username: impl AsRef<str>) -> String {
+    username.as_ref().trim().to_string()
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
         standalone_auth_root_from_env, DASOBJECTSTORE_AUTH_ROOT_ENV,
@@ -435,9 +440,4 @@ mod tests {
         );
         assert_eq!(DASOBJECTSTORE_AUTH_ROOT_ENV, "DASOBJECTSTORE_AUTH_ROOT");
     }
-}
-
-#[cfg(test)]
-fn normalize_username(username: impl AsRef<str>) -> String {
-    username.as_ref().trim().to_string()
 }

@@ -27,6 +27,9 @@ pub struct S3BindingBackfillReport {
     pub objects_retained_unmapped: u64,
 }
 
+// Keep the complete authoritative binding explicit at this transaction
+// boundary; callers must not be able to omit identity or integrity fields.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn bind_s3_object_in_transaction(
     tx: &Transaction<'_>,
     store_id: &StoreId,

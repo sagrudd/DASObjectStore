@@ -365,9 +365,11 @@ fn file_node(
         readiness: readiness_for(entry.lifecycle_state, &entry.placements),
         lifecycle_state: entry.lifecycle_state,
         copy_count,
-        placements: include_placement
-            .then(|| entry.placements.clone())
-            .unwrap_or_default(),
+        placements: if include_placement {
+            entry.placements.clone()
+        } else {
+            Default::default()
+        },
         download_source: if copy_count > 0 {
             Some(ObjectBrowserDownloadSource::HddSettled)
         } else if entry.placements.iter().any(|placement| {

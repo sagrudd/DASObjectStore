@@ -357,10 +357,7 @@ pub(crate) fn performance_io_chart_artifacts_from_json(
         .into_iter()
         .map(|label| PerformanceChartArtifact {
             title: format!("Per-second IO rates: {label}"),
-            path: parent.join(format!(
-                "{base}-io-{}.png",
-                label.replace(' ', "-").replace('/', "-")
-            )),
+            path: parent.join(format!("{base}-io-{}.png", label.replace([' ', '/'], "-"))),
         })
         .collect()
 }

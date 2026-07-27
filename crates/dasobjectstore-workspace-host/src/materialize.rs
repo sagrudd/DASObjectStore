@@ -143,7 +143,7 @@ fn copy_extent(
     let mut input = fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&source)
+        .open(source)
         .map_err(|error| BrokerError::Io("open materialization source", error))?;
     let mut output = fs::OpenOptions::new()
         .read(true)
@@ -151,7 +151,7 @@ fn copy_extent(
         .create(true)
         .mode(0o640)
         .custom_flags(libc::O_NOFOLLOW)
-        .open(&partial)
+        .open(partial)
         .map_err(|error| BrokerError::Io("open materialization partial", error))?;
     let offset = output
         .metadata()
@@ -188,19 +188,19 @@ fn copy_extent(
             None,
         ));
     }
-    let hash = hash_file(&partial)?;
+    let hash = hash_file(partial)?;
     if hash != normalize_sha256(&plan.expected_sha256)? {
         return Err(BrokerError::UnsafeEntry(
             "materialization checksum does not match catalogue authority".to_string(),
         ));
     }
-    fs::hard_link(&partial, &destination).map_err(|error| {
+    fs::hard_link(partial, destination).map_err(|error| {
         BrokerError::Io(
             "publish materialization without replacing destination",
             error,
         )
     })?;
-    fs::remove_file(&partial)
+    fs::remove_file(partial)
         .map_err(|error| BrokerError::Io("remove published materialization partial", error))?;
     crate::marker::sync_directory(destination.parent().ok_or_else(|| {
         BrokerError::InvalidRequest("materialization destination has no parent".to_string())

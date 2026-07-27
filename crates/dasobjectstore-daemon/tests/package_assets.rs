@@ -33,7 +33,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, libpam0g, udisks2, docker.io, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin";
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -139,8 +139,9 @@ fn release_readiness_requires_same_commit_surrogate_evidence() {
     assert_contains(RELEASE_READINESS, "source_commit \"$COMMIT\"");
     assert_contains(
         RELEASE_READINESS,
-        "physical_das_acceptance=blocked_unavailable_host",
+        "physical_das_acceptance=required_pending",
     );
+    assert_contains(RELEASE_READINESS, "x86_64_package_parity=required_pending");
 }
 
 #[test]
@@ -597,13 +598,15 @@ fn deb_postinst_repairs_existing_managed_member_roots() {
     assert_contains(POSTINST, "install -d -o root -g root -m 0755 \"$root/hdd\"");
     assert_contains(POSTINST, "chown \"$service_user:$service_group\" \"$root\"");
     assert_contains(POSTINST, "chmod 0750 \"$root\"");
-    assert_contains(POSTINST, "-path \"$root/lost+found\" -prune");
     assert_contains(
         POSTINST,
-        "-exec chown \"$service_user:$service_group\" {} +",
+        "Never recursively traverse a live data plane from a package maintainer",
     );
-    assert_contains(POSTINST, "-type d -exec chmod 0750 {} +");
-    assert_contains(POSTINST, "-type f -exec chmod 0640 {} +");
+    assert_contains(
+        POSTINST,
+        "legacy/adopted trees require the\n  # explicit reconciliation workflow",
+    );
+    assert!(!POSTINST.contains("-exec chown"));
     assert_contains(POSTINST, "repair_marked_managed_tree \"$managed_root/ssd\"");
     assert_contains(POSTINST, "for root in \"$managed_root\"/hdd/*; do");
     assert_contains(POSTINST, "repair_marked_managed_tree \"$root\"");

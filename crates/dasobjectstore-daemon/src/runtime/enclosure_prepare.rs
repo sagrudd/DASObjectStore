@@ -150,7 +150,7 @@ fn prepare_device<R: ServiceCommandRunner>(
         if let Some(owner) = request.owner.as_deref() {
             runner.run(
                 "chown",
-                &vec![
+                &[
                     "-R".into(),
                     format!("{owner}:{owner}"),
                     mount_point.join(".dasobjectstore").display().to_string(),

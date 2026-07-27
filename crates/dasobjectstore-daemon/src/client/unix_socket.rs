@@ -508,6 +508,7 @@ mod tests {
     #[test]
     fn unix_socket_transport_round_trips_request() {
         let socket_path = unique_socket_path();
+        let _ = fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).expect("listener binds");
         let server = UnixSocketDaemonServer::new(&socket_path, |request| {
             assert!(matches!(request, DaemonApiRequest::ServiceStatus(_)));

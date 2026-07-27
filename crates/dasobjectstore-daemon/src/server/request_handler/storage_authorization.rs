@@ -20,48 +20,6 @@ impl AuthorizedEndpointWrite {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::AuthorizedEndpointWrite;
-    use dasobjectstore_core::{backend::BackendObjectKey, ids::StoreId};
-
-    #[test]
-    fn subobject_write_qualifies_the_backend_namespace() {
-        let authorized = AuthorizedEndpointWrite {
-            store_id: StoreId::new("store-main").expect("store id"),
-            subobject: Some("project-media".to_string()),
-            object_prefix: Some("projects/alpha/media".to_string()),
-        };
-        let key = BackendObjectKey {
-            object_id: "frames/0001.raw".to_string(),
-            version: 7,
-        };
-
-        assert_eq!(
-            authorized.qualify_object(&key),
-            BackendObjectKey {
-                object_id: "projects/alpha/media/frames/0001.raw".to_string(),
-                version: 7,
-            }
-        );
-    }
-
-    #[test]
-    fn root_write_preserves_the_backend_namespace() {
-        let authorized = AuthorizedEndpointWrite {
-            store_id: StoreId::new("store-main").expect("store id"),
-            subobject: None,
-            object_prefix: None,
-        };
-        let key = BackendObjectKey {
-            object_id: "frames/0001.raw".to_string(),
-            version: 7,
-        };
-
-        assert_eq!(authorized.qualify_object(&key), key);
-    }
-}
-
 impl<S, C> DaemonRequestHandler<S, C>
 where
     S: DaemonServiceOrchestrator,
@@ -265,5 +223,47 @@ where
         request: &ObjectFolderDownloadRequest,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
         self.authorize_endpoint_read(actor, &request.endpoint)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthorizedEndpointWrite;
+    use dasobjectstore_core::{backend::BackendObjectKey, ids::StoreId};
+
+    #[test]
+    fn subobject_write_qualifies_the_backend_namespace() {
+        let authorized = AuthorizedEndpointWrite {
+            store_id: StoreId::new("store-main").expect("store id"),
+            subobject: Some("project-media".to_string()),
+            object_prefix: Some("projects/alpha/media".to_string()),
+        };
+        let key = BackendObjectKey {
+            object_id: "frames/0001.raw".to_string(),
+            version: 7,
+        };
+
+        assert_eq!(
+            authorized.qualify_object(&key),
+            BackendObjectKey {
+                object_id: "projects/alpha/media/frames/0001.raw".to_string(),
+                version: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn root_write_preserves_the_backend_namespace() {
+        let authorized = AuthorizedEndpointWrite {
+            store_id: StoreId::new("store-main").expect("store id"),
+            subobject: None,
+            object_prefix: None,
+        };
+        let key = BackendObjectKey {
+            object_id: "frames/0001.raw".to_string(),
+            version: 7,
+        };
+
+        assert_eq!(authorized.qualify_object(&key), key);
     }
 }

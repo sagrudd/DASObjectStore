@@ -758,6 +758,7 @@ mod tests {
             job_id: IngestJobId::new("ingest-files-1").expect("job id"),
             accepted_at_utc: "2026-07-07T10:27:12Z".to_string(),
             dry_run: false,
+            objects: Vec::new(),
         })
         .expect("tui finishes");
 

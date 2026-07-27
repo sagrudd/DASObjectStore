@@ -1,7 +1,7 @@
+use super::ObjectBrowserDelegatedActor;
 use dasobjectstore_metadata::{
     WorkspaceCleanupPlan, WorkspaceExpiryCandidate, WorkspaceReservationSnapshot,
 };
-use super::ObjectBrowserDelegatedActor;
 use serde::{Deserialize, Serialize};
 
 pub const WORKSPACE_CONTROL_SCHEMA_VERSION: &str = "dasobjectstore.workspace_control.v1";

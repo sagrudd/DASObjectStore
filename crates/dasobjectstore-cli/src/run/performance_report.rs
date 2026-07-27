@@ -41,9 +41,9 @@ pub(super) fn fallback_qr_svg(payload: &str) -> String {
                     || x == 6
                     || y == 0
                     || y == 6
-                    || (x >= 2 && x <= 4 && y >= 2 && y <= 4)
-                    || (x >= cells - 5 && x <= cells - 3 && y >= 2 && y <= 4)
-                    || (x >= 2 && x <= 4 && y >= cells - 5 && y <= cells - 3)
+                    || ((2..=4).contains(&x) && (2..=4).contains(&y))
+                    || (x >= cells - 5 && x <= cells - 3 && (2..=4).contains(&y))
+                    || ((2..=4).contains(&x) && y >= cells - 5 && y <= cells - 3)
             } else {
                 state = state
                     .wrapping_mul(6364136223846793005)
@@ -138,7 +138,7 @@ pub(super) fn write_formal_performance_pdf_report_from_artifact(
 ) -> Result<(), CliError> {
     let metadata_json = performance_report_metadata_json_from_artifact(artifact);
     let generated_at =
-        json_string(artifact, &["run", "generated_at_utc"]).unwrap_or_else(|| now_utc_string());
+        json_string(artifact, &["run", "generated_at_utc"]).unwrap_or_else(now_utc_string);
     let qr_payload = performance_report_qr_payload_from_artifact(artifact);
     let status = ProcessCommand::new(report_renderer_command())
         .arg("render-report-pdf")

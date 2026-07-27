@@ -100,10 +100,10 @@ REPORT="$EVIDENCE_DIR/local-release-readiness-$COMMIT.txt"
     printf 'auth_authority_switch_mvp=passed_surrogate\n'
     printf 'remote_upload_completion_mvp=passed_surrogate\n'
     printf 'local_deployment_readiness=passed\n'
-    printf 'physical_das_acceptance=blocked_unavailable_host\n'
-    printf 'x86_64_package_parity=blocked_unavailable_host\n'
+    printf 'physical_das_acceptance=required_pending\n'
+    printf 'x86_64_package_parity=required_pending\n'
 } > "$REPORT"
 /bin/chmod 600 "$REPORT"
 printf 'Local deployment release-readiness evidence is complete.\n'
-printf 'External hardware gates remain blocked and are not reported as passed.\n'
+printf 'Physical x86_64 appliance gates remain required and are not reported as passed.\n'
 printf 'Report: %s\n' "$REPORT"

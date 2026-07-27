@@ -82,11 +82,11 @@ pub fn hash_file_sha256(path: impl AsRef<Path>) -> Result<String, std::io::Error
 
 pub fn hash_file_sha256_with_progress(
     path: impl AsRef<Path>,
-    mut progress: impl FnMut(u64) -> Result<(), std::io::Error>,
+    progress: impl FnMut(u64) -> Result<(), std::io::Error>,
 ) -> Result<String, std::io::Error> {
     let mut file = File::open(path)?;
     let mut sink = std::io::sink();
-    copy_and_hash_with_controlled_progress(&mut file, &mut sink, |bytes| progress(bytes))
+    copy_and_hash_with_controlled_progress(&mut file, &mut sink, progress)
         .map(|report| report.content_hash)
 }
 

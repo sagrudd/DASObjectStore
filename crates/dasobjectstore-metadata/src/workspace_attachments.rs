@@ -38,6 +38,9 @@ pub fn list_workspace_attachments(
     attachments
 }
 
+// This compare-and-swap API deliberately carries both the expected and new
+// attachment state plus the complete path-free publication record.
+#[allow(clippy::too_many_arguments)]
 pub fn publish_workspace_attachment_state(
     live_sqlite_path: &Path,
     workspace_id: &str,

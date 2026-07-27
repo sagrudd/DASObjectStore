@@ -102,7 +102,7 @@ pub(crate) fn upsert_storage_group(
 
     if entries
         .iter()
-        .any(|entry| entry.group_name().as_deref() == Some(group_name))
+        .any(|entry| entry.group_name() == Some(group_name))
     {
         return Ok(false);
     }
@@ -112,6 +112,7 @@ pub(crate) fn upsert_storage_group(
         display_name: None,
         source: Some("local_os".to_string()),
     });
+    entries.sort_by(|left, right| left.group_name().cmp(&right.group_name()));
 
     write_storage_group_entries(path, entries)?;
     Ok(true)

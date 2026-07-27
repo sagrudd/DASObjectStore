@@ -5,11 +5,10 @@ Source roadmap: [ROADMAP.md](ROADMAP.md)
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
 developers
 
-Current status: Milestones 1-18 record the delivered appliance foundation, not
-market completion. Milestones 19-24 and the architecture-remediation backlog
-contain active debt. The new market/integration campaign below is the primary
-dependency order; historical milestone checklists remain as implementation
-evidence and detailed source tasks.
+Current status: the release-candidate dashboard below is the sole authority for
+open work. Historical milestone and campaign checklists remain implementation
+evidence; an unchecked historical item is not automatically an active release
+requirement unless the dashboard links it.
 
 ## Working Rules
 
@@ -27,7 +26,73 @@ evidence and detailed source tasks.
   closed that item. A partial gate remains open until every required child task
   is implemented, validated, documented, committed, and pushed.
 
-### Current campaign gate status (2026-07-16)
+## Authoritative MVP Release-Candidate Dashboard
+
+Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
+appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
+operator surfaces, Monas/Prosopikon human authentication, bounded-folder
+compatibility, and SSD-to-HDD durability. The workspace version will advance
+through ``0.146.0-rc.N`` candidates and then ``0.146.0``. A ``1.0.0`` release
+requires a separate explicit compatibility decision.
+
+Work is dependency ordered. Only these entries define open release work:
+
+### Tier 0 — MVP release-candidate blockers
+
+- [x] **EPIC A — release baseline and planning authority.** Restored all
+  repository source gates, split every newly oversized production module,
+  reviewed rather than silently expanded legacy module exceptions, removed stale
+  platform/blocker claims, and make this dashboard plus ROADMAP the
+  authoritative scope. Exit evidence: formatting, strict clippy, the complete
+  workspace test suite, the Rust module budget, lockfile validation, package
+  guards, release-evidence script parsing, and the 12-case visual matrix pass
+  for version ``0.145.5``.
+- [ ] **EPIC B — appliance data-lifecycle closure.** Deliver durable,
+  idempotent ObjectStore creation intent/recovery; one persistent multi-class
+  fair scheduler; one logical-object identity across SSD, HDD, and Garage
+  placements; generated-data ``AfterHdd`` acknowledgement by default; and
+  SSD-first acknowledgement only when a durable destage reservation is held.
+- [ ] **EPIC C — durability maintenance, availability, and observability.**
+  Complete idle maintenance/reverification and balanced placement, retain
+  bounded control capacity and cancellation under ingest, prove telemetry
+  device mapping, and expose every retained or blocked staging byte with a
+  typed reason.
+- [ ] **EPIC D — security and package authority.** Make Monas/Prosopikon the
+  sole human identity/session authority, keep product roles audience-bound,
+  prove application registration/rotation/revocation, enforce APT-owned
+  install/upgrade/restart, and verify that production packages contain no
+  development issuer or secret material.
+- [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
+  acceptance on the available x86_64 DASServer before any representative
+  workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,
+  restart recovery, control SLOs, and a performance baseline with no
+  unexplained staging growth. Promote only commit-bound evidence.
+
+### Tier 1 — required for v1.0, not the MVP candidate
+
+- [ ] Dedicated-drive production acceptance, migration/protection workflows,
+  workspace-host promotion, Synoptikon/Mneion SQL authority cutover, and the
+  compatibility review required before declaring ``1.0.0``.
+- [ ] Remove the four reviewed legacy module-size exceptions without changing
+  behavior: daemon ``runtime/capacity_provider.rs``,
+  ``runtime/ingest_files.rs``, ``runtime/profile_s3.rs``, and
+  ``server/request_handler/service.rs``. No additional exception may be added
+  without a named owner, rationale, and removal task.
+
+### Tier 2 — later integrations
+
+- [ ] Non-Garage providers, additional architecture parity beyond the approved
+  platform tiers, and product-specific or experimental workload acceptance.
+  The transient HG002 workflow is explicitly excluded until its owner defines
+  a stable contract.
+
+### Tier 3 — historical evidence
+
+- [x] Milestones and campaign gates below record delivered foundations and
+  previously accepted slices. They are retained for traceability and must not
+  compete with Tier 0 dependency order.
+
+### Historical campaign gate status (last reconciled 2026-07-16)
 
 - `[x]` Live Status Web dashboard — daemon-authoritative ingest snapshots,
   appliance/actor-to-ObjectStore attribution, SSD and HDD progress/throughput,
@@ -66,8 +131,9 @@ evidence and detailed source tasks.
   principal registration, proof exchange, rotation, revocation, mTLS request
   revalidation, and redacted audit. A third surrogate matrix covers remote
   upload capability issuance, verify-before-commit ordering, replay, and
-  catalogue-failure recovery. Physical DAS, live Garage/shared-SQLite,
-  production CA, x86_64, multi-HDD, and performance acceptance remain blocked.
+  catalogue-failure recovery. Commit-bound physical DAS, live Garage/shared-
+  SQLite, production CA, multi-HDD, and performance acceptance remain pending
+  under EPIC E.
   Application-authorized exact-object deletion now has a distinct scoped
   ``delete`` operation, strict evidence-bound daemon contract, Garage
   verify/delete/absence sequence, atomic authoritative catalogue withdrawal,
@@ -76,23 +142,22 @@ evidence and detailed source tasks.
   serialization coverage. The Pinakotheke helper transport and live synthetic
   deletion remain the integration closure steps.
 
-## Current External Blockers (2026-07-13)
+## Current Acceptance Boundaries (2026-07-27)
 
-- DASServer/Garage hardware, appliance credentials, and deployment access are
-  unavailable while travelling. Do not retry DASServer connectivity until the
-  operator confirms they are home. In the interim, Lima with native ARM64
-  Ubuntu and AlmaLinux guests is approved for DEB/RPM
-  install/upgrade/uninstall, systemd/cgroup, reboot, and synthetic loop-device
-  coverage. VM evidence must not close physical
-  enclosure, SMART/NVMe, device replacement, multi-HDD/Garage durability, or
-  appliance performance acceptance; those remain scheduled for a quiescent
-  DASServer window using a bounded synthetic ``CODEX`` store; that later run
-  also supplies x86_64 parity.
+- The physical x86_64 DASServer is available at ``192.168.1.192`` and the
+  ARM64/GB10 DGX Spark at ``192.168.1.48``. Availability is not acceptance:
+  destructive, capacity-intensive, reboot, and performance tests still require
+  a declared quiescent window and must use only the bounded synthetic ``CODEX``
+  ObjectStore.
+- Commit-bound macOS, container, package, authentication, and physical-host
+  evidence must be regenerated for the candidate commit. Older evidence remains
+  useful history but cannot promote a different source revision.
 - The public paired-session HTTPS completion authentication contract is
   delivered as daemon-owned application identities, short-lived access-token
   exchange, and one-time completion capabilities. Production mTLS deployment
-  acceptance remains blocked on the unavailable appliance and CA material;
-  renewal tokens are never storage-operation bearer credentials.
+  acceptance remains pending against the available appliance and its
+  production CA; renewal tokens are never storage-operation bearer
+  credentials.
 - Development self-signing is permitted only for local workspace/local-Docker
   generated-data tests. It is explicitly rejected by appliance/production
   listeners and must not appear in RPM/DEB contents, including keys, issuers,

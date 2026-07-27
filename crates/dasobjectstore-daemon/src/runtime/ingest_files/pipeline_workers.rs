@@ -216,10 +216,9 @@ pub(super) fn settle_hdd_payload_with_controlled_progress(
     match payload {
         HddSettlementPayload::Staged(staged) => {
             settle_staged_object_to_hdd_with_controlled_progress(staged, progress)
-                .map_err(Into::into)
         }
         HddSettlementPayload::Direct(request) => {
-            put_object_direct_to_hdd_with_controlled_progress(request, progress).map_err(Into::into)
+            put_object_direct_to_hdd_with_controlled_progress(request, progress)
         }
     }
 }

@@ -651,9 +651,7 @@ fn resolve_diskstats_device_name(
         }
     }
 
-    let Some(sys_root) = sys_root else {
-        return None;
-    };
+    let sys_root = sys_root?;
     for candidate in candidates {
         let mut alias_roots = vec![sys_root.join("class/block")];
         if sys_root == Path::new("/sys") {
@@ -940,6 +938,53 @@ fn diskstats_counter_reset(current: &LinuxDiskIoCounters, previous: &LinuxDiskIo
         || current.io_time_millis < previous.io_time_millis
 }
 
+fn rate(delta: u64, elapsed_seconds: f64) -> f64 {
+    round_two_decimals(delta as f64 / elapsed_seconds)
+}
+
+fn round_two_decimals(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+fn parse_load_averages(proc_loadavg: &str) -> (Option<f64>, Option<f64>, Option<f64>) {
+    let mut fields = proc_loadavg.split_whitespace();
+    (
+        fields.next().and_then(parse_non_negative_f64),
+        fields.next().and_then(parse_non_negative_f64),
+        fields.next().and_then(parse_non_negative_f64),
+    )
+}
+
+fn parse_non_negative_f64(value: &str) -> Option<f64> {
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|parsed| parsed.is_finite() && *parsed >= 0.0)
+}
+
+fn parse_meminfo_kib(proc_meminfo: &str) -> BTreeMap<&str, u64> {
+    proc_meminfo
+        .lines()
+        .filter_map(|line| {
+            let (key, rest) = line.split_once(':')?;
+            let value = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+            Some((key, value))
+        })
+        .collect()
+}
+
+fn kib_to_bytes(value: u64) -> u64 {
+    value.saturating_mul(1024)
+}
+
+fn percent(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        ((numerator as f64 / denominator as f64) * 10_000.0).round() / 100.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1093,52 +1138,5 @@ mod tests {
         }];
         apply_registry_enclosure_labels(&registry, &mut summaries);
         assert_eq!(summaries[0].label.as_deref(), Some("primary"));
-    }
-}
-
-fn rate(delta: u64, elapsed_seconds: f64) -> f64 {
-    round_two_decimals(delta as f64 / elapsed_seconds)
-}
-
-fn round_two_decimals(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
-}
-
-fn parse_load_averages(proc_loadavg: &str) -> (Option<f64>, Option<f64>, Option<f64>) {
-    let mut fields = proc_loadavg.split_whitespace();
-    (
-        fields.next().and_then(parse_non_negative_f64),
-        fields.next().and_then(parse_non_negative_f64),
-        fields.next().and_then(parse_non_negative_f64),
-    )
-}
-
-fn parse_non_negative_f64(value: &str) -> Option<f64> {
-    value
-        .parse::<f64>()
-        .ok()
-        .filter(|parsed| parsed.is_finite() && *parsed >= 0.0)
-}
-
-fn parse_meminfo_kib(proc_meminfo: &str) -> BTreeMap<&str, u64> {
-    proc_meminfo
-        .lines()
-        .filter_map(|line| {
-            let (key, rest) = line.split_once(':')?;
-            let value = rest.split_whitespace().next()?.parse::<u64>().ok()?;
-            Some((key, value))
-        })
-        .collect()
-}
-
-fn kib_to_bytes(value: u64) -> u64 {
-    value.saturating_mul(1024)
-}
-
-fn percent(numerator: u64, denominator: u64) -> f64 {
-    if denominator == 0 {
-        0.0
-    } else {
-        ((numerator as f64 / denominator as f64) * 10_000.0).round() / 100.0
     }
 }

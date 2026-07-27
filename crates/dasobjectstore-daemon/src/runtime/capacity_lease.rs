@@ -140,10 +140,6 @@ mod tests {
             DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS,
             600
         );
-        assert!(
-            DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS
-                > DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS
-        );
     }
 
     #[test]

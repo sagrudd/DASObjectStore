@@ -40,7 +40,6 @@ pub struct LocalAdminCommandPlan {
 
 impl LocalAdminCommandPlan {
     fn new(program: impl Into<String>, args: Vec<String>) -> Self {
-        let args = args;
         Self {
             program: program.into(),
             display_args: args.clone(),

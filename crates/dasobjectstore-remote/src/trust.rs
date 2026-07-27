@@ -335,6 +335,7 @@ pub fn persist_trust(record: &ApplianceTrustRecord) -> Result<PathBuf, TrustErro
     reject_unsafe_file(&lock_path)?;
     let lock = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;
@@ -449,6 +450,7 @@ pub fn rotate_trust(
         .ok_or_else(|| TrustError::Invalid("trust record has no parent directory".to_string()))?;
     let lock = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(parent.join(".enrollment.lock"))?;

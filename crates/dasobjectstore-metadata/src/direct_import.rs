@@ -28,6 +28,9 @@ pub struct DirectHddImportRequest {
 }
 
 impl DirectHddImportRequest {
+    // This compatibility constructor mirrors the explicit risk-gated request
+    // fields; replacing it with positional defaults would weaken that boundary.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         object_id: ObjectId,
         disk_id: DiskId,

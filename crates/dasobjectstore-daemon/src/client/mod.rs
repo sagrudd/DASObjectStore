@@ -880,7 +880,6 @@ where
             )),
         }
     }
-
 }
 
 fn unexpected(expected: &'static str, response: DaemonApiResponse) -> DaemonClientError {

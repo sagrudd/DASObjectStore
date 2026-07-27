@@ -488,7 +488,7 @@ mod tests {
             checksum: "sha256:data".to_string(),
             location: ".dasobjectstore/objects/catalogue/data.txt".to_string(),
         };
-        ObjectCatalogueAuthority::commit_batch(&mut backend, &[record.clone()])
+        ObjectCatalogueAuthority::commit_batch(&mut backend, std::slice::from_ref(&record))
             .expect("guarded authority commit");
         assert_eq!(
             ObjectCatalogueAuthority::records(&backend).expect("guarded authority records"),

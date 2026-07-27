@@ -89,7 +89,7 @@ where
         .map_err(|error| WorkspaceCheckpointError::InvalidRequest(error.to_string()))?;
     let workspace = read_workspace_reservation(&config.live_sqlite_path, &workspace_id)
         .map_err(|error| WorkspaceCheckpointError::Metadata(error.to_string()))?;
-    if workspace.state.as_str() != "ready" || workspace.aggregate_mount_identity.is_none() {
+    if workspace.state.state_name() != "ready" || workspace.aggregate_mount_identity.is_none() {
         return Err(WorkspaceCheckpointError::UnsafeEvidence(
             "workspace must be ready and aggregated before checkpoint registration".to_string(),
         ));
@@ -243,11 +243,11 @@ fn validate_request(request: &WorkspaceCheckpointRequest) -> Result<(), Workspac
 }
 
 trait WorkspaceStateName {
-    fn as_str(self) -> &'static str;
+    fn state_name(self) -> &'static str;
 }
 
 impl WorkspaceStateName for dasobjectstore_core::workspace::ComputeWorkspaceState {
-    fn as_str(self) -> &'static str {
+    fn state_name(self) -> &'static str {
         match self {
             Self::Ready => "ready",
             _ => "other",

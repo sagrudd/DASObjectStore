@@ -492,8 +492,7 @@ fn read_store_policy(
     config: &WorkspacePromotionWorkerConfig,
     store_id: &StoreId,
 ) -> Result<StorePolicy, WorkspacePromotionError> {
-    let connection =
-        Connection::open(&config.live_sqlite_path).map_err(|error| metadata_error(error))?;
+    let connection = Connection::open(&config.live_sqlite_path).map_err(metadata_error)?;
     let json: String = connection
         .query_row(
             "SELECT policy_json FROM stores WHERE store_id = ?1",

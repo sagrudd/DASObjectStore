@@ -466,7 +466,7 @@ fn copy_object_payload(
             && catalogued.checksum == source_record.checksum
         {
             destination
-                .commit_batch(&[existing.clone()])
+                .commit_batch(std::slice::from_ref(&existing))
                 .map_err(|error| FolderMigrationError::Backend {
                     operation: "commit existing destination catalogue",
                     error,
@@ -523,7 +523,7 @@ fn copy_object_payload(
     {
         return Err(FolderMigrationError::VerificationMismatch);
     }
-    if let Err(error) = destination.commit_batch(&[verified.clone()]) {
+    if let Err(error) = destination.commit_batch(std::slice::from_ref(&verified)) {
         return Err(FolderMigrationError::Backend {
             operation: "commit destination catalogue",
             error,

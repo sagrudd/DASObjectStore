@@ -813,7 +813,7 @@ mod tests {
             Ok(vec![self.record.clone()])
         }
         fn commit_batch(&mut self, records: &[BackendObjectRecord]) -> Result<(), BackendError> {
-            assert_eq!(records, &[self.record.clone()]);
+            assert_eq!(records, std::slice::from_ref(&self.record));
             Ok(())
         }
         fn remove_record(&mut self, _: &BackendObjectKey) -> Result<(), BackendError> {

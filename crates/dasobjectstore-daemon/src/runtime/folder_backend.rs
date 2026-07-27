@@ -324,7 +324,7 @@ impl FolderBackend {
                     return Err(error);
                 }
             };
-            self.catalogue_authority_commit_batch(&[finalized.clone()])
+            self.catalogue_authority_commit_batch(std::slice::from_ref(&finalized))
                 .map_err(|error| {
                     let _ = manifest.checkpoint(
                         checkpoint_path,
@@ -588,7 +588,7 @@ fn source_revision(metadata: &Metadata) -> String {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return format!(
+        format!(
             "unix:{}:{}:{}:{}:{}:{}",
             metadata.dev(),
             metadata.ino(),
@@ -596,7 +596,7 @@ fn source_revision(metadata: &Metadata) -> String {
             metadata.len(),
             modified,
             metadata.mode()
-        );
+        )
     }
     #[cfg(not(unix))]
     {
@@ -738,7 +738,7 @@ fn is_ambiguous_hard_link(path: &Path) -> Result<bool, BackendError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        return Ok(fs::metadata(path).map_err(io_error)?.nlink() > 1);
+        Ok(fs::metadata(path).map_err(io_error)?.nlink() > 1)
     }
     #[cfg(not(unix))]
     {

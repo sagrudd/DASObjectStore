@@ -41,7 +41,7 @@ pub(super) fn measure_generate_random_file_with_progress(
             settler.submit(path.to_path_buf(), file)?;
         }
     }
-    if let Some(callback) = progress.as_deref_mut() {
+    if let Some(callback) = progress {
         callback(size_bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
     Ok(PerformanceMeasurement {
@@ -225,7 +225,7 @@ pub(super) fn measure_copy_with_split_progress(
         performance_sync_all(&writer)?;
     }
     destination_write_seconds += sync_started.elapsed().as_secs_f64();
-    if let Some(callback) = progress.as_deref_mut() {
+    if let Some(callback) = progress {
         callback(PerformanceSplitCopyProgress {
             bytes,
             source_read_seconds,
@@ -289,7 +289,7 @@ pub(super) fn measure_copy_with_progress_and_sync_policy(
             settler.submit(destination.to_path_buf(), writer)?;
         }
     }
-    if let Some(callback) = progress.as_deref_mut() {
+    if let Some(callback) = progress {
         callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
     Ok(PerformanceMeasurement {
@@ -385,7 +385,7 @@ pub(super) fn measure_read_with_progress(
             }
         }
     }
-    if let Some(callback) = progress.as_deref_mut() {
+    if let Some(callback) = progress {
         callback(bytes, started.elapsed().as_secs_f64().max(0.001))?;
     }
     Ok(PerformanceMeasurement {

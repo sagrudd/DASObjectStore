@@ -207,7 +207,7 @@ pub fn query_appliance_telemetry(
 ) -> ApplianceTelemetryResponse {
     let samples = samples_in_window(&sample_set.samples, request.window);
     let series_samples = downsample_samples(samples.clone(), request.window);
-    let current = samples.last().map(|sample| current_summary(sample));
+    let current = samples.last().map(current_summary);
     ApplianceTelemetryResponse {
         state: ApplianceTelemetryState::Available,
         generated_at_utc: Some(sample_set.generated_at_utc.clone()),

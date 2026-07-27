@@ -335,9 +335,8 @@ impl MultipartPartJournal {
         });
         self.manifest.parts.sort_by_key(|part| part.part_number);
         self.manifest.updated_at_unix_seconds = now_unix_seconds();
-        self.persist().map_err(|error| {
+        self.persist().inspect_err(|_| {
             let _ = fs::remove_file(&final_path);
-            error
         })?;
         Ok(record)
     }
@@ -349,7 +348,7 @@ impl MultipartPartJournal {
             .iter()
             .find(|part| part.part_number == part_number)
             .ok_or(MultipartPartJournalError::PartNotFound)?;
-        Ok(File::open(self.directory.join(&part.file_name)).map_err(io_error)?)
+        File::open(self.directory.join(&part.file_name)).map_err(io_error)
     }
 
     /// Durably claim this reservation for one immutable completion request.

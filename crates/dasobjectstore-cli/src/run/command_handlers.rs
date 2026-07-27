@@ -93,38 +93,6 @@ pub(crate) fn run_object_put(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_disk_roots;
-
-    #[test]
-    fn parse_disk_roots_rejects_missing_separator() {
-        assert!(parse_disk_roots(&["disk-a".to_string()]).is_err());
-    }
-
-    #[test]
-    fn parse_disk_roots_rejects_invalid_disk_id() {
-        assert!(parse_disk_roots(&[" =/tmp/disk".to_string()]).is_err());
-    }
-
-    #[test]
-    fn parse_disk_roots_rejects_empty_root() {
-        assert!(parse_disk_roots(&["disk-a=".to_string()]).is_err());
-    }
-
-    #[test]
-    fn parse_disk_roots_preserves_order_and_paths() {
-        let roots =
-            parse_disk_roots(&["disk-a=/tmp/a".to_string(), "disk-b=relative/b".to_string()])
-                .expect("valid disk root mappings");
-        assert_eq!(roots.len(), 2);
-        assert_eq!(roots[0].disk_id.as_str(), "disk-a");
-        assert_eq!(roots[0].root_path.to_string_lossy(), "/tmp/a");
-        assert_eq!(roots[1].disk_id.as_str(), "disk-b");
-        assert_eq!(roots[1].root_path.to_string_lossy(), "relative/b");
-    }
-}
-
 pub(crate) fn run_service_render_compose(
     args: &ServiceRenderComposeArgs,
     writer: &mut impl Write,
@@ -266,6 +234,38 @@ pub(crate) fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
 #[cfg(target_os = "macos")]
 pub(crate) fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
     MacosProbeProvider::system().probe()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_disk_roots;
+
+    #[test]
+    fn parse_disk_roots_rejects_missing_separator() {
+        assert!(parse_disk_roots(&["disk-a".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_rejects_invalid_disk_id() {
+        assert!(parse_disk_roots(&[" =/tmp/disk".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_rejects_empty_root() {
+        assert!(parse_disk_roots(&["disk-a=".to_string()]).is_err());
+    }
+
+    #[test]
+    fn parse_disk_roots_preserves_order_and_paths() {
+        let roots =
+            parse_disk_roots(&["disk-a=/tmp/a".to_string(), "disk-b=relative/b".to_string()])
+                .expect("valid disk root mappings");
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].disk_id.as_str(), "disk-a");
+        assert_eq!(roots[0].root_path.to_string_lossy(), "/tmp/a");
+        assert_eq!(roots[1].disk_id.as_str(), "disk-b");
+        assert_eq!(roots[1].root_path.to_string_lossy(), "relative/b");
+    }
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]

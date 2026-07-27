@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.5 - 2026-07-27
+
+- Establish one authoritative 0.146 MVP release-candidate dashboard with fixed
+  scope, dependency-ordered EPICs, explicit deferrals, and commit-bound
+  physical acceptance.
+- Split nine newly oversized CLI, daemon, metadata, remote, Web, and
+  workspace-host modules by responsibility without changing their public
+  contracts or adding module-size exceptions.
+- Correct release-readiness reporting for the now-available physical DASServer:
+  physical x86_64 evidence is required and pending rather than blocked by an
+  unavailable host.
+- Repair stale ingest response fixtures and restore formatting, compilation,
+  warning, and module-budget source gates.
+
 ## 0.145.4 - 2026-07-27
 
 - Extend the daemon-owned local ``store contents --json`` inventory evidence

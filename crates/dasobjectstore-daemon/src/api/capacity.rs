@@ -172,6 +172,9 @@ impl CapacityAdmissionResponse {
     /// exclusively borrowed by the daemon. Rejections never mutate the
     /// ledger; an admitted request uses its client request ID as the durable
     /// reservation key.
+    // Preserve the typed rejection response at this public compatibility
+    // boundary; boxing the established error variant would be a breaking API.
+    #[allow(clippy::result_large_err)]
     pub fn evaluate_and_reserve(
         request: &CapacityAdmissionRequest,
         policy: &CapacityPolicy,
@@ -216,8 +219,7 @@ impl CapacityAdmissionResponse {
         let result = evaluate_capacity_admission(policy, input);
         let required_backend_bytes = request
             .requested_bytes
-            .checked_mul(u64::from(request.copy_count))
-            .unwrap_or(u64::MAX);
+            .saturating_mul(u64::from(request.copy_count));
         let logical_available_bytes = policy.logical_limit_bytes.map(|limit| {
             limit
                 .saturating_sub(policy.backend_reserve_bytes)
@@ -261,10 +263,11 @@ impl CapacityAdmissionResponse {
                 .requires_ssd_staging()
                 .then_some(input.ssd_free_bytes),
             required_backend_bytes,
-            required_ssd_bytes: request
-                .requires_ssd_staging()
-                .then_some(request.requested_bytes)
-                .unwrap_or(0),
+            required_ssd_bytes: if request.requires_ssd_staging() {
+                request.requested_bytes
+            } else {
+                0
+            },
             copy_amplification_basis_points,
             warning_threshold_basis_points: policy.warning_threshold_basis_points,
             critical_threshold_basis_points: policy.critical_threshold_basis_points,

@@ -1,13 +1,38 @@
 # DASObjectStore Roadmap
 
-Status: Active product-integration campaign
-Tracked TODO status: Milestones 1-18 record the delivered appliance foundation;
-Milestones 19-24 contain partially delivered console, browser, upload,
-telemetry, and design work. Milestones 25-31 define the dependency-ordered
-campaign for multi-profile deployment and Mnemosyne-wide integration.
+Status: MVP release-candidate closure
+Tracked TODO status: the authoritative release-candidate dashboard at the top
+of ``TODO.md`` defines open work. The milestones below are retained as design
+history and acceptance evidence, not as a second competing backlog.
 Scope: a common managed object-storage service ranging from bounded local
 folders and dedicated SSDs to tiered DAS appliances
 Target platforms: Linux full support, macOS development/read-export support
+
+## 0.146 MVP Release-Candidate Plan
+
+The approved MVP target is an APT-managed Ubuntu x86_64 appliance with Garage
+and native ingest, Web/CLI/TUI operator surfaces, Monas/Prosopikon human
+authentication, bounded-folder compatibility, and explicit SSD-to-HDD
+durability. Dedicated-drive production acceptance, migrations, workspace-host
+promotion, Synoptikon/Mneion SQL authority cutover, non-Garage providers, and
+experimental workload acceptance are not candidate blockers.
+
+Five dependency-ordered EPICs close the candidate:
+
+1. restore a green, size-budgeted source baseline and one authoritative plan;
+2. close appliance creation, scheduling, logical-object identity,
+   acknowledgement, and destage state machines;
+3. prove maintenance, control-plane availability, telemetry, and retained-byte
+   observability;
+4. prove centralized authentication, application credentials, and APT package
+   authority; and
+5. run commit-bound synthetic physical acceptance before promotion.
+
+The release sequence is ``0.146.0-rc.N`` followed by ``0.146.0``. Release
+candidate scope is frozen except for defects required to satisfy these EPICs.
+Performance promotion requires a recorded baseline, no unexplained staging
+growth, and investigation of regressions greater than 20 percent. ``1.0.0``
+remains a later, explicit compatibility decision.
 
 ## Product Direction and Campaign Gates
 
@@ -237,8 +262,9 @@ capability contract and awaits deployment validation.
 
 ### Open technical debt
 
-The active baseline still has release-relevant gaps: provider upload completion
-is not yet an atomic catalogue transaction; Garage reconciliation now uses
+The historical campaign identified release-relevant gaps. Current open work is
+classified by the authoritative TODO dashboard rather than this narrative.
+Garage reconciliation uses
 durable provider-independent manifest/checkpoint planning plus a per-key Garage
 transfer worker with progress and administrator cancellation checks between
 provider transfers; the packaged command runner now also polls and terminates a
@@ -258,16 +284,16 @@ device mapping and appliance acceptance remain incomplete; and UI/design work
 remains. Stable telemetry device mapping and the packaged collection loop are
 covered by offline fixtures; physical device mapping and appliance acceptance
 remain deployment-gated. The folder backend, daemon API validation adapters,
-request-handler error projections, and bounded-profile storage dispatch have
-been split below the production size budget; the module-size guard passes with
-no exceptions. Hardware-only acceptance is deferred while travelling without DAS
-access. Lima with native ARM64 Ubuntu and AlmaLinux guests is approved as the
-interim surrogate for DEB/RPM package, systemd/cgroup, reboot, and synthetic
-loop-device evidence, but it cannot close
+request-handler error projections, and bounded-profile storage dispatch were
+split below the production size budget. Later growth introduced new violations
+and retained four named legacy exceptions; EPIC A owns restoring the guard and
+recording explicit removal work rather than claiming an exception-free
+baseline. The physical x86_64 DASServer is now available. Lima with native
+ARM64 Ubuntu and AlmaLinux guests remains useful package, systemd/cgroup,
+reboot, and synthetic loop-device evidence, but it cannot close
 physical enclosure, SMART/NVMe, multi-HDD/Garage durability, replacement, or
-performance acceptance. Those gates resume during a quiescent DASServer window
-after the operator confirms access is available; that later run also supplies
-x86_64 parity.
+performance acceptance. Those gates require a quiescent DASServer window and a
+bounded synthetic ``CODEX`` store; availability alone is not acceptance.
 
 The shared Linux package assets now put the Web control plane and storage daemon
 in distinct systemd slices with CPU, memory, and I/O accounting and explicit

@@ -645,10 +645,12 @@ fn ensure_store(tx: &Transaction<'_>, id: &StoreId) -> Result<(), DestageMetadat
     }
     Ok(())
 }
+type DestageIdentity = (String, i64, String, String, String, u8);
+
 fn read_identity(
     tx: &Transaction<'_>,
     id: &ObjectId,
-) -> Result<Option<(String, i64, String, String, String, u8)>, DestageMetadataError> {
+) -> Result<Option<DestageIdentity>, DestageMetadataError> {
     tx.query_row("SELECT q.store_id,q.expected_size_bytes,q.content_hash_algorithm,q.content_hash,q.acknowledgement_policy,q.required_copy_count FROM destage_queue q JOIN ssd_object_placements s ON s.object_id=q.object_id WHERE q.object_id=?1",[id.as_str()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional().map_err(Into::into)
 }
 fn read_record_tx(

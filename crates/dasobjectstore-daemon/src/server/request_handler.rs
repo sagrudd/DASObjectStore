@@ -1223,8 +1223,9 @@ mod tests {
         .with_profile_binding_registry_path(&profile_registry)
         .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store"));
         let actor = DaemonLocalActor::new(0).with_username("root");
-        let binding_request =
+        let mut binding_request =
             profile_binding_request_for_auth_test("stream-store", backend_root.clone());
+        binding_request.store_definition = Some(store_definitions[0].clone());
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
@@ -1481,8 +1482,10 @@ mod tests {
             store_definitions[0].policy.capacity.clone(),
         )
         .expect("capacity ledger");
-        let mut service = FakeService::default();
-        service.capacity_provider = Some(Arc::new(provider));
+        let service = FakeService {
+            capacity_provider: Some(Arc::new(provider)),
+            ..FakeService::default()
+        };
         let handler =
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-14T09:00:00Z"))
                 .with_registry_paths(&store_registry, &subobject_registry)
@@ -1491,9 +1494,10 @@ mod tests {
                 .with_profile_binding_registry_path(&profile_registry);
         let actor = DaemonLocalActor::new(0)
             .with_username("root")
-            .with_groups(["mnemosyne"]);
-        let binding_request =
+            .with_groups(["mnemosyne", "writers"]);
+        let mut binding_request =
             profile_binding_request_for_auth_test("upload-store", backend_root.clone());
+        binding_request.store_definition = Some(store_definitions[0].clone());
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
@@ -2008,7 +2012,7 @@ mod tests {
                 policy,
                 bucket_name: None,
                 reader_group: None,
-                writer_group: Some("writers".to_string()),
+                writer_group: None,
                 public: false,
             }),
             backend_root,
@@ -2054,11 +2058,16 @@ mod tests {
     #[test]
     fn folder_profile_create_bootstraps_private_namespace_without_adopting_files() {
         let root = temp_root("profile-folder-create");
+        cleanup(&root);
         let backend_root = root.join("store");
         fs::create_dir_all(backend_root.join("incoming")).expect("user hierarchy");
         let user_file = backend_root.join("incoming/user.txt");
         fs::write(&user_file, b"user-owned").expect("user file");
         let profile_registry = root.join("profile-bindings.json");
+        let capacity = dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.capacity = capacity.clone();
+        policy.copies = 1;
         let request = ProfileBindingRequest {
             operation: ProfileBindingOperation::Create,
             manifest: ObjectStoreManifest {
@@ -2071,8 +2080,15 @@ mod tests {
                     root_identity: "fsid:folder-create".to_string(),
                 },
             },
-            capacity: dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64),
-            store_definition: None,
+            capacity,
+            store_definition: Some(StoreServiceDefinition {
+                store_id: StoreId::new("folder-create").expect("store id"),
+                policy,
+                bucket_name: None,
+                reader_group: None,
+                writer_group: Some("mnemosyne".to_string()),
+                public: false,
+            }),
             backend_root: backend_root.clone(),
             ssd_staging_root: None,
             dry_run: false,
@@ -2084,7 +2100,9 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T10:01:00Z"),
         )
-        .with_profile_binding_registry_path(&profile_registry);
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
 
         let actor = DaemonLocalActor::new(0).with_username("codex");
         let first_response = handler
@@ -3796,6 +3814,7 @@ mod tests {
     #[test]
     fn daemon_object_browser_returns_authorized_live_metadata_with_readiness() {
         let root = temp_root("browser-auth-allowed");
+        cleanup(&root);
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "ena", Some("mnemosyne"));
         let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
@@ -3822,7 +3841,9 @@ mod tests {
                 .with_registry_paths(&store_registry, &subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
                 .with_profile_binding_registry_path(&profile_registry);
-        let binding_request = profile_binding_request_for_auth_test("ena", backend_root.clone());
+        let mut binding_request =
+            profile_binding_request_for_auth_test("ena", backend_root.clone());
+        binding_request.store_definition = Some(store_definitions[0].clone());
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
@@ -4671,6 +4692,9 @@ mod tests {
         store_id: &str,
         backend_root: PathBuf,
     ) -> ProfileBindingRequest {
+        let capacity = dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
+        policy.capacity = capacity.clone();
         ProfileBindingRequest {
             operation: ProfileBindingOperation::Create,
             manifest: ObjectStoreManifest {
@@ -4683,8 +4707,15 @@ mod tests {
                     root_identity: format!("fsid:{store_id}"),
                 },
             },
-            capacity: dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64),
-            store_definition: None,
+            capacity,
+            store_definition: Some(StoreServiceDefinition {
+                store_id: StoreId::new(store_id).expect("store id"),
+                policy,
+                bucket_name: None,
+                reader_group: None,
+                writer_group: Some("writers".to_string()),
+                public: false,
+            }),
             backend_root,
             ssd_staging_root: None,
             dry_run: false,
@@ -4838,13 +4869,16 @@ mod tests {
     #[test]
     fn profile_binding_response_redacts_paths_and_uses_authenticated_actor() {
         let root = temp_root("profile-binding-admin");
+        cleanup(&root);
         fs::create_dir_all(&root).expect("backend root");
         let registry = root.join("profile-bindings.json");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:02:00Z"),
         )
-        .with_profile_binding_registry_path(&registry);
+        .with_profile_binding_registry_path(&registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         let response = handler
             .handle_with_progress_for_actor(
@@ -5307,15 +5341,19 @@ mod tests {
     #[test]
     fn profile_inspection_requires_authenticated_actor_and_redacts_paths() {
         let root = temp_root("profile-inspection-auth");
-        fs::create_dir_all(&root).expect("backend root");
-        fs::write(root.join("user.txt"), b"unmanaged").expect("user file");
+        cleanup(&root);
+        let backend = root.join("backend");
+        fs::create_dir_all(&backend).expect("backend root");
+        fs::write(backend.join("user.txt"), b"unmanaged").expect("user file");
         let registry = root.with_extension("profile-bindings.json");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:03:00Z"),
         )
-        .with_profile_binding_registry_path(&registry);
-        let binding_request = profile_binding_request_for_auth_test("inspect", root.clone());
+        .with_profile_binding_registry_path(&registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
+        let binding_request = profile_binding_request_for_auth_test("inspect", backend);
         let actor = DaemonLocalActor::new(0).with_username("root");
         handler
             .handle_with_progress_for_actor(
@@ -5361,6 +5399,7 @@ mod tests {
     #[test]
     fn profile_inspection_missing_root_is_read_only_and_redacted() {
         let root = temp_root("profile-inspection-missing");
+        cleanup(&root);
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let registry = root.with_extension("profile-bindings.json");
@@ -5368,7 +5407,9 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:04:00Z"),
         )
-        .with_profile_binding_registry_path(&registry);
+        .with_profile_binding_registry_path(&registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         handler
             .handle_with_progress_for_actor(
@@ -5404,6 +5445,7 @@ mod tests {
     #[test]
     fn profile_readiness_reports_explicit_capacity_blocker_without_paths() {
         let root = temp_root("profile-readiness");
+        cleanup(&root);
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let registry = root.with_extension("profile-bindings.json");
@@ -5411,7 +5453,9 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:05:00Z"),
         )
-        .with_profile_binding_registry_path(&registry);
+        .with_profile_binding_registry_path(&registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         handler
             .handle_with_progress_for_actor(
@@ -5450,6 +5494,7 @@ mod tests {
     #[test]
     fn profile_browser_reads_folder_catalogue_without_exposing_backend_metadata() {
         let root = temp_root("profile-browser");
+        cleanup(&root);
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let (store_registry, subobject_registry) =
@@ -5460,10 +5505,13 @@ mod tests {
             FixedDaemonClock::new("2026-07-13T11:06:00Z"),
         )
         .with_registry_paths(store_registry, subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry);
-        let actor = DaemonLocalActor::new(0)
-            .with_username("root")
-            .with_groups(["users"]);
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_live_sqlite_path(root.join("live.sqlite"));
+        let actor = DaemonLocalActor::new(0).with_username("root").with_groups([
+            "users",
+            "mnemosyne",
+            "writers",
+        ]);
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
@@ -5506,7 +5554,7 @@ mod tests {
             )
             .expect("profile browser");
         let DaemonApiResponse::ProfileBrowser(response) = response else {
-            panic!("expected profile browser response");
+            panic!("expected profile browser response: {response:?}");
         };
         assert_eq!(response.entries.len(), 1);
         assert_eq!(response.entries[0].key.object_id, "nested/sample.fastq");
@@ -5520,6 +5568,7 @@ mod tests {
     #[test]
     fn folder_profile_adopt_executes_checkpointed_reconciliation_without_mutating_source() {
         let root = temp_root("profile-adopt");
+        cleanup(&root);
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let source = backend.join("nested/input.txt");
@@ -5530,7 +5579,9 @@ mod tests {
             FakeService::default(),
             FixedDaemonClock::new("2026-07-13T11:05:00Z"),
         )
-        .with_profile_binding_registry_path(&registry);
+        .with_profile_binding_registry_path(&registry)
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
         let actor = DaemonLocalActor::new(0).with_username("root");
         let mut request = profile_binding_request_for_auth_test("adopt", backend.clone());
         request.operation = ProfileBindingOperation::Adopt;

@@ -50,7 +50,8 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
         state_root.join("stores.json"),
         state_root.join("subobjects.json"),
     )
-    .with_profile_binding_registry_path(state_root.join("profile-bindings.json"));
+    .with_profile_binding_registry_path(state_root.join("profile-bindings.json"))
+    .with_live_sqlite_path(state_root.join("live.sqlite"));
     let client = DaemonClient::new(InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
@@ -70,9 +71,7 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
     let manifest = plan.manifest.clone();
     let mut backend = FolderBackend::open(&backend_root, manifest.clone(), capacity.clone(), 0)
         .expect("provisioned backend opens");
-    let payloads = (0..OBJECT_COUNT)
-        .map(|index| generated_payload(index))
-        .collect::<Vec<_>>();
+    let payloads = (0..OBJECT_COUNT).map(generated_payload).collect::<Vec<_>>();
     for (index, payload) in payloads.iter().enumerate() {
         put_profile_object(
             &mut backend,

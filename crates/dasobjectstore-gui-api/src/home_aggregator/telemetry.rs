@@ -231,7 +231,7 @@ fn optional_mib(value: Option<f64>) -> Option<u32> {
 }
 
 fn finite_u32(value: f64) -> Option<u32> {
-    finite_nonnegative(Some(value)).map(|value| rounded_u32(value))
+    finite_nonnegative(Some(value)).map(rounded_u32)
 }
 
 fn telemetry_missing_reason_label(reason: ApplianceTelemetryMissingReason) -> &'static str {

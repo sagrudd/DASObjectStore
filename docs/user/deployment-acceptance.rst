@@ -65,12 +65,13 @@ recognizing the bounded post-commit crash window when it is already absent.
 The evidence labels provider execution as ``surrogate_only``: it does not
 replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 
-Hardware acceptance after returning home
-----------------------------------------
+Physical appliance acceptance
+-----------------------------
 
-Wait for the operator to confirm a quiescent DASServer window before using the
-documented SSH identity or touching the appliance. Then run x86_64 package
-parity plus generated-data physical-drive identity, SMART/NVMe, replacement,
-full-disk/corruption, multi-HDD/Garage durability, control-plane saturation,
-and performance/soak matrices. Those results must be recorded separately; a
-surrogate report must never be relabelled as hardware acceptance.
+The x86_64 DASServer is available, but availability is not an acceptance
+window. Wait for the operator to confirm that the appliance is quiescent before
+running x86_64 package parity or generated-data physical-drive identity,
+SMART/NVMe, replacement, full-disk/corruption, multi-HDD/Garage durability,
+control-plane saturation, and performance/soak matrices. Use only the bounded
+synthetic ``CODEX`` ObjectStore. Record those results separately; surrogate or
+older-commit evidence must never be relabelled as physical acceptance.

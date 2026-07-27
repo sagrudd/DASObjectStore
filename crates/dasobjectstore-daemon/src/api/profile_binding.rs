@@ -4,7 +4,7 @@ use dasobjectstore_core::manifest::ObjectStoreManifest;
 use dasobjectstore_core::store::CapacityPolicy;
 use dasobjectstore_object_service::StoreServiceDefinition;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const PROFILE_BINDING_CONFIRMATION: &str = "confirm profile binding";
 
@@ -181,16 +181,13 @@ impl std::fmt::Display for ProfileBindingValidationError {
 
 impl std::error::Error for ProfileBindingValidationError {}
 
-fn require_absolute(
-    field: &'static str,
-    path: &PathBuf,
-) -> Result<(), ProfileBindingValidationError> {
+fn require_absolute(field: &'static str, path: &Path) -> Result<(), ProfileBindingValidationError> {
     if path.is_absolute() {
         Ok(())
     } else {
         Err(ProfileBindingValidationError::RelativePath {
             field,
-            path: path.clone(),
+            path: path.to_path_buf(),
         })
     }
 }

@@ -1946,7 +1946,7 @@ fn home_dashboard_live_payload_maps_to_metrics_and_attention() {
         .all(|point| point.x >= 48.0 && point.x <= 616.0));
     assert!(chart_points
         .iter()
-        .all(|point| { point.y.is_some_and(|y| y >= 24.0 && y <= 144.0) }));
+        .all(|point| { point.y.is_some_and(|y| (24.0..=144.0).contains(&y)) }));
     assert_eq!(home_throughput_chart_max_tib(&chart_points), "1.8 TiB");
     assert_eq!(
         home_throughput_chart_polyline(&chart_points),
@@ -2958,7 +2958,7 @@ fn local_access_component_contract_is_users_first_and_task_pane_scoped() {
         "Sessions",
     ] {
         assert!(
-            source.contains(&format!("{header}")),
+            source.contains(header),
             "missing users table header: {header}"
         );
     }

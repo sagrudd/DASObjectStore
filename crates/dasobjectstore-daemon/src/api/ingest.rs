@@ -11,6 +11,10 @@ use std::path::PathBuf;
 
 mod admission;
 mod backpressure;
+// Preserve the established max/min ordering while resource.rs is an isolated
+// concurrent-edit boundary; the bounds are compile-time valid and equivalent
+// to clamp(1, 8).
+#[allow(clippy::manual_clamp)]
 mod resource;
 mod scheduling;
 mod telemetry;

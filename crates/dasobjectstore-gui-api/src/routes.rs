@@ -80,9 +80,7 @@ pub(crate) struct HomeDashboardQuery {
 
 impl HomeDashboardQuery {
     pub(crate) fn selected_window(&self) -> ApplianceTelemetryWindow {
-        self.telemetry_window
-            .or(self.window)
-            .unwrap_or_else(ApplianceTelemetryWindow::default)
+        self.telemetry_window.or(self.window).unwrap_or_default()
     }
 }
 

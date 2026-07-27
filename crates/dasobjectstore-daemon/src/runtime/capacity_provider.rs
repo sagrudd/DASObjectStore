@@ -37,6 +37,9 @@ pub trait CapacitySpaceProbe: Send + Sync {
 pub struct StatvfsCapacitySpaceProbe;
 
 impl CapacitySpaceProbe for StatvfsCapacitySpaceProbe {
+    // libc exposes statvfs counters with platform-dependent integer widths;
+    // retain checked conversion/multiplication for one cross-platform path.
+    #[allow(clippy::unnecessary_fallible_conversions, clippy::useless_conversion)]
     fn free_bytes(&self, path: &Path) -> Result<u64, String> {
         let path = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|_| format!("capacity probe path contains NUL: {}", path.display()))?;

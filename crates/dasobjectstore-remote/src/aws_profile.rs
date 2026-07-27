@@ -272,6 +272,7 @@ fn lock_paths(paths: &AwsPaths) -> Result<Vec<File>, AwsProfileError> {
         }
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(path)?;

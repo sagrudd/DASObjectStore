@@ -20,17 +20,16 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
-    let delegated_actor = match handler
-        .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
-    {
-        Ok(actor) => actor,
-        Err(error_value) => {
-            return Ok(error(
-                "workspace_actor_delegation_rejected",
-                error_value.to_string(),
-            ))
-        }
-    };
+    let delegated_actor =
+        match handler.delegated_object_browser_actor(actor, request.delegated_actor.as_ref()) {
+            Ok(actor) => actor,
+            Err(error_value) => {
+                return Ok(error(
+                    "workspace_actor_delegation_rejected",
+                    error_value.to_string(),
+                ))
+            }
+        };
     let effective_actor = delegated_actor.as_ref().or(actor);
     let Some(actor) = effective_actor else {
         return Ok(error(

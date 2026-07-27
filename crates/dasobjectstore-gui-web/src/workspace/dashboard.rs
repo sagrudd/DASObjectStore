@@ -279,7 +279,7 @@ pub(super) fn throughput_chart_points(
         1.0
     };
     let span = days.len().saturating_sub(1).max(1) as f64;
-    days.into_iter()
+    days.iter()
         .enumerate()
         .map(|(index, day)| {
             let ingest_tib = parse_tib_value(&day.ingest_tib);
