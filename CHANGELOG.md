@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.146.3 - 2026-07-27
+
+- Route ``ProfileS3MultipartUploads`` through the production daemon storage
+  dispatcher so the externally exposed S3 operation reaches its
+  journal-backed implementation.
+
 ## 0.146.2 - 2026-07-27
 
 - Keep standard S3 ``ListMultipartUploads`` compatible with historical

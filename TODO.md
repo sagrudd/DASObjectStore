@@ -1281,6 +1281,8 @@ hardware acceptance.
     those daemon journals so recoverable work cannot appear to have vanished.
     Release 0.146.2 preserves that projection across legacy terminal journal
     schemas without weakening validation of advertised recoverable work.
+    Release 0.146.3 wires the operation through the production daemon
+    dispatcher; external GB10 acceptance guards against API/daemon route skew.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; daemon request routing and
     runtime store dispatch now complete through the journal-backed completion

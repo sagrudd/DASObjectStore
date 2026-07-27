@@ -73,6 +73,7 @@ where
         | DaemonApiRequest::ProfileS3Delete(_)
         | DaemonApiRequest::ProfileS3MultipartAbort(_)
         | DaemonApiRequest::ProfileS3MultipartComplete(_)
+        | DaemonApiRequest::ProfileS3MultipartUploads(_)
         | DaemonApiRequest::ProfileS3Head(_)
         | DaemonApiRequest::ProfileS3Verify(_)
         | DaemonApiRequest::ProfileS3Health(_)
