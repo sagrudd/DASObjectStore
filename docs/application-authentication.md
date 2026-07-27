@@ -149,10 +149,19 @@ authoritative catalogue before provider mutation.
 
 Garage deletion uses only daemon-managed credentials. The daemon verifies the
 current provider object, deletes the exact key, verifies absence, atomically
-withdraws the matching catalogue row, and records a redacted audit event.
+withdraws the matching catalogue row, reconciles store-global logical used
+bytes, and records a redacted audit event. The checked remaining-byte total is
+computed in the withdrawal transaction across all catalogue namespaces for
+that ObjectStore. Capacity authority is required before provider mutation, and
+application upload completion and deletion share a per-ObjectStore mutation
+guard so a concurrent settlement cannot be lost.
 Changed evidence or an uncatalogued provider object fails closed before
-mutation. Exact absence is idempotent success. Applications must not substitute
+mutation. A reconciliation failure is reported as failure; exact-absence retry
+recomputes the same authoritative remainder and repairs the capacity ledger.
+Exact absence is idempotent success. Applications must not substitute
 raw S3 deletion or remove their projection before the authoritative response.
+Release `0.145.3` is the minimum providing
+`dasobjectstore.application-delete-capacity-reconciliation.v1`.
 The v1 request is defined at
 `/api/v1/application-auth/object-deletions`; its first consumer helper and live
 synthetic deployment remain separate integration work.

@@ -71,9 +71,10 @@ evidence and detailed source tasks.
   Application-authorized exact-object deletion now has a distinct scoped
   ``delete`` operation, strict evidence-bound daemon contract, Garage
   verify/delete/absence sequence, atomic authoritative catalogue withdrawal,
-  idempotent absence, and redacted audit. The Pinakotheke helper transport,
-  capacity-ledger reconciliation, and live synthetic deletion remain the
-  integration closure steps.
+  idempotent absence, and redacted audit. Store-global logical-capacity
+  reconciliation is released in ``0.145.3`` with crash-retry and same-store
+  serialization coverage. The Pinakotheke helper transport and live synthetic
+  deletion remain the integration closure steps.
 
 ## Current External Blockers (2026-07-13)
 

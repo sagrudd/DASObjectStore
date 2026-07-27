@@ -26,14 +26,35 @@ catalogue row, and writes a redacted application audit event. Changed evidence
 fails before deletion. A provider object that exists without matching
 catalogue evidence is rejected rather than adopted or removed.
 
+Capacity convergence
+--------------------
+
+This behavior is the
+``dasobjectstore.application-delete-capacity-reconciliation.v1`` capability
+released in DASObjectStore ``0.145.3``.
+
+Capacity authority must be available before any provider mutation. Catalogue
+withdrawal returns the checked remaining logical bytes for the complete
+ObjectStore, across all profile namespaces, from the same SQLite transaction.
+The daemon then reconciles the store-global logical-capacity ledger before it
+reports terminal success. Application upload settlement and deletion share a
+per-ObjectStore mutation guard; different stores remain independent.
+
+If capacity reconciliation fails after provider and catalogue deletion, the
+request fails rather than claiming success. An exact retry follows the
+``already_absent`` path, recomputes the same store-global remainder, and repairs
+the ledger. Outstanding capacity reservations remain governed by the capacity
+provider during reconciliation.
+
 Idempotency and recovery
 ------------------------
 
 An exact retry after both provider and catalogue removal returns
 ``already_absent``. If the provider object is absent but the matching catalogue
 row remains after an interrupted operation, the retry withdraws that stale row
-and returns ``already_absent``. Pinakotheke may remove its gallery projection
-only after receiving ``deleted`` or ``already_absent`` from this authority.
+and returns ``already_absent`` only after capacity reconciliation succeeds.
+Pinakotheke may remove its gallery projection only after receiving ``deleted``
+or ``already_absent`` from this authority.
 
 The initial daemon contract is
 ``dasobjectstore.application_object_delete.v1`` at

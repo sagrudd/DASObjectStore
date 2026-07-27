@@ -8,6 +8,20 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.145.3 - 2026-07-27
+
+- Reconcile store-global logical used bytes after every terminal
+  application-authorized exact-object deletion, including an idempotent retry
+  that repairs the provider-deleted/catalogue-present crash window.
+- Compute the checked remainder in the same catalogue-withdrawal transaction
+  across every profile namespace for the ObjectStore.
+- Require capacity authority before provider mutation and serialize
+  application upload settlement and deletion per ObjectStore so concurrent
+  mutations cannot overwrite one another's ledger result.
+- Propagate reconciliation failures while preserving safe exact-absence retry,
+  with cross-namespace, other-store, failure/retry, and concurrency regression
+  coverage.
+
 ## 0.145.2 - 2026-07-27
 
 - Make completion-bound daemon uploads ignore caller AWS profiles and

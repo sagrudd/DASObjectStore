@@ -54,6 +54,9 @@ pub struct ProfileCatalogueObjectWithdrawalRequest<'a> {
 pub struct ProfileCatalogueObjectWithdrawalReport {
     pub removed: bool,
     pub already_absent: bool,
+    /// Remaining authoritative logical bytes for the entire store across all
+    /// profile namespaces, measured in the withdrawal transaction.
+    pub remaining_logical_bytes: u64,
 }
 
 /// Verify one exact provider-backed catalogue row without mutating it.
@@ -116,10 +119,12 @@ pub fn withdraw_profile_catalogue_object(
         )
         .optional()?;
     let Some(object_json) = object_json else {
+        let remaining_logical_bytes = store_logical_bytes(&transaction, request.store_id)?;
         transaction.commit()?;
         return Ok(ProfileCatalogueObjectWithdrawalReport {
             removed: false,
             already_absent: true,
+            remaining_logical_bytes,
         });
     };
     validate_object_withdrawal_evidence(&request, &object_json)?;
@@ -140,11 +145,40 @@ pub fn withdraw_profile_catalogue_object(
             version: request.object_version,
         });
     }
+    let remaining_logical_bytes = store_logical_bytes(&transaction, request.store_id)?;
     transaction.commit()?;
     Ok(ProfileCatalogueObjectWithdrawalReport {
         removed: true,
         already_absent: false,
+        remaining_logical_bytes,
     })
+}
+
+fn store_logical_bytes(
+    transaction: &Transaction<'_>,
+    store_id: &StoreId,
+) -> Result<u64, ProfileCatalogueCommitError> {
+    let mut statement = transaction.prepare(
+        "SELECT object_json FROM profile_catalogue_objects
+         WHERE store_id = ?1",
+    )?;
+    let object_rows =
+        statement.query_map(params![store_id.as_str()], |row| row.get::<_, String>(0))?;
+    let mut logical_bytes = 0_u64;
+    for object_json in object_rows {
+        let object: dasobjectstore_core::object_catalogue::PortableObjectVersion =
+            serde_json::from_str(&object_json?).map_err(|error| {
+                ProfileCatalogueCommitError::InvalidCatalogue(error.to_string())
+            })?;
+        logical_bytes = logical_bytes
+            .checked_add(object.size_bytes)
+            .ok_or_else(|| {
+                ProfileCatalogueCommitError::InvalidCatalogue(
+                    "profile catalogue logical byte total exceeds u64".to_string(),
+                )
+            })?;
+    }
+    Ok(logical_bytes)
 }
 
 fn validate_object_withdrawal_request(
@@ -850,6 +884,12 @@ mod tests {
                 [],
             )
             .expect("store");
+        connection
+            .execute(
+                "INSERT INTO stores VALUES ('store-b', 'pool-a', 'folder', '{}', 'now', 'now')",
+                [],
+            )
+            .expect("other store");
         drop(connection);
         let store_id = StoreId::new("store-a").expect("store id");
         let mut catalogue = sample_catalogue();
@@ -857,6 +897,17 @@ mod tests {
             provider: "garage".into(),
             object_key: "bucket-a/media/object-a".into(),
         };
+        let mut retained = catalogue.objects[0].clone();
+        retained.object_id = ObjectId::new("object-b").expect("object id");
+        retained.size_bytes = 5;
+        retained.checksum.value = "bbb".into();
+        retained.placements[0].placement_id =
+            PlacementId::new("placement-b").expect("placement id");
+        retained.placements[0].location = PortablePlacementLocation::Provider {
+            provider: "garage".into(),
+            object_key: "bucket-a/media/object-b".into(),
+        };
+        catalogue.objects.push(retained);
         commit_profile_catalogue(
             &db,
             ProfileCatalogueCommitRequest {
@@ -870,6 +921,52 @@ mod tests {
             },
         )
         .expect("catalogue commit");
+        let mut other_namespace_catalogue = sample_catalogue();
+        other_namespace_catalogue.objects[0].object_id =
+            ObjectId::new("object-c").expect("object id");
+        other_namespace_catalogue.objects[0].size_bytes = 11;
+        other_namespace_catalogue.objects[0].checksum.value = "ccc".into();
+        other_namespace_catalogue.objects[0].placements[0].placement_id =
+            PlacementId::new("placement-c").expect("placement id");
+        other_namespace_catalogue.objects[0].placements[0].location =
+            PortablePlacementLocation::Provider {
+                provider: "garage".into(),
+                object_key: "bucket-a/media/object-c".into(),
+            };
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-other-namespace",
+                profile_namespace: "provider:archive",
+                store_id: &store_id,
+                catalogue: &other_namespace_catalogue,
+                source_retained: true,
+                exact_snapshot: false,
+                committed_at_utc: "2026-07-23T00:00:01Z",
+            },
+        )
+        .expect("other namespace commit");
+        let other_store_id = StoreId::new("store-b").expect("other store id");
+        let mut other_catalogue = sample_catalogue();
+        other_catalogue.store_id = other_store_id.clone();
+        other_catalogue.objects[0].size_bytes = 7;
+        other_catalogue.objects[0].placements[0].location = PortablePlacementLocation::Provider {
+            provider: "garage".into(),
+            object_key: "bucket-b/media/object-a".into(),
+        };
+        commit_profile_catalogue(
+            &db,
+            ProfileCatalogueCommitRequest {
+                transaction_id: "tx-other-provider",
+                profile_namespace: "provider:garage",
+                store_id: &other_store_id,
+                catalogue: &other_catalogue,
+                source_retained: true,
+                exact_snapshot: false,
+                committed_at_utc: "2026-07-23T00:00:02Z",
+            },
+        )
+        .expect("other catalogue commit");
 
         let request = || ProfileCatalogueObjectWithdrawalRequest {
             profile_namespace: "provider:garage",
@@ -892,6 +989,7 @@ mod tests {
             ProfileCatalogueObjectWithdrawalReport {
                 removed: true,
                 already_absent: false,
+                remaining_logical_bytes: 16,
             }
         );
         assert_eq!(
@@ -899,6 +997,28 @@ mod tests {
             ProfileCatalogueObjectWithdrawalReport {
                 removed: false,
                 already_absent: true,
+                remaining_logical_bytes: 16,
+            }
+        );
+        assert_eq!(
+            withdraw_profile_catalogue_object(
+                &db,
+                ProfileCatalogueObjectWithdrawalRequest {
+                    profile_namespace: "provider:garage",
+                    store_id: &other_store_id,
+                    object_id: "absent-object",
+                    object_version: 1,
+                    expected_size_bytes: 1,
+                    expected_checksum: "sha256:ccc",
+                    expected_provider: "garage",
+                    expected_provider_object_key: "bucket-b/media/absent",
+                },
+            )
+            .expect("other store report"),
+            ProfileCatalogueObjectWithdrawalReport {
+                removed: false,
+                already_absent: true,
+                remaining_logical_bytes: 7,
             }
         );
         let _ = std::fs::remove_dir_all(root);

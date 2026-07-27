@@ -5,7 +5,44 @@ use crate::api::{
     RemoteEasyconnectAwsCliEnvironmentVariable, APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
 };
 use ring::rand::{SecureRandom, SystemRandom};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+fn lock_application_store_mutation(
+    store_id: &StoreId,
+) -> Result<Arc<Mutex<()>>, DaemonServiceRuntimeError> {
+    static GUARDS: OnceLock<Mutex<BTreeMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut guards = GUARDS
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| upload_error("application ObjectStore mutation guard is unavailable"))?;
+    let guard = guards
+        .entry(store_id.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone();
+    if guard.is_poisoned() {
+        return Err(upload_error(
+            "application ObjectStore mutation guard is unavailable",
+        ));
+    }
+    Ok(guard)
+}
+
+fn reconcile_application_deletion_capacity(
+    capacity_provider: &dyn crate::runtime::CapacityAdmissionProvider,
+    store_id: &StoreId,
+    outcome: crate::runtime::ApplicationObjectDeletionOutcome,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let remaining_logical_bytes = match outcome {
+        crate::runtime::ApplicationObjectDeletionOutcome::Deleted {
+            remaining_logical_bytes,
+        }
+        | crate::runtime::ApplicationObjectDeletionOutcome::AlreadyAbsent {
+            remaining_logical_bytes,
+        } => remaining_logical_bytes,
+    };
+    capacity_provider.reconcile_used_bytes(store_id, remaining_logical_bytes)
+}
 
 fn random_capability_slug(prefix: &str) -> Result<String, DaemonServiceRuntimeError> {
     let mut bytes = [0_u8; 16];
@@ -426,6 +463,10 @@ where
             .ok_or_else(|| {
                 upload_error("capacity settlement is unavailable for application upload completion")
             })?;
+        let mutation_lock = lock_application_store_mutation(&pending.capability.store_id)?;
+        let _mutation_guard = mutation_lock
+            .lock()
+            .map_err(|_| upload_error("application ObjectStore mutation guard is unavailable"))?;
         let credentials =
             read_managed_credential_registry(&self.credential_registry_path, now_utc)?
                 .credentials
@@ -570,6 +611,12 @@ where
         }
         let store_id = StoreId::new(request.object_store.clone())
             .map_err(|error| upload_error(error.to_string()))?;
+        let capacity_provider = self
+            .service_orchestrator
+            .capacity_provider()
+            .ok_or_else(|| {
+                upload_error("capacity reconciliation is unavailable for application deletion")
+            })?;
         let identity = read_application_identity(
             &self.application_identity_registry_path,
             &request.application_id,
@@ -612,10 +659,19 @@ where
             bucket: request.bucket,
             endpoint_url: request.endpoint_url,
         };
+        let mutation_lock = lock_application_store_mutation(&deletion.store_id)?;
+        let _mutation_guard = mutation_lock
+            .lock()
+            .map_err(|_| upload_error("application ObjectStore mutation guard is unavailable"))?;
         let outcome = self.service_orchestrator.delete_application_object(
             &deletion,
             environment,
             self.live_sqlite_path.clone(),
+        )?;
+        reconcile_application_deletion_capacity(
+            capacity_provider.as_ref(),
+            &deletion.store_id,
+            outcome,
         )?;
         let reason = match request.reason {
             ApplicationObjectDeleteReason::UserRequested => "user_requested",
@@ -636,10 +692,10 @@ where
             schema_version: APPLICATION_OBJECT_DELETE_SCHEMA_VERSION.to_string(),
             request_id: request.request_id,
             outcome: match outcome {
-                crate::runtime::ApplicationObjectDeletionOutcome::Deleted => {
+                crate::runtime::ApplicationObjectDeletionOutcome::Deleted { .. } => {
                     ApplicationObjectDeleteOutcome::Deleted
                 }
-                crate::runtime::ApplicationObjectDeletionOutcome::AlreadyAbsent => {
+                crate::runtime::ApplicationObjectDeletionOutcome::AlreadyAbsent { .. } => {
                     ApplicationObjectDeleteOutcome::AlreadyAbsent
                 }
             },
@@ -901,5 +957,133 @@ where
                 },
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    struct ReconciliationFixture {
+        failures_remaining: AtomicUsize,
+        reconciled_bytes: Mutex<Vec<u64>>,
+    }
+
+    impl crate::runtime::CapacityAdmissionProvider for ReconciliationFixture {
+        fn admit(
+            &self,
+            _request: CapacityAdmissionRequest,
+        ) -> Result<CapacityAdmissionResponse, DaemonServiceRuntimeError> {
+            Err(upload_error("admission is outside this fixture"))
+        }
+
+        fn reconcile_used_bytes(
+            &self,
+            _store_id: &StoreId,
+            used_bytes: u64,
+        ) -> Result<(), DaemonServiceRuntimeError> {
+            self.reconciled_bytes
+                .lock()
+                .expect("reconciliations")
+                .push(used_bytes);
+            if self
+                .failures_remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                    remaining.checked_sub(1)
+                })
+                .is_ok()
+            {
+                return Err(upload_error("synthetic reconciliation failure"));
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn reconciliation_failure_is_repaired_by_idempotent_absent_retry() {
+        let provider = ReconciliationFixture {
+            failures_remaining: AtomicUsize::new(1),
+            reconciled_bytes: Mutex::new(Vec::new()),
+        };
+        let store_id = StoreId::new("store-retry").expect("store");
+        reconcile_application_deletion_capacity(
+            &provider,
+            &store_id,
+            crate::runtime::ApplicationObjectDeletionOutcome::Deleted {
+                remaining_logical_bytes: 17,
+            },
+        )
+        .expect_err("first reconciliation fails");
+        reconcile_application_deletion_capacity(
+            &provider,
+            &store_id,
+            crate::runtime::ApplicationObjectDeletionOutcome::AlreadyAbsent {
+                remaining_logical_bytes: 17,
+            },
+        )
+        .expect("retry repairs ledger");
+        assert_eq!(
+            provider
+                .reconciled_bytes
+                .lock()
+                .expect("reconciliations")
+                .as_slice(),
+            &[17, 17]
+        );
+    }
+
+    #[test]
+    fn upload_settlement_and_deletion_are_serialized_per_store_only() {
+        let store_id =
+            StoreId::new(format!("store-shared-{}", std::process::id())).expect("shared store");
+        let other_store_id =
+            StoreId::new(format!("store-other-{}", std::process::id())).expect("other store");
+        let logical_usage = Arc::new(AtomicU64::new(40));
+        let (upload_started_tx, upload_started_rx) = mpsc::channel();
+        let (allow_upload_tx, allow_upload_rx) = mpsc::channel();
+        let upload_store = store_id.clone();
+        let upload_usage = Arc::clone(&logical_usage);
+        let upload = thread::spawn(move || {
+            let lock = lock_application_store_mutation(&upload_store).expect("upload lock");
+            let _guard = lock.lock().expect("upload guard");
+            upload_started_tx.send(()).expect("upload started");
+            allow_upload_rx.recv().expect("allow upload");
+            upload_usage.fetch_add(10, Ordering::SeqCst);
+        });
+        upload_started_rx.recv().expect("upload started");
+
+        let other_lock =
+            lock_application_store_mutation(&other_store_id).expect("other store lock");
+        let _other_guard = other_lock
+            .try_lock()
+            .expect("other store remains independent");
+
+        let (delete_done_tx, delete_done_rx) = mpsc::channel();
+        let delete_store = store_id.clone();
+        let delete_usage = Arc::clone(&logical_usage);
+        let deletion = thread::spawn(move || {
+            let lock = lock_application_store_mutation(&delete_store).expect("delete lock");
+            let _guard = lock.lock().expect("delete guard");
+            delete_usage.store(10, Ordering::SeqCst);
+            delete_done_tx.send(()).expect("delete done");
+        });
+        assert!(
+            delete_done_rx
+                .recv_timeout(Duration::from_millis(50))
+                .is_err(),
+            "same-store deletion must wait for upload settlement"
+        );
+        allow_upload_tx.send(()).expect("allow upload");
+        upload.join().expect("upload");
+        delete_done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("deletion completes");
+        deletion.join().expect("deletion");
+        assert_eq!(logical_usage.load(Ordering::SeqCst), 10);
     }
 }

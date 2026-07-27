@@ -20,8 +20,8 @@ pub struct ApplicationObjectDeletion {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApplicationObjectDeletionOutcome {
-    Deleted,
-    AlreadyAbsent,
+    Deleted { remaining_logical_bytes: u64 },
+    AlreadyAbsent { remaining_logical_bytes: u64 },
 }
 
 pub struct GarageApplicationObjectDeletionAuthority<'a> {
@@ -75,7 +75,14 @@ impl<'a> GarageApplicationObjectDeletionAuthority<'a> {
                     "provider object exists without matching authoritative catalogue evidence",
                 ))
             } else {
-                Ok(ApplicationObjectDeletionOutcome::AlreadyAbsent)
+                let withdrawal = dasobjectstore_metadata::withdraw_profile_catalogue_object(
+                    &self.live_sqlite_path,
+                    evidence,
+                )
+                .map_err(|error| delete_error(error.to_string()))?;
+                Ok(ApplicationObjectDeletionOutcome::AlreadyAbsent {
+                    remaining_logical_bytes: withdrawal.remaining_logical_bytes,
+                })
             };
         }
 
@@ -100,15 +107,19 @@ impl<'a> GarageApplicationObjectDeletionAuthority<'a> {
             }
         }
 
-        dasobjectstore_metadata::withdraw_profile_catalogue_object(
+        let withdrawal = dasobjectstore_metadata::withdraw_profile_catalogue_object(
             &self.live_sqlite_path,
             evidence,
         )
         .map_err(|error| delete_error(error.to_string()))?;
         Ok(if provider_has_object {
-            ApplicationObjectDeletionOutcome::Deleted
+            ApplicationObjectDeletionOutcome::Deleted {
+                remaining_logical_bytes: withdrawal.remaining_logical_bytes,
+            }
         } else {
-            ApplicationObjectDeletionOutcome::AlreadyAbsent
+            ApplicationObjectDeletionOutcome::AlreadyAbsent {
+                remaining_logical_bytes: withdrawal.remaining_logical_bytes,
+            }
         })
     }
 
@@ -281,7 +292,12 @@ mod tests {
         )
         .delete(&deletion)
         .expect("delete");
-        assert_eq!(outcome, ApplicationObjectDeletionOutcome::Deleted);
+        assert_eq!(
+            outcome,
+            ApplicationObjectDeletionOutcome::Deleted {
+                remaining_logical_bytes: 0,
+            }
+        );
         let commands = runner.commands.lock().expect("commands");
         assert_eq!(commands.len(), 4);
         assert_eq!(commands[0][1], "list-objects-v2");
@@ -322,6 +338,45 @@ mod tests {
             .delete(&deletion)
             .expect_err("stale evidence");
         assert!(runner.commands.lock().expect("commands").is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn provider_absent_crash_window_withdraws_catalogue_and_reports_remainder() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-application-delete-provider-absent-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let live = root.join("live.sqlite");
+        seed_catalogue(&live);
+        let runner = FixtureRunner {
+            outputs: Mutex::new(vec![r#"{"Contents":[]}"#.to_string()]),
+            commands: Mutex::new(Vec::new()),
+        };
+        let outcome =
+            GarageApplicationObjectDeletionAuthority::new(&runner, Vec::new(), live.clone())
+                .delete(&deletion())
+                .expect("recover deletion");
+        assert_eq!(
+            outcome,
+            ApplicationObjectDeletionOutcome::AlreadyAbsent {
+                remaining_logical_bytes: 0,
+            }
+        );
+        assert_eq!(runner.commands.lock().expect("commands").len(), 1);
+        assert_eq!(
+            Connection::open(&live)
+                .expect("db")
+                .query_row(
+                    "SELECT COUNT(*) FROM profile_catalogue_objects",
+                    [],
+                    |row| row.get::<_, u64>(0)
+                )
+                .expect("count"),
+            0
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
