@@ -35,9 +35,21 @@ Evidence and visibility
 
 The latest general and reconciliation reports are written below
 ``<state_dir>/garbage-collection/``. Reports use managed relative paths; the Web
-``Live Status`` response exposes only aggregated retained reasons, counts, and
-bytes. A collection error fails closed, leaves uncertain data in place, and
-appears as a Live Status warning.
+``Live Status`` response exposes the versioned
+``dasobjectstore.staging_inventory.v1`` projection. It groups path-free counts
+and bytes by managed staging kind, disposition, and typed retention reason.
+The daemon refreshes this read-only inventory every 30 seconds.
+
+The inventory covers ingest jobs, performance fixtures, reconciliation
+checkpoints, direct-S3 uploads and multipart work, registered folder staging,
+and interrupted garbage-collection quarantine. ``observed_bytes`` always
+equals ``accounted_bytes + unaccounted_bytes``. A scan limit, unsafe entry,
+unreadable root, or unsupported journal changes coverage to ``partial`` or
+``unavailable`` instead of silently presenting a complete total. The Web Live
+Status page renders these results under **Staging & attention**.
+
+A collection error fails closed, leaves uncertain data in place, and appears
+as a Live Status warning. Inventory is evidence, not deletion authority.
 
 Reclamation uses a same-filesystem quarantine rename followed by directory
 synchronization. When SSD placement metadata must be changed, a failed metadata

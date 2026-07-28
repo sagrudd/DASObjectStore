@@ -1,15 +1,15 @@
 use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
-    default_hdd_root, default_ssd_root, garbage_collect_reconciliation_staging,
-    profile_binding_registry_path, reconcile_workspace_cleanups,
-    reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
-    reconcile_workspace_promotions, reconcile_workspace_provision_operations,
-    run_garbage_collection, run_one_durable_destage, spawn_storage_assurance_loop,
-    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
-    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
-    WorkspaceCleanupWorkerConfig, WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig,
-    DEFAULT_WORKSPACE_HOST_SOCKET,
+    build_staging_inventory, default_hdd_root, default_ssd_root,
+    garbage_collect_reconciliation_staging, profile_binding_registry_path,
+    reconcile_workspace_cleanups, reconcile_workspace_materializations,
+    reconcile_workspace_nfs_attachments, reconcile_workspace_promotions,
+    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
+    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
+    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
+    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceCleanupWorkerConfig,
+    WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -686,6 +686,15 @@ fn spawn_startup_garbage_collection(
         // Startup collection owns the initial SSD metadata/removal window. Begin
         // durable destage only after that pass has either completed or failed closed.
         let _ = spawn_durable_destage_loop();
+        loop {
+            let now_utc = current_utc_timestamp();
+            live_status_registry.record_staging_inventory(build_staging_inventory(
+                &gc_config,
+                &now_utc,
+                SystemTime::now(),
+            ));
+            thread::sleep(Duration::from_secs(30));
+        }
     })
 }
 

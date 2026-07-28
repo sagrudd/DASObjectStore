@@ -39,12 +39,28 @@ Relocation safety
 
 A relocation is ordered as:
 
-``verify source -> copy -> hash destination -> fsync -> metadata swap -> unlink source``
+``journal -> claim -> verify source -> copy -> hash destination -> fsync ->
+metadata swap -> unlink source -> clear journal``
 
-The metadata swap is one SQLite transaction. A crash before it leaves the
-source authoritative. A crash after it may leave a redundant source file, but
-never removes the newly verified placement. Such redundant files are retained
-for daemon-owned garbage collection rather than guessed at during recovery.
+The operation identity and phase are persisted atomically with mode ``0600``.
+On restart, the daemon independently verifies the placement metadata, capacity
+claim, destination file, and checksum before continuing. A crash before the
+metadata swap leaves the source authoritative. A crash after it may leave a
+redundant source file; recovery removes that source only after proving the
+verified destination is authoritative. Changed or ambiguous evidence fails
+closed and retains both data and the journal for inspection.
+
+Hashing and copying check for primary ingest, destage, and garbage-collection
+work between bounded chunks. Preemption releases the capacity claim and leaves
+the source placement unchanged. Rebalancing searches the ordered set of
+feasible source/destination pairs, so an ineligible freest disk does not hide a
+valid second choice. Object size is not used to silently exclude evacuation or
+reverification.
+
+When the last placement leaves a disk already marked ``Draining``, one SQLite
+transaction proves the disk empty and changes it to ``Retired``. A disk with
+any remaining placement stays draining and is reported as blocked; operators
+must not take it offline.
 
 If a scrub finds a checksum mismatch, DASObjectStore withdraws the placement's
 verification, marks the object ``Degraded``, and promotes a ``Healthy`` or
@@ -57,6 +73,10 @@ Status and configuration
 The latest durable result is written to:
 
 ``/var/lib/dasobjectstore/storage-assurance/latest.json``
+
+An interrupted relocation checkpoint is held at
+``/var/lib/dasobjectstore/storage-assurance/operation.json``. Do not edit or
+remove it manually; daemon restart recovery owns it.
 
 Defaults are enabled for packaged Linux appliances. Operators may override
 them through the service environment:

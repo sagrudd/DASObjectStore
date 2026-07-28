@@ -624,11 +624,49 @@ pub struct LiveStatusWorkspaceResponse {
     #[serde(default)]
     pub recent: Vec<LiveStatusProgressResponse>,
     #[serde(default)]
+    pub garbage_collection: Option<LiveStatusGarbageCollectionResponse>,
+    #[serde(default)]
+    pub staging_inventory: Option<LiveStatusStagingInventoryResponse>,
+    #[serde(default)]
     pub warnings: Vec<LiveStatusWarningResponse>,
     #[serde(skip)]
     pub ssd_trace: Vec<LiveStatusTracePointResponse>,
     #[serde(skip)]
     pub hdd_trace: Vec<LiveStatusTracePointResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusGarbageCollectionResponse {
+    pub running: bool,
+    pub last_completed_at_utc: Option<String>,
+    pub scanned_bytes: u64,
+    pub reclaimable_bytes: u64,
+    pub reclaimed_bytes: u64,
+    pub retained_items: u64,
+    #[serde(default)]
+    pub retained_reasons: Vec<LiveStatusWarningResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusStagingInventoryResponse {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub coverage: String,
+    pub observed_bytes: u64,
+    pub accounted_bytes: u64,
+    pub unaccounted_bytes: u64,
+    pub omitted_items: u64,
+    #[serde(default)]
+    pub groups: Vec<LiveStatusStagingInventoryGroupResponse>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+pub struct LiveStatusStagingInventoryGroupResponse {
+    pub root_kind: String,
+    pub disposition: String,
+    pub reason: String,
+    pub items: u64,
+    pub bytes: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]

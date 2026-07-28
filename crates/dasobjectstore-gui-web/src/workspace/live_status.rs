@@ -208,6 +208,7 @@ fn render_snapshot(
                 { render_hosts(&snapshot.hosts) }
                 { render_waiting(snapshot) }
             </section>
+            { render_staging_inventory(snapshot) }
         </>
     }
 }
@@ -321,6 +322,66 @@ fn render_waiting(snapshot: &LiveStatusWorkspaceResponse) -> Html {
             }
         </section>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_staging_inventory(snapshot: &LiveStatusWorkspaceResponse) -> Html {
+    let Some(inventory) = snapshot.staging_inventory.as_ref() else {
+        return html! {
+            <section class="dos-card dos-live-staging" data-state="unavailable">
+                <div class="dos-card-row"><div><span class="dos-card-label">{ "Staging & attention" }</span><h2>{ "Inventory unavailable" }</h2></div></div>
+                <p class="dos-empty-state">{ "The daemon has not published a staging inventory yet." }</p>
+            </section>
+        };
+    };
+    let retained_bytes = staging_attention_bytes(inventory);
+    html! {
+        <section class="dos-card dos-live-staging" data-state={inventory.coverage.clone()}>
+            <div class="dos-card-row">
+                <div><span class="dos-card-label">{ "Staging & attention" }</span><h2>{ format!("{} retained or blocked", format_bytes(retained_bytes as f64)) }</h2></div>
+                <span class="dos-status-pill">{ stage_label(&inventory.coverage) }</span>
+            </div>
+            <p>{ format!(
+                "{} observed · {} accounted · {} unaccounted",
+                format_bytes(inventory.observed_bytes as f64),
+                format_bytes(inventory.accounted_bytes as f64),
+                format_bytes(inventory.unaccounted_bytes as f64),
+            ) }</p>
+            if inventory.groups.is_empty() {
+                <p class="dos-empty-state">{ "No daemon-owned staging bytes are currently retained." }</p>
+            } else {
+                <div class="dos-live-wait-list" role="list">
+                    { for inventory.groups.iter().map(|group| html! {
+                        <div key={format!("{}-{}-{}", group.root_kind, group.disposition, group.reason)} role="listitem" data-state={group.disposition.clone()}>
+                            <strong>{ stage_label(&group.root_kind) }</strong>
+                            <span>{ format!("{} · {}", stage_label(&group.disposition), stage_label(&group.reason)) }</span>
+                            <small>{ format!("{} item(s) · {}", group.items, format_bytes(group.bytes as f64)) }</small>
+                        </div>
+                    }) }
+                </div>
+            }
+            if inventory.omitted_items != 0 {
+                <p class="dos-live-reconnect" role="status">{ format!(
+                    "{} inventory group(s) omitted; coverage is partial.",
+                    inventory.omitted_items
+                ) }</p>
+            }
+        </section>
+    }
+}
+
+fn staging_attention_bytes(inventory: &crate::api::LiveStatusStagingInventoryResponse) -> u64 {
+    inventory
+        .groups
+        .iter()
+        .filter(|group| {
+            matches!(
+                group.disposition.as_str(),
+                "retained" | "blocked" | "unknown"
+            )
+        })
+        .map(|group| group.bytes)
+        .sum()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -468,11 +529,24 @@ mod tests {
             "hdd_transfers": [{"job_id": "job-1", "store_id": "reads", "disk_id": "disk-1",
                 "copy_number": 1, "current_item": "sample.pod5", "bytes_done": 3,
                 "bytes_total": 10, "bytes_per_second": 8, "phase": "writing"}],
-            "recent": [], "warnings": []
+            "recent": [],
+            "staging_inventory": {
+                "schema_version": "dasobjectstore.staging_inventory.v1",
+                "generated_at_utc": "2026-07-19T10:11:12Z",
+                "coverage": "complete", "observed_bytes": 12,
+                "accounted_bytes": 12, "unaccounted_bytes": 0, "omitted_items": 0,
+                "groups": [{"root_kind": "direct_s3_upload", "disposition": "blocked",
+                    "reason": "durability_not_proven", "items": 1, "bytes": 12}]
+            },
+            "warnings": []
         });
         let decoded: LiveStatusWorkspaceResponse = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.sequence, 4);
         assert_eq!(decoded.hosts[0].display_name, "sequencer");
         assert_eq!(decoded.hdd_transfers[0].disk_id, "disk-1");
+        assert_eq!(
+            staging_attention_bytes(decoded.staging_inventory.as_ref().unwrap()),
+            12
+        );
     }
 }

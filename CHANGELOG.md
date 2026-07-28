@@ -8,6 +8,19 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.149.0 - 2026-07-28
+
+- Make idle storage assurance restart-safe with a deterministic, private
+  operation journal, independent recovery evidence, idempotent capacity-claim
+  release, cancellation-aware hashing/copying, feasible multi-disk balancing,
+  and atomic empty-disk drain completion.
+- Add the typed ``dasobjectstore.staging_inventory.v1`` retained-byte contract,
+  periodic daemon inventory, explicit coverage/accounting invariants, and an
+  end-to-end Live Status ``Staging & attention`` presentation.
+- Add a fail-closed, commit-bound EPIC C appliance harness for CODEX-only
+  control-plane saturation, telemetry mapping, cancellation, PSI/device queue,
+  and staging-recovery acceptance.
+
 ## 0.148.2 - 2026-07-27
 
 - Gate the appliance-wide logical identity backfill on committed migration

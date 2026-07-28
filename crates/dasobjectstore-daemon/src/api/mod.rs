@@ -166,7 +166,9 @@ pub use jobs::{
 pub use live_status::{
     LiveStatusActor, LiveStatusAggregate, LiveStatusConnectionOrigin, LiveStatusGarbageCollection,
     LiveStatusGarbageCollectionRetained, LiveStatusIngest, LiveStatusRequest, LiveStatusResponse,
-    LIVE_STATUS_SCHEMA_VERSION,
+    StagingByteDisposition, StagingInventory, StagingInventoryCoverage, StagingInventoryGroup,
+    StagingRetentionReason, StagingRootKind, LIVE_STATUS_SCHEMA_VERSION,
+    STAGING_INVENTORY_SCHEMA_VERSION,
 };
 pub use local_admin::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,

@@ -2,6 +2,7 @@ use super::DaemonIngestProgressEvent;
 use serde::{Deserialize, Serialize};
 
 pub const LIVE_STATUS_SCHEMA_VERSION: u16 = 1;
+pub const STAGING_INVENTORY_SCHEMA_VERSION: &str = "dasobjectstore.staging_inventory.v1";
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LiveStatusRequest;
@@ -63,6 +64,84 @@ pub struct LiveStatusGarbageCollectionRetained {
     pub bytes: u64,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagingRootKind {
+    IngestJob,
+    PerformanceTest,
+    RemoteS3Reconciliation,
+    DirectS3Upload,
+    DirectS3Multipart,
+    FolderStaging,
+    GarbageCollectionQuarantine,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagingByteDisposition {
+    Active,
+    Resumable,
+    Reclaimable,
+    Retained,
+    Blocked,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagingRetentionReason {
+    ActiveOperation,
+    ResumableCheckpoint,
+    TerminalGrace,
+    DurabilityNotProven,
+    CatalogueEvidenceMissing,
+    ExplicitRetentionRequested,
+    LegacyUnowned,
+    UnsupportedMetadata,
+    UnsafeEntry,
+    AmbiguousState,
+    ReclaimableAfterDurabilityProof,
+    ExplicitlyAborted,
+    InterruptedGarbageCollection,
+    ScanUnavailable,
+    InventoryLimitReached,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StagingInventoryCoverage {
+    Complete,
+    Partial,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StagingInventoryGroup {
+    pub root_kind: StagingRootKind,
+    pub disposition: StagingByteDisposition,
+    pub reason: StagingRetentionReason,
+    pub items: u64,
+    pub bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct StagingInventory {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub coverage: StagingInventoryCoverage,
+    pub observed_bytes: u64,
+    pub accounted_bytes: u64,
+    pub unaccounted_bytes: u64,
+    pub omitted_items: u64,
+    pub groups: Vec<StagingInventoryGroup>,
+}
+
+impl StagingInventory {
+    pub fn accounting_is_complete(&self) -> bool {
+        self.observed_bytes == self.accounted_bytes.saturating_add(self.unaccounted_bytes)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LiveStatusResponse {
     pub schema_version: u16,
@@ -73,4 +152,6 @@ pub struct LiveStatusResponse {
     pub recent: Vec<LiveStatusIngest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub garbage_collection: Option<LiveStatusGarbageCollection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub staging_inventory: Option<StagingInventory>,
 }

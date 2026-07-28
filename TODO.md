@@ -32,7 +32,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.148.2``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.149.0``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -64,11 +64,17 @@ Work is dependency ordered. Only these entries define open release work:
   capacity claim for every required HDD copy. The unreserved compatibility
   helper is test-only. Packaged physical acceptance remains correctly owned by
   EPIC E rather than reopening this source-contract EPIC.
-- [ ] **EPIC C — durability maintenance, availability, and observability.**
-  Complete idle maintenance/reverification and balanced placement, retain
-  bounded control capacity and cancellation under ingest, prove telemetry
-  device mapping, and expose every retained or blocked staging byte with a
-  typed reason.
+- [~] **EPIC C — durability maintenance, availability, and observability.**
+  Durable journalled idle maintenance now recovers claims and relocation
+  phases across restart, completes only empty disk drains, preempts bounded
+  hashing/copying for primary work, searches feasible fractional-balance
+  placements, and never silently excludes large objects. The versioned staging
+  inventory accounts daemon-owned transient roots with typed dispositions,
+  reasons, coverage, and overflow through Live Status. Bounded control and
+  priority cancellation source contracts remain green. The commit-bound,
+  CODEX-only appliance harness is delivered; its quiescent physical load,
+  device-mapping, latency, PSI, cancellation, and staging-recovery evidence
+  remains the final EPIC C acceptance action.
 - [~] **EPIC D — security and package authority.** The strict Ergasterion
   binding-v2 exchange is live behind dedicated HTTPS routes: Ed25519/JCS
   proof verification, independently admitted current host/Prosopikon

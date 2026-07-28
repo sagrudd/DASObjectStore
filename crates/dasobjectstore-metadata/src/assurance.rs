@@ -3,11 +3,11 @@
 use crate::object_commit::placement_id;
 use dasobjectstore_core::ids::{DiskId, InvalidId, ObjectId, PlacementId, StoreId};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::Path;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AssurancePlacementCandidate {
     pub placement_id: PlacementId,
     pub object_id: ObjectId,
@@ -68,7 +68,6 @@ pub fn list_assurance_placement_candidates(
          JOIN disks d ON d.disk_id=p.disk_id
          WHERE o.size_bytes IS NOT NULL
            AND COALESCE(p.content_hash, o.content_hash) IS NOT NULL
-           AND p.verified_at_utc IS NOT NULL
          ORDER BY
            CASE LOWER(d.state)
              WHEN 'draining' THEN 0
@@ -293,6 +292,93 @@ pub fn commit_assurance_relocation(
     Ok(destination_placement_id)
 }
 
+pub fn assurance_relocation_committed(
+    live_sqlite_path: impl AsRef<Path>,
+    object_id: &ObjectId,
+    source_placement_id: &PlacementId,
+    destination_disk_id: &DiskId,
+    destination_relative_path: &str,
+    expected_hash: &str,
+) -> Result<bool, AssuranceMetadataError> {
+    let connection = Connection::open_with_flags(
+        live_sqlite_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let source_exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM placements WHERE placement_id=?1)",
+        [source_placement_id.as_str()],
+        |row| row.get(0),
+    )?;
+    let destination_matches: bool = connection.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM placements
+            WHERE object_id=?1 AND disk_id=?2 AND relative_path=?3
+              AND content_hash=?4 AND verified_at_utc IS NOT NULL
+        )",
+        params![
+            object_id.as_str(),
+            destination_disk_id.as_str(),
+            destination_relative_path,
+            expected_hash
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(!source_exists && destination_matches)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AssuranceDrainCompletion {
+    pub disk_id: DiskId,
+    pub placement_count: u64,
+    pub previous_state: String,
+    pub current_state: String,
+    pub transitioned_to_retired: bool,
+}
+
+pub fn complete_assurance_drain_if_empty(
+    live_sqlite_path: impl AsRef<Path>,
+    disk_id: &DiskId,
+    updated_at_utc: &str,
+) -> Result<AssuranceDrainCompletion, AssuranceMetadataError> {
+    let mut connection = Connection::open(live_sqlite_path)?;
+    let transaction = connection.transaction()?;
+    let previous_state: Option<String> = transaction
+        .query_row(
+            "SELECT state FROM disks WHERE disk_id=?1",
+            [disk_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let previous_state =
+        previous_state.ok_or_else(|| AssuranceMetadataError::MissingDisk(disk_id.clone()))?;
+    let placement_count: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM placements WHERE disk_id=?1",
+        [disk_id.as_str()],
+        |row| row.get(0),
+    )?;
+    let transitioned_to_retired =
+        placement_count == 0 && previous_state.eq_ignore_ascii_case("draining");
+    if transitioned_to_retired {
+        transaction.execute(
+            "UPDATE disks SET state='Retired',updated_at_utc=?1
+             WHERE disk_id=?2 AND LOWER(state)='draining'",
+            params![updated_at_utc, disk_id.as_str()],
+        )?;
+    }
+    transaction.commit()?;
+    Ok(AssuranceDrainCompletion {
+        disk_id: disk_id.clone(),
+        placement_count: placement_count as u64,
+        previous_state: previous_state.clone(),
+        current_state: if transitioned_to_retired {
+            "Retired".to_string()
+        } else {
+            previous_state
+        },
+        transitioned_to_retired,
+    })
+}
+
 fn parse_id<T>(field: &'static str, value: String) -> Result<T, rusqlite::Error>
 where
     T: std::str::FromStr<Err = InvalidId>,
@@ -314,6 +400,7 @@ pub enum AssuranceMetadataError {
     NegativeSize(i64),
     PlacementChanged(PlacementId),
     DuplicateObjectDisk(DiskId),
+    MissingDisk(DiskId),
 }
 
 impl Display for AssuranceMetadataError {
@@ -332,6 +419,9 @@ impl Display for AssuranceMetadataError {
                 formatter,
                 "object already has a placement on assurance destination {disk_id}"
             ),
+            Self::MissingDisk(disk_id) => {
+                write!(formatter, "assurance disk {disk_id} is missing")
+            }
         }
     }
 }
@@ -480,6 +570,70 @@ mod tests {
         assert_eq!(placement_verified, None);
         assert_eq!(disk_state, "Suspect");
         assert_eq!(object_state, "Degraded");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn drain_completion_retires_only_an_empty_draining_disk() {
+        let path = fixture("drain-completion");
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute(
+                "UPDATE disks SET state='Draining' WHERE disk_id='disk-a'",
+                [],
+            )
+            .expect("draining");
+        drop(connection);
+        let disk = DiskId::new("disk-a").expect("disk");
+        let blocked = complete_assurance_drain_if_empty(&path, &disk, "2026-03-01T00:00:00Z")
+            .expect("blocked completion");
+        assert!(!blocked.transitioned_to_retired);
+        assert!(blocked.placement_count > 0);
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute("DELETE FROM placements WHERE disk_id='disk-a'", [])
+            .expect("evacuated");
+        drop(connection);
+        let completed = complete_assurance_drain_if_empty(&path, &disk, "2026-03-01T00:01:00Z")
+            .expect("completed");
+        assert!(completed.transitioned_to_retired);
+        assert_eq!(completed.current_state, "Retired");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn relocation_commit_evidence_requires_destination_and_absent_source() {
+        let path = fixture("relocation-evidence");
+        let candidate = list_assurance_placement_candidates(&path)
+            .expect("candidates")
+            .remove(0);
+        let destination = DiskId::new("disk-c").expect("destination");
+        assert!(!assurance_relocation_committed(
+            &path,
+            &candidate.object_id,
+            &candidate.placement_id,
+            &destination,
+            &candidate.relative_path,
+            &candidate.content_hash,
+        )
+        .expect("precondition"));
+        commit_assurance_relocation(
+            &path,
+            &candidate,
+            &destination,
+            &candidate.relative_path,
+            "2026-03-01T00:00:00Z",
+        )
+        .expect("commit");
+        assert!(assurance_relocation_committed(
+            &path,
+            &candidate.object_id,
+            &candidate.placement_id,
+            &destination,
+            &candidate.relative_path,
+            &candidate.content_hash,
+        )
+        .expect("committed"));
         cleanup(&path);
     }
 

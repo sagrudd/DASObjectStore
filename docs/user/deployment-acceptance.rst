@@ -68,10 +68,36 @@ replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 Physical appliance acceptance
 -----------------------------
 
-The x86_64 DASServer is available, but availability is not an acceptance
-window. Wait for the operator to confirm that the appliance is quiescent before
-running x86_64 package parity or generated-data physical-drive identity,
-SMART/NVMe, replacement, full-disk/corruption, multi-HDD/Garage durability,
-control-plane saturation, and performance/soak matrices. Use only the bounded
-synthetic ``CODEX`` ObjectStore. Record those results separately; surrogate or
-older-commit evidence must never be relabelled as physical acceptance.
+Use the EPIC C harness for maintenance, device-mapping, staging-accounting, and
+control-plane evidence. Its default inspection is read-only:
+
+.. code-block:: console
+
+   deploy/acceptance/epic-c-appliance.sh inspect
+
+The load mode refuses a dirty checkout, a non-Linux host, another active file
+ingest, missing authenticated dashboard state, an undeclared quiescent window,
+or synthetic data that would make ``CODEX`` reach 1 TiB. It generates random
+data only below ``$HOME/.dasobjectstore-codex-validation`` and requires the
+exact confirmation:
+
+.. code-block:: console
+
+   DASOBJECTSTORE_ACCEPTANCE_QUIESCENT=yes \
+   DASOBJECTSTORE_ACCEPTANCE_CONFIRM='RUN EPIC C CODEX LOAD' \
+   DASOBJECTSTORE_ACCEPTANCE_COOKIE_FILE="$HOME/.config/dasobjectstore/acceptance.cookies" \
+   deploy/acceptance/epic-c-appliance.sh load
+
+The resulting mode-``0600`` evidence is commit/package/service-bound and
+records HTTPS p50/p95/p99 latency, accept queues, CPU/IO/memory PSI,
+per-device queue state, mounted-device telemetry mapping, priority
+cancellation latency, and post-load staging recovery. It never restarts a
+service or removes managed ObjectStore payload. Validate a retained report
+with:
+
+.. code-block:: console
+
+   deploy/acceptance/epic-c-appliance.sh validate /path/to/evidence.json
+
+Surrogate or older-commit evidence must never be relabelled as physical
+acceptance.

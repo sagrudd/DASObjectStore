@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnemosyne.dev/dasobjectstore/epic-c-evidence.schema.json",
+  "title": "DASObjectStore EPIC C appliance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "mode",
+    "result",
+    "captured_at_utc",
+    "source",
+    "package",
+    "services",
+    "safety",
+    "thresholds",
+    "https",
+    "host",
+    "telemetry",
+    "staging"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "dasobjectstore.epic-c-appliance-evidence.v1"
+    },
+    "mode": {
+      "enum": ["inspect", "load"]
+    },
+    "result": {
+      "enum": ["inspected", "passed", "failed", "incomplete"]
+    },
+    "captured_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/identity"
+    },
+    "package": {
+      "$ref": "#/$defs/identity"
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_id",
+        "generated_bytes",
+        "maximum_total_bytes",
+        "customer_or_project_data_used",
+        "quiescent_gate",
+        "explicit_confirmation"
+      ],
+      "properties": {
+        "store_id": { "const": "CODEX" },
+        "generated_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627775
+        },
+        "maximum_total_bytes": { "const": 1099511627776 },
+        "customer_or_project_data_used": { "const": false },
+        "quiescent_gate": { "type": "boolean" },
+        "explicit_confirmation": { "type": "boolean" }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "liveness_p95_ms",
+        "liveness_p99_ms",
+        "dashboard_p95_ms",
+        "dashboard_p99_ms",
+        "accept_queue_max",
+        "cpu_psi_some_avg10",
+        "io_psi_some_avg10",
+        "memory_psi_some_avg10",
+        "device_io_in_progress",
+        "cancellation_ms",
+        "staging_recovery_bytes"
+      ],
+      "properties": {
+        "liveness_p95_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "liveness_p99_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "dashboard_p95_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "dashboard_p99_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "accept_queue_max": { "type": "integer", "minimum": 0 },
+        "cpu_psi_some_avg10": { "type": "number", "minimum": 0, "maximum": 100 },
+        "io_psi_some_avg10": { "type": "number", "minimum": 0, "maximum": 100 },
+        "memory_psi_some_avg10": { "type": "number", "minimum": 0, "maximum": 100 },
+        "device_io_in_progress": { "type": "integer", "minimum": 0 },
+        "cancellation_ms": { "type": "number", "exclusiveMinimum": 0 },
+        "staging_recovery_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "https": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          { "$ref": "#/$defs/latency" },
+          { "type": "null" }
+        ]
+      },
+      "required": ["liveness", "dashboard"]
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["accept_queue_max", "psi", "device_queue"]
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["mounted_devices", "mapping_status"]
+    },
+    "staging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before_bytes", "peak_bytes", "after_bytes", "recovered_bytes"],
+      "properties": {
+        "before_bytes": { "type": "integer", "minimum": 0 },
+        "peak_bytes": { "type": "integer", "minimum": 0 },
+        "after_bytes": { "type": "integer", "minimum": 0 },
+        "recovered_bytes": { "type": "integer" }
+      }
+    },
+    "cancellation": {
+      "anyOf": [
+        { "$ref": "#/$defs/cancellation" },
+        { "type": "null" }
+      ]
+    },
+    "ingest": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "failures": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["identity"],
+      "properties": {
+        "identity": { "type": "string", "minLength": 1 }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["samples", "http_successes", "p50_ms", "p95_ms", "p99_ms"],
+      "properties": {
+        "samples": { "type": "integer", "minimum": 1 },
+        "http_successes": { "type": "integer", "minimum": 0 },
+        "p50_ms": { "type": "number", "minimum": 0 },
+        "p95_ms": { "type": "number", "minimum": 0 },
+        "p99_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "accepted", "latency_ms"],
+      "properties": {
+        "requested": { "type": "boolean" },
+        "accepted": { "type": "boolean" },
+        "latency_ms": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

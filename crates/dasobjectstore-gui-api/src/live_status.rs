@@ -87,9 +87,31 @@ pub struct LiveStatusGarbageCollectionView {
     pub running: bool,
     pub last_completed_at_utc: Option<String>,
     pub scanned_bytes: u64,
+    pub reclaimable_bytes: u64,
     pub reclaimed_bytes: u64,
     pub retained_items: u64,
     pub retained_reasons: Vec<LiveStatusWarningView>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LiveStatusStagingInventoryGroupView {
+    pub root_kind: String,
+    pub disposition: String,
+    pub reason: String,
+    pub items: u64,
+    pub bytes: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LiveStatusStagingInventoryView {
+    pub schema_version: String,
+    pub generated_at_utc: String,
+    pub coverage: String,
+    pub observed_bytes: u64,
+    pub accounted_bytes: u64,
+    pub unaccounted_bytes: u64,
+    pub omitted_items: u64,
+    pub groups: Vec<LiveStatusStagingInventoryGroupView>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -106,6 +128,7 @@ pub struct LiveStatusWorkspaceView {
     pub hdd_transfers: Vec<LiveStatusHddTransferView>,
     pub recent: Vec<LiveStatusProgressView>,
     pub garbage_collection: Option<LiveStatusGarbageCollectionView>,
+    pub staging_inventory: Option<LiveStatusStagingInventoryView>,
     pub warnings: Vec<LiveStatusWarningView>,
 }
 
@@ -124,6 +147,7 @@ impl LiveStatusWorkspaceView {
             hdd_transfers: Vec::new(),
             recent: Vec::new(),
             garbage_collection: None,
+            staging_inventory: None,
             warnings: vec![LiveStatusWarningView {
                 code: code.into(),
                 message: message.into(),
@@ -190,6 +214,7 @@ pub(crate) fn workspace_from_daemon(snapshot: LiveStatusResponse) -> LiveStatusW
                 running: collection.running,
                 last_completed_at_utc: collection.last_completed_at_utc.clone(),
                 scanned_bytes: collection.scanned_bytes,
+                reclaimable_bytes: collection.reclaimable_bytes,
                 reclaimed_bytes: collection.reclaimed_bytes,
                 retained_items: collection.retained_items,
                 retained_reasons: collection
@@ -201,6 +226,30 @@ pub(crate) fn workspace_from_daemon(snapshot: LiveStatusResponse) -> LiveStatusW
                             "{} item(s), {} byte(s): {}",
                             retained.items, retained.bytes, retained.reason
                         ),
+                    })
+                    .collect(),
+            });
+    let staging_inventory =
+        snapshot
+            .staging_inventory
+            .as_ref()
+            .map(|inventory| LiveStatusStagingInventoryView {
+                schema_version: inventory.schema_version.clone(),
+                generated_at_utc: inventory.generated_at_utc.clone(),
+                coverage: enum_code(inventory.coverage),
+                observed_bytes: inventory.observed_bytes,
+                accounted_bytes: inventory.accounted_bytes,
+                unaccounted_bytes: inventory.unaccounted_bytes,
+                omitted_items: inventory.omitted_items,
+                groups: inventory
+                    .groups
+                    .iter()
+                    .map(|group| LiveStatusStagingInventoryGroupView {
+                        root_kind: enum_code(group.root_kind),
+                        disposition: enum_code(group.disposition),
+                        reason: enum_code(group.reason),
+                        items: group.items,
+                        bytes: group.bytes,
                     })
                     .collect(),
             });
@@ -256,8 +305,16 @@ pub(crate) fn workspace_from_daemon(snapshot: LiveStatusResponse) -> LiveStatusW
         hdd_transfers,
         recent: snapshot.recent.iter().map(progress_from_daemon).collect(),
         garbage_collection,
+        staging_inventory,
         warnings,
     }
+}
+
+fn enum_code(value: impl Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn progress_from_daemon(ingest: &LiveStatusIngest) -> LiveStatusProgressView {
@@ -366,7 +423,8 @@ mod tests {
     use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId, StoreId};
     use dasobjectstore_daemon::{
         DaemonIngestHddActiveTransfer, DaemonIngestProgressEvent, LiveStatusActor,
-        LiveStatusAggregate, LiveStatusConnectionOrigin,
+        LiveStatusAggregate, LiveStatusConnectionOrigin, StagingByteDisposition, StagingInventory,
+        StagingInventoryCoverage, StagingInventoryGroup, StagingRetentionReason, StagingRootKind,
     };
 
     fn ingest() -> LiveStatusIngest {
@@ -434,6 +492,22 @@ mod tests {
             active: vec![item],
             recent: Vec::new(),
             garbage_collection: None,
+            staging_inventory: Some(StagingInventory {
+                schema_version: "dasobjectstore.staging_inventory.v1".into(),
+                generated_at_utc: "2026-07-19T12:00:00Z".into(),
+                coverage: StagingInventoryCoverage::Complete,
+                observed_bytes: 12,
+                accounted_bytes: 12,
+                unaccounted_bytes: 0,
+                omitted_items: 0,
+                groups: vec![StagingInventoryGroup {
+                    root_kind: StagingRootKind::DirectS3Upload,
+                    disposition: StagingByteDisposition::Blocked,
+                    reason: StagingRetentionReason::DurabilityNotProven,
+                    items: 1,
+                    bytes: 12,
+                }],
+            }),
         });
         assert_eq!(view.availability, LiveStatusAvailabilityView::Available);
         assert_eq!(view.suggested_refresh_millis, 1_000);
@@ -444,6 +518,9 @@ mod tests {
             Some("sample.fast5")
         );
         assert_eq!(view.hdd_transfers[0].disk_id, "disk-1");
+        let inventory = view.staging_inventory.expect("staging inventory");
+        assert_eq!(inventory.coverage, "complete");
+        assert_eq!(inventory.groups[0].root_kind, "direct_s3_upload");
     }
 
     #[test]
@@ -456,6 +533,7 @@ mod tests {
             active: vec![ingest()],
             recent: Vec::new(),
             garbage_collection: None,
+            staging_inventory: None,
         });
         let encoded = serde_json::to_string(&view).unwrap();
         assert!(!encoded.contains("/secret/source"));

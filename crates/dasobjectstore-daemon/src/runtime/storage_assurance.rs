@@ -1,27 +1,35 @@
 //! Idle-gated background verification, rebalancing, and disk evacuation.
 
+mod operation;
+
 use super::ingest_files::discover_managed_hdd_roots;
 use super::LiveStatusRegistry;
 use dasobjectstore_core::ids::DiskId;
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
+use dasobjectstore_metadata::assurance::{
+    assurance_relocation_committed, complete_assurance_drain_if_empty,
+};
 use dasobjectstore_metadata::{
     acquire_disk_capacity_claims, assurance_primary_work_pending, commit_assurance_relocation,
-    hash_file_sha256, list_assurance_disk_states, list_assurance_placement_candidates,
-    measure_ssd_capacity, read_outstanding_disk_capacity, record_assurance_hash_failure,
-    record_assurance_verification, release_disk_capacity_claims,
-    write_verified_hdd_copy_with_controlled_progress, AssuranceMetadataError,
-    AssurancePlacementCandidate, DiskCapacityClaimAllocation, DiskCapacityClaimError,
-    DiskCapacityClaimKind, DiskCapacityClaimRequest, HddCopyError, HddCopyRequest,
+    list_assurance_disk_states, list_assurance_placement_candidates, measure_ssd_capacity,
+    read_outstanding_disk_capacity, record_assurance_hash_failure, record_assurance_verification,
+    release_disk_capacity_claims, write_verified_hdd_copy_with_controlled_progress,
+    AssuranceMetadataError, AssurancePlacementCandidate, DiskCapacityClaimAllocation,
+    DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest, HddCopyError,
+    HddCopyRequest,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use operation::{DurableAssuranceOperation, OperationPhase};
 
 pub const DEFAULT_ASSURANCE_POLL_SECONDS: u64 = 30;
 pub const DEFAULT_ASSURANCE_IDLE_GRACE_SECONDS: u64 = 10 * 60;
@@ -42,6 +50,7 @@ pub struct StorageAssuranceConfig {
     pub live_sqlite_path: PathBuf,
     pub hdd_root: PathBuf,
     pub latest_report_path: PathBuf,
+    pub operation_journal_path: PathBuf,
 }
 
 impl StorageAssuranceConfig {
@@ -86,6 +95,7 @@ impl StorageAssuranceConfig {
             live_sqlite_path: ssd_root.join(".dasobjectstore/live.sqlite"),
             hdd_root,
             latest_report_path: state_dir.join("storage-assurance/latest.json"),
+            operation_journal_path: state_dir.join("storage-assurance/operation.json"),
         };
         config.validate()?;
         Ok(config)
@@ -157,13 +167,24 @@ struct MeasuredRoot {
     state: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageAssuranceAction {
     Evacuate,
     Rebalance,
     Verify,
     Idle,
+}
+
+impl StorageAssuranceAction {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Evacuate => "evacuate",
+            Self::Rebalance => "rebalance",
+            Self::Verify => "verify",
+            Self::Idle => "idle",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -261,11 +282,49 @@ pub fn run_one_storage_assurance(
     now_utc: &str,
 ) -> Result<StorageAssuranceReport, StorageAssuranceError> {
     let roots = measured_roots(config)?;
+    if let Some(report) =
+        recover_assurance_operation(config, &roots, Arc::clone(&live_status_registry), now_utc)?
+    {
+        return Ok(report);
+    }
+    for root in roots
+        .iter()
+        .filter(|root| root.state.eq_ignore_ascii_case("draining"))
+    {
+        let completion =
+            complete_assurance_drain_if_empty(&config.live_sqlite_path, &root.disk_id, now_utc)?;
+        if completion.transitioned_to_retired {
+            return Ok(StorageAssuranceReport {
+                schema: "dasobjectstore.storage_assurance.report.v1",
+                completed_at_utc: now_utc.to_string(),
+                success: true,
+                action: StorageAssuranceAction::Evacuate,
+                object_id: None,
+                source_disk_id: Some(root.disk_id.to_string()),
+                destination_disk_id: None,
+                bytes: 0,
+                source_removed: false,
+                message: "drain completed; empty disk is retired and offline-ready".to_string(),
+            });
+        }
+    }
     let candidates = list_assurance_placement_candidates(&config.live_sqlite_path)?;
     let now_seconds = parse_utc_timestamp_seconds(now_utc)
         .ok_or_else(|| StorageAssuranceError::InvalidTimestamp(now_utc.to_string()))?;
     let selected = select_action(config, &roots, &candidates, now_seconds);
     let Some((action, candidate, destination)) = selected else {
+        if let Some(blocked) = candidates.iter().find(|candidate| {
+            matches!(
+                candidate.disk_state.to_ascii_lowercase().as_str(),
+                "draining" | "suspect"
+            )
+        }) {
+            return Err(StorageAssuranceError::EvacuationBlocked {
+                object_id: blocked.object_id.to_string(),
+                disk_id: blocked.disk_id.clone(),
+                reason: "no healthy destination has capacity and copy separation".to_string(),
+            });
+        }
         return Ok(StorageAssuranceReport {
             schema: "dasobjectstore.storage_assurance.report.v1",
             completed_at_utc: now_utc.to_string(),
@@ -286,7 +345,9 @@ pub fn run_one_storage_assurance(
     let relative = safe_relative_path(&candidate.relative_path)?;
     let source_path = source_root.root_path.join(&relative);
     let expected_hash = normalize_sha256(&candidate.content_hash)?;
-    let source_hash = hash_file_sha256(&source_path)?;
+    let source_hash = hash_file_sha256_controlled(&source_path, || {
+        assurance_should_preempt(config, &live_status_registry, now_utc)
+    })?;
     if source_hash != expected_hash {
         record_assurance_hash_failure(
             &config.live_sqlite_path,
@@ -320,18 +381,15 @@ pub fn run_one_storage_assurance(
 
     let destination =
         destination.ok_or_else(|| StorageAssuranceError::MissingAssuranceDestination)?;
-    let claim_kind = match action {
-        StorageAssuranceAction::Evacuate => DiskCapacityClaimKind::Evacuation,
-        StorageAssuranceAction::Rebalance => DiskCapacityClaimKind::Repair,
-        StorageAssuranceAction::Verify | StorageAssuranceAction::Idle => {
-            return Err(StorageAssuranceError::MissingAssuranceDestination);
-        }
-    };
-    let claim_owner = format!(
-        "assurance:{}:{}",
-        candidate.object_id.as_str(),
-        destination.disk_id.as_str()
+    let claim_kind = claim_kind(action)?;
+    let mut operation = DurableAssuranceOperation::deterministic(
+        action,
+        candidate.clone(),
+        destination.disk_id.clone(),
+        now_utc,
     );
+    operation::persist(&config.operation_journal_path, &operation)?;
+    let claim_owner = operation.claim_owner.clone();
     let raw_capacity = measure_ssd_capacity(&destination.root_path)
         .map_err(|error| StorageAssuranceError::Discovery(error.to_string()))?;
     acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
@@ -355,6 +413,8 @@ pub fn run_one_storage_assurance(
             requested_bytes: candidate.size_bytes,
         }],
     })?;
+    operation.advance(OperationPhase::Claimed, now_utc);
+    operation::persist(&config.operation_journal_path, &operation)?;
     let destination_path = destination.root_path.join(&relative);
     let request = HddCopyRequest::new(
         candidate.object_id.clone(),
@@ -365,18 +425,18 @@ pub fn run_one_storage_assurance(
         &expected_hash,
     );
     let copy_result = write_verified_hdd_copy_with_controlled_progress(&request, |_| {
-        let snapshot = live_status_registry.snapshot(now_utc.to_string());
-        if snapshot.aggregate.active_ingests > 0
-            || assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true)
-        {
+        if assurance_should_preempt(config, &live_status_registry, now_utc) {
             return Err(HddCopyError::Cancelled);
         }
         Ok(())
     });
     if let Err(error) = copy_result {
         release_disk_capacity_claims(&config.live_sqlite_path, claim_kind, &claim_owner, now_utc)?;
+        operation::remove(&config.operation_journal_path)?;
         return Err(error.into());
     }
+    operation.advance(OperationPhase::Copied, now_utc);
+    operation::persist(&config.operation_journal_path, &operation)?;
     commit_assurance_relocation(
         &config.live_sqlite_path,
         candidate,
@@ -384,6 +444,8 @@ pub fn run_one_storage_assurance(
         &candidate.relative_path,
         now_utc,
     )?;
+    operation.advance(OperationPhase::Promoted, now_utc);
+    operation::persist(&config.operation_journal_path, &operation)?;
     release_disk_capacity_claims(&config.live_sqlite_path, claim_kind, &claim_owner, now_utc)?;
     let source_removed = match fs::remove_file(&source_path) {
         Ok(()) => {
@@ -401,6 +463,9 @@ pub fn run_one_storage_assurance(
             false
         }
     };
+    operation::remove(&config.operation_journal_path)?;
+    let _ =
+        complete_assurance_drain_if_empty(&config.live_sqlite_path, &candidate.disk_id, now_utc)?;
     Ok(report_for(
         action,
         candidate,
@@ -413,6 +478,192 @@ pub fn run_one_storage_assurance(
             "verified relocation committed; redundant source retained for garbage collection"
         },
     ))
+}
+
+fn recover_assurance_operation(
+    config: &StorageAssuranceConfig,
+    roots: &[MeasuredRoot],
+    live_status_registry: Arc<LiveStatusRegistry>,
+    now_utc: &str,
+) -> Result<Option<StorageAssuranceReport>, StorageAssuranceError> {
+    let Some(mut operation) = operation::read(&config.operation_journal_path)? else {
+        return Ok(None);
+    };
+    let claim_kind = claim_kind(operation.action)?;
+    let source_root = roots
+        .iter()
+        .find(|root| root.disk_id == operation.candidate.disk_id)
+        .ok_or_else(|| {
+            StorageAssuranceError::MissingDiskRoot(operation.candidate.disk_id.clone())
+        })?;
+    let destination_root = roots
+        .iter()
+        .find(|root| root.disk_id == operation.destination_disk_id)
+        .ok_or_else(|| {
+            StorageAssuranceError::MissingDiskRoot(operation.destination_disk_id.clone())
+        })?;
+    let relative = safe_relative_path(&operation.destination_relative_path)?;
+    let source_path = source_root.root_path.join(&relative);
+    let destination_path = destination_root.root_path.join(&relative);
+    let expected_hash = normalize_sha256(&operation.candidate.content_hash)?;
+
+    if operation.phase == OperationPhase::Planned {
+        release_disk_capacity_claims(
+            &config.live_sqlite_path,
+            claim_kind,
+            &operation.claim_owner,
+            now_utc,
+        )?;
+        operation::remove(&config.operation_journal_path)?;
+        return Ok(None);
+    }
+    if operation.phase == OperationPhase::Claimed {
+        if !destination_path.is_file() {
+            release_disk_capacity_claims(
+                &config.live_sqlite_path,
+                claim_kind,
+                &operation.claim_owner,
+                now_utc,
+            )?;
+            operation::remove(&config.operation_journal_path)?;
+            return Ok(None);
+        }
+        let actual_hash = hash_file_sha256_controlled(&destination_path, || {
+            assurance_should_preempt(config, &live_status_registry, now_utc)
+        })?;
+        if actual_hash != expected_hash {
+            return Err(StorageAssuranceError::AmbiguousRecovery(
+                operation.operation_id,
+            ));
+        }
+        operation.advance(OperationPhase::Copied, now_utc);
+        operation::persist(&config.operation_journal_path, &operation)?;
+    }
+
+    let committed = assurance_relocation_committed(
+        &config.live_sqlite_path,
+        &operation.candidate.object_id,
+        &operation.candidate.placement_id,
+        &operation.destination_disk_id,
+        &operation.destination_relative_path,
+        &operation.candidate.content_hash,
+    )?;
+    if operation.phase == OperationPhase::Copied && !committed {
+        if !destination_path.is_file() {
+            release_disk_capacity_claims(
+                &config.live_sqlite_path,
+                claim_kind,
+                &operation.claim_owner,
+                now_utc,
+            )?;
+            operation::remove(&config.operation_journal_path)?;
+            return Ok(None);
+        }
+        let actual_hash = hash_file_sha256_controlled(&destination_path, || {
+            assurance_should_preempt(config, &live_status_registry, now_utc)
+        })?;
+        if actual_hash != expected_hash {
+            return Err(StorageAssuranceError::HashMismatch {
+                object_id: operation.candidate.object_id.to_string(),
+                disk_id: operation.destination_disk_id.clone(),
+                expected: expected_hash,
+                actual: actual_hash,
+            });
+        }
+        commit_assurance_relocation(
+            &config.live_sqlite_path,
+            &operation.candidate,
+            &operation.destination_disk_id,
+            &operation.destination_relative_path,
+            now_utc,
+        )?;
+        operation.advance(OperationPhase::Promoted, now_utc);
+        operation::persist(&config.operation_journal_path, &operation)?;
+    } else if !committed {
+        return Err(StorageAssuranceError::AmbiguousRecovery(
+            operation.operation_id,
+        ));
+    }
+
+    release_disk_capacity_claims(
+        &config.live_sqlite_path,
+        claim_kind,
+        &operation.claim_owner,
+        now_utc,
+    )?;
+    let source_removed = remove_redundant_source(&source_path)?;
+    operation::remove(&config.operation_journal_path)?;
+    let _ = complete_assurance_drain_if_empty(
+        &config.live_sqlite_path,
+        &operation.candidate.disk_id,
+        now_utc,
+    )?;
+    Ok(Some(report_for(
+        operation.action,
+        &operation.candidate,
+        Some(destination_root),
+        now_utc,
+        source_removed,
+        "restart recovered verified relocation without recopying",
+    )))
+}
+
+fn claim_kind(
+    action: StorageAssuranceAction,
+) -> Result<DiskCapacityClaimKind, StorageAssuranceError> {
+    match action {
+        StorageAssuranceAction::Evacuate => Ok(DiskCapacityClaimKind::Evacuation),
+        StorageAssuranceAction::Rebalance => Ok(DiskCapacityClaimKind::Repair),
+        StorageAssuranceAction::Verify | StorageAssuranceAction::Idle => {
+            Err(StorageAssuranceError::MissingAssuranceDestination)
+        }
+    }
+}
+
+fn remove_redundant_source(path: &Path) -> Result<bool, StorageAssuranceError> {
+    match fs::remove_file(path) {
+        Ok(()) => {
+            if let Some(parent) = path.parent() {
+                File::open(parent)?.sync_all()?;
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(_) => Ok(false),
+    }
+}
+
+fn assurance_should_preempt(
+    config: &StorageAssuranceConfig,
+    live_status_registry: &LiveStatusRegistry,
+    now_utc: &str,
+) -> bool {
+    let snapshot = live_status_registry.snapshot(now_utc.to_string());
+    snapshot.aggregate.active_ingests > 0
+        || snapshot
+            .garbage_collection
+            .is_some_and(|collection| collection.running)
+        || assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true)
+}
+
+fn hash_file_sha256_controlled(
+    path: &Path,
+    mut should_cancel: impl FnMut() -> bool,
+) -> Result<String, StorageAssuranceError> {
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        if should_cancel() {
+            return Err(StorageAssuranceError::Preempted);
+        }
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn select_action<'a>(
@@ -444,13 +695,16 @@ fn select_action<'a>(
         .filter(|root| destination_state_allowed(&root.state))
         .collect::<Vec<_>>();
     ordered_roots.sort_by(|left, right| compare_free_fraction(left, right));
-    if let (Some(source), Some(destination)) = (ordered_roots.first(), ordered_roots.last()) {
-        let gap = free_basis_points(destination).saturating_sub(free_basis_points(source));
-        if source.disk_id != destination.disk_id && gap >= u64::from(config.imbalance_basis_points)
-        {
+    for source in &ordered_roots {
+        for destination in ordered_roots.iter().rev() {
+            let gap = free_basis_points(destination).saturating_sub(free_basis_points(source));
+            if source.disk_id == destination.disk_id
+                || gap < u64::from(config.imbalance_basis_points)
+            {
+                continue;
+            }
             if let Some(candidate) = candidates.iter().find(|candidate| {
                 candidate.disk_id == source.disk_id
-                    && candidate.size_bytes <= config.max_object_bytes
                     && candidate.size_bytes <= destination.available_bytes
                     && !candidate
                         .existing_disk_ids
@@ -467,7 +721,6 @@ fn select_action<'a>(
     }
     candidates
         .iter()
-        .filter(|candidate| candidate.size_bytes <= config.max_object_bytes)
         .find(|candidate| {
             candidate
                 .verified_at_utc
@@ -482,7 +735,7 @@ fn select_action<'a>(
 }
 
 fn best_destination<'a>(
-    config: &StorageAssuranceConfig,
+    _config: &StorageAssuranceConfig,
     roots: &'a [MeasuredRoot],
     candidate: &AssurancePlacementCandidate,
 ) -> Option<&'a MeasuredRoot> {
@@ -492,7 +745,6 @@ fn best_destination<'a>(
             root.disk_id != candidate.disk_id
                 && destination_state_allowed(&root.state)
                 && root.available_bytes >= candidate.size_bytes
-                && candidate.size_bytes <= config.max_object_bytes
                 && !candidate
                     .existing_disk_ids
                     .iter()
@@ -684,6 +936,13 @@ pub enum StorageAssuranceError {
         expected: String,
         actual: String,
     },
+    EvacuationBlocked {
+        object_id: String,
+        disk_id: DiskId,
+        reason: String,
+    },
+    AmbiguousRecovery(String),
+    Preempted,
     Metadata(AssuranceMetadataError),
     CapacityClaim(DiskCapacityClaimError),
     Copy(HddCopyError),
@@ -701,6 +960,9 @@ impl Display for StorageAssuranceError {
             Self::MissingAssuranceDestination => formatter.write_str("assurance action requires a destination"),
             Self::Discovery(error) => write!(formatter, "assurance disk discovery failed: {error}"),
             Self::HashMismatch { object_id, disk_id, expected, actual } => write!(formatter, "assurance hash mismatch for {object_id} on {disk_id}: expected {expected}, got {actual}"),
+            Self::EvacuationBlocked { object_id, disk_id, reason } => write!(formatter, "assurance evacuation blocked for {object_id} on {disk_id}: {reason}"),
+            Self::AmbiguousRecovery(operation_id) => write!(formatter, "assurance operation {operation_id} has ambiguous restart evidence; source retained"),
+            Self::Preempted => formatter.write_str("storage assurance preempted by primary work"),
             Self::Metadata(error) => error.fmt(formatter),
             Self::CapacityClaim(error) => error.fmt(formatter),
             Self::Copy(error) => error.fmt(formatter),
@@ -735,7 +997,7 @@ impl From<io::Error> for StorageAssuranceError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dasobjectstore_metadata::{object_commit::placement_id, LIVE_SCHEMA_SQL};
+    use dasobjectstore_metadata::{hash_file_sha256, object_commit::placement_id, LIVE_SCHEMA_SQL};
     use rusqlite::{params, Connection};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -799,6 +1061,53 @@ mod tests {
         let selected = select_action(&config, &roots, &candidates, 0).expect("action");
         assert_eq!(selected.0, StorageAssuranceAction::Rebalance);
         assert_eq!(selected.2.expect("destination").disk_id.as_str(), "disk-b");
+    }
+
+    #[test]
+    fn balance_tries_second_freest_destination_when_first_is_ineligible() {
+        let config = test_config();
+        let roots = vec![
+            root("disk-a", 10, 100),
+            root("disk-b", 90, 100),
+            root("disk-c", 80, 100),
+        ];
+        let mut object = candidate("disk-a");
+        object
+            .existing_disk_ids
+            .push("disk-b".parse().expect("disk"));
+        let candidates = vec![object];
+        let selected = select_action(&config, &roots, &candidates, 0).expect("action");
+        assert_eq!(selected.0, StorageAssuranceAction::Rebalance);
+        assert_eq!(selected.2.expect("destination").disk_id.as_str(), "disk-c");
+    }
+
+    #[test]
+    fn large_placement_is_not_silently_excluded_from_evacuation_or_scrub() {
+        let mut config = test_config();
+        config.max_object_bytes = 1;
+        let roots = vec![root("disk-a", 10, 100), root("disk-b", 90, 100)];
+        let mut object = candidate("disk-a");
+        object.disk_state = "Draining".to_string();
+        object.size_bytes = 5;
+        let candidates = [object];
+        let selected = select_action(&config, &roots, &candidates, i64::MAX).expect("action");
+        assert_eq!(selected.0, StorageAssuranceAction::Evacuate);
+    }
+
+    #[test]
+    fn controlled_hash_stops_before_reading_more_work_after_preemption() {
+        let root = temp_root("hash-preemption");
+        fs::create_dir_all(&root).expect("root");
+        let payload = root.join("payload");
+        fs::write(&payload, vec![7_u8; 2 * 1024 * 1024]).expect("payload");
+        let mut checks = 0;
+        let error = hash_file_sha256_controlled(&payload, || {
+            checks += 1;
+            checks > 1
+        })
+        .expect_err("preempted");
+        assert!(matches!(error, StorageAssuranceError::Preempted));
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
@@ -875,6 +1184,7 @@ mod tests {
             live_sqlite_path: live_sqlite_path.clone(),
             hdd_root: hdd_root.clone(),
             latest_report_path: state_root.join("latest.json"),
+            operation_journal_path: state_root.join("operation.json"),
             ..test_config()
         };
 
@@ -901,6 +1211,16 @@ mod tests {
             )
             .expect("placement");
         assert_eq!(disk, "disk-b");
+        let source_state: String = Connection::open(&live_sqlite_path)
+            .expect("open")
+            .query_row(
+                "SELECT state FROM disks WHERE disk_id='disk-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("source state");
+        assert_eq!(source_state, "Retired");
+        assert!(!config.operation_journal_path.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -942,6 +1262,7 @@ mod tests {
             live_sqlite_path: PathBuf::from("/live.sqlite"),
             hdd_root: PathBuf::from("/hdd"),
             latest_report_path: PathBuf::from("/state/latest.json"),
+            operation_journal_path: PathBuf::from("/state/operation.json"),
         }
     }
 

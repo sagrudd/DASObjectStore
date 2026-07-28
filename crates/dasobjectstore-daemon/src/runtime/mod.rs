@@ -47,6 +47,7 @@ mod remote_sessions;
 mod remote_upload;
 mod service;
 mod service_reconciliation;
+mod staging_inventory;
 mod storage_assurance;
 mod subobject_capacity_persistence;
 mod work_scheduler;
@@ -331,6 +332,7 @@ pub use service_reconciliation::{
     garbage_collect_reconciliation_staging, ReconciliationGarbageCollectionDisposition,
     ReconciliationGarbageCollectionReport, ReconciliationGarbageCollectionSnapshot,
 };
+pub use staging_inventory::build_staging_inventory;
 pub use storage_assurance::{
     run_one_storage_assurance, spawn_storage_assurance_loop, StorageAssuranceAction,
     StorageAssuranceConfig, StorageAssuranceError, StorageAssuranceReport,

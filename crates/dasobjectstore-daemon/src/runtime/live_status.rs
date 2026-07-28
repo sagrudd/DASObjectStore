@@ -1,7 +1,7 @@
 use crate::api::{
     DaemonIngestProgressEvent, DaemonIngestStage, LiveStatusActor, LiveStatusAggregate,
     LiveStatusConnectionOrigin, LiveStatusGarbageCollection, LiveStatusIngest, LiveStatusResponse,
-    LIVE_STATUS_SCHEMA_VERSION,
+    StagingInventory, LIVE_STATUS_SCHEMA_VERSION,
 };
 use crate::auth::DaemonLocalActor;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -15,6 +15,7 @@ struct LiveStatusState {
     active: BTreeMap<String, LiveStatusIngest>,
     recent: VecDeque<LiveStatusIngest>,
     garbage_collection: Option<LiveStatusGarbageCollection>,
+    staging_inventory: Option<StagingInventory>,
 }
 
 #[derive(Debug, Default)]
@@ -30,6 +31,15 @@ impl LiveStatusRegistry {
             .expect("live status registry lock poisoned");
         state.sequence = state.sequence.saturating_add(1);
         state.garbage_collection = Some(report);
+    }
+
+    pub fn record_staging_inventory(&self, inventory: StagingInventory) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("live status registry lock poisoned");
+        state.sequence = state.sequence.saturating_add(1);
+        state.staging_inventory = Some(inventory);
     }
     pub fn record(
         &self,
@@ -114,6 +124,7 @@ impl LiveStatusRegistry {
             active,
             recent: state.recent.iter().cloned().collect(),
             garbage_collection: state.garbage_collection.clone(),
+            staging_inventory: state.staging_inventory.clone(),
         }
     }
 }
@@ -200,5 +211,24 @@ mod tests {
         assert!(!serde_json::to_string(&collection)
             .expect("serialize")
             .contains("/srv/"));
+    }
+
+    #[test]
+    fn staging_inventory_is_sequenced_and_preserves_accounting() {
+        let registry = LiveStatusRegistry::default();
+        registry.record_staging_inventory(crate::api::StagingInventory {
+            schema_version: crate::api::STAGING_INVENTORY_SCHEMA_VERSION.to_string(),
+            generated_at_utc: "2026-01-01T00:00:00Z".to_string(),
+            coverage: crate::api::StagingInventoryCoverage::Complete,
+            observed_bytes: 9,
+            accounted_bytes: 7,
+            unaccounted_bytes: 2,
+            omitted_items: 0,
+            groups: Vec::new(),
+        });
+        let snapshot = registry.snapshot("2026-01-01T00:00:01Z");
+        let inventory = snapshot.staging_inventory.expect("staging inventory");
+        assert!(inventory.accounting_is_complete());
+        assert_eq!(snapshot.sequence, 1);
     }
 }
