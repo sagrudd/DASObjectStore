@@ -216,6 +216,13 @@ pub fn easyconnect_public_router() -> Router {
     easyconnect_public_router_with_state(EasyconnectPublicRouteState::default())
 }
 
+/// Public pairing routes enriched with the host-owned S3 deployment descriptor.
+pub fn easyconnect_public_router_with_s3_descriptor(
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+) -> Router {
+    easyconnect_public_router_with_state(EasyconnectPublicRouteState { s3_descriptor })
+}
+
 fn easyconnect_public_router_with_state(state: EasyconnectPublicRouteState) -> Router {
     Router::new()
         .route(

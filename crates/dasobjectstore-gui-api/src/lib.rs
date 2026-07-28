@@ -53,7 +53,8 @@ pub use auth_guard::{
     STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
-    easyconnect_public_router, federated_gui_api_router, gui_api_router_for_host_mode,
+    easyconnect_public_router, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, gui_api_router_for_host_mode,
     gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
     standalone_gui_api_router, AssignLocalUserToGroupRequest, AuthRouteError,

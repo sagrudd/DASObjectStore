@@ -48,7 +48,9 @@ pub use host_auth_adapter::{
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_api_router_with_verifier,
-    monas_dasobjectstore_router, monas_dasobjectstore_router_with_verifier, monas_federated_router,
+    monas_dasobjectstore_router, monas_dasobjectstore_router_with_s3_descriptor,
+    monas_dasobjectstore_router_with_verifier,
+    monas_dasobjectstore_router_with_verifier_and_s3_descriptor, monas_federated_router,
     monas_federated_router_with_verifier, synoptikon_federated_router, MonasLiveSessionVerifier,
     SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
 };

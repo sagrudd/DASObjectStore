@@ -17,8 +17,9 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    easyconnect_public_router, federated_gui_api_router, AuthenticatedLocalPolicySubject,
-    LocalAuthStore,
+    easyconnect_public_router, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, AuthenticatedLocalPolicySubject, LocalAuthStore,
+    StandaloneS3ConnectionDescriptor,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -81,6 +82,21 @@ pub fn monas_dasobjectstore_router(
     monas_federated_router(product_router, auth_store).merge(easyconnect_public_router())
 }
 
+/// Mount Monas-hosted routes with the authoritative public S3 descriptor used
+/// by passwordless EasyConnect clients.
+pub fn monas_dasobjectstore_router_with_s3_descriptor(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+    s3_descriptor: StandaloneS3ConnectionDescriptor,
+) -> Router {
+    let product_router =
+        federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
+            .merge(host_product_routes);
+    monas_federated_router(product_router, auth_store).merge(
+        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor)),
+    )
+}
+
 /// Mount product routes behind a host-owned live-session verifier.
 ///
 /// The local auth store remains the product's user-management adapter; it is
@@ -94,6 +110,21 @@ pub fn monas_dasobjectstore_router_with_verifier(
         .merge(host_product_routes);
     monas_federated_router_with_verifier(product_router, verifier)
         .merge(easyconnect_public_router())
+}
+
+/// Mount verifier-backed Monas routes with an authoritative public S3
+/// descriptor.
+pub fn monas_dasobjectstore_router_with_verifier_and_s3_descriptor(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+    s3_descriptor: StandaloneS3ConnectionDescriptor,
+) -> Router {
+    let product_router = federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store))
+        .merge(host_product_routes);
+    monas_federated_router_with_verifier(product_router, verifier).merge(
+        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor)),
+    )
 }
 
 pub fn synoptikon_federated_router(
