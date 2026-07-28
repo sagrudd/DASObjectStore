@@ -167,6 +167,40 @@ pub struct RemoteSessionBinding {
 }
 
 impl RemoteConfig {
+    pub(crate) fn duplicate_store_binding_count(&self) -> usize {
+        self.session_bindings
+            .iter()
+            .enumerate()
+            .map(|(index, binding)| {
+                self.session_bindings[index + 1..]
+                    .iter()
+                    .filter(|candidate| candidate.store_id == binding.store_id)
+                    .count()
+            })
+            .sum()
+    }
+
+    pub(crate) fn profile_association_consistent(&self, binding: &RemoteSessionBinding) -> bool {
+        let associations = self
+            .s3_profiles
+            .iter()
+            .filter(|association| association.store_id == binding.store_id)
+            .collect::<Vec<_>>();
+        match (binding.s3_profile.as_deref(), associations.as_slice()) {
+            (None, []) => true,
+            (Some(profile), [association]) => {
+                association.profile == profile
+                    && association.endpoint_url == binding.s3_endpoint_url
+                    && association.bucket == binding.bucket
+                    && association.region == binding.region
+                    && association.addressing_style == binding.addressing_style
+                    && association.expires_at.as_deref()
+                        == Some(binding.session.expires_at.as_str())
+            }
+            _ => false,
+        }
+    }
+
     pub fn session_binding(
         &self,
         store_id: &str,
@@ -220,38 +254,28 @@ impl RemoteConfig {
                     remediation: "dasobjectstore-remote config repair --dry-run --json".to_string(),
                 });
             }
-            if self.session_bindings[index + 1..].iter().any(|candidate| {
-                candidate.appliance_id == binding.appliance_id
-                    && candidate.store_id == binding.store_id
-            }) {
+            if self.session_bindings[index + 1..]
+                .iter()
+                .any(|candidate| candidate.store_id == binding.store_id)
+            {
                 return Err(RemoteConfigError::Integrity {
                     code: "ambiguous_session_state",
                     message: format!(
-                        "duplicate session binding for appliance {} and ObjectStore {}",
-                        binding.appliance_id, binding.store_id
+                        "multiple authoritative session generations exist for ObjectStore {}",
+                        binding.store_id
                     ),
                     remediation: "dasobjectstore-remote config repair --dry-run --json".to_string(),
                 });
             }
-            if let Some(profile) = &binding.s3_profile {
-                let associations = self
-                    .s3_profiles
-                    .iter()
-                    .filter(|association| {
-                        association.profile == *profile && association.store_id == binding.store_id
-                    })
-                    .count();
-                if associations != 1 {
-                    return Err(RemoteConfigError::Integrity {
-                        code: "profile_association_mismatch",
-                        message: format!(
-                            "AWS profile {profile} is not uniquely associated with ObjectStore {}",
-                            binding.store_id
-                        ),
-                        remediation: "dasobjectstore-remote config repair --dry-run --json"
-                            .to_string(),
-                    });
-                }
+            if !self.profile_association_consistent(binding) {
+                return Err(RemoteConfigError::Integrity {
+                    code: "profile_association_mismatch",
+                    message: format!(
+                        "ObjectStore {} does not have exactly one matching AWS profile association",
+                        binding.store_id
+                    ),
+                    remediation: "dasobjectstore-remote config repair --dry-run --json".to_string(),
+                });
             }
         }
         Ok(())

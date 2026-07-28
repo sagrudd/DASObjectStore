@@ -694,3 +694,15 @@ revealing credentials with::
 Apply a reported safe migration with::
 
    dasobjectstore-remote config repair --apply --json
+
+Doctor, repair, and normal session lookup all apply the same rule: there may
+be exactly one authoritative session and one S3 profile association for an
+ObjectStore, even when an appliance identity has changed. A dry run lists the
+appliance IDs, stores, profiles, and expiry times it will retain or retire; it
+never renders session credentials. Repair selects the complete binding whose
+endpoint trust matches the currently enrolled appliance. If none matches, it
+retires the obsolete bindings so the active ``authenticate`` invocation can
+establish the replacement. Apply writes a new immutable generation and moves
+``state.json`` atomically; the previous generation remains the private archive.
+``authenticate --set-s3-config`` performs this safe repair automatically and
+continues without requiring a second authentication command.

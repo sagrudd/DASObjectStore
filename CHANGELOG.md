@@ -8,6 +8,17 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.151.1 - 2026-07-28
+
+- Reconcile authoritative remote sessions by ObjectStore across replaced
+  appliance identities, select the binding matching enrolled endpoint trust,
+  retire obsolete bindings in an archived generation, and rebuild exactly one
+  S3 profile association without exposing credentials.
+- Make config doctor, dry-run repair, applied repair, strict session lookup,
+  and authentication use the same per-store uniqueness invariant.
+- Continue the original authentication transaction automatically after safe
+  identity-replacement repair instead of requiring a second invocation.
+
 ## 0.151.0 - 2026-07-28
 
 - Separate the stable daemon-owned appliance identity from replaceable HTTPS

@@ -180,8 +180,20 @@ pub(super) fn run_authenticate_with_identity_policy(
         .unwrap_or_else(|| default_profile_name(&context.object_store))?;
     let path = config_path(cli)?;
     // Trigger a supported legacy migration before taking the transaction lock;
+    // repair an identity-replacement ambiguity against enrolled endpoint trust,
     // then reload under the lock so concurrent authentication cannot publish
-    // from a stale base generation.
+    // from a stale base generation. The same authenticate invocation continues
+    // after repair and publishes the newly authenticated binding.
+    if let Err(RemoteConfigError::Integrity { code, .. }) = read_optional_config(&path) {
+        if matches!(
+            code,
+            "ambiguous_session_state" | "profile_association_mismatch"
+        ) {
+            repair_config(&path, true)?;
+        } else {
+            let _ = read_optional_config(&path)?;
+        }
+    }
     let _ = read_optional_config(&path)?;
     let transaction_lock = acquire_config_transaction(&path)?;
     let prior_config = read_optional_config(&path)?.unwrap_or_else(empty_config);
@@ -299,8 +311,12 @@ pub(super) fn authenticated_context_config(
     if let Some(association) = association {
         config
             .s3_profiles
-            .retain(|entry| entry.profile != association.profile);
+            .retain(|entry| entry.store_id != context.object_store);
         config.s3_profiles.push(association);
+    } else {
+        config
+            .s3_profiles
+            .retain(|entry| entry.store_id != context.object_store);
     }
     let appliance_id = context.appliance_id.clone();
     let control_base_url = format!("https://{}:{}", context.appliance_host, https_port);
@@ -329,12 +345,12 @@ pub(super) fn authenticated_context_config(
         writer_group: None,
         object_type: "store_scoped_session".to_string(),
     };
-    // Host aliases and historical endpoint spellings cannot create a second
-    // logical session. The server-returned appliance/store identities are the
-    // sole replacement key.
-    config.session_bindings.retain(|binding| {
-        !(binding.appliance_id == appliance_id && binding.store_id == context.object_store)
-    });
+    // Host aliases, historical endpoint spellings, and replaced appliance IDs
+    // cannot create a second logical session. ObjectStore identity is the sole
+    // replacement key; authenticated appliance identity becomes its new owner.
+    config
+        .session_bindings
+        .retain(|binding| binding.store_id != context.object_store);
     config.session_bindings.push(RemoteSessionBinding {
         appliance_id: appliance_id.clone(),
         store_id: context.object_store.clone(),

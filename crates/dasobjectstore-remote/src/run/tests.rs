@@ -94,12 +94,13 @@ fn config_set_preserves_paired_appliance_storage() {
 }
 
 #[test]
-fn authentication_retires_obsolete_alias_session_generation() {
+fn authentication_retires_obsolete_alias_and_appliance_session_generations() {
     let mut config = paired_config();
     let mut alias = config.session_bindings[0].clone();
     alias.control_base_url = "https://das.local:8448".to_string();
+    alias.appliance_id = "standalone-dasobjectstore@2cb548dc079ab9f55d918bcc".to_string();
     alias.session.session_id = "OBSOLETESESSION".to_string();
-    config.session_bindings.push(alias);
+    config.session_bindings.push(alias.clone());
     let context = remote_connection_context("NEWSESSION");
 
     let updated = authenticated_context_config(
@@ -126,6 +127,11 @@ fn authentication_retires_obsolete_alias_session_generation() {
         matching[0].trust_fingerprint_sha256,
         "new-trust-fingerprint"
     );
+    assert_eq!(updated.session_bindings.len(), 1);
+    assert!(updated
+        .session_bindings
+        .iter()
+        .all(|binding| binding.appliance_id != alias.appliance_id));
 }
 
 #[test]
