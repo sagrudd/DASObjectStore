@@ -8,6 +8,14 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.152.3 - 2026-07-28
+
+### Changed
+
+- Align the Monas product boundary on the merged Prosopikon 0.15 authority and
+  executable conformance revision, preventing duplicate incompatible session
+  authority types when Monas enables its production Pistis route.
+
 ## 0.152.2 - 2026-07-28
 
 ### Fixed
