@@ -32,8 +32,9 @@ const MANIFEST_FILE: &str = "manifest.json";
 mod completion;
 use completion::{completion_job_id, completion_status};
 pub use completion::{
-    inspect_multipart_completion_status, list_recoverable_multipart_uploads,
-    multipart_completion_job_id, MultipartUploadStatusRecord,
+    inspect_multipart_completion, inspect_multipart_completion_status,
+    list_recoverable_multipart_uploads, multipart_completion_job_id, MultipartCompletionInspection,
+    MultipartUploadStatusRecord,
 };
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -52,6 +53,10 @@ struct JournalManifest {
     updated_at_unix_seconds: u64,
     #[serde(default)]
     completion_intent: Option<MultipartCompletionIntent>,
+    #[serde(default)]
+    completion_subobject: Option<String>,
+    #[serde(default)]
+    completion_scope_recorded: bool,
     #[serde(default)]
     completion_receipt: Option<MultipartCompletionReceipt>,
     #[serde(default)]
@@ -148,6 +153,8 @@ impl MultipartPartJournal {
                 created_at_unix_seconds: now_unix_seconds(),
                 updated_at_unix_seconds: now_unix_seconds(),
                 completion_intent: None,
+                completion_subobject: None,
+                completion_scope_recorded: false,
                 completion_receipt: None,
                 completion_job: None,
             }
@@ -372,6 +379,19 @@ impl MultipartPartJournal {
         expected_size_bytes: u64,
         parts: Vec<MultipartPartRecord>,
     ) -> Result<MultipartCompletionClaim, MultipartPartJournalError> {
+        self.begin_completion_for_subobject(object, expected_size_bytes, parts, None)
+    }
+
+    /// Durably bind a completion to the exact authorized capacity scope.
+    /// Persisting the scope is required so daemon startup recovery cannot
+    /// accidentally settle a subobject reservation against its parent store.
+    pub fn begin_completion_for_subobject(
+        &mut self,
+        object: BackendObjectKey,
+        expected_size_bytes: u64,
+        parts: Vec<MultipartPartRecord>,
+        subobject: Option<&str>,
+    ) -> Result<MultipartCompletionClaim, MultipartPartJournalError> {
         let intent = MultipartCompletionIntent {
             object,
             expected_size_bytes,
@@ -389,6 +409,8 @@ impl MultipartPartJournal {
             MultipartLifecycle::Receiving => {
                 self.manifest.lifecycle = MultipartLifecycle::Completing;
                 self.manifest.completion_intent = Some(intent);
+                self.manifest.completion_subobject = subobject.map(str::to_string);
+                self.manifest.completion_scope_recorded = true;
                 self.manifest.completion_job = Some(completion_status(
                     &self.manifest.store_id,
                     &self.manifest.reservation_id,
@@ -409,6 +431,20 @@ impl MultipartPartJournal {
             MultipartLifecycle::Completing => {
                 if self.manifest.completion_intent.as_ref() != Some(&intent) {
                     return Err(MultipartPartJournalError::CompletionConflict);
+                }
+                if self.manifest.completion_scope_recorded
+                    && self.manifest.completion_subobject.as_deref() != subobject
+                {
+                    return Err(MultipartPartJournalError::CompletionConflict);
+                }
+                if !self.manifest.completion_scope_recorded {
+                    // A client retry is authenticated and therefore may
+                    // safely upgrade an older intent that predates persisted
+                    // capacity scope. Startup recovery must not guess it.
+                    self.manifest.completion_subobject = subobject.map(str::to_string);
+                    self.manifest.completion_scope_recorded = true;
+                    self.manifest.updated_at_unix_seconds = now_unix_seconds();
+                    self.persist()?;
                 }
                 if self.manifest.completion_job.is_none() {
                     // Upgrade an older v1 completing journal in place. The
@@ -1364,6 +1400,129 @@ mod tests {
     }
 
     #[test]
+    fn committed_completion_receipt_is_independently_queryable() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-receipt-inspect-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        journal.persist().expect("manifest");
+        journal
+            .begin_completion(request.object.clone(), 10, Vec::new())
+            .expect("begin");
+        journal
+            .mark_completion_in_progress(ProfileS3MultipartCompletionPhase::PersistingReceipt)
+            .expect("in progress");
+        journal
+            .mark_committed(MultipartCompletionReceipt {
+                object: request.object.clone(),
+                size_bytes: 10,
+                checksum: format!("sha256:{}", "a".repeat(64)),
+            })
+            .expect("commit");
+        drop(journal);
+
+        let inspection = inspect_multipart_completion(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            &request.object,
+        )
+        .expect("inspect")
+        .expect("completion");
+        assert_eq!(
+            inspection.status.state,
+            ProfileS3MultipartCompletionState::Committed
+        );
+        assert_eq!(inspection.receipt.expect("receipt").size_bytes, 10);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restart_recovery_preserves_exact_subobject_scope_and_immutable_intent() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-multipart-completion-scope-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("root");
+        let request = request(
+            1,
+            "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        );
+        let mut journal = MultipartPartJournal::open(&root, &request).expect("journal");
+        let part = MultipartPartRecord {
+            part_number: 1,
+            size_bytes: 10,
+            checksum: format!("sha256:{}", "a".repeat(64)),
+        };
+        journal.manifest.parts.push(JournalPart {
+            part_number: part.part_number,
+            size_bytes: part.size_bytes,
+            checksum: part.checksum.clone(),
+            file_name: "part-00000001.bin".to_string(),
+        });
+        std::fs::write(journal.directory.join("part-00000001.bin"), b"0123456789").expect("part");
+        journal.persist().expect("manifest");
+        journal
+            .begin_completion_for_subobject(
+                request.object.clone(),
+                10,
+                vec![part.clone()],
+                Some("sample-a"),
+            )
+            .expect("begin scoped completion");
+        drop(journal);
+
+        let uploads =
+            list_recoverable_multipart_uploads(&root, request.store_id.as_str()).expect("list");
+        assert_eq!(uploads.len(), 1);
+        assert_eq!(uploads[0].subobject.as_deref(), Some("sample-a"));
+        assert_eq!(uploads[0].expected_size_bytes, Some(10));
+        assert_eq!(uploads[0].parts, vec![part.clone()]);
+        assert!(uploads[0].scope_recorded);
+
+        let mut reopened = MultipartPartJournal::open_for_completion(
+            &root,
+            request.store_id.as_str(),
+            &request.reservation_id,
+            request.object.clone(),
+            10,
+        )
+        .expect("reopen");
+        assert_eq!(
+            reopened
+                .begin_completion_for_subobject(
+                    request.object.clone(),
+                    10,
+                    vec![part.clone()],
+                    Some("sample-a"),
+                )
+                .expect("resume exact scope"),
+            MultipartCompletionClaim::Resuming
+        );
+        assert!(matches!(
+            reopened.begin_completion_for_subobject(
+                request.object,
+                10,
+                vec![part],
+                Some("different-scope"),
+            ),
+            Err(MultipartPartJournalError::CompletionConflict)
+        ));
+
+        drop(reopened);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn legacy_completing_manifest_gets_stable_synthesized_status() {
         let root = std::env::temp_dir().join(format!(
             "dasobjectstore-multipart-completion-legacy-{}",
@@ -1399,6 +1558,23 @@ mod tests {
         .expect("synthesized");
         assert_eq!(first.job_id, second.job_id);
         assert_eq!(first.state, ProfileS3MultipartCompletionState::InProgress);
+        assert!(!journal.manifest.completion_scope_recorded);
+        assert_eq!(
+            journal
+                .begin_completion_for_subobject(
+                    request.object.clone(),
+                    10,
+                    Vec::new(),
+                    Some("legacy-scope"),
+                )
+                .expect("authenticated retry upgrades scope"),
+            MultipartCompletionClaim::Resuming
+        );
+        assert!(journal.manifest.completion_scope_recorded);
+        assert_eq!(
+            journal.manifest.completion_subobject.as_deref(),
+            Some("legacy-scope")
+        );
 
         drop(journal);
         let _ = std::fs::remove_dir_all(root);

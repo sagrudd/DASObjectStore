@@ -250,6 +250,10 @@ pub(crate) fn standalone_dashboard_router_with_state(
             post(standalone_profile_s3_multipart_complete),
         )
         .route(
+            "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/status",
+            get(standalone_profile_s3_multipart_status),
+        )
+        .route(
             PROFILE_S3_MULTIPART_PART_ROUTE,
             post(standalone_profile_s3_multipart_part),
         )

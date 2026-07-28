@@ -16,7 +16,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.149.0"
+version = "0.150.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -46,8 +46,8 @@ gloo-timers = "0.3.0"
 flate2 = "1.1.5"
 js-sys = "0.3.83"
 plist = "1"
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "b3440e3859fd2921325435a2f7c19c9e64502213" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "b3440e3859fd2921325435a2f7c19c9e64502213" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "fc28a926885c1b9665e93bf321f9adb9c76ffb83" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "fc28a926885c1b9665e93bf321f9adb9c76ffb83" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"

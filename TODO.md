@@ -32,7 +32,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.149.0``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.150.0``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -1307,6 +1307,12 @@ hardware acceptance.
     schemas without weakening validation of advertised recoverable work.
     Release 0.146.3 wires the operation through the production daemon
     dispatcher; external GB10 acceptance guards against API/daemon route skew.
+    Release 0.150.0 closes the observed production disconnect gap: transient
+    completion polling reconnects, restart recovery requeues durable jobs,
+    receipts have an authenticated status surface, structured recovery events
+    identify safe job state, and S3 multipart listing honours prefix and marker
+    pagination. The guarded multi-GiB CODEX restart harness is the remaining
+    physical acceptance evidence.
   - [x] Publish stable profile-S3 route constants for bounded object listing
     and reservation-bound multipart completion; daemon request routing and
     runtime store dispatch now complete through the journal-backed completion

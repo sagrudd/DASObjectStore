@@ -120,9 +120,9 @@ returns ``401`` before the product handler runs. The generic verifier result is
 credential-free; DASObjectStore never opens the Pistis handoff store.
 The verifier must attest the exact ``monas`` Prosopikon audience; a verifier
 result for any product or host audience is rejected before context creation.
-The review build pins the stacked Prosopikon authority and guarded
-first-administrator commit
-``b3440e3859fd2921325435a2f7c19c9e64502213``. Release evidence must replace
+The review build pins the stacked, security-fixed Prosopikon authority and
+guarded first-administrator commit
+``fc28a926885c1b9665e93bf321f9adb9c76ffb83``. Release evidence must replace
 that review pin with the eventual merged commits from Prosopikon PRs 10 and 12
 after their dependencies are accepted.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie

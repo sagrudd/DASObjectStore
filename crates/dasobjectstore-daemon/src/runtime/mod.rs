@@ -274,8 +274,9 @@ pub use profile_s3::{
     PROFILE_S3_MAX_MULTIPART_PARTS,
 };
 pub use profile_s3_multipart::{
-    discover_multipart_reservation_ids, inspect_multipart_completion_status,
-    list_recoverable_multipart_uploads, multipart_completion_job_id, MultipartCompletionClaim,
+    discover_multipart_reservation_ids, inspect_multipart_completion,
+    inspect_multipart_completion_status, list_recoverable_multipart_uploads,
+    multipart_completion_job_id, MultipartCompletionClaim, MultipartCompletionInspection,
     MultipartCompletionReceipt, MultipartPartJournal, MultipartPartJournalError,
     MultipartPartRecord, MultipartUploadStatusRecord,
 };

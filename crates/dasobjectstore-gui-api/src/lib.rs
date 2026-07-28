@@ -25,6 +25,7 @@ mod reporting;
 pub mod routes;
 mod s3_gateway;
 mod s3_gateway_auth;
+mod s3_multipart_listing;
 pub mod server_config;
 pub mod tls_assets;
 pub mod view;

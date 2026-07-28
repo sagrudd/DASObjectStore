@@ -313,6 +313,18 @@ fn run() -> Result<(), String> {
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir))
     .with_live_status_registry(Arc::clone(&live_status_registry));
+    let multipart_recovery = handler.recover_multipart_completion_workers();
+    if multipart_recovery.discovered > 0 || multipart_recovery.retained_unsafe > 0 {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "event": "profile_s3_multipart_startup_recovery",
+                "discovered": multipart_recovery.discovered,
+                "requeued": multipart_recovery.requeued,
+                "retained_unsafe": multipart_recovery.retained_unsafe,
+            })
+        );
+    }
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, Arc::clone(&capacity_provider));
     let assurance_config = StorageAssuranceConfig::from_environment(&config.state_dir)

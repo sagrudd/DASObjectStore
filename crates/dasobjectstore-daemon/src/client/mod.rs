@@ -935,6 +935,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ProfileS3List(_) => "profile_s3_list",
         DaemonApiResponse::ProfileS3Delete(_) => "profile_s3_delete",
         DaemonApiResponse::ProfileS3MultipartComplete(_) => "profile_s3_multipart_complete",
+        DaemonApiResponse::ProfileS3MultipartStatus(_) => "profile_s3_multipart_status",
         DaemonApiResponse::ProfileS3MultipartUploads(_) => "profile_s3_multipart_uploads",
         DaemonApiResponse::ProfileS3MultipartAbort(_) => "profile_s3_multipart_abort",
         DaemonApiResponse::ProfileS3Head(_) => "profile_s3_head",

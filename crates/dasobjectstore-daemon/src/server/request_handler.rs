@@ -137,6 +137,7 @@ use self::job_projection::{
     daemon_job_summary_from_update_object_store_ingest_policy,
     remote_easyconnect_aws_cli_upload_job_request,
 };
+pub use self::multipart_completion_worker::MultipartCompletionRecoveryReport;
 pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
     create_object_store_with_capacity, ensure_profile_backend, prepare_profile_provision_root,
