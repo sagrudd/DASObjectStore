@@ -18,7 +18,7 @@ sequence below.
 Architecture and acknowledgement
 --------------------------------
 
-The public endpoint stays at ``http://192.168.1.192:3900``. In direct mode the
+The public endpoint uses ``https://<appliance-name>:3900``. In direct mode the
 DASObjectStore standalone server owns that listener; Garage moves to
 ``http://127.0.0.1:3901`` and remains available only for legacy/recovery
 operations.
@@ -255,6 +255,32 @@ available. The required topology is one public gateway on ``:3900``, one
 loopback-only Garage listener on ``127.0.0.1:3901``, and the existing Web UI on
 ``:8448``.
 
+Before restarting, preserve the active configuration and confirm that
+``tls.certificate_path`` and ``tls.private_key_path`` name the reviewed
+appliance certificate pair. Configure ``public_endpoint_url`` with the DNS
+name present in that certificate, the exact listener port, and an ``https``
+scheme. The server rejects plaintext and port-substituted descriptors:
+
+.. code-block:: console
+
+   sudo install -m 0600 /opt/dasobjectstore/config.json \
+     /opt/dasobjectstore/config.json.pre-direct-s3-tls
+   sudo dasobjectstore-server \
+     --config /opt/dasobjectstore/config.json --check-config --json
+   openssl s_client -connect objects.appliance.example:3900 \
+     -servername objects.appliance.example -tls1_3 </dev/null
+   curl --proto '=https' --tlsv1.3 --fail \
+     --cacert /path/to/reviewed-appliance-ca.pem \
+     https://objects.appliance.example:3900/.well-known/dasobjectstore/appliance-ca.pem
+
+The operator must make one explicit trust decision before deployment: either
+use a certificate issued by a CA already trusted by every remote client, or
+distribute the appliance/customer CA through the site's authenticated
+configuration-management channel. Never fetch a CA from the untrusted
+endpoint and trust it implicitly. Retain the certificate chain, SHA-256
+fingerprint, SANs, expiry, negotiated TLS version, configuration digest, and
+exact package revision as acceptance evidence.
+
 Acceptance tests
 ----------------
 
@@ -268,7 +294,7 @@ already been provisioned through DASObjectStore:
    export AWS_ACCESS_KEY_ID='acceptance-store-access-key'
    export AWS_SECRET_ACCESS_KEY='acceptance-store-secret-key'
    export AWS_DEFAULT_REGION='garage'
-   endpoint='http://192.168.1.192:3900'
+   endpoint='https://dasobjectstore.example:3900'
    bucket='dos-codex-direct-s3'
    root="$HOME/.dasobjectstore-codex-validation/direct-s3"
    mkdir -p "$root"
@@ -412,9 +438,9 @@ Limitations and production gates
 --------------------------------
 
 * Direct mode is opt-in; omission means ``garage_legacy``.
-* Public ``http://`` provides no transport confidentiality. Keep it on a
-  trusted network or put a reviewed TLS terminator in front before wider
-  exposure.
+* The packaged direct gateway is HTTPS-only and reuses the appliance
+  certificate lifecycle. An operator-managed reverse proxy is a separate
+  deployment boundary and does not qualify this native-listener profile.
 * Header-signed SigV4 with a fixed hexadecimal payload digest is the required
   write form. Presigned-query authentication, streaming SigV4 chunks, and
   ``UNSIGNED-PAYLOAD`` writes are not release claims unless their tests pass.

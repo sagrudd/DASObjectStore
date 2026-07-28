@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+- Correct standalone EasyConnect URL publication so daemon routes that already
+  include the DASObjectStore product mount are not prefixed a second time.
+- Render a bounded standalone login handoff for first-use EasyConnect browser
+  approval, preserving header-based browser sessions without cookies or an
+  authentication bypass and escaping hostile query content.
+- Terminate direct S3 ingress with the appliance's native Rustls listener,
+  reject plaintext or port-substituted public descriptors, and document
+  explicit certificate trust, deployment evidence, and recoverable rollback.
+
 - Add the Monas/Pistis EasyConnect HTTP boundary: loopback-only public pairing
   creation, host-session and CSRF-protected approval, one-time public exchange,
   and a browser approval page that posts the exchange capability directly to

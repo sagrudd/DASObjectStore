@@ -24,7 +24,7 @@ can read the DASObjectStore store registry:
 .. code-block:: console
 
    dasobjectstore store s3-upload generated-data \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --auth mneion
 
 The command resolves the store's S3 bucket, credential reference, AWS CLI
@@ -38,8 +38,10 @@ Endpoint reachability
 ---------------------
 
 The endpoint URL in the upload plan must be reachable from the remote computer.
-``http://127.0.0.1:3900`` only verifies that the object service is listening on
-the DAS host itself; it is not a valid endpoint for a different workstation.
+``http://127.0.0.1:3900`` only verifies a legacy Garage listener on the DAS
+host itself; it is not a valid endpoint for a different workstation or for
+``direct_gateway``. The native direct gateway requires HTTPS and a
+hostname-valid appliance certificate.
 
 When rendering Docker Compose for the appliance object service, the CLI defaults
 to a remote-capable host binding:
@@ -118,7 +120,7 @@ the bucket name explicitly:
 .. code-block:: console
 
    dasobjectstore store s3-upload generated-data \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --bucket dos-generated-data \
      --auth mneion
 
@@ -208,7 +210,7 @@ Upload a single file with an explicit S3 PUT operation:
 .. code-block:: console
 
    aws --profile dasobjectstore-generated-data \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      s3api put-object \
      --bucket dos-generated-data \
      --key experiments/run-001/report.json \
@@ -219,7 +221,7 @@ For ordinary file copies, ``aws s3 cp`` is usually more ergonomic:
 .. code-block:: console
 
    aws --profile dasobjectstore-generated-data \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      s3 cp ./report.json s3://dos-generated-data/experiments/run-001/report.json
 
 For a directory tree:
@@ -227,7 +229,7 @@ For a directory tree:
 .. code-block:: console
 
    aws --profile dasobjectstore-generated-data \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      s3 sync ./run-001/ s3://dos-generated-data/experiments/run-001/
 
 Operational notes

@@ -409,7 +409,7 @@ Configure the DASObjectStore S3 endpoint once on the remote computer:
 .. code-block:: console
 
    dasobjectstore-remote config set \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --region garage \
      --profile dasobjectstore
 

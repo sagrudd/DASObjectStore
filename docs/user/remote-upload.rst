@@ -20,7 +20,8 @@ The remote client must be able to reach:
 * the standalone DASObjectStore Web application, normally
   ``https://<appliance>:8448``; and
 * the S3-compatible object-service endpoint used for transfer, normally a
-  non-loopback appliance address such as ``http://192.168.1.192:3900``.
+  hostname-valid appliance address such as
+  ``https://objects.appliance.example:3900``.
 
 Start easyconnect from the remote computer:
 
