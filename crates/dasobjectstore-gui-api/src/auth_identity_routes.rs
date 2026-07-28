@@ -695,25 +695,10 @@ pub(super) async fn easyconnect_create_pairing(
         .query_pairs_mut()
         .append_pair("object_store", &requested_object_store)
         .append_pair("expires_at_utc", &response.expires_at_utc);
-    response.browser_login_url = format!(
-        "{}?{}",
-        browser_url.path(),
-        browser_url.query().unwrap_or_default()
-    );
-    response.browser_login_url = format!(
-        "{}/products/dasobjectstore{}",
-        state.public_base_url.trim_end_matches('/'),
-        response.browser_login_url
-    );
+    response.browser_login_url = browser_url.into();
     response.polling_url =
         absolute_public_easyconnect_url(&state.public_base_url, &response.polling_url)
-            .map(|url| {
-                format!(
-                    "{}/products/dasobjectstore{}",
-                    state.public_base_url.trim_end_matches('/'),
-                    url.path()
-                )
-            })
+            .map(Into::into)
             .ok_or_else(|| {
                 route_error(
                     StatusCode::SERVICE_UNAVAILABLE,

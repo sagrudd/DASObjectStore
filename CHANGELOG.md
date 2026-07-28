@@ -8,6 +8,9 @@ agreement before landing.
 
 ## Unreleased
 
+- Correct standalone EasyConnect URL publication so daemon routes that already
+  include the DASObjectStore product mount are not prefixed a second time.
+
 ## 0.151.0 - 2026-07-28
 
 - Add the Monas/Pistis EasyConnect HTTP boundary: loopback-only public pairing
