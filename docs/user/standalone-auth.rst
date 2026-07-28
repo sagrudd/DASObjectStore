@@ -121,15 +121,16 @@ credential-free; DASObjectStore never opens the Pistis handoff store.
 The verifier must attest the exact ``monas`` Prosopikon audience; a verifier
 result for any product or host audience is rejected before context creation.
 The review build pins Prosopikon hardening commit
-``fcc9a054dae7d092be5fff7d6c2b6eea25f5ec5a``. Release evidence must replace
-that review pin with the eventual merged commit from Prosopikon PR 6.
+``0b94fec7bbb7958240a739fa3a213d97d60b5ad2``. Release evidence must replace
+that review pin with the eventual merged commit from Prosopikon PR 10 after
+its specialist PR 6, PR 7, and PR 8 dependencies are accepted.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 
-Monas ``0.6.0`` commit ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``
-mounts this router directly at ``/products/dasobjectstore``. Both projects pin
-Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
-store is type- and schema-identical in a clean checkout.
+Monas mounts this router directly at ``/products/dasobjectstore``. Its
+integration review must pin this exact DASObjectStore revision and the same
+Prosopikon integration revision so the shared types and authority semantics
+are identical in a clean checkout.
 
 Federated HTML must include
 ``<meta name="dasobjectstore-host" content="monas">`` (or ``synoptikon``).
