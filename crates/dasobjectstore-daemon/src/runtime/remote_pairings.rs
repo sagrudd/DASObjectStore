@@ -158,6 +158,18 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
                 pairing_id: approval.pairing_id,
             });
         };
+        if let Some(requested) = pairing.requested_object_store.as_deref() {
+            if approval.allowed_object_stores.len() != 1
+                || approval.allowed_object_stores[0].object_store != requested
+            {
+                return Err(
+                    RemoteEasyconnectPairingStoreError::RequestedObjectStoreMismatch {
+                        pairing_id: pairing.pairing_id.clone(),
+                        requested: requested.to_string(),
+                    },
+                );
+            }
+        }
         pairing.approval = Some(approval);
         let approved = pairing.clone();
         write_store(&self.path, &store)?;
@@ -244,6 +256,10 @@ pub enum RemoteEasyconnectPairingStoreError {
     ExchangeCodeMismatch {
         pairing_id: String,
     },
+    RequestedObjectStoreMismatch {
+        pairing_id: String,
+        requested: String,
+    },
 }
 
 impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
@@ -314,6 +330,13 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
             Self::ExchangeCodeMismatch { pairing_id } => write!(
                 formatter,
                 "remote easyconnect pairing {pairing_id} exchange code did not match"
+            ),
+            Self::RequestedObjectStoreMismatch {
+                pairing_id,
+                requested,
+            } => write!(
+                formatter,
+                "remote easyconnect pairing {pairing_id} may approve only requested ObjectStore {requested}"
             ),
         }
     }
@@ -488,7 +511,14 @@ pub fn session_credentials_from_store_credentials(
 #[cfg(test)]
 mod tests {
     use super::{
-        write_store, RemoteEasyconnectPairingStoreFile, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+        write_store, FileBackedRemoteEasyconnectPairingStore, RemoteEasyconnectPairingApproval,
+        RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
+        RemoteEasyconnectPairingStoreError, RemoteEasyconnectPairingStoreFile,
+        REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+    };
+    use crate::api::{
+        remote_easyconnect_control_operations, RemoteEasyconnectAuthProvider,
+        RemoteEasyconnectObjectStoreGrant, REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -527,6 +557,52 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("entries");
         assert_eq!(entries.len(), 1);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn approval_cannot_substitute_the_requested_object_store() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        store
+            .upsert(RemoteEasyconnectPairingRecord {
+                pairing_id: "pairing-1".to_string(),
+                client_name: "remote CLI".to_string(),
+                callback_url:
+                    "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
+                        .to_string(),
+                requested_object_store: Some("requested-store".to_string()),
+                requested_session_lifetime_seconds: None,
+                client_request_id: Some("request-1".to_string()),
+                created_at_utc: "2026-07-28T10:00:00Z".to_string(),
+                expires_at_utc: "2026-07-28T10:05:00Z".to_string(),
+                approval: None,
+                exchanged_at_utc: None,
+            })
+            .expect("pairing is stored");
+        let error = store
+            .approve(RemoteEasyconnectPairingApproval {
+                pairing_id: "pairing-1".to_string(),
+                approved_actor: "principal-1".to_string(),
+                auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+                allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                    object_store: "different-store".to_string(),
+                    bucket: "bucket".to_string(),
+                    can_read: true,
+                    can_write: true,
+                    writer_group: Some("writers".to_string()),
+                    object_type: "store_scoped_session".to_string(),
+                    control_operations: remote_easyconnect_control_operations(true),
+                    allowed_prefixes: vec![REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string()],
+                }],
+                approval_expires_at_utc: "2026-07-28T10:04:00Z".to_string(),
+                exchange_code: "exchange-secret".to_string(),
+            })
+            .expect_err("store substitution must fail");
+        assert!(matches!(
+            error,
+            RemoteEasyconnectPairingStoreError::RequestedObjectStoreMismatch { .. }
+        ));
         fs::remove_dir_all(root).expect("cleanup");
     }
 }

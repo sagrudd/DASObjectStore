@@ -682,6 +682,243 @@ pub(super) async fn easyconnect_auth_context(
     }))
 }
 
+pub(super) async fn easyconnect_create_pairing(
+    Json(request): Json<RemoteEasyconnectCreatePairingRequest>,
+) -> Result<Json<RemoteEasyconnectCreatePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_pairing",
+            error.to_string(),
+        )
+    })?;
+    validate_loopback_callback(&request.callback_url)?;
+    let requested_object_store = request.requested_object_store.clone().ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "easyconnect_object_store_required",
+            "passwordless EasyConnect requires one exact ObjectStore",
+        )
+    })?;
+    let mut response = crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .remote_easyconnect_create_pairing(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(remote_auth_bridge_error)?;
+    let mut browser_url = reqwest::Url::parse(&format!(
+        "https://pistis.invalid{}",
+        response.browser_login_url
+    ))
+    .map_err(|_| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "invalid_easyconnect_browser_route",
+            "daemon returned an invalid EasyConnect browser route",
+        )
+    })?;
+    browser_url
+        .query_pairs_mut()
+        .append_pair("object_store", &requested_object_store)
+        .append_pair("expires_at_utc", &response.expires_at_utc);
+    response.browser_login_url = format!(
+        "{}?{}",
+        browser_url.path(),
+        browser_url.query().unwrap_or_default()
+    );
+    Ok(Json(response))
+}
+
+pub(super) async fn easyconnect_browser_approval(
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
+    Query(query): Query<EasyconnectBrowserApprovalQuery>,
+) -> Result<Html<String>, (StatusCode, Json<AuthRouteError>)> {
+    if query.pairing_id.trim().is_empty()
+        || query.object_store.trim().is_empty()
+        || query.expires_at_utc.trim().is_empty()
+    {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_approval_page",
+            "pairing, ObjectStore, and expiry are required",
+        ));
+    }
+    let intent = serde_json::to_string(&EasyconnectBrowserApprovalIntent {
+        pairing_id: query.pairing_id.clone(),
+        object_store: query.object_store.clone(),
+        approval_expires_at_utc: query.expires_at_utc.clone(),
+    })
+    .map_err(|error| {
+        route_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "easyconnect_approval_render_failed",
+            error.to_string(),
+        )
+    })?;
+    let csrf = serde_json::to_string(&verified.context().csrf_binding_sha256).map_err(|error| {
+        route_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "easyconnect_approval_render_failed",
+            error.to_string(),
+        )
+    })?;
+    let principal = html_escape(&actor.subject_id);
+    let object_store = html_escape(&query.object_store);
+    Ok(Html(format!(
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd>{principal}</dd><dt>ObjectStore</dt><dd>{object_store}</dd></dl><p>This creates one short-lived, ObjectStore-scoped session. No GitHub credential is sent to DASObjectStore.</p><button id="approve" type="button">Approve connection</button><pre id="status" role="status"></pre></main><script>const intent={intent};const csrf={csrf};document.getElementById("approve").onclick=async()=>{{const status=document.getElementById("status");status.textContent="Approving…";const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json","x-dasobjectstore-csrf":csrf}},body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};</script></body></html>"#
+    )))
+}
+
+pub(super) async fn easyconnect_approve_pairing(
+    actor: AuthenticatedGuiActor,
+    local_policy_subject: Option<Extension<crate::AuthenticatedLocalPolicySubject>>,
+    Json(intent): Json<EasyconnectBrowserApprovalIntent>,
+) -> Result<Json<RemoteEasyconnectApprovePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+    if !actor.authority.uses_local_os_policy() {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "local_os_policy_identity_required",
+            "EasyConnect approval requires a host-verified appliance-local policy subject",
+        ));
+    }
+    let username = local_policy_subject
+        .map(|Extension(subject)| subject.username)
+        .unwrap_or_else(|| actor.subject_id.clone());
+    let current_user = discover_local_user(&username).map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "local_user_discovery_failed",
+            error.to_string(),
+        )
+    })?;
+    let workspace = crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
+        current_user.username.clone(),
+        current_user.groups,
+        current_user.sudo_administrator,
+    );
+    let store = workspace
+        .stores
+        .iter()
+        .find(|store| store.store_id == intent.object_store)
+        .ok_or_else(|| {
+            route_error(
+                StatusCode::FORBIDDEN,
+                "object_store_not_authorized",
+                "the authenticated user has no remote access to the requested ObjectStore",
+            )
+        })?;
+    if !store.upload_allowed {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "object_store_write_authorization_required",
+            "remote EasyConnect sessions require current ObjectStore write authority",
+        ));
+    }
+    let request = RemoteEasyconnectApprovePairingRequest {
+        pairing_id: intent.pairing_id,
+        approved_actor: actor.subject_id,
+        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+        allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+            object_store: store.store_id.clone(),
+            bucket: store.bucket.clone(),
+            can_read: true,
+            can_write: true,
+            writer_group: store.writer_group.clone(),
+            object_type: store.object_type.clone(),
+            control_operations: dasobjectstore_daemon::api::remote_easyconnect_control_operations(
+                true,
+            ),
+            allowed_prefixes: vec![
+                dasobjectstore_daemon::api::REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string(),
+            ],
+        }],
+        approval_expires_at_utc: intent.approval_expires_at_utc,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_approval",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .remote_easyconnect_approve_pairing(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(remote_auth_bridge_error)
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+pub(super) async fn easyconnect_exchange_pairing(
+    Json(request): Json<RemoteEasyconnectExchangePairingRequest>,
+) -> Result<Json<RemoteEasyconnectExchangePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_exchange",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .remote_easyconnect_exchange_pairing(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(remote_auth_bridge_error)
+}
+
+fn validate_loopback_callback(
+    callback_url: &str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    let callback = reqwest::Url::parse(callback_url).map_err(|_| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_callback",
+            "callback URL must be an absolute loopback HTTP URL",
+        )
+    })?;
+    let loopback = callback.scheme() == "http"
+        && callback.username().is_empty()
+        && callback.password().is_none()
+        && callback.query().is_none()
+        && callback.fragment().is_none()
+        && callback.port().is_some()
+        && matches!(callback.host_str(), Some("127.0.0.1" | "::1"))
+        && callback.path() == "/products/dasobjectstore/remote/easyconnect/callback";
+    if !loopback {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_callback",
+            "callback URL must use the exact EasyConnect path on 127.0.0.1 or ::1 with an explicit port",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn standalone_easyconnect_discovery_payload(
     public_base_url: &str,
     appliance_id: &str,

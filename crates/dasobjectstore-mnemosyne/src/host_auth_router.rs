@@ -16,8 +16,8 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    federated_gui_api_router, AuthenticatedGuiActor, FederatedHostSessionResponse, LocalAuthStore,
-    VerifiedHostAuthenticatedContext,
+    easyconnect_public_router, federated_gui_api_router, AuthenticatedGuiActor,
+    FederatedHostSessionResponse, LocalAuthStore, VerifiedHostAuthenticatedContext,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -75,7 +75,7 @@ pub fn monas_dasobjectstore_router(
     let product_router =
         federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
             .merge(host_product_routes);
-    monas_federated_router(product_router, auth_store)
+    monas_federated_router(product_router, auth_store).merge(easyconnect_public_router())
 }
 
 pub fn synoptikon_federated_router(
@@ -118,6 +118,11 @@ async fn authenticate_monas_request(
     if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {
         return csrf_rejected();
     }
+    request
+        .extensions_mut()
+        .insert(AuthenticatedLocalPolicySubject {
+            username: session.username,
+        });
     request.extensions_mut().insert(verified);
     next.run(request).await
 }

@@ -41,7 +41,7 @@ use auth_identity_routes::*;
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
-    federated_gui_api_router, gui_api_router_for_host_mode,
+    easyconnect_public_router, federated_gui_api_router, gui_api_router_for_host_mode,
     gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
     standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,
@@ -57,12 +57,12 @@ pub(crate) use auth_router::{
 use auth_validation::*;
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::{
         header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
     },
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 pub use contracts::*;
@@ -121,11 +121,13 @@ use dasobjectstore_daemon::{
     ProfileS3ListResponse as DaemonProfileS3ListResponse,
     ProfileS3VerifyRequest as DaemonProfileS3VerifyRequest,
     ProfileS3VerifyResponse as DaemonProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectSessionPolicy,
+    UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -160,6 +162,20 @@ struct ProfileS3ListQuery {
 struct ProfileS3HeadQuery {
     key: Option<String>,
     version: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EasyconnectBrowserApprovalQuery {
+    pairing_id: String,
+    object_store: String,
+    expires_at_utc: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct EasyconnectBrowserApprovalIntent {
+    pairing_id: String,
+    object_store: String,
+    approval_expires_at_utc: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
