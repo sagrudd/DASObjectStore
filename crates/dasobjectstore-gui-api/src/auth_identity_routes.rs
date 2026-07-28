@@ -44,7 +44,7 @@ impl StandaloneEasyconnectRouteState {
 }
 
 #[cfg(not(test))]
-fn system_appliance_id() -> String {
+pub(super) fn system_appliance_id() -> String {
     let identity = dasobjectstore_daemon::runtime::ensure_appliance_identity(
         &dasobjectstore_daemon::DaemonRuntimeConfig::default_packaged().state_dir,
     );
@@ -58,7 +58,7 @@ fn system_appliance_id() -> String {
 }
 
 #[cfg(test)]
-fn system_appliance_id() -> String {
+pub(super) fn system_appliance_id() -> String {
     "das-appliance-test".to_string()
 }
 

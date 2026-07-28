@@ -93,6 +93,7 @@ async fn start_server(
         auth_root,
         !mtls_enabled,
         public_s3_descriptor,
+        Some(config.public_base_url.clone()),
     );
     let direct_s3 = async move {
         if s3_ingress.enabled() {
@@ -137,7 +138,7 @@ fn standalone_router(
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
 ) -> Router {
-    standalone_router_with_application_auth(web_root, authentication, auth_root, true, None)
+    standalone_router_with_application_auth(web_root, authentication, auth_root, true, None, None)
 }
 
 fn standalone_router_with_application_auth(
@@ -146,6 +147,7 @@ fn standalone_router_with_application_auth(
     auth_root: PathBuf,
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
 ) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
@@ -157,12 +159,14 @@ fn standalone_router_with_application_auth(
         auth_store.clone(),
         include_application_auth,
         s3_descriptor.clone(),
+        public_base_url.clone(),
     );
     let product_api = gui_api_router_for_host_mode_with_s3_descriptor(
         host_mode,
         auth_store,
         include_application_auth,
         s3_descriptor,
+        public_base_url,
     );
     Router::new()
         .route("/", get(root_redirect))
@@ -560,6 +564,7 @@ mod tests {
             auth_root.clone(),
             false,
             None,
+            None,
         )
         .oneshot(request())
         .await
@@ -572,11 +577,51 @@ mod tests {
             auth_root.clone(),
             true,
             None,
+            None,
         )
         .oneshot(request())
         .await
         .expect("compatible response");
         assert_ne!(compatible.status(), StatusCode::NOT_FOUND);
+        cleanup(&auth_root);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn easyconnect_discovery_uses_configured_public_base_url() {
+        let root = temp_root("server-run-public-base");
+        let auth_root = temp_root("server-run-public-base-auth");
+        let response = standalone_router_with_application_auth(
+            root.clone(),
+            Default::default(),
+            auth_root.clone(),
+            true,
+            None,
+            Some("https://192.0.2.10:8448".to_string()),
+        )
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/remote/easyconnect/discovery")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("discovery response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("discovery body");
+        let discovery: serde_json::Value =
+            serde_json::from_slice(&body).expect("discovery JSON");
+        assert_eq!(
+            discovery["pairing_create_url"],
+            "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+        );
+        assert_eq!(
+            discovery["pairing_exchange_url"],
+            "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
+        );
         cleanup(&auth_root);
         cleanup(&root);
     }

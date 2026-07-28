@@ -34,7 +34,7 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone())
+            let router = federated_operational_router(auth_store.clone(), None)
                 .merge(standalone_session_auth_router(auth_store));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
@@ -51,10 +51,11 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
     auth_store: LocalAuthStore,
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone()).merge(
+            let router = federated_operational_router(auth_store.clone(), public_base_url).merge(
                 standalone_session_auth_router_with_state(StandaloneAuthRouteState {
                     auth_store,
                     local_password_authenticator: Arc::new(
@@ -79,7 +80,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
 pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
     Router::new()
         .route("/api/v1/host-session", get(federated_host_session))
-        .merge(federated_operational_router(auth_store))
+        .merge(federated_operational_router(auth_store, None))
 }
 
 async fn federated_host_session(
@@ -92,12 +93,23 @@ async fn federated_host_session(
     ))
 }
 
-fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
+fn federated_operational_router(
+    auth_store: LocalAuthStore,
+    public_base_url: Option<String>,
+) -> Router {
+    let easyconnect_state = match public_base_url {
+        Some(public_base_url) => StandaloneEasyconnectRouteState {
+            auth_store: auth_store.clone(),
+            public_base_url,
+            appliance_id: super::auth_identity_routes::system_appliance_id(),
+        },
+        None => StandaloneEasyconnectRouteState::system(auth_store.clone()),
+    };
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(crate::remote_control_routes::remote_control_router())
         .merge(standalone_dashboard_router(auth_store.clone()))
         .merge(standalone_live_status_router(auth_store.clone()))
-        .merge(standalone_easyconnect_router(auth_store.clone()))
+        .merge(standalone_easyconnect_router_with_state(easyconnect_state))
         .merge(standalone_users_groups_router(auth_store.clone()))
         .merge(standalone_enclosure_admin_router(auth_store.clone()))
         .merge(crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()))

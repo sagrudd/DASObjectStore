@@ -8,6 +8,14 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.152.2 - 2026-07-28
+
+### Fixed
+
+- Generate EasyConnect pairing, exchange, renewal, and revocation URLs from the
+  configured public control-plane base URL so clean remote clients never
+  receive appliance-local loopback action URLs.
+
 ## 0.152.1 - 2026-07-28
 
 - Make the authenticated remote descriptor authoritative for the externally
