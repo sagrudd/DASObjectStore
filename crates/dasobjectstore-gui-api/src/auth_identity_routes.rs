@@ -20,6 +20,7 @@ pub struct StandaloneS3ConnectionDescriptor {
 pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) auth_store: LocalAuthStore,
     pub(super) public_base_url: String,
+    pub(super) appliance_id: String,
 }
 
 impl StandaloneAuthRouteState {
@@ -37,8 +38,28 @@ impl StandaloneEasyconnectRouteState {
         Self {
             auth_store,
             public_base_url: crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
+            appliance_id: system_appliance_id(),
         }
     }
+}
+
+#[cfg(not(test))]
+fn system_appliance_id() -> String {
+    let identity = dasobjectstore_daemon::runtime::ensure_appliance_identity(
+        &dasobjectstore_daemon::DaemonRuntimeConfig::default_packaged().state_dir,
+    );
+    match identity {
+        Ok(identity) => identity.appliance_id,
+        #[cfg(debug_assertions)]
+        Err(_) => "das-appliance-development".to_string(),
+        #[cfg(not(debug_assertions))]
+        Err(error) => panic!("authoritative appliance identity must be readable: {error}"),
+    }
+}
+
+#[cfg(test)]
+fn system_appliance_id() -> String {
+    "das-appliance-test".to_string()
 }
 
 pub(super) trait LocalPasswordAuthenticator: Send + Sync {
@@ -475,8 +496,7 @@ pub(super) async fn remote_authenticate(
         })?;
     Ok(Json(RemoteAuthenticateResponse {
         schema_version: "dasobjectstore.remote_authenticate.v3".to_string(),
-        appliance_id: standalone_easyconnect_discovery_payload("https://standalone.invalid")
-            .appliance_id,
+        appliance_id: system_appliance_id(),
         store_id: request.object_store.clone(),
         s3: RemoteAuthenticatedS3Descriptor {
             endpoint_url: s3_descriptor.endpoint_url.clone(),
@@ -611,6 +631,7 @@ pub(super) async fn easyconnect_discovery(
 ) -> Json<RemoteEasyconnectDiscoveryResponse> {
     Json(standalone_easyconnect_discovery_payload(
         &state.public_base_url,
+        &state.appliance_id,
     ))
 }
 
@@ -640,6 +661,7 @@ pub(super) async fn easyconnect_auth_context(
 
 pub(super) fn standalone_easyconnect_discovery_payload(
     public_base_url: &str,
+    appliance_id: &str,
 ) -> RemoteEasyconnectDiscoveryResponse {
     let api_base_url = format!(
         "{}/products/dasobjectstore/api",
@@ -647,7 +669,7 @@ pub(super) fn standalone_easyconnect_discovery_payload(
     );
 
     RemoteEasyconnectDiscoveryResponse {
-        appliance_id: "standalone-dasobjectstore".to_string(),
+        appliance_id: appliance_id.to_string(),
         product_id: "dasobjectstore".to_string(),
         display_name: "DASObjectStore standalone appliance".to_string(),
         pairing_create_url: format!("{api_base_url}/v1/remote/easyconnect/pairings"),

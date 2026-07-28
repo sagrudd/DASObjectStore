@@ -1,6 +1,7 @@
 //! Runtime configuration for the managed daemon.
 
 mod admin_jobs;
+mod appliance_identity;
 mod appliance_telemetry;
 mod application_audit;
 mod application_capability_ledger;
@@ -60,6 +61,10 @@ mod workspace_provision;
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,
     ADMIN_JOB_REGISTRY_DIR_NAME, ADMIN_JOB_REGISTRY_FILE_NAME, ADMIN_JOB_REGISTRY_SCHEMA,
+};
+pub use appliance_identity::{
+    appliance_identity_path, ensure_appliance_identity, load_appliance_identity,
+    ApplianceIdentityRecord,
 };
 pub use appliance_telemetry::{
     appliance_sample_set, appliance_telemetry_state_path, collect_appliance_session_telemetry,

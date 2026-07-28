@@ -112,13 +112,18 @@ An interactive user must answer the default-deny prompt:
 
    Trust this DASObjectStore appliance certificate? [y/N]
 
-The accepted certificate and endpoint/appliance binding are stored as private,
-locked, atomic trust state below
+The accepted certificate, stable appliance identity, endpoint binding, and any
+configured domain-cert CA are stored as private, locked, atomic trust state below
 ``~/.config/dasobjectstore/trusted-appliances`` (or
 ``$XDG_CONFIG_HOME/dasobjectstore/trusted-appliances``). Subsequent
-authentication verifies the presented leaf against that pin before prompting
-for a password. A changed, expired, or not-yet-valid certificate fails closed
-and shows the old and new fingerprints.
+authentication verifies the presented certificate before prompting for a
+password. For a domain-cert CA-backed appliance it validates the complete
+chain, server EKU, validity and requested DNS/IP SAN. A renewed leaf is accepted
+automatically only when that validation succeeds and the authenticated API
+returns the already-enrolled appliance ID. The new leaf and SPKI binding are
+then committed with the new session generation. Reinstalling the package does
+not change the appliance ID because it is retained independently below
+``/var/lib/dasobjectstore``.
 
 For non-interactive enrollment, compare a fingerprint obtained through an
 independent trusted channel:
@@ -146,11 +151,28 @@ Inspect and deliberately maintain enrolled trust with:
    dasobjectstore-remote trust inspect 192.168.1.192
    dasobjectstore-remote trust list
    dasobjectstore-remote trust remove APPLIANCE_ID
-   dasobjectstore-remote trust rotate APPLIANCE_ID \
-     --trust-fingerprint SHA256
+   dasobjectstore-remote trust repair 192.168.1.192 \
+     --username stephen \
+     --store epic_collection \
+     --set-s3-config
 
-Ordinary authentication never replaces an existing pin. Rotation requires a
-new independently verified fingerprint; removal requires interactive
+``authenticate --set-s3-config`` performs the repair automatically for a valid
+CA-backed renewal. ``trust repair`` is the single exceptional recovery command:
+it displays the enrolled identity and old/new certificate evidence, identifies
+the independent appliance-local check, asks once when continuity cannot be
+proved, renews the session, and configures and verifies S3. Obtain independent
+evidence on the appliance with:
+
+.. code-block:: console
+
+   dasobjectstore trust identity --json
+
+That report contains the authoritative appliance ID, certificate fingerprint,
+subject, issuer, SANs and validity without private-key material. Self-signed or
+wrong-CA replacement certificates, appliance-ID changes, SAN mismatch, invalid
+validity, and unauthorized CA changes remain fail-closed. The legacy
+``trust rotate`` command remains available for compatibility, but normal users
+do not need to copy fingerprints or edit JSON. Removal requires interactive
 confirmation or ``--yes``. ``--ca-cert`` and ``--tls-server-name`` remain
 advanced administrator-controlled overrides. There is no insecure TLS bypass
 or accept-any-certificate option.

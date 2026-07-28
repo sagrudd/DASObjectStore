@@ -10,6 +10,12 @@ and NAS-backed storage.
 
    user/index
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Architecture decisions
+
+   adr/index
+
 Design Notes
 ------------
 
@@ -17,3 +23,9 @@ The repository also contains Markdown design notes covering architecture,
 requirements, service orchestration, Mnemosyne integration, metadata recovery,
 platform probing, and application authentication and authoritative tokens.
 They remain source-controlled design documents rather than operator runbooks.
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Architecture
+
+   architecture/managed-compute-workspaces

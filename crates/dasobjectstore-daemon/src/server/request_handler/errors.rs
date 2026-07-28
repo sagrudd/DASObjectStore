@@ -65,6 +65,7 @@ impl From<RemoteEasyconnectPairedSessionStoreError> for RemoteEasyconnectStoreIn
 pub(super) enum RemoteEasyconnectExchangeDispatchError {
     InvalidRequest { message: String },
     InvalidClock { value: String },
+    ApplianceIdentity(std::io::Error),
     PairingStore(RemoteEasyconnectPairingStoreError),
     SessionStore(RemoteEasyconnectPairedSessionStoreError),
 }
@@ -77,6 +78,12 @@ impl Display for RemoteEasyconnectExchangeDispatchError {
                 formatter,
                 "daemon clock value {value} is not a supported UTC timestamp"
             ),
+            Self::ApplianceIdentity(error) => {
+                write!(
+                    formatter,
+                    "authoritative appliance identity is unavailable: {error}"
+                )
+            }
             Self::PairingStore(error) => Display::fmt(error, formatter),
             Self::SessionStore(error) => Display::fmt(error, formatter),
         }

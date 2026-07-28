@@ -4554,6 +4554,12 @@ mod tests {
         };
 
         assert_eq!(exchange.session.issued_at_utc, "2026-07-09T16:20:00Z");
+        assert_eq!(
+            exchange.appliance_id,
+            crate::runtime::load_appliance_identity(&root)
+                .expect("authoritative appliance identity")
+                .appliance_id
+        );
         assert_eq!(exchange.session.expires_at_utc, "2026-07-10T00:20:00Z");
         assert_ne!(exchange.session.credentials.access_key_id, "DOSMANAGEDKEY");
         assert_ne!(

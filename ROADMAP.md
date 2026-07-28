@@ -29,12 +29,19 @@ Five dependency-ordered EPICs close the candidate:
 5. run commit-bound synthetic physical acceptance before promotion.
 
 Development continues through compatible pre-1.0 semantic-version releases
-(currently ``0.150.0``). EPIC E binds the first promoted release-candidate tag
+(currently ``0.151.0``). EPIC E binds the first promoted release-candidate tag
 to the exact installed and accepted commit; it does not reuse a superseded
 version number. Release-candidate scope is frozen except for defects required
 to satisfy these EPICs. Performance promotion requires a recorded baseline, no
 unexplained staging growth, and investigation of regressions greater than 20
 percent. ``1.0.0`` remains a later, explicit compatibility decision.
+
+Remote TLS identity is now split into a stable daemon-owned appliance ID and a
+replaceable HTTPS certificate generation. Domain-cert CA-backed renewals
+validate chain, server EKU, validity and DNS/IP SAN, then prove the same
+appliance ID through authenticated EasyConnect exchange before atomically
+publishing the new leaf/SPKI and session binding. Exceptional replacement uses
+one ``trust repair`` workflow plus appliance-local identity evidence.
 
 ### EPIC B implementation evidence
 

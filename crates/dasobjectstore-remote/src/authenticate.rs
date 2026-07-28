@@ -149,6 +149,7 @@ pub struct ApplianceTrust {
     pub appliance_id: Option<String>,
     pub newly_enrolled: bool,
     pub legacy_fingerprint_pinned: bool,
+    pub pending_replacement: Option<crate::trust::ApplianceTrustRecord>,
 }
 
 pub fn prepare_appliance_trust<F>(
@@ -168,23 +169,53 @@ where
 {
     let host = normalize_host(host)?;
     if let Some(path) = explicit_ca_cert {
-        let certificate = fs::read(path)?;
-        validate_public_certificate(&certificate)?;
-        let leaf = crate::trust::pem_leaf_der(&certificate)
+        let existing = crate::trust::load_trust(&host, https_port)
             .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
-        let presented = crate::trust::inspect_leaf_certificate(&host, &leaf)
+        let authority = fs::read(path)?;
+        validate_public_certificate(&authority)?;
+        let presented = crate::trust::probe_certificate(&host, https_port)
             .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        crate::trust::verify_chain_with_authority(
+            &host,
+            &presented,
+            std::str::from_utf8(&authority).map_err(|_| {
+                RemoteAuthenticateError::Http(
+                    "configured domain-cert CA is not valid UTF-8 PEM".to_string(),
+                )
+            })?,
+        )
+        .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
         if let Some(expected) = expected_fingerprint {
             crate::trust::expected_fingerprint_matches(expected, &presented)
                 .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
         }
+        let mut enrollment = crate::trust::new_trust_record(
+            &host,
+            https_port,
+            existing.as_ref().map(|record| record.appliance_id.as_str()),
+            &presented,
+        )
+        .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        let authority_der = crate::trust::pem_leaf_der(&authority)
+            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        enrollment.authority_certificate_pem =
+            Some(String::from_utf8(authority).map_err(|_| {
+                RemoteAuthenticateError::Http(
+                    "configured domain-cert CA is not valid UTF-8 PEM".to_string(),
+                )
+            })?);
+        enrollment.authority_fingerprint_sha256 =
+            Some(crate::trust::formatted_certificate_sha256(&authority_der));
         return Ok(ApplianceTrust {
-            certificate_pem: certificate,
-            tls_server_name: explicit_tls_server_name.map(str::to_string),
+            certificate_pem: presented.certificate_pem.as_bytes().to_vec(),
+            tls_server_name: explicit_tls_server_name
+                .map(str::to_string)
+                .or_else(|| presented.tls_server_name.clone()),
             fingerprint_sha256: presented.fingerprint_sha256,
-            appliance_id: None,
+            appliance_id: existing.map(|record| record.appliance_id),
             newly_enrolled: false,
             legacy_fingerprint_pinned: false,
+            pending_replacement: Some(enrollment),
         });
     }
 
@@ -193,19 +224,29 @@ where
     if let Some(record) = crate::trust::load_trust(&host, https_port)
         .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?
     {
-        crate::trust::verify_presented_pin(&record, &presented)
-            .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        if let Some(authority) = record.authority_certificate_pem.as_deref() {
+            crate::trust::verify_chain_with_authority(&host, &presented, authority)
+                .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
+        }
+        let pending_replacement = match crate::trust::verify_presented_pin(&record, &presented) {
+            Ok(()) => None,
+            Err(_) => Some(
+                crate::trust::ca_validated_replacement(&record, &presented)
+                    .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?,
+            ),
+        };
         if let Some(expected) = expected_fingerprint {
             crate::trust::expected_fingerprint_matches(expected, &presented)
                 .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
         }
         return Ok(ApplianceTrust {
-            certificate_pem: record.certificate_pem.into_bytes(),
-            tls_server_name: Some(record.tls_server_name),
-            fingerprint_sha256: record.fingerprint_sha256,
-            appliance_id: Some(record.appliance_id),
+            certificate_pem: presented.certificate_pem.as_bytes().to_vec(),
+            tls_server_name: presented.tls_server_name.clone(),
+            fingerprint_sha256: presented.fingerprint_sha256.clone(),
+            appliance_id: Some(record.appliance_id.clone()),
             newly_enrolled: false,
             legacy_fingerprint_pinned: record.legacy_fingerprint_pinned,
+            pending_replacement,
         });
     }
 
@@ -248,6 +289,7 @@ where
         appliance_id: Some(record.appliance_id),
         newly_enrolled: true,
         legacy_fingerprint_pinned: record.legacy_fingerprint_pinned,
+        pending_replacement: None,
     })
 }
 

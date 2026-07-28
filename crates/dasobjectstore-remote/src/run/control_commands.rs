@@ -12,6 +12,7 @@ pub(super) fn trust_summary(record: &crate::trust::ApplianceTrustRecord) -> serd
         "not_after": record.not_after,
         "fingerprint_sha256": record.fingerprint_sha256,
         "spki_sha256": record.spki_sha256,
+        "authority_fingerprint_sha256": record.authority_fingerprint_sha256,
         "address_matches_certificate": record.address_matches_certificate,
         "legacy_fingerprint_pinned": record.legacy_fingerprint_pinned,
         "tls_server_name": record.tls_server_name,
@@ -76,6 +77,99 @@ pub(super) fn run_trust_rotate(
     let record = crate::trust::rotate_trust(appliance_id, expected_fingerprint)?;
     serde_json::to_writer_pretty(&mut *writer, &trust_summary(&record))?;
     writer.write_all(b"\n")?;
+    Ok(())
+}
+
+pub(super) fn run_trust_repair(
+    cli: &RemoteCli,
+    args: &TrustRepairArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let existing =
+        crate::trust::load_trust(args.host_or_ip(), args.https_port())?.ok_or_else(|| {
+            RemoteRunError::UploadRouting(format!(
+                "no appliance trust is enrolled for {}:{}; use authenticate for first enrollment",
+                args.host_or_ip(),
+                args.https_port()
+            ))
+        })?;
+    let username = args
+        .username()
+        .map(str::to_string)
+        .or_else(|| std::env::var("USER").ok())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(
+                "username is required to construct the trust-repair command".to_string(),
+            )
+        })?;
+    let presented = crate::trust::probe_certificate(args.host_or_ip(), args.https_port())?;
+    if crate::trust::verify_presented_pin(&existing, &presented).is_ok()
+        || crate::trust::ca_validated_replacement(&existing, &presented).is_ok()
+    {
+        return run_authenticate_with_identity_policy(
+            cli,
+            &args.as_authenticate_args(),
+            writer,
+            false,
+        );
+    }
+
+    eprintln!(
+        "DASObjectStore exceptional trust repair\nEnrolled appliance ID: {}\nOld SHA-256: {}\nNew SHA-256: {}\n{}\nIndependent verification: log into the appliance and run `dasobjectstore trust identity --json`\nProposed command: dasobjectstore-remote trust repair {} --username {} --store {}{}",
+        existing.appliance_id,
+        existing.fingerprint_sha256,
+        presented.fingerprint_sha256,
+        crate::trust::format_certificate_details(
+            args.host_or_ip(),
+            args.https_port(),
+            &presented,
+            Some(&existing.appliance_id),
+        ),
+        args.host_or_ip(),
+        username,
+        args.store(),
+        if args.as_authenticate_args().set_s3_config() {
+            " --set-s3-config"
+        } else {
+            ""
+        }
+    );
+    if !std::io::stdin().is_terminal() {
+        return Err(RemoteRunError::UploadRouting(
+            "identity continuity cannot be proven automatically; compare the appliance-local identity and rerun interactively"
+                .to_string(),
+        ));
+    }
+    eprint!(
+        "The appliance-local identity has been independently verified. Continue trust repair? [y/N] "
+    );
+    std::io::stderr().flush()?;
+    let mut response = String::new();
+    std::io::stdin().read_line(&mut response)?;
+    if !matches!(response.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        return Err(RemoteRunError::UploadRouting(
+            "trust repair was not confirmed".to_string(),
+        ));
+    }
+    let path = crate::trust::trust_record_path(args.host_or_ip(), args.https_port())?;
+    let mut replacement = crate::trust::new_trust_record(
+        args.host_or_ip(),
+        args.https_port(),
+        Some(&existing.appliance_id),
+        &presented,
+    )?;
+    replacement.appliance_id = existing.appliance_id.clone();
+    crate::trust::replace_trust_if_current(&path, &existing, &replacement)?;
+    let result =
+        run_authenticate_with_identity_policy(cli, &args.as_authenticate_args(), writer, true);
+    if let Err(error) = result {
+        let current = crate::trust::load_trust(args.host_or_ip(), args.https_port())?;
+        if let Some(current) = current {
+            let _ = crate::trust::replace_trust_if_current(&path, &current, &existing);
+        }
+        return Err(error);
+    }
     Ok(())
 }
 

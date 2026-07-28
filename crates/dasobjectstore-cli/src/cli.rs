@@ -12,6 +12,7 @@ mod pool;
 mod service;
 mod store;
 mod subobject;
+mod trust;
 mod workspace;
 
 pub(crate) use application_auth::{ApplicationAuthArgs, ApplicationAuthCommand};
@@ -45,6 +46,7 @@ pub(crate) use store::{
 pub(crate) use subobject::{
     SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,
 };
+pub(crate) use trust::{TrustArgs, TrustCommand, TrustIdentityArgs};
 pub(crate) use workspace::{
     WorkspaceArgs, WorkspaceCleanupCancelArgs, WorkspaceCleanupRequestArgs, WorkspaceCommand,
     WorkspaceIdentityArgs, WorkspaceMutationArgs,
@@ -112,6 +114,8 @@ pub(crate) enum Command {
     Endpoint(EndpointArgs),
     /// Inspect object metadata.
     Object(ObjectArgs),
+    /// Inspect authoritative appliance trust identity.
+    Trust(TrustArgs),
     /// Render and manage the S3-compatible object service.
     Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
@@ -319,6 +323,7 @@ mod tests {
     use super::{
         Cli, Command, EndpointCommand, MnemosyneCommand, PerformanceFileOrder,
         PerformanceFileSelection, PerformanceScenarioSelection, ProbeArgs, StatusArgs,
+        TrustCommand,
     };
     use clap::Parser;
     use std::path::Path;
@@ -363,6 +368,14 @@ mod tests {
             panic!("expected ingest command");
         };
         assert!(args.command().is_none());
+
+        let trust = Cli::try_parse_from(["dasobjectstore", "trust", "identity", "--json"])
+            .expect("trust identity parses");
+        let Some(Command::Trust(args)) = trust.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Identity(args) = args.command();
+        assert!(args.json());
     }
 
     #[test]

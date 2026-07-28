@@ -6,9 +6,12 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError};
+use rustls::{
+    ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError, RootCertStore,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -43,6 +46,10 @@ pub struct ApplianceTrustRecord {
     pub legacy_fingerprint_pinned: bool,
     pub tls_server_name: String,
     pub certificate_pem: String,
+    #[serde(default)]
+    pub authority_certificate_pem: Option<String>,
+    #[serde(default)]
+    pub authority_fingerprint_sha256: Option<String>,
 }
 
 impl ApplianceTrustRecord {
@@ -54,6 +61,7 @@ impl ApplianceTrustRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentedCertificate {
     pub leaf_der: Vec<u8>,
+    pub chain_der: Vec<Vec<u8>>,
     pub certificate_pem: String,
     pub subject: String,
     pub issuer: String,
@@ -182,17 +190,34 @@ pub fn probe_certificate(host: &str, port: u16) -> Result<PresentedCertificate, 
     let chain = connection.peer_certificates().ok_or_else(|| {
         TrustError::Tls("appliance TLS listener presented no certificate".to_string())
     })?;
-    let leaf = chain
+    chain
         .first()
         .ok_or_else(|| TrustError::Tls("appliance certificate chain is empty".to_string()))?;
-    inspect_leaf_certificate(host, leaf.as_ref())
+    inspect_certificate_chain(
+        host,
+        chain
+            .iter()
+            .map(|certificate| certificate.as_ref().to_vec())
+            .collect(),
+    )
 }
 
 pub fn inspect_leaf_certificate(
     host: &str,
     leaf_der: &[u8],
 ) -> Result<PresentedCertificate, TrustError> {
-    let (_, certificate) = parse_x509_certificate(leaf_der)
+    inspect_certificate_chain(host, vec![leaf_der.to_vec()])
+}
+
+pub fn inspect_certificate_chain(
+    host: &str,
+    chain_der: Vec<Vec<u8>>,
+) -> Result<PresentedCertificate, TrustError> {
+    let leaf_der = chain_der
+        .first()
+        .cloned()
+        .ok_or_else(|| TrustError::Invalid("certificate chain is empty".to_string()))?;
+    let (_, certificate) = parse_x509_certificate(&leaf_der)
         .map_err(|error| TrustError::Invalid(format!("invalid X.509 certificate: {error}")))?;
     if !certificate.validity().is_valid() {
         return Err(TrustError::Invalid(format!(
@@ -225,14 +250,15 @@ pub fn inspect_leaf_certificate(
     };
     let spki = certificate.public_key().raw;
     Ok(PresentedCertificate {
-        leaf_der: leaf_der.to_vec(),
-        certificate_pem: pem_certificate(leaf_der),
+        leaf_der: leaf_der.clone(),
+        chain_der,
+        certificate_pem: pem_certificate(&leaf_der),
         subject: certificate.subject().to_string(),
         issuer: certificate.issuer().to_string(),
         subject_alt_names,
         not_before: certificate.validity().not_before.to_string(),
         not_after: certificate.validity().not_after.to_string(),
-        fingerprint_sha256: formatted_sha256(leaf_der),
+        fingerprint_sha256: formatted_sha256(&leaf_der),
         spki_sha256: formatted_sha256(spki),
         address_matches_certificate,
         tls_server_name,
@@ -261,7 +287,7 @@ pub fn verify_presented_pin(
     let new = parse_fingerprint(&presented.fingerprint_sha256)?;
     if !bool::from(old.ct_eq(&new)) {
         return Err(TrustError::Invalid(format!(
-            "appliance certificate changed; refusing connection\nold SHA-256: {}\nnew SHA-256: {}\nuse `dasobjectstore-remote trust rotate {} --trust-fingerprint SHA256` after independent verification",
+            "appliance certificate changed and CA-backed continuity could not yet be established\nold SHA-256: {}\nnew SHA-256: {}\nappliance ID: {}",
             record.fingerprint_sha256, presented.fingerprint_sha256, record.appliance_id
         )));
     }
@@ -302,7 +328,7 @@ pub fn new_trust_record(
         endpoint_port: port,
         appliance_id: appliance_id
             .filter(|value| !value.trim().is_empty())
-            .map(|value| format!("{value}@{}", endpoint_identity_suffix(host, port)))
+            .map(str::to_string)
             .unwrap_or_else(|| endpoint_identity(host, port)),
         enrolled_at_utc: dasobjectstore_core::utc::format_utc_timestamp_seconds(
             SystemTime::now()
@@ -321,7 +347,106 @@ pub fn new_trust_record(
         legacy_fingerprint_pinned: !presented.address_matches_certificate,
         tls_server_name,
         certificate_pem: presented.certificate_pem.clone(),
+        authority_certificate_pem: presented
+            .chain_der
+            .last()
+            .filter(|certificate| {
+                presented.chain_der.len() > 1 && *certificate != &presented.leaf_der
+            })
+            .map(|certificate| pem_certificate(certificate)),
+        authority_fingerprint_sha256: presented
+            .chain_der
+            .last()
+            .filter(|certificate| {
+                presented.chain_der.len() > 1 && *certificate != &presented.leaf_der
+            })
+            .map(|certificate| formatted_sha256(certificate)),
     })
+}
+
+pub fn ca_validated_replacement(
+    existing: &ApplianceTrustRecord,
+    presented: &PresentedCertificate,
+) -> Result<ApplianceTrustRecord, TrustError> {
+    let authority_pem = existing.authority_certificate_pem.as_deref().ok_or_else(|| {
+        TrustError::Invalid(
+            "certificate renewal cannot be proven from the enrolled trust: no domain-cert CA is recorded"
+                .to_string(),
+        )
+    })?;
+    verify_chain_with_authority(&existing.endpoint_host, presented, authority_pem)?;
+    let mut replacement = new_trust_record(
+        &existing.endpoint_host,
+        existing.endpoint_port,
+        Some(&existing.appliance_id),
+        presented,
+    )?;
+    replacement.appliance_id = existing.appliance_id.clone();
+    replacement.enrolled_at_utc = existing.enrolled_at_utc.clone();
+    replacement.authority_certificate_pem = existing.authority_certificate_pem.clone();
+    replacement.authority_fingerprint_sha256 = existing.authority_fingerprint_sha256.clone();
+    replacement.legacy_fingerprint_pinned = false;
+    Ok(replacement)
+}
+
+pub fn verify_chain_with_authority(
+    host: &str,
+    presented: &PresentedCertificate,
+    authority_pem: &str,
+) -> Result<(), TrustError> {
+    let mut reader = BufReader::new(authority_pem.as_bytes());
+    let authorities = rustls_pemfile::certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}"))
+        })?;
+    if authorities.len() != 1 {
+        return Err(TrustError::Invalid(
+            "enrolled domain-cert CA must contain exactly one certificate".to_string(),
+        ));
+    }
+    let mut roots = RootCertStore::empty();
+    roots.add(authorities[0].clone()).map_err(|error| {
+        TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}"))
+    })?;
+    let verifier = WebPkiServerVerifier::builder_with_provider(
+        Arc::new(roots),
+        Arc::new(rustls::crypto::ring::default_provider()),
+    )
+    .build()
+    .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
+    let server_name = ServerName::try_from(host.to_string())
+        .map_err(|_| TrustError::Invalid("host is not a valid TLS server name".to_string()))?;
+    let leaf = CertificateDer::from(presented.leaf_der.clone());
+    let intermediates = presented
+        .chain_der
+        .iter()
+        .skip(1)
+        .filter(|certificate| {
+            existing_certificate_der(authority_pem)
+                .is_none_or(|authority| authority != certificate.as_slice())
+        })
+        .cloned()
+        .map(CertificateDer::from)
+        .collect::<Vec<_>>();
+    verifier
+        .verify_server_cert(
+            &leaf,
+            &intermediates,
+            &server_name,
+            &[],
+            UnixTime::now(),
+        )
+        .map_err(|error| {
+            TrustError::Invalid(format!(
+                "presented certificate is not a valid server certificate for the enrolled domain-cert CA and endpoint: {error}"
+            ))
+        })?;
+    Ok(())
+}
+
+fn existing_certificate_der(pem: &str) -> Option<Vec<u8>> {
+    pem_leaf_der(pem.as_bytes()).ok()
 }
 
 pub fn persist_trust(record: &ApplianceTrustRecord) -> Result<PathBuf, TrustError> {
@@ -345,7 +470,7 @@ pub fn persist_trust(record: &ApplianceTrustRecord) -> Result<PathBuf, TrustErro
         let existing: ApplianceTrustRecord = serde_json::from_slice(&fs::read(&path)?)?;
         if existing.fingerprint_sha256 != record.fingerprint_sha256 {
             return Err(TrustError::Invalid(
-                "an appliance trust record already exists and cannot be replaced by authenticate; use trust rotate"
+                "an appliance trust record already exists and cannot be replaced by first enrollment; use trust repair"
                     .to_string(),
             ));
         }
@@ -445,6 +570,23 @@ pub fn rotate_trust(
             "replacement certificate exposes no usable endpoint or legacy TLS name".to_string(),
         )
     })?;
+    replace_trust_if_current(path, existing, &replacement)?;
+    Ok(replacement)
+}
+
+pub fn replace_trust_if_current(
+    path: &Path,
+    existing: &ApplianceTrustRecord,
+    replacement: &ApplianceTrustRecord,
+) -> Result<(), TrustError> {
+    if existing.endpoint_host != replacement.endpoint_host
+        || existing.endpoint_port != replacement.endpoint_port
+        || existing.appliance_id != replacement.appliance_id
+    {
+        return Err(TrustError::Invalid(
+            "replacement trust changes endpoint or appliance identity".to_string(),
+        ));
+    }
     let parent = path
         .parent()
         .ok_or_else(|| TrustError::Invalid("trust record has no parent directory".to_string()))?;
@@ -464,7 +606,7 @@ pub fn rotate_trust(
         ));
     }
     atomic_replace_private(path, &serde_json::to_vec_pretty(&replacement)?)?;
-    Ok(replacement)
+    Ok(())
 }
 
 pub fn format_certificate_details(
@@ -557,6 +699,10 @@ fn formatted_sha256(bytes: &[u8]) -> String {
     canonical_fingerprint(Sha256::digest(bytes).as_slice())
 }
 
+pub fn formatted_certificate_sha256(bytes: &[u8]) -> String {
+    formatted_sha256(bytes)
+}
+
 fn canonical_fingerprint(bytes: &[u8]) -> String {
     bytes
         .iter()
@@ -624,6 +770,25 @@ fn validate_record_binding(
         return Err(TrustError::Invalid(
             "appliance trust record certificate does not match its fingerprint".to_string(),
         ));
+    }
+    match (
+        record.authority_certificate_pem.as_deref(),
+        record.authority_fingerprint_sha256.as_deref(),
+    ) {
+        (Some(pem), Some(expected)) if !pem.contains("PRIVATE KEY") => {
+            let authority = pem_leaf_der(pem.as_bytes())?;
+            if formatted_sha256(&authority) != expected {
+                return Err(TrustError::Invalid(
+                    "appliance trust authority does not match its fingerprint".to_string(),
+                ));
+            }
+        }
+        (None, None) => {}
+        _ => {
+            return Err(TrustError::Invalid(
+                "appliance trust authority record is incomplete or unsafe".to_string(),
+            ))
+        }
     }
     Ok(())
 }
@@ -734,9 +899,12 @@ fn atomic_replace_private(path: &Path, bytes: &[u8]) -> Result<(), TrustError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_fingerprint, expected_fingerprint_matches, inspect_leaf_certificate,
-        parse_fingerprint,
+        ca_validated_replacement, canonical_fingerprint, expected_fingerprint_matches,
+        inspect_certificate_chain, inspect_leaf_certificate, new_trust_record, parse_fingerprint,
+        replace_trust_if_current,
     };
+    use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
+    use std::fs;
 
     #[test]
     fn parses_colon_and_compact_fingerprints() {
@@ -754,6 +922,7 @@ mod tests {
     fn fingerprint_mismatch_is_rejected() {
         let presented = super::PresentedCertificate {
             leaf_der: vec![],
+            chain_der: vec![],
             certificate_pem: String::new(),
             subject: String::new(),
             issuer: String::new(),
@@ -768,6 +937,126 @@ mod tests {
         assert!(
             expected_fingerprint_matches(&canonical_fingerprint(&[0x22; 32]), &presented).is_err()
         );
+    }
+
+    #[test]
+    fn ca_backed_leaf_renewal_is_accepted_but_wrong_ca_and_san_fail_closed() {
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_key = KeyPair::generate().expect("CA key");
+        let ca_certificate = ca_params.self_signed(&ca_key).expect("CA certificate");
+        let issuer = Issuer::new(ca_params, ca_key);
+        let first_key = KeyPair::generate().expect("first key");
+        let first = CertificateParams::new(vec!["appliance.example".to_string()])
+            .expect("first params")
+            .signed_by(&first_key, &issuer)
+            .expect("first leaf");
+        let second_key = KeyPair::generate().expect("second key");
+        let second = CertificateParams::new(vec!["appliance.example".to_string()])
+            .expect("second params")
+            .signed_by(&second_key, &issuer)
+            .expect("second leaf");
+        let enrolled = inspect_certificate_chain(
+            "appliance.example",
+            vec![first.der().to_vec(), ca_certificate.der().to_vec()],
+        )
+        .expect("enrolled chain");
+        let existing = new_trust_record(
+            "appliance.example",
+            8448,
+            Some("das-appliance-1"),
+            &enrolled,
+        )
+        .expect("trust");
+        assert_eq!(existing.appliance_id, "das-appliance-1");
+        let renewed = inspect_certificate_chain(
+            "appliance.example",
+            vec![second.der().to_vec(), ca_certificate.der().to_vec()],
+        )
+        .expect("renewed chain");
+        let replacement = ca_validated_replacement(&existing, &renewed).expect("valid CA renewal");
+        assert_eq!(replacement.appliance_id, "das-appliance-1");
+        assert_ne!(replacement.fingerprint_sha256, existing.fingerprint_sha256);
+        assert_eq!(
+            replacement.authority_fingerprint_sha256,
+            existing.authority_fingerprint_sha256
+        );
+
+        let wrong_name_key = KeyPair::generate().expect("wrong-name key");
+        let wrong_name_leaf = CertificateParams::new(vec!["other.example".to_string()])
+            .expect("wrong-name params")
+            .signed_by(&wrong_name_key, &issuer)
+            .expect("wrong-name leaf");
+        let wrong_name = inspect_certificate_chain(
+            "appliance.example",
+            vec![
+                wrong_name_leaf.der().to_vec(),
+                ca_certificate.der().to_vec(),
+            ],
+        )
+        .expect("inspect");
+        assert!(ca_validated_replacement(&existing, &wrong_name).is_err());
+
+        let rogue =
+            CertificateParams::new(vec!["appliance.example".to_string()]).expect("rogue params");
+        let rogue_key = KeyPair::generate().expect("rogue key");
+        let rogue_leaf = rogue.self_signed(&rogue_key).expect("rogue cert");
+        let rogue =
+            inspect_leaf_certificate("appliance.example", rogue_leaf.der()).expect("inspect rogue");
+        assert!(ca_validated_replacement(&existing, &rogue).is_err());
+    }
+
+    #[test]
+    fn trust_replacement_is_atomic_and_rejects_stale_or_identity_changed_writers() {
+        let generated =
+            rcgen::generate_simple_self_signed(vec!["appliance.example".to_string()]).unwrap();
+        let first =
+            inspect_leaf_certificate("appliance.example", generated.cert.der()).expect("first");
+        let existing = new_trust_record(
+            "appliance.example",
+            8448,
+            Some("das-appliance-stable"),
+            &first,
+        )
+        .expect("existing trust");
+        let renewed =
+            rcgen::generate_simple_self_signed(vec!["appliance.example".to_string()]).unwrap();
+        let renewed =
+            inspect_leaf_certificate("appliance.example", renewed.cert.der()).expect("renewed");
+        let mut replacement = new_trust_record(
+            "appliance.example",
+            8448,
+            Some("das-appliance-stable"),
+            &renewed,
+        )
+        .expect("replacement trust");
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-trust-atomic-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("test root");
+        let path = root.join("trust.json");
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&existing).expect("serialize existing"),
+        )
+        .expect("write existing");
+
+        replace_trust_if_current(&path, &existing, &replacement).expect("replace");
+        let committed: super::ApplianceTrustRecord =
+            serde_json::from_slice(&fs::read(&path).expect("read committed"))
+                .expect("committed record is complete JSON");
+        assert_eq!(committed, replacement);
+        assert!(replace_trust_if_current(&path, &existing, &replacement).is_err());
+
+        replacement.appliance_id = "das-appliance-replacement".to_string();
+        assert!(replace_trust_if_current(&path, &committed, &replacement).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

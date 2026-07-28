@@ -12,7 +12,7 @@ use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
     ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
     RemoteCommand, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand, TrustCommand,
-    UploadArgs,
+    TrustRepairArgs, UploadArgs,
 };
 use crate::config::{
     acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
@@ -58,6 +58,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
             TrustCommand::Rotate(args) => {
                 run_trust_rotate(args.appliance_id(), args.trust_fingerprint(), writer)
             }
+            TrustCommand::Repair(args) => run_trust_repair(cli, args, writer),
         },
         RemoteCommand::S3(args) => match args.command() {
             S3Command::Status(args) => {
