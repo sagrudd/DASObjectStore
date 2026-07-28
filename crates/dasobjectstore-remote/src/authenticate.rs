@@ -30,11 +30,34 @@ struct RemoteAuthenticateResponse {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct RemoteAuthenticatedS3Descriptor {
+    #[serde(default)]
+    schema_version: String,
     endpoint_url: String,
+    #[serde(default)]
+    scheme: String,
+    #[serde(default)]
+    host: String,
+    #[serde(default)]
+    port: u16,
     bucket: String,
     region: String,
     addressing_style: String,
+    #[serde(default)]
+    tls: RemoteAuthenticatedS3TlsRequirements,
+    #[serde(default)]
+    credential_expires_at: String,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default)]
+    endpoint_protocol_verified: bool,
     session: RemoteEasyconnectSession,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+struct RemoteAuthenticatedS3TlsRequirements {
+    required: bool,
+    trust_mode: String,
+    ca_certificate_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -374,9 +397,13 @@ pub fn authenticate(
             .json::<serde_json::Value>()
             .ok()
             .and_then(|body| {
-                body.get("message")
-                    .and_then(|value| value.as_str())
-                    .map(str::to_string)
+                let message = body.get("message").and_then(|value| value.as_str())?;
+                Some(
+                    body.get("code")
+                        .and_then(|value| value.as_str())
+                        .map(|code| format!("{code}: {message}"))
+                        .unwrap_or_else(|| message.to_string()),
+                )
             })
             .unwrap_or_else(|| "the appliance rejected the authentication request".to_string());
         return Err(RemoteAuthenticateError::Server {
@@ -491,6 +518,30 @@ fn validate_descriptor(
     {
         return Err(RemoteAuthenticateError::Http(
             "appliance S3 endpoint must be an HTTP(S) origin without credentials, path, query, or fragment".to_string(),
+        ));
+    }
+    if response.schema_version == "dasobjectstore.remote_authenticate.v4"
+        && (s3.schema_version != "dasobjectstore.authenticated_s3_endpoint.v1"
+            || s3.scheme != endpoint.scheme()
+            || endpoint.host_str() != Some(s3.host.as_str())
+            || endpoint.port_or_known_default() != Some(s3.port)
+            || !s3.endpoint_protocol_verified
+            || s3.credential_expires_at != s3.session.expires_at_utc
+            || s3.tls.required != (s3.scheme == "https")
+            || !matches!(
+                s3.tls.trust_mode.as_str(),
+                "plaintext" | "appliance_ca" | "system"
+            )
+            || (s3.scheme == "http" && s3.tls.trust_mode != "plaintext")
+            || (s3.scheme == "https"
+                && s3.tls.trust_mode == "appliance_ca"
+                && s3.tls.ca_certificate_url.is_none())
+            || !["list_objects_v2", "head_object"]
+                .iter()
+                .all(|required| s3.capabilities.iter().any(|value| value == required)))
+    {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance returned an inconsistent authoritative S3 endpoint descriptor".to_string(),
         ));
     }
     if s3.bucket.trim().is_empty()

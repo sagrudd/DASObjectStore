@@ -104,7 +104,10 @@ The standalone server configuration at
        "bind_address": "0.0.0.0",
        "port": 3900,
        "legacy_upstream_endpoint": "http://127.0.0.1:3901",
-       "max_concurrent_uploads": 8
+       "max_concurrent_uploads": 8,
+       "public_endpoint_url": "http://192.168.1.192:3900",
+       "region": "garage",
+       "addressing_style": "path"
      }
    }
 
@@ -127,6 +130,15 @@ packaged value, observe SSD latency, capacity waits, daemon queueing, Web health
 and HDD destage throughput, and change it only through a reviewed configuration
 update. A value from 1 through 256 is valid; production limits should normally
 be much lower than the schema maximum.
+
+The public endpoint is authoritative remote-client configuration. The direct
+gateway currently serves plaintext HTTP, independently of the HTTPS Web/control
+listener on port 8448, so its URL must begin with ``http://``. Advertising
+``https://`` for the plaintext listener is rejected as
+``advertised_endpoint_protocol_mismatch``. Before issuing temporary
+credentials, the server also probes the public origin and requires a valid S3
+XML response. Remote clients independently reject plaintext HTTP observed
+behind an advertised HTTPS URL and never silently downgrade it.
 
 Before migration
 ----------------

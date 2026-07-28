@@ -3,6 +3,7 @@ use serde::Serialize;
 
 const RESYNC_PROTOCOL: u32 = 1;
 const RESYNC_CAPABILITY: &str = "remote_resync_v1";
+const AUTHORITATIVE_S3_ENDPOINT_CAPABILITY: &str = "authoritative_s3_endpoint_v1";
 
 #[derive(Debug, Serialize)]
 struct ResyncReport {
@@ -250,6 +251,16 @@ fn negotiate_descriptor(
                 .to_string(),
         ));
     }
+    if !descriptor
+        .capabilities
+        .iter()
+        .any(|capability| capability == AUTHORITATIVE_S3_ENDPOINT_CAPABILITY)
+    {
+        return Err(RemoteRunError::UploadRouting(
+            "authoritative_s3_endpoint_unsupported: upgrade the appliance before resynchronizing AWS configuration"
+                .to_string(),
+        ));
+    }
     Ok(format!("protocol_{RESYNC_PROTOCOL}_compatible"))
 }
 
@@ -347,24 +358,27 @@ mod tests {
 
     #[test]
     fn compatibility_uses_protocol_and_capability_not_semantic_version() {
-        assert!(negotiate_descriptor(&descriptor(1, 1, &[RESYNC_CAPABILITY])).is_ok());
-        assert!(
-            negotiate_descriptor(&descriptor(2, 2, &[RESYNC_CAPABILITY]))
-                .expect_err("client old")
-                .to_string()
-                .contains("remote_client_too_old")
-        );
-        assert!(
-            negotiate_descriptor(&descriptor(0, 0, &[RESYNC_CAPABILITY]))
-                .expect_err("server old")
-                .to_string()
-                .contains("appliance_too_old")
-        );
+        let supported = [RESYNC_CAPABILITY, AUTHORITATIVE_S3_ENDPOINT_CAPABILITY];
+        assert!(negotiate_descriptor(&descriptor(1, 1, &supported)).is_ok());
+        assert!(negotiate_descriptor(&descriptor(2, 2, &supported))
+            .expect_err("client old")
+            .to_string()
+            .contains("remote_client_too_old"));
+        assert!(negotiate_descriptor(&descriptor(0, 0, &supported))
+            .expect_err("server old")
+            .to_string()
+            .contains("appliance_too_old"));
         assert!(
             negotiate_descriptor(&descriptor(1, 1, &["capability_added_later"]))
                 .expect_err("missing resync")
                 .to_string()
                 .contains("remote_resync_unsupported")
+        );
+        assert!(
+            negotiate_descriptor(&descriptor(1, 1, &[RESYNC_CAPABILITY]))
+                .expect_err("missing endpoint authority")
+                .to_string()
+                .contains("authoritative_s3_endpoint_unsupported")
         );
     }
 

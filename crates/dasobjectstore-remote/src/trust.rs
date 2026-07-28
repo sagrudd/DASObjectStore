@@ -579,9 +579,26 @@ pub fn replace_trust_if_current(
     existing: &ApplianceTrustRecord,
     replacement: &ApplianceTrustRecord,
 ) -> Result<(), TrustError> {
+    replace_trust_if_current_inner(path, existing, replacement, false)
+}
+
+pub fn replace_verified_identity_trust_if_current(
+    path: &Path,
+    existing: &ApplianceTrustRecord,
+    replacement: &ApplianceTrustRecord,
+) -> Result<(), TrustError> {
+    replace_trust_if_current_inner(path, existing, replacement, true)
+}
+
+fn replace_trust_if_current_inner(
+    path: &Path,
+    existing: &ApplianceTrustRecord,
+    replacement: &ApplianceTrustRecord,
+    allow_identity_change: bool,
+) -> Result<(), TrustError> {
     if existing.endpoint_host != replacement.endpoint_host
         || existing.endpoint_port != replacement.endpoint_port
-        || existing.appliance_id != replacement.appliance_id
+        || (!allow_identity_change && existing.appliance_id != replacement.appliance_id)
     {
         return Err(TrustError::Invalid(
             "replacement trust changes endpoint or appliance identity".to_string(),
@@ -600,12 +617,42 @@ pub fn replace_trust_if_current(
     lock.lock()?;
     reject_unsafe_file(path)?;
     let current: ApplianceTrustRecord = serde_json::from_slice(&fs::read(path)?)?;
-    if current.fingerprint_sha256 != existing.fingerprint_sha256 {
+    if current != *existing {
         return Err(TrustError::Invalid(
             "trust changed concurrently; refusing certificate rotation".to_string(),
         ));
     }
     atomic_replace_private(path, &serde_json::to_vec_pretty(&replacement)?)?;
+    Ok(())
+}
+
+pub fn remove_trust_if_current(
+    path: &Path,
+    expected: &ApplianceTrustRecord,
+) -> Result<(), TrustError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| TrustError::Invalid("trust record has no parent directory".to_string()))?;
+    let lock_path = parent.join(".enrollment.lock");
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
+    restrict_private_file(&lock_path)?;
+    lock.lock()?;
+    reject_unsafe_file(path)?;
+    let current: ApplianceTrustRecord = serde_json::from_slice(&fs::read(path)?)?;
+    if current != *expected {
+        return Err(TrustError::Invalid(
+            "trust changed concurrently; refusing enrollment rollback".to_string(),
+        ));
+    }
+    fs::remove_file(path)?;
+    if let Ok(directory) = fs::File::open(parent) {
+        let _ = directory.sync_all();
+    }
     Ok(())
 }
 
@@ -901,7 +948,8 @@ mod tests {
     use super::{
         ca_validated_replacement, canonical_fingerprint, expected_fingerprint_matches,
         inspect_certificate_chain, inspect_leaf_certificate, new_trust_record, parse_fingerprint,
-        replace_trust_if_current,
+        remove_trust_if_current, replace_trust_if_current,
+        replace_verified_identity_trust_if_current,
     };
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
     use std::fs;
@@ -1056,6 +1104,10 @@ mod tests {
 
         replacement.appliance_id = "das-appliance-replacement".to_string();
         assert!(replace_trust_if_current(&path, &committed, &replacement).is_err());
+        replace_verified_identity_trust_if_current(&path, &committed, &replacement)
+            .expect("independently verified identity replacement");
+        remove_trust_if_current(&path, &replacement).expect("rollback removes exact generation");
+        assert!(!path.exists());
         fs::remove_dir_all(root).expect("cleanup");
     }
 

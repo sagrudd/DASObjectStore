@@ -23,6 +23,7 @@ pub mod remote_control_routes;
 mod remote_upload_aggregator;
 mod reporting;
 pub mod routes;
+mod s3_endpoint_probe;
 mod s3_gateway;
 mod s3_gateway_auth;
 mod s3_multipart_listing;

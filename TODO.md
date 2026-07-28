@@ -32,7 +32,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.152.0``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.152.1``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -1937,6 +1937,12 @@ list until every temporary size-budget exception has been removed.
     dry-run planning, rollback-safe exceptional trust replacement, shared
     trust/session/profile reconciliation, bounded ListObjectsV2 plus HeadObject
     verification, and final daemon-owned readiness proof.
+  - [x] Correct remote resync endpoint authority: publish a structured,
+    runtime-verified S3 endpoint descriptor; reject HTTPS advertisements for
+    the plaintext direct gateway; verify profile-only signed ListObjectsV2 and
+    HeadObject from a private provisional generation; preserve sanitized AWS
+    diagnostics; and publish no trust/session/profile mutation on failed
+    verification.
 - [x] Remove SSH from production remote ingest finalization: add explicitly
   scoped HTTPS readiness, 20,000-object authoritative snapshots, exact
   payload-group settlement, idempotent three-key S3 reconciliation, and remote

@@ -1400,6 +1400,10 @@ mod tests {
             .as_array()
             .expect("capabilities")
             .contains(&serde_json::json!("remote_resync_v1")));
+        assert!(encoded["capabilities"]
+            .as_array()
+            .expect("capabilities")
+            .contains(&serde_json::json!("authoritative_s3_endpoint_v1")));
         assert_eq!(
             encoded["component_builds"]["daemon"],
             dasobjectstore_core::VERSION

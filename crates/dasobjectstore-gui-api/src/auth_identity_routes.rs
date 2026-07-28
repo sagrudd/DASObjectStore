@@ -433,6 +433,16 @@ pub(super) async fn remote_authenticate(
             "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
         )
     })?;
+    let verified_endpoint =
+        crate::s3_endpoint_probe::verify_public_s3_endpoint(&s3_descriptor.endpoint_url)
+            .await
+            .map_err(|error| {
+                route_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    error.code(),
+                    error.to_string(),
+                )
+            })?;
 
     let grant = RemoteEasyconnectObjectStoreGrant {
         object_store: store.store_id.clone(),
@@ -484,25 +494,38 @@ pub(super) async fn remote_authenticate(
         .await
         .map_err(remote_auth_bridge_error)?;
 
-    let endpoint_port = reqwest::Url::parse(&s3_descriptor.endpoint_url)
-        .ok()
-        .and_then(|url| url.port_or_known_default())
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "s3_connection_descriptor_invalid",
-                "the configured public S3 endpoint has no usable port",
-            )
-        })?;
+    let endpoint_port = verified_endpoint.port;
     Ok(Json(RemoteAuthenticateResponse {
-        schema_version: "dasobjectstore.remote_authenticate.v3".to_string(),
+        schema_version: "dasobjectstore.remote_authenticate.v4".to_string(),
         appliance_id: system_appliance_id(),
         store_id: request.object_store.clone(),
         s3: RemoteAuthenticatedS3Descriptor {
+            schema_version: "dasobjectstore.authenticated_s3_endpoint.v1".to_string(),
             endpoint_url: s3_descriptor.endpoint_url.clone(),
+            scheme: verified_endpoint.scheme.clone(),
+            host: verified_endpoint.host,
+            port: verified_endpoint.port,
             region: s3_descriptor.region.clone(),
             addressing_style: s3_descriptor.addressing_style.clone(),
             bucket: store.bucket.clone(),
+            tls: RemoteAuthenticatedS3TlsRequirements {
+                required: verified_endpoint.scheme == "https",
+                trust_mode: if verified_endpoint.scheme == "https" {
+                    "appliance_ca".to_string()
+                } else {
+                    "plaintext".to_string()
+                },
+                ca_certificate_url: None,
+            },
+            credential_expires_at: session.expires_at_utc.clone(),
+            capabilities: vec![
+                "list_objects_v2".to_string(),
+                "head_object".to_string(),
+                "put_object".to_string(),
+                "multipart_upload".to_string(),
+                "path_style_addressing".to_string(),
+            ],
+            endpoint_protocol_verified: true,
             session: session.clone(),
         },
         endpoint_port,
@@ -693,6 +716,7 @@ pub(super) fn standalone_easyconnect_discovery_payload(
         ],
         capabilities: vec![
             "remote_resync_v1".to_string(),
+            "authoritative_s3_endpoint_v1".to_string(),
             "stable_appliance_identity".to_string(),
             "trust_repair_v1".to_string(),
             "temporary_s3_session".to_string(),

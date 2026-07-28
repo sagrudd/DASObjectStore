@@ -8,6 +8,18 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.152.1 - 2026-07-28
+
+- Make the authenticated remote descriptor authoritative for the externally
+  reachable S3 scheme, host, port, TLS requirements, bucket, region,
+  addressing style, expiry, and supported operations.
+- Reject direct-gateway HTTPS advertisements because the current listener is
+  plaintext HTTP, and independently probe the advertised origin for a valid S3
+  response before issuing credentials.
+- Verify signed ListObjectsV2 and HeadObject using private provisional AWS
+  files before publishing a profile; retain sanitized AWS diagnostics and
+  rollback trust, session bindings, and AWS state coherently on failure.
+
 ## 0.152.0 - 2026-07-28
 
 - Add ``dasobjectstore-remote resync`` as one integrated, idempotent workflow

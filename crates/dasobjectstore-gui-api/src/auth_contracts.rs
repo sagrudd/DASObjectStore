@@ -45,11 +45,26 @@ pub struct RemoteAuthenticateResponse {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteAuthenticatedS3Descriptor {
+    pub schema_version: String,
     pub endpoint_url: String,
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
     pub bucket: String,
     pub region: String,
     pub addressing_style: String,
+    pub tls: RemoteAuthenticatedS3TlsRequirements,
+    pub credential_expires_at: String,
+    pub capabilities: Vec<String>,
+    pub endpoint_protocol_verified: bool,
     pub session: RemoteEasyconnectSession,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteAuthenticatedS3TlsRequirements {
+    pub required: bool,
+    pub trust_mode: String,
+    pub ca_certificate_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

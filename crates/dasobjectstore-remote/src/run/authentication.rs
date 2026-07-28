@@ -14,6 +14,7 @@ pub(super) fn run_authenticate_with_identity_policy(
     writer: &mut impl Write,
     allow_confirmed_identity_replacement: bool,
 ) -> Result<(), RemoteRunError> {
+    let initial_trust = crate::trust::load_trust(args.host_or_ip(), args.https_port())?;
     let username = args
         .username()
         .map(ToOwned::to_owned)
@@ -146,7 +147,7 @@ pub(super) fn run_authenticate_with_identity_policy(
         let mut replacement = existing.clone();
         replacement.appliance_id = context.appliance_id.clone();
         let path = crate::trust::trust_record_path(args.host_or_ip(), args.https_port())?;
-        crate::trust::replace_trust_if_current(&path, &existing, &replacement)?;
+        crate::trust::replace_verified_identity_trust_if_current(&path, &existing, &replacement)?;
         trust.appliance_id = Some(context.appliance_id.clone());
     }
     let mut prior_trust_record = crate::trust::load_trust(args.host_or_ip(), args.https_port())?;
@@ -267,6 +268,7 @@ pub(super) fn run_authenticate_with_identity_policy(
                     crate::trust::replace_trust_if_current(&path, current, previous)?;
                 }
             }
+            restore_initial_trust(args.host_or_ip(), args.https_port(), initial_trust.as_ref())?;
             return Err(error);
         }
     };
@@ -288,6 +290,26 @@ pub(super) fn run_authenticate_with_identity_policy(
     });
     serde_json::to_writer_pretty(&mut *writer, &safe)?;
     writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn restore_initial_trust(
+    host: &str,
+    port: u16,
+    initial: Option<&crate::trust::ApplianceTrustRecord>,
+) -> Result<(), RemoteRunError> {
+    let current = crate::trust::load_trust(host, port)?;
+    match (initial, current.as_ref()) {
+        (Some(initial), Some(current)) if initial != current => {
+            let path = crate::trust::trust_record_path(host, port)?;
+            crate::trust::replace_verified_identity_trust_if_current(&path, current, initial)?;
+        }
+        (None, Some(current)) => {
+            let path = crate::trust::trust_record_path(host, port)?;
+            crate::trust::remove_trust_if_current(&path, current)?;
+        }
+        _ => {}
+    }
     Ok(())
 }
 

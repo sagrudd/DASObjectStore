@@ -193,10 +193,21 @@ daemon-owned readiness check:
      --username stephen \
      --set-s3-config
 
-S3 verification performs a bounded ``ListObjectsV2`` and, when the bucket is
-not empty, a ``HeadObject`` against the returned key. The command succeeds only
-after the committed session, profile association, and readiness state all
-refer to the discovered appliance identity.
+The authenticated endpoint descriptor supplies the externally reachable
+scheme, host, port, bucket, region, addressing style, TLS trust requirements,
+credential expiry, and supported S3 operations. The appliance proves that its
+listener matches the advertised protocol before issuing credentials. The
+client independently rejects plaintext HTTP behind an advertised HTTPS URL;
+it never silently downgrades the connection.
+
+S3 verification uses private provisional AWS files to perform a signed,
+profile-only ``ListObjectsV2`` and, when the bucket is not empty, a
+``HeadObject`` against the returned key. Only after both checks pass are the
+trust/session generation and standard AWS profile committed. An error reports
+the operation, endpoint, bucket, process status, S3 error code, sanitized AWS
+diagnostic, and rollback result without exposing credentials. The command
+succeeds only after the committed session, profile association, and readiness
+state all refer to the discovered appliance identity.
 
 Inspect the proposed changes without writing trust, session, configuration, or
 AWS files:
@@ -233,6 +244,16 @@ Protocol incompatibility is reported as either ``remote_client_too_old`` or
 ``appliance_too_old`` with the component that must be upgraded. Feature
 availability is negotiated from the descriptor capability set rather than
 inferred from semantic-version ordering.
+
+After a successful resync, ordinary AWS CLI commands require only the profile
+and normal S3 arguments—no manual ``aws configure set`` or endpoint override:
+
+.. code-block:: console
+
+   aws --profile dasobjectstore-epic_collection \
+     s3api list-objects-v2 \
+     --bucket dos-epic-collection \
+     --max-keys 1
 
 ``--set-s3-config`` installs the temporary session into the standard AWS
 credentials and config files under the deterministic profile

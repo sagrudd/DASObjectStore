@@ -140,6 +140,18 @@ impl StandaloneS3IngressConfig {
         }
         if let Some(endpoint) = &self.public_endpoint_url {
             validate_s3_public_endpoint(endpoint)?;
+            let advertised_scheme = reqwest::Url::parse(endpoint)
+                .map_err(|_| StandaloneServerConfigError::InvalidS3PublicDescriptor)?
+                .scheme()
+                .to_string();
+            if self.enabled() && advertised_scheme != "http" {
+                return Err(
+                    StandaloneServerConfigError::AdvertisedS3EndpointProtocolMismatch {
+                        advertised: advertised_scheme,
+                        observed: "http".to_string(),
+                    },
+                );
+            }
         }
         if self
             .region
@@ -348,18 +360,43 @@ impl Default for StandaloneAuthenticationAuthority {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StandaloneServerConfigError {
-    InvalidBindAddress { bind_address: String },
-    InvalidHttpsPort { https_port: u16 },
-    InvalidPublicBaseUrl { public_base_url: String },
-    RelativePath { field: &'static str, path: PathBuf },
+    InvalidBindAddress {
+        bind_address: String,
+    },
+    InvalidHttpsPort {
+        https_port: u16,
+    },
+    InvalidPublicBaseUrl {
+        public_base_url: String,
+    },
+    RelativePath {
+        field: &'static str,
+        path: PathBuf,
+    },
     DuplicateTlsAssetPath,
-    InvalidSessionTtlSeconds { session_ttl_seconds: i64 },
-    InvalidMutualTlsBindAddress { bind_address: String },
-    DuplicateListenerPort { https_port: u16 },
-    InvalidS3IngressBindAddress { bind_address: String },
-    InvalidS3LegacyUpstream { endpoint: String },
-    InvalidS3Concurrency { value: usize },
+    InvalidSessionTtlSeconds {
+        session_ttl_seconds: i64,
+    },
+    InvalidMutualTlsBindAddress {
+        bind_address: String,
+    },
+    DuplicateListenerPort {
+        https_port: u16,
+    },
+    InvalidS3IngressBindAddress {
+        bind_address: String,
+    },
+    InvalidS3LegacyUpstream {
+        endpoint: String,
+    },
+    InvalidS3Concurrency {
+        value: usize,
+    },
     InvalidS3PublicDescriptor,
+    AdvertisedS3EndpointProtocolMismatch {
+        advertised: String,
+        observed: String,
+    },
 }
 
 impl Display for StandaloneServerConfigError {
@@ -426,6 +463,13 @@ impl Display for StandaloneServerConfigError {
             ),
             Self::InvalidS3PublicDescriptor => formatter.write_str(
                 "S3 public descriptor requires an HTTP(S) endpoint with a host, a non-empty region, and addressing_style path or virtual",
+            ),
+            Self::AdvertisedS3EndpointProtocolMismatch {
+                advertised,
+                observed,
+            } => write!(
+                formatter,
+                "advertised_endpoint_protocol_mismatch: s3_ingress.public_endpoint_url advertises {advertised} but the direct gateway listener serves {observed}; correct /opt/dasobjectstore/config.json before restarting"
             ),
         }
     }
@@ -753,14 +797,30 @@ mod tests {
     fn validates_complete_authoritative_s3_descriptor_without_assuming_3900() {
         let mut config = StandaloneServerConfig::default();
         config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
-        config.s3_ingress.public_endpoint_url =
-            Some("https://objects.lab.example:9443".to_string());
+        config.s3_ingress.public_endpoint_url = Some("http://objects.lab.example:9443".to_string());
         config.s3_ingress.region = Some("lab-west".to_string());
         config.s3_ingress.addressing_style = Some("virtual".to_string());
         config.validate().expect("descriptor is valid");
         assert_ne!(
             config.s3_ingress.public_endpoint_url.as_deref(),
             Some("http://127.0.0.1:3900")
+        );
+    }
+
+    #[test]
+    fn direct_gateway_rejects_advertised_https_for_plaintext_listener() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+        config.s3_ingress.public_endpoint_url =
+            Some("https://objects.lab.example:3900".to_string());
+        config.s3_ingress.region = Some("garage".to_string());
+        config.s3_ingress.addressing_style = Some("path".to_string());
+        assert_eq!(
+            config.validate().expect_err("protocol mismatch"),
+            StandaloneServerConfigError::AdvertisedS3EndpointProtocolMismatch {
+                advertised: "https".to_string(),
+                observed: "http".to_string(),
+            }
         );
     }
 
