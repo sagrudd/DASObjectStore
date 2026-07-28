@@ -8,6 +8,18 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.150.0 - 2026-07-28
+
+- Make direct-S3 multipart completion survive gateway transport loss and
+  daemon/gateway restart through reconnecting polls, deterministic durable
+  jobs, restart recovery, queryable completion receipts, and safe structured
+  recovery diagnostics.
+- Correct ``ListMultipartUploads`` prefix and marker semantics, bounded
+  pagination, effective response fields, and deterministic ordering.
+- Add a guarded CODEX-only multi-GiB acceptance harness that interrupts
+  completion, restarts both services, retries without retransmitting parts,
+  verifies exact bytes, and checks for duplicate or leaked multipart state.
+
 ## 0.149.0 - 2026-07-28
 
 - Make idle storage assurance restart-safe with a deterministic, private

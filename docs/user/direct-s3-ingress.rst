@@ -416,3 +416,26 @@ Limitations and production gates
   the selected profile and required HDD copy policy remain authoritative.
 * Before/after write-amplification and control-plane soak evidence must be
   captured on the physical DASServer before declaring production acceptance.
+
+Multipart completion recovery acceptance
+----------------------------------------
+
+Use ``deploy/acceptance/direct-s3-multipart-recovery.sh`` for the guarded
+appliance acceptance of durable multipart completion. It uses only the
+dedicated ``CODEX`` ObjectStore, generated data, an explicitly supplied
+temporary AWS profile, the appliance CA, and an authenticated operator cookie.
+The script refuses a dirty or unpushed checkout, requires the exact destructive
+test confirmation phrase, and keeps its default generated payload below 1 TiB.
+
+The acceptance uploads every part exactly once, disconnects the first
+completion client, inspects the daemon-owned completion receipt, restarts the
+gateway and daemon, and retries completion without retransmitting parts. It
+then proves the exact object size and SHA-256, checks that only one object is
+visible, verifies that no matching multipart reservation leaked, and exercises
+prefix-filtered multipart listing with both pagination markers. Run
+``deploy/acceptance/direct-s3-multipart-recovery-self-test.sh`` first to verify
+the harness's fail-closed preconditions without contacting an appliance.
+
+Do not use this acceptance against project or user data. A failed run must be
+investigated through the durable status endpoint and daemon journal; do not
+manually remove multipart state or managed payload files.

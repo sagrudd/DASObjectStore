@@ -4,7 +4,8 @@ use crate::api::{
     ProfileS3HeadRequest, ProfileS3HeadResponse, ProfileS3HealthRequest, ProfileS3HealthResponse,
     ProfileS3ListRequest, ProfileS3ListResponse, ProfileS3MultipartAbortRequest,
     ProfileS3MultipartAbortResponse, ProfileS3MultipartCompletionRequest,
-    ProfileS3MultipartCompletionResponse, ProfileS3MultipartUploadsRequest,
+    ProfileS3MultipartCompletionResponse, ProfileS3MultipartStatusRequest,
+    ProfileS3MultipartStatusResponse, ProfileS3MultipartUploadsRequest,
     ProfileS3MultipartUploadsResponse, ProfileS3VerifyRequest, ProfileS3VerifyResponse,
 };
 
@@ -79,6 +80,16 @@ where
         match self.send(DaemonApiRequest::ProfileS3MultipartUploads(request))? {
             DaemonApiResponse::ProfileS3MultipartUploads(response) => Ok(response),
             response => Err(unexpected("profile_s3_multipart_uploads", response)),
+        }
+    }
+
+    pub fn profile_s3_multipart_status(
+        &self,
+        request: ProfileS3MultipartStatusRequest,
+    ) -> Result<ProfileS3MultipartStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::ProfileS3MultipartStatus(request))? {
+            DaemonApiResponse::ProfileS3MultipartStatus(response) => Ok(response),
+            response => Err(unexpected("profile_s3_multipart_status", response)),
         }
     }
 
