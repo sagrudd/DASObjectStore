@@ -52,7 +52,8 @@ pub use host_auth_router::{
     monas_dasobjectstore_router_with_verifier,
     monas_dasobjectstore_router_with_verifier_and_s3_descriptor, monas_federated_router,
     monas_federated_router_with_verifier, synoptikon_federated_router, MonasLiveSessionVerifier,
-    SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
+    MonasS3ConnectionDescriptor, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
+    MONAS_SESSION_COOKIE,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,

@@ -30,6 +30,24 @@ use uuid::Uuid;
 pub const MONAS_SESSION_COOKIE: &str = "monas_session";
 pub const FEDERATED_CSRF_HEADER: HeaderName = HeaderName::from_static("x-dasobjectstore-csrf");
 
+/// Monas-owned externally reachable S3 service tuple.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MonasS3ConnectionDescriptor {
+    pub endpoint_url: String,
+    pub region: String,
+    pub addressing_style: String,
+}
+
+impl From<MonasS3ConnectionDescriptor> for StandaloneS3ConnectionDescriptor {
+    fn from(descriptor: MonasS3ConnectionDescriptor) -> Self {
+        Self {
+            endpoint_url: descriptor.endpoint_url,
+            region: descriptor.region,
+            addressing_style: descriptor.addressing_style,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct SynoptikonHostRequestAuthentication {
     pub issue: SynoptikonIntegratedSessionIssue,
@@ -87,13 +105,13 @@ pub fn monas_dasobjectstore_router(
 pub fn monas_dasobjectstore_router_with_s3_descriptor(
     host_product_routes: Router,
     auth_store: ProsopikonAuthStore,
-    s3_descriptor: StandaloneS3ConnectionDescriptor,
+    s3_descriptor: MonasS3ConnectionDescriptor,
 ) -> Router {
     let product_router =
         federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
             .merge(host_product_routes);
     monas_federated_router(product_router, auth_store).merge(
-        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor)),
+        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor.into())),
     )
 }
 
@@ -118,12 +136,12 @@ pub fn monas_dasobjectstore_router_with_verifier_and_s3_descriptor(
     host_product_routes: Router,
     auth_store: ProsopikonAuthStore,
     verifier: Arc<dyn MonasLiveSessionVerifier>,
-    s3_descriptor: StandaloneS3ConnectionDescriptor,
+    s3_descriptor: MonasS3ConnectionDescriptor,
 ) -> Router {
     let product_router = federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store))
         .merge(host_product_routes);
     monas_federated_router_with_verifier(product_router, verifier).merge(
-        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor)),
+        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor.into())),
     )
 }
 
