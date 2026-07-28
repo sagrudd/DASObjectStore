@@ -11,6 +11,7 @@ pub mod integrated_session;
 pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
 pub mod nas_nfs_runtime;
+pub mod pistis_actor;
 pub mod policy_templates;
 pub mod product_provisioning;
 pub mod product_ui;
@@ -80,6 +81,10 @@ pub use nas_nfs_runtime::{
     NasNfsObjectServiceProbePlan, NasNfsRuntimeProbeStep, NasNfsRuntimeValidationPlan,
     NasNfsRuntimeValidationPlanError, NasNfsTenantContractBoundary,
     NAS_NFS_RUNTIME_VALIDATION_PLAN_SCHEMA_VERSION,
+};
+pub use pistis_actor::{
+    accept_preverified_pistis_actor, PistisActorBoundary, PistisActorError,
+    PistisHostRequestBindings, PISTIS_DASOBJECTSTORE_PRODUCT_ID,
 };
 pub use policy_templates::{
     ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
