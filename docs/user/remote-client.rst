@@ -120,12 +120,28 @@ the approved principal, grants, and short-lived session. The client validates
 the envelope and commits the complete session generation atomically. It never
 guesses an S3 endpoint from the browser or control URL.
 
-If certificate trust has not yet been enrolled, inspect and verify it before
-retrying:
+If certificate trust has not yet been enrolled, obtain the leaf-certificate
+SHA-256 fingerprint through an independent administrator channel, then enrol
+that exact fingerprint before retrying:
 
 .. code-block:: console
 
-   dasobjectstore-remote trust inspect 192.168.1.192
+   dasobjectstore-remote trust enroll 192.168.1.192 \
+     --fingerprint 'C9:9C:...:C5'
+
+When the appliance is reached by IP but its certificate is issued to a DNS
+name, supply that exact certificate SAN:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust enroll 192.168.1.192 \
+     --fingerprint 'C9:9C:...:C5' \
+     --tls-server-name customer-das.example
+
+Enrollment probes the leaf certificate without sending credentials, requires
+the supplied fingerprint to match, and refuses an existing record. It never
+trusts a certificate merely because it was first observed. Use ``trust rotate``
+for an independently approved certificate replacement.
 
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and

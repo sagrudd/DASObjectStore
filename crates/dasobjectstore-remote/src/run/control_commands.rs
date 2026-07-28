@@ -32,6 +32,19 @@ pub(super) fn run_trust_inspect(
     Ok(())
 }
 
+pub(super) fn run_trust_enroll(
+    host: &str,
+    port: u16,
+    fingerprint: &str,
+    tls_server_name: Option<&str>,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let record = crate::trust::enroll_trust(host, port, fingerprint, tls_server_name)?;
+    serde_json::to_writer_pretty(&mut *writer, &trust_summary(&record))?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
 pub(super) fn run_trust_list(_json: bool, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     let records = crate::trust::list_trust()?
         .into_iter()

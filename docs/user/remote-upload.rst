@@ -29,7 +29,9 @@ Start easyconnect from the remote computer:
    dasobjectstore-remote easyconnect 192.168.1.192
 
 Use ``--object-store NAME`` when the requested ObjectStore must be fixed before
-approval. EasyConnect requires an already enrolled appliance certificate pin.
+approval. EasyConnect requires an already enrolled appliance certificate pin;
+use ``trust enroll HOST --fingerprint SHA256`` with a fingerprint obtained
+through an independent administrator channel. Enrollment is never TOFU.
 
 The client starts a loopback callback listener, opens the appliance login page
 in a browser, and waits for authenticated approval. Use ``--no-browser`` on a

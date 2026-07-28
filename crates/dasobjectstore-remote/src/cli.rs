@@ -111,6 +111,8 @@ impl TrustArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum TrustCommand {
+    /// Enrol a new appliance certificate using an independently verified fingerprint.
+    Enroll(TrustEnrollArgs),
     /// Inspect trust for one appliance endpoint.
     Inspect(TrustInspectArgs),
     /// List enrolled appliance trust records.
@@ -119,6 +121,34 @@ pub enum TrustCommand {
     Remove(TrustRemoveArgs),
     /// Replace a changed certificate using an independently verified fingerprint.
     Rotate(TrustRotateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TrustEnrollArgs {
+    host_or_ip: String,
+    #[arg(long, default_value_t = crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    /// Independently verified SHA-256 fingerprint of the presented leaf certificate.
+    #[arg(long)]
+    fingerprint: String,
+    /// Certificate DNS name when the certificate is not issued to the appliance address.
+    #[arg(long)]
+    tls_server_name: Option<String>,
+}
+
+impl TrustEnrollArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
+    pub fn tls_server_name(&self) -> Option<&str> {
+        self.tls_server_name.as_deref()
+    }
 }
 
 #[derive(Debug, Args)]
@@ -999,6 +1029,31 @@ mod tests {
             panic!("expected trust command");
         };
         assert!(matches!(args.command(), TrustCommand::Rotate(_)));
+    }
+
+    #[test]
+    fn parses_fail_closed_trust_enrollment() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "enroll",
+            "192.168.1.192",
+            "--fingerprint",
+            "AA:BB",
+            "--tls-server-name",
+            "customer-das.example",
+        ])
+        .expect("trust enrollment parses");
+        let RemoteCommand::Trust(args) = cli.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Enroll(args) = args.command() else {
+            panic!("expected enroll command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.https_port(), 8448);
+        assert_eq!(args.fingerprint(), "AA:BB");
+        assert_eq!(args.tls_server_name(), Some("customer-das.example"));
     }
 
     #[test]

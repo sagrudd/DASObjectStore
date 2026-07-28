@@ -49,6 +49,13 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
     match cli.command() {
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {
+            TrustCommand::Enroll(args) => run_trust_enroll(
+                args.host_or_ip(),
+                args.https_port(),
+                args.fingerprint(),
+                args.tls_server_name(),
+                writer,
+            ),
             TrustCommand::Inspect(args) => {
                 run_trust_inspect(args.host_or_ip(), args.https_port(), args.json(), writer)
             }

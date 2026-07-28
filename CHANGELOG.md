@@ -21,6 +21,8 @@ agreement before landing.
 - Complete the remote CLI's pinned-HTTPS create, form-POST callback, one-time
   exchange, and atomic config-generation installation using the server-owned
   S3 connection descriptor and asserted approval identity.
+- Add explicit fingerprint-required ``trust enroll`` bootstrap for passwordless
+  clients without weakening certificate enrollment to trust-on-first-use.
 
 ## 0.150.0 - 2026-07-28
 

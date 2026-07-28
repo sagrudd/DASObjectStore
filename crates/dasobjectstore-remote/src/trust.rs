@@ -355,6 +355,74 @@ pub fn persist_trust(record: &ApplianceTrustRecord) -> Result<PathBuf, TrustErro
     Ok(path)
 }
 
+pub fn enroll_trust(
+    host: &str,
+    port: u16,
+    expected_fingerprint: &str,
+    explicit_tls_server_name: Option<&str>,
+) -> Result<ApplianceTrustRecord, TrustError> {
+    let host = host.trim();
+    if host.is_empty()
+        || host.contains('/')
+        || host.contains('@')
+        || host.contains(char::is_whitespace)
+        || port == 0
+    {
+        return Err(TrustError::Invalid(
+            "trust enrollment requires a host name or IP address and non-zero HTTPS port"
+                .to_string(),
+        ));
+    }
+    if load_trust(host, port)?.is_some() {
+        return Err(TrustError::Invalid(
+            "appliance trust is already enrolled; use trust rotate for a changed certificate"
+                .to_string(),
+        ));
+    }
+    let presented = probe_certificate(host, port)?;
+    let record = prepare_enrollment_record(
+        host,
+        port,
+        expected_fingerprint,
+        explicit_tls_server_name,
+        &presented,
+    )?;
+    persist_trust(&record)?;
+    Ok(record)
+}
+
+fn prepare_enrollment_record(
+    host: &str,
+    port: u16,
+    expected_fingerprint: &str,
+    explicit_tls_server_name: Option<&str>,
+    presented: &PresentedCertificate,
+) -> Result<ApplianceTrustRecord, TrustError> {
+    expected_fingerprint_matches(expected_fingerprint, presented)?;
+    let mut enrollment_certificate = presented.clone();
+    if let Some(name) = explicit_tls_server_name {
+        let name = name.trim();
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('@')
+            || name.contains(char::is_whitespace)
+            || !presented
+                .subject_alt_names
+                .iter()
+                .any(|entry| entry == &format!("DNS:{name}"))
+        {
+            return Err(TrustError::Invalid(
+                "TLS server name must exactly match a DNS subject alternative name in the presented certificate"
+                    .to_string(),
+            ));
+        }
+        enrollment_certificate.tls_server_name = Some(name.to_string());
+    }
+    let mut record = new_trust_record(host, port, None, &enrollment_certificate)?;
+    record.legacy_fingerprint_pinned = record.tls_server_name != host;
+    Ok(record)
+}
+
 pub fn trust_record_path(host: &str, port: u16) -> Result<PathBuf, TrustError> {
     let root = trust_root()?;
     Ok(root
@@ -735,7 +803,7 @@ fn atomic_replace_private(path: &Path, bytes: &[u8]) -> Result<(), TrustError> {
 mod tests {
     use super::{
         canonical_fingerprint, expected_fingerprint_matches, inspect_leaf_certificate,
-        parse_fingerprint,
+        parse_fingerprint, prepare_enrollment_record,
     };
 
     #[test]
@@ -790,5 +858,41 @@ mod tests {
             inspect_leaf_certificate("192.168.1.192", generated.cert.der().as_ref()).unwrap();
         assert!(!presented.address_matches_certificate);
         assert_eq!(presented.tls_server_name.as_deref(), Some("localhost"));
+    }
+
+    #[test]
+    fn explicit_enrollment_requires_fingerprint_and_certificate_dns_name() {
+        let generated =
+            rcgen::generate_simple_self_signed(vec!["customer-das.example".to_string()]).unwrap();
+        let presented =
+            inspect_leaf_certificate("192.168.1.192", generated.cert.der().as_ref()).unwrap();
+
+        let record = prepare_enrollment_record(
+            "192.168.1.192",
+            8448,
+            &presented.fingerprint_sha256,
+            Some("customer-das.example"),
+            &presented,
+        )
+        .expect("independently pinned DNS identity enrolls");
+        assert_eq!(record.tls_server_name, "customer-das.example");
+        assert!(record.legacy_fingerprint_pinned);
+
+        assert!(prepare_enrollment_record(
+            "192.168.1.192",
+            8448,
+            &canonical_fingerprint(&[0x44; 32]),
+            Some("customer-das.example"),
+            &presented,
+        )
+        .is_err());
+        assert!(prepare_enrollment_record(
+            "192.168.1.192",
+            8448,
+            &presented.fingerprint_sha256,
+            Some("attacker.example"),
+            &presented,
+        )
+        .is_err());
     }
 }
