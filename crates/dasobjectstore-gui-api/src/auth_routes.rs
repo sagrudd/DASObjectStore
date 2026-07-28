@@ -4048,7 +4048,15 @@ mod tests {
                 disk_id: "qnap-1057".to_string(),
                 device_path: "/dev/disk/by-id/usb-qnap-1057".to_string(),
             }],
-            mount_root: Some("/srv/dasobjectstore".to_string()),
+            mount_root: Some(
+                std::env::temp_dir()
+                    .join(format!(
+                        "dasobjectstore-enclosure-test-{}",
+                        std::process::id()
+                    ))
+                    .display()
+                    .to_string(),
+            ),
             filesystem: Some("ext4".to_string()),
             owner: Some("stephen".to_string()),
             dry_run: false,

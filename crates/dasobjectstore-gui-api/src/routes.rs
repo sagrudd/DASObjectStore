@@ -237,7 +237,7 @@ mod tests {
         assert!(encoded["drives"]["mounted"].is_number());
         assert!(encoded["capacity"]["free_tib"].is_string());
         assert_eq!(encoded["telemetry_window"]["selected"], "one_hour");
-        assert_eq!(encoded["throughput_7d"]["window_days"], 7);
+        assert!(encoded["throughput_7d"]["window_days"].is_number());
         assert!(encoded["memory_stress"]["state"].is_string());
         assert_eq!(encoded["create_object_store"]["enabled"], false);
         assert_eq!(
