@@ -96,12 +96,24 @@ binding to the host's CSRF state. It does not contain a storage permission.
 Daemon-owned local group, administrator, ObjectStore, pairing, and action policy
 still decide whether an authenticated actor may read or mutate storage.
 
-The Monas adapter reads the host's pinned Prosopikon session store directly and
-verifies the browser session for each adaptation. The bearer token is never
-placed in the context, response, or audit identity: DASObjectStore receives an
-opaque SHA-256-derived session identifier and a context valid for at most five
-minutes and never longer than the host session. Monas caller input cannot mint
-administrator or storage roles; the adapter emits only ``authenticated``.
+For a Pistis session, Monas asks the single Prosopikon SQLite authority for an
+``AudienceBoundActorContext`` on every request. Monas retains the raw browser
+credential and passes DASObjectStore only that credential-free result, a
+correlation identifier, and a one-way CSRF digest. DASObjectStore accepts it
+only for the configured Prosopikon authority UUID and the exact
+``dasobjectstore`` audience. It also checks that the principal is active, the
+session and principal identifiers agree, and the verified session remains
+current. There is no Pistis message verifier or second session state machine in
+DASObjectStore.
+
+The adapter maps only active, correctly scoped Prosopikon assignments. An
+explicit ``dasobjectstore`` ``view``, ``operate``, or ``administer`` entitlement
+(or the equivalent ``viewer``, ``operator``, or ``administrator`` role) produces
+the corresponding ``storage_viewer``, ``storage_operator``, and
+``storage_administrator`` facts. Unknown roles, another product's assignment,
+suspended assignments, tenant mismatches, and host-project roles cannot
+elevate the actor. These facts identify the authorization decision made by
+Prosopikon; daemon action policy remains authoritative for storage mutations.
 
 The ready-to-mount Monas router consumes the host's HttpOnly
 ``monas_session`` cookie in process, inserts the verified actor, and serves the
@@ -113,10 +125,9 @@ the product handler runs.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 
-Monas ``0.6.0`` commit ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``
-mounts this router directly at ``/products/dasobjectstore``. Both projects pin
-Prosopikon commit ``c1dd477270e3ab34f5444e2c0565af845a930a70`` so the shared
-store is type- and schema-identical in a clean checkout.
+Pistis host integration pins Prosopikon commit
+``e4363ec9cadd08c8e73c3f29800bba3106319e65`` so Monas and DASObjectStore use
+one type- and schema-identical ``0.16`` actor contract.
 
 Federated HTML must include
 ``<meta name="dasobjectstore-host" content="monas">`` (or ``synoptikon``).

@@ -189,3 +189,158 @@ impl HostAuthenticationContextVerifier for BoundActorVerifier<'_> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    const NOW: i64 = 1_750_000_000;
+
+    fn fixture() -> AudienceBoundActorContext {
+        serde_json::from_value(json!({
+            "authority_id": "00000000-0000-0000-0000-000000000001",
+            "audience": "dasobjectstore",
+            "actor": {
+                "session": {
+                    "session_id": "00000000-0000-0000-0000-000000000002",
+                    "principal_id": "00000000-0000-0000-0000-000000000003",
+                    "authentication_method": "device",
+                    "issued_at_utc": "2025-06-15T14:39:00Z",
+                    "verified_at_utc": "2025-06-15T14:39:10Z",
+                    "expires_at_utc": "2025-06-15T15:39:00Z",
+                    "authority_revision": 7
+                },
+                "principal": {
+                    "principal_id": "00000000-0000-0000-0000-000000000003",
+                    "username": "stephen",
+                    "display_name": "Stephen",
+                    "email": "stephen@mnemosyne.co.uk",
+                    "kind": "person",
+                    "status": "active",
+                    "created_at_utc": "2025-06-01T00:00:00Z",
+                    "updated_at_utc": "2025-06-01T00:00:00Z"
+                },
+                "active_tenant_id": null,
+                "memberships": [],
+                "role_assignments": [],
+                "product_entitlements": [{
+                    "assignment_id": "00000000-0000-0000-0000-000000000004",
+                    "subject": {
+                        "kind": "principal",
+                        "principal_id": "00000000-0000-0000-0000-000000000003"
+                    },
+                    "product_id": "dasobjectstore",
+                    "grant": "administer",
+                    "status": "active",
+                    "created_at_utc": "2025-06-01T00:00:00Z",
+                    "updated_at_utc": "2025-06-01T00:00:00Z"
+                }]
+            }
+        }))
+        .expect("valid fixture")
+    }
+
+    fn bindings() -> PistisHostRequestBindings {
+        PistisHostRequestBindings {
+            correlation_id: "pistis:test:1".to_owned(),
+            csrf_binding_sha256: format!("sha256:{}", "a".repeat(64)),
+        }
+    }
+
+    fn boundary(actor: &AudienceBoundActorContext) -> PistisActorBoundary {
+        PistisActorBoundary {
+            authority_id: actor.authority_id,
+        }
+    }
+
+    #[test]
+    fn maps_only_explicit_das_admin_grant() {
+        let actor = fixture();
+        let accepted = accept_preverified_pistis_actor(&actor, &bindings(), boundary(&actor), NOW)
+            .expect("accepted actor");
+        assert_eq!(accepted.context().subject_id, "stephen");
+        assert_eq!(
+            accepted.context().roles,
+            [
+                "authenticated",
+                "storage_viewer",
+                "storage_operator",
+                "storage_administrator"
+            ]
+        );
+    }
+
+    #[test]
+    fn unrelated_and_suspended_grants_cannot_elevate_actor() {
+        let base = serde_json::to_value(fixture()).expect("serialize fixture");
+        for mutation in [
+            ("product_id", Value::String("jenkins".to_owned())),
+            ("status", Value::String("suspended".to_owned())),
+        ] {
+            let mut value = base.clone();
+            value["actor"]["product_entitlements"][0][mutation.0] = mutation.1;
+            let actor: AudienceBoundActorContext =
+                serde_json::from_value(value).expect("mutated actor");
+            let accepted =
+                accept_preverified_pistis_actor(&actor, &bindings(), boundary(&actor), NOW)
+                    .expect("accepted without elevation");
+            assert_eq!(accepted.context().roles, ["authenticated"]);
+        }
+    }
+
+    #[test]
+    fn rejects_absent_authority_wrong_audience_and_stale_session() {
+        let actor = fixture();
+        let wrong_authority = PistisActorBoundary {
+            authority_id: Uuid::nil(),
+        };
+        assert_eq!(
+            accept_preverified_pistis_actor(&actor, &bindings(), wrong_authority, NOW),
+            Err(PistisActorError::WrongAuthority)
+        );
+
+        let mut wrong_audience = actor.clone();
+        wrong_audience.audience = "jenkins".to_owned();
+        assert_eq!(
+            accept_preverified_pistis_actor(&wrong_audience, &bindings(), boundary(&actor), NOW),
+            Err(PistisActorError::WrongAudience)
+        );
+
+        assert_eq!(
+            accept_preverified_pistis_actor(
+                &actor,
+                &bindings(),
+                boundary(&actor),
+                actor.actor.session.expires_at_utc.timestamp()
+            ),
+            Err(PistisActorError::SessionNotCurrent)
+        );
+    }
+
+    #[test]
+    fn rejects_inactive_or_mismatched_principal_and_malformed_bindings() {
+        let actor = fixture();
+        let mut inactive = serde_json::to_value(&actor).expect("serialize");
+        inactive["actor"]["principal"]["status"] = json!("locked");
+        let inactive = serde_json::from_value(inactive).expect("inactive actor");
+        assert_eq!(
+            accept_preverified_pistis_actor(&inactive, &bindings(), boundary(&actor), NOW),
+            Err(PistisActorError::InactivePrincipal)
+        );
+
+        let mut mismatch = actor.clone();
+        mismatch.actor.session.principal_id = Uuid::nil();
+        assert_eq!(
+            accept_preverified_pistis_actor(&mismatch, &bindings(), boundary(&actor), NOW),
+            Err(PistisActorError::SessionPrincipalMismatch)
+        );
+
+        let mut malformed = bindings();
+        malformed.csrf_binding_sha256 = "raw-secret".to_owned();
+        assert!(matches!(
+            accept_preverified_pistis_actor(&actor, &malformed, boundary(&actor), NOW),
+            Err(PistisActorError::InvalidBinding(_))
+        ));
+    }
+}
