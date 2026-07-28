@@ -22,9 +22,19 @@ pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) public_base_url: String,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct EasyconnectPublicRouteState {
     pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    pub(super) public_base_url: String,
+}
+
+impl Default for EasyconnectPublicRouteState {
+    fn default() -> Self {
+        Self {
+            s3_descriptor: None,
+            public_base_url: crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
+        }
+    }
 }
 
 impl StandaloneAuthRouteState {
@@ -644,6 +654,7 @@ pub(super) async fn easyconnect_auth_context(
 }
 
 pub(super) async fn easyconnect_create_pairing(
+    State(state): State<EasyconnectPublicRouteState>,
     Json(request): Json<RemoteEasyconnectCreatePairingRequest>,
 ) -> Result<Json<RemoteEasyconnectCreatePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
     request.validate().map_err(|error| {
@@ -671,17 +682,15 @@ pub(super) async fn easyconnect_create_pairing(
         })
         .await
         .map_err(remote_auth_bridge_error)?;
-    let mut browser_url = reqwest::Url::parse(&format!(
-        "https://pistis.invalid{}",
-        response.browser_login_url
-    ))
-    .map_err(|_| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "invalid_easyconnect_browser_route",
-            "daemon returned an invalid EasyConnect browser route",
-        )
-    })?;
+    let mut browser_url =
+        absolute_public_easyconnect_url(&state.public_base_url, &response.browser_login_url)
+            .ok_or_else(|| {
+                route_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "invalid_easyconnect_browser_route",
+                    "daemon returned an invalid EasyConnect browser route",
+                )
+            })?;
     browser_url
         .query_pairs_mut()
         .append_pair("object_store", &requested_object_store)
@@ -691,6 +700,27 @@ pub(super) async fn easyconnect_create_pairing(
         browser_url.path(),
         browser_url.query().unwrap_or_default()
     );
+    response.browser_login_url = format!(
+        "{}/products/dasobjectstore{}",
+        state.public_base_url.trim_end_matches('/'),
+        response.browser_login_url
+    );
+    response.polling_url =
+        absolute_public_easyconnect_url(&state.public_base_url, &response.polling_url)
+            .map(|url| {
+                format!(
+                    "{}/products/dasobjectstore{}",
+                    state.public_base_url.trim_end_matches('/'),
+                    url.path()
+                )
+            })
+            .ok_or_else(|| {
+                route_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "invalid_easyconnect_polling_route",
+                    "daemon returned an invalid EasyConnect polling route",
+                )
+            })?;
     Ok(Json(response))
 }
 
@@ -894,33 +924,6 @@ fn validate_loopback_callback(
         ));
     }
     Ok(())
-}
-
-pub(super) fn standalone_easyconnect_discovery_payload(
-    public_base_url: &str,
-) -> RemoteEasyconnectDiscoveryResponse {
-    let api_base_url = format!(
-        "{}/products/dasobjectstore/api",
-        public_base_url.trim_end_matches('/')
-    );
-
-    RemoteEasyconnectDiscoveryResponse {
-        appliance_id: "standalone-dasobjectstore".to_string(),
-        product_id: "dasobjectstore".to_string(),
-        display_name: "DASObjectStore standalone appliance".to_string(),
-        pairing_create_url: format!("{api_base_url}/v1/remote/easyconnect/pairings"),
-        pairing_exchange_url: format!("{api_base_url}/v1/remote/easyconnect/pairings/exchange"),
-        session_revoke_url_template: format!(
-            "{api_base_url}/v1/remote/easyconnect/sessions/{{session_id}}"
-        ),
-        session_renew_url_template: format!(
-            "{api_base_url}/v1/remote/easyconnect/sessions/{{session_id}}/renew"
-        ),
-        default_session_lifetime_seconds:
-            dasobjectstore_daemon::REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
-        session_policy: RemoteEasyconnectSessionPolicy::default(),
-        auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
-    }
 }
 
 fn local_password_auth_route_error(

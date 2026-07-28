@@ -12,6 +12,8 @@ use crate::{
 mod auth_admin_clients;
 #[path = "auth_clients.rs"]
 mod auth_clients;
+#[path = "auth_easyconnect_public.rs"]
+mod auth_easyconnect_public;
 #[path = "auth_identity_routes.rs"]
 mod auth_identity_routes;
 #[path = "auth_parsing.rs"]
@@ -36,6 +38,7 @@ pub(crate) mod profile_multipart;
 pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
+use auth_easyconnect_public::*;
 pub use auth_identity_routes::StandaloneS3ConnectionDescriptor;
 use auth_identity_routes::*;
 use auth_parsing::*;

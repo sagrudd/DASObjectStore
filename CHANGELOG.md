@@ -23,6 +23,8 @@ agreement before landing.
   S3 connection descriptor and asserted approval identity.
 - Add explicit fingerprint-required ``trust enroll`` bootstrap for passwordless
   clients without weakening certificate enrollment to trust-on-first-use.
+- Propagate the configured non-loopback ``public_base_url`` through root and
+  product EasyConnect discovery, creation, polling, and browser URLs.
 
 ## 0.150.0 - 2026-07-28
 

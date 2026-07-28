@@ -87,12 +87,14 @@ async fn start_server(
         }
         _ => None,
     };
+    let public_base_url = config.public_base_url.clone();
     let primary_router = standalone_router_with_application_auth(
         web_root,
         config.authentication.clone(),
         auth_root,
         !mtls_enabled,
         public_s3_descriptor,
+        &public_base_url,
     );
     let direct_s3 = async move {
         if s3_ingress.enabled() {
@@ -137,7 +139,14 @@ fn standalone_router(
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
 ) -> Router {
-    standalone_router_with_application_auth(web_root, authentication, auth_root, true, None)
+    standalone_router_with_application_auth(
+        web_root,
+        authentication,
+        auth_root,
+        true,
+        None,
+        dasobjectstore_gui_api::DEFAULT_STANDALONE_PUBLIC_BASE_URL,
+    )
 }
 
 fn standalone_router_with_application_auth(
@@ -146,6 +155,7 @@ fn standalone_router_with_application_auth(
     auth_root: PathBuf,
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: &str,
 ) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
@@ -157,12 +167,14 @@ fn standalone_router_with_application_auth(
         auth_store.clone(),
         include_application_auth,
         s3_descriptor.clone(),
+        public_base_url,
     );
     let product_api = gui_api_router_for_host_mode_with_s3_descriptor(
         host_mode,
         auth_store,
         include_application_auth,
         s3_descriptor,
+        public_base_url,
     );
     Router::new()
         .route("/", get(root_redirect))
@@ -412,7 +424,7 @@ mod tests {
         STATIC_ASSET_READ_PERMITS,
     };
     use crate::server_cli::ServerCli;
-    use axum::body::Body;
+    use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use clap::Parser;
     use std::fs;
@@ -542,6 +554,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn easyconnect_discovery_uses_configured_non_loopback_origin_on_both_mounts() {
+        let root = temp_root("server-run-easyconnect-public-origin");
+        let auth_root = temp_root("server-run-easyconnect-public-origin-auth");
+        let app = standalone_router_with_application_auth(
+            root.clone(),
+            Default::default(),
+            auth_root.clone(),
+            true,
+            None,
+            "https://das.customer.example:8448",
+        );
+        for path in [
+            "/api/v1/remote/easyconnect/discovery",
+            "/products/dasobjectstore/api/v1/remote/easyconnect/discovery",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("discovery response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = to_bytes(response.into_body(), 64 * 1024)
+                .await
+                .expect("response body");
+            let discovery: serde_json::Value =
+                serde_json::from_slice(&body).expect("discovery JSON");
+            assert_eq!(
+                discovery["pairing_create_url"],
+                "https://das.customer.example:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+            );
+            assert!(!discovery.to_string().contains("127.0.0.1"));
+        }
+        cleanup(&auth_root);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn primary_listener_removes_application_auth_when_mtls_is_enabled() {
         let root = temp_root("server-run-mtls-isolation");
         let auth_root = temp_root("server-run-mtls-isolation-auth");
@@ -560,6 +614,7 @@ mod tests {
             auth_root.clone(),
             false,
             None,
+            dasobjectstore_gui_api::DEFAULT_STANDALONE_PUBLIC_BASE_URL,
         )
         .oneshot(request())
         .await
@@ -572,6 +627,7 @@ mod tests {
             auth_root.clone(),
             true,
             None,
+            dasobjectstore_gui_api::DEFAULT_STANDALONE_PUBLIC_BASE_URL,
         )
         .oneshot(request())
         .await

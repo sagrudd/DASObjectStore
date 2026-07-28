@@ -120,6 +120,13 @@ the approved principal, grants, and short-lived session. The client validates
 the envelope and commits the complete session generation atomically. It never
 guesses an S3 endpoint from the browser or control URL.
 
+The appliance ``public_base_url`` must be its externally reachable HTTPS
+origin, for example ``https://das.customer.example:8448`` rather than a
+loopback listener. The server uses this single validated origin for discovery,
+pairing creation, polling, and browser approval URLs on both the root API and
+the ``/products/dasobjectstore`` mount. A returned route cannot substitute
+another origin, and clients continue to reject any cross-origin response.
+
 If certificate trust has not yet been enrolled, obtain the leaf-certificate
 SHA-256 fingerprint through an independent administrator channel, then enrol
 that exact fingerprint before retrying:

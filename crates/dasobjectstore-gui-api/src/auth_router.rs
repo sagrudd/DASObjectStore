@@ -52,22 +52,29 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
     auth_store: LocalAuthStore,
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: &str,
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone())
-                .merge(standalone_session_auth_router_with_state(
-                    StandaloneAuthRouteState {
-                        auth_store,
-                        local_password_authenticator: Arc::new(
-                            SystemLocalPasswordAuthenticator::default(),
-                        ),
-                        s3_descriptor: s3_descriptor.clone(),
-                    },
-                ))
-                .merge(easyconnect_public_router_with_state(
-                    EasyconnectPublicRouteState { s3_descriptor },
-                ));
+            let router = federated_operational_router_with_public_base_url(
+                auth_store.clone(),
+                public_base_url,
+            )
+            .merge(standalone_session_auth_router_with_state(
+                StandaloneAuthRouteState {
+                    auth_store,
+                    local_password_authenticator: Arc::new(
+                        SystemLocalPasswordAuthenticator::default(),
+                    ),
+                    s3_descriptor: s3_descriptor.clone(),
+                },
+            ))
+            .merge(easyconnect_public_router_with_state(
+                EasyconnectPublicRouteState {
+                    s3_descriptor,
+                    public_base_url: public_base_url.to_string(),
+                },
+            ));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -98,12 +105,25 @@ async fn federated_host_session(
 }
 
 fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
+    federated_operational_router_with_public_base_url(
+        auth_store,
+        crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL,
+    )
+}
+
+fn federated_operational_router_with_public_base_url(
+    auth_store: LocalAuthStore,
+    public_base_url: &str,
+) -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(crate::remote_control_routes::remote_control_router())
         .merge(standalone_dashboard_router(auth_store.clone()))
         .merge(standalone_live_status_router(auth_store.clone()))
         .merge(standalone_easyconnect_router_with_state(
-            StandaloneEasyconnectRouteState::system(auth_store.clone()),
+            StandaloneEasyconnectRouteState {
+                auth_store: auth_store.clone(),
+                public_base_url: public_base_url.to_string(),
+            },
         ))
         .merge(standalone_users_groups_router(auth_store.clone()))
         .merge(standalone_enclosure_admin_router(auth_store.clone()))
@@ -220,7 +240,10 @@ pub fn easyconnect_public_router() -> Router {
 pub fn easyconnect_public_router_with_s3_descriptor(
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
 ) -> Router {
-    easyconnect_public_router_with_state(EasyconnectPublicRouteState { s3_descriptor })
+    easyconnect_public_router_with_state(EasyconnectPublicRouteState {
+        s3_descriptor,
+        ..EasyconnectPublicRouteState::default()
+    })
 }
 
 fn easyconnect_public_router_with_state(state: EasyconnectPublicRouteState) -> Router {

@@ -495,7 +495,16 @@ fn validate_https_port(https_port: u16) -> Result<(), StandaloneServerConfigErro
 }
 
 fn validate_public_base_url(public_base_url: &str) -> Result<(), StandaloneServerConfigError> {
-    if !public_base_url.starts_with("https://") || public_base_url.trim() == "https://" {
+    let valid = reqwest::Url::parse(public_base_url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.path() == "/"
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && url.username().is_empty()
+            && url.password().is_none()
+    });
+    if !valid {
         return Err(StandaloneServerConfigError::InvalidPublicBaseUrl {
             public_base_url: public_base_url.to_string(),
         });
@@ -582,6 +591,24 @@ mod tests {
                 public_base_url: "http://127.0.0.1:8448".to_string()
             }
         );
+    }
+
+    #[test]
+    fn rejects_public_base_url_with_credentials_path_or_cross_origin_suffix() {
+        for public_base_url in [
+            "https://user@das.example:8448",
+            "https://das.example:8448/products/dasobjectstore",
+            "https://das.example:8448/?redirect=https://attacker.example",
+        ] {
+            let config = StandaloneServerConfig {
+                public_base_url: public_base_url.to_string(),
+                ..StandaloneServerConfig::default()
+            };
+            assert!(matches!(
+                config.validate(),
+                Err(StandaloneServerConfigError::InvalidPublicBaseUrl { .. })
+            ));
+        }
     }
 
     #[test]
