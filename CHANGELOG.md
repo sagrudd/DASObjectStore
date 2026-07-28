@@ -13,6 +13,9 @@ agreement before landing.
 - Render a bounded standalone login handoff for first-use EasyConnect browser
   approval, preserving header-based browser sessions without cookies or an
   authentication bypass and escaping hostile query content.
+- Terminate direct S3 ingress with the appliance's native Rustls listener,
+  reject plaintext or port-substituted public descriptors, and document
+  explicit certificate trust, deployment evidence, and recoverable rollback.
 
 ## 0.151.0 - 2026-07-28
 

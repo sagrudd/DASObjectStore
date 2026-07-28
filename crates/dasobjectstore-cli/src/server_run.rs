@@ -14,6 +14,7 @@ use dasobjectstore_gui_api::{
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
@@ -58,6 +59,7 @@ async fn start_server(
     let tls =
         RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
             .await?;
+    let s3_tls = tls.clone();
     writeln!(
         writer,
         "dasobjectstore-server listening on https://{}",
@@ -99,12 +101,7 @@ async fn start_server(
     let direct_s3 = async move {
         if s3_ingress.enabled() {
             let address = s3_ingress.socket_addr().map_err(io::Error::other)?;
-            let listener = tokio::net::TcpListener::bind(address).await?;
-            axum::serve(
-                listener,
-                s3_gateway_router(s3_ingress.max_concurrent_uploads).into_make_service(),
-            )
-            .await
+            serve_direct_s3_tls(address, s3_tls, s3_ingress.max_concurrent_uploads).await
         } else {
             std::future::pending::<io::Result<()>>().await
         }
@@ -131,6 +128,20 @@ async fn start_server(
         tokio::try_join!(primary, direct_s3)?;
     }
     Ok(())
+}
+
+/// Serve packaged direct S3 ingress through the appliance-owned TLS boundary.
+///
+/// Requiring a fully constructed [`RustlsConfig`] here keeps plaintext binding
+/// out of the direct-gateway startup path.
+async fn serve_direct_s3_tls(
+    address: SocketAddr,
+    tls: RustlsConfig,
+    max_concurrent_uploads: usize,
+) -> io::Result<()> {
+    axum_server::bind_rustls(address, tls)
+        .serve(s3_gateway_router(max_concurrent_uploads).into_make_service())
+        .await
 }
 
 #[cfg(test)]

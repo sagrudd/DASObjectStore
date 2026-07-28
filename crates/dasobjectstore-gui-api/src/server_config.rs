@@ -139,7 +139,10 @@ impl StandaloneS3IngressConfig {
             return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
         }
         if let Some(endpoint) = &self.public_endpoint_url {
-            validate_s3_public_endpoint(endpoint)?;
+            let endpoint_port = validate_s3_public_endpoint(endpoint)?;
+            if endpoint_port != self.port {
+                return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+            }
         }
         if self
             .region
@@ -459,10 +462,10 @@ fn default_s3_max_concurrent_uploads() -> usize {
     8
 }
 
-fn validate_s3_public_endpoint(endpoint: &str) -> Result<(), StandaloneServerConfigError> {
+fn validate_s3_public_endpoint(endpoint: &str) -> Result<u16, StandaloneServerConfigError> {
     let parsed = reqwest::Url::parse(endpoint)
         .map_err(|_| StandaloneServerConfigError::InvalidS3PublicDescriptor)?;
-    if !matches!(parsed.scheme(), "http" | "https")
+    if parsed.scheme() != "https"
         || parsed.host_str().is_none()
         || !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -472,7 +475,9 @@ fn validate_s3_public_endpoint(endpoint: &str) -> Result<(), StandaloneServerCon
     {
         return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
     }
-    Ok(())
+    parsed
+        .port_or_known_default()
+        .ok_or(StandaloneServerConfigError::InvalidS3PublicDescriptor)
 }
 
 fn default_application_identity_registry_path() -> PathBuf {
@@ -780,6 +785,7 @@ mod tests {
     fn validates_complete_authoritative_s3_descriptor_without_assuming_3900() {
         let mut config = StandaloneServerConfig::default();
         config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
+        config.s3_ingress.port = 9443;
         config.s3_ingress.public_endpoint_url =
             Some("https://objects.lab.example:9443".to_string());
         config.s3_ingress.region = Some("lab-west".to_string());
@@ -809,6 +815,22 @@ mod tests {
             config
                 .validate()
                 .expect_err("malformed descriptor rejected"),
+            StandaloneServerConfigError::InvalidS3PublicDescriptor
+        );
+
+        config.s3_ingress.public_endpoint_url = Some("http://objects.example:3900".to_string());
+        assert_eq!(
+            config
+                .validate()
+                .expect_err("plaintext descriptor rejected"),
+            StandaloneServerConfigError::InvalidS3PublicDescriptor
+        );
+
+        config.s3_ingress.public_endpoint_url = Some("https://objects.example:7443".to_string());
+        assert_eq!(
+            config
+                .validate()
+                .expect_err("listener port substitution rejected"),
             StandaloneServerConfigError::InvalidS3PublicDescriptor
         );
     }

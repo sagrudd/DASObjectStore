@@ -31,7 +31,7 @@ key, Authorization header, or complete presigned URL.
 | Multipart abuse | Bound part size/count, total retained bytes, concurrent uploads, idle lifetime, and completion manifest; retain only explicitly resumable state | Invalid ordering/duplicate part/oversize/expiry/abort/restart tests |
 | SQLite denial of service | Do not hold write transactions during transfer; bounded busy timeout/retry with jitter around the short commit | Lock-contention test transfers once and either commits or returns a retryable failure |
 | Symlink or managed-root escape | Store-private root, no-follow/symlink checks, restrictive modes, atomic rename on the same filesystem | Symlink fixture is rejected before a file is opened or published |
-| Network observation or replay | Production exposure requires trusted-network placement or TLS termination; SigV4 authenticates requests but plaintext HTTP does not provide confidentiality | Network policy/TLS termination recorded in appliance evidence |
+| Network observation or replay | The packaged direct gateway requires native TLS with the configured appliance certificate; SigV4 authenticates requests but is not treated as a confidentiality mechanism | TLS 1.3 negotiation, hostname/CA validation, and endpoint evidence retained |
 
 The SigV4 verifier must enforce a bounded clock-skew/replay window before the
 gateway is exposed beyond a trusted appliance network.  A matching credential
