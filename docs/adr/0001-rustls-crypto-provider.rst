@@ -41,10 +41,14 @@ The locked workspace contains these shipped executable processes:
 
 ``dasobjectstore-remote``
    Constructs blocking Reqwest clients for appliance control and
-   authentication. Its pinned-certificate trust probe currently uses
+   authentication. Its capture-only enrollment probe currently uses
    ``ClientConfig::builder_with_provider`` with an explicit Ring provider.
    The implementation must migrate that explicit path to the selected
-   executable provider without weakening certificate, CA, or hostname checks.
+   executable provider while preserving handshake-signature validation, zero
+   application data, certificate parsing and display, and explicit
+   out-of-band confirmation of the full fingerprint. Capture remains
+   explicitly untrusted. After enrollment, discovery, authentication, and
+   control clients retain pin or CA trust together with hostname validation.
 
 ``dasobjectstore``
    The management CLI can reach daemon/server functionality. Even when a
