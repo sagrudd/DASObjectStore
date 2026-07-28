@@ -44,7 +44,7 @@ pub use flounder_telemetry::{
 pub use host_auth_adapter::{
     accept_monas_host_session, accept_synoptikon_host_session, accept_verified_monas_host_session,
     HostSessionAdapterError, MonasHostSessionIssue, MonasVerifiedSession,
-    SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
+    SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS, MONAS_AUTHORITY_AUDIENCE,
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_api_router_with_verifier,

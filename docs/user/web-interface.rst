@@ -1312,7 +1312,9 @@ preferred in-process mount because the verified actor cannot be serialized or
 forged as a forwarding header. The authority-backed constructor accepts a
 narrow live-session verifier, allowing Pistis sessions to be rechecked by Monas
 against Prosopikon SQLite while reusing exactly the same product context and
-CSRF boundary. The legacy header must remain disabled for a DASObjectStore
+CSRF boundary. Its credential-free result must retain the exact ``monas``
+authority audience; wrong-audience, expired, revoked, or inconsistent results
+return HTTP 401. The legacy header must remain disabled for a DASObjectStore
 mount.
 
 That mount is implemented by Monas ``0.6.0`` commit

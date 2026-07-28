@@ -13,6 +13,7 @@ use prosopikon_core::ProsopikonAuthStore;
 use std::fmt::{self, Display};
 
 pub const HOST_ADAPTER_CONTEXT_TTL_SECONDS: i64 = 5 * 60;
+pub const MONAS_AUTHORITY_AUDIENCE: &str = "monas";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MonasHostSessionIssue {
@@ -29,6 +30,8 @@ pub struct MonasVerifiedSession {
     pub principal_id: String,
     pub session_id: String,
     pub username: String,
+    /// Exact Prosopikon audience under which Monas validated the session.
+    pub audience: String,
     pub expires_at_unix_seconds: i64,
 }
 
@@ -74,6 +77,7 @@ pub fn accept_monas_host_session(
             principal_id: session.principal_id.to_string(),
             session_id: session.session_id.to_string(),
             username: session.username,
+            audience: MONAS_AUTHORITY_AUDIENCE.to_string(),
             expires_at_unix_seconds: session.expires_at_utc.timestamp(),
         },
         issue,
@@ -90,6 +94,7 @@ pub fn accept_verified_monas_host_session(
     accepted_at_unix_seconds: i64,
 ) -> Result<VerifiedHostAuthenticatedContext, HostSessionAdapterError> {
     if session.username != issue.username
+        || session.audience != MONAS_AUTHORITY_AUDIENCE
         || session.authority_id.is_empty()
         || session.principal_id.is_empty()
         || session.session_id.is_empty()

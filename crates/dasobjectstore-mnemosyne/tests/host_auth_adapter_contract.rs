@@ -5,12 +5,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
+use dasobjectstore_gui_api::{
+    AuthenticatedGuiActor, HostAuthenticationAuthority, VerifiedHostAuthenticatedContext,
+};
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
     monas_dasobjectstore_api_router_with_verifier, monas_federated_router,
-    synoptikon_federated_router, HostSessionAdapterError, MonasHostSessionIssue,
-    MonasLiveSessionVerifier, MonasVerifiedSession, StorageAuthority,
+    monas_federated_router_with_verifier, synoptikon_federated_router, HostSessionAdapterError,
+    MonasHostSessionIssue, MonasLiveSessionVerifier, MonasVerifiedSession, StorageAuthority,
     SynoptikonHostRequestAuthentication, SynoptikonIntegratedAcceptedSession,
     SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
     SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, FEDERATED_CSRF_HEADER,
@@ -23,6 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
+
+const AUTHORITY_TOKEN: &str = "authority-secret-credential-0001";
 
 #[tokio::test]
 async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
@@ -79,6 +83,7 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
 #[derive(Debug)]
 struct AuthorityBackedMonas {
     valid: bool,
+    audience: &'static str,
     expires_at_unix_seconds: i64,
 }
 
@@ -88,7 +93,7 @@ impl MonasLiveSessionVerifier for AuthorityBackedMonas {
         username: &str,
         session_token: &str,
     ) -> Result<MonasVerifiedSession, String> {
-        if !self.valid || username != "operator" || session_token != "authority-secret" {
+        if !self.valid || username != "operator" || session_token != AUTHORITY_TOKEN {
             return Err("authority session rejected".to_string());
         }
         Ok(MonasVerifiedSession {
@@ -96,6 +101,7 @@ impl MonasLiveSessionVerifier for AuthorityBackedMonas {
             principal_id: "00000000-0000-0000-0000-000000000002".to_string(),
             session_id: "00000000-0000-0000-0000-000000000003".to_string(),
             username: username.to_string(),
+            audience: self.audience.to_string(),
             expires_at_unix_seconds: self.expires_at_unix_seconds,
         })
     }
@@ -105,22 +111,23 @@ impl MonasLiveSessionVerifier for AuthorityBackedMonas {
 async fn authority_backed_monas_session_reuses_the_product_boundary() {
     let root = temp_root("monas-authority");
     let store = registered_store(&root);
-    let cookie = "monas_session=operator:authority-secret";
-    let app = |valid, expires_at_unix_seconds| {
+    let cookie = format!("monas_session=operator:{AUTHORITY_TOKEN}");
+    let app = |valid, audience, expires_at_unix_seconds| {
         monas_dasobjectstore_api_router_with_verifier(
             store.clone(),
             Arc::new(AuthorityBackedMonas {
                 valid,
+                audience,
                 expires_at_unix_seconds,
             }),
         )
     };
 
-    let response = app(true, unix_now() + 300)
+    let response = app(true, "monas", unix_now() + 300)
         .oneshot(
             Request::builder()
                 .uri("/api/v1/host-session")
-                .header(COOKIE, cookie)
+                .header(COOKIE, &cookie)
                 .body(Body::empty())
                 .expect("request builds"),
         )
@@ -137,12 +144,16 @@ async fn authority_backed_monas_session_reuses_the_product_boundary() {
     );
     assert!(session.get("session_token").is_none());
 
-    for rejected in [app(false, unix_now() + 300), app(true, unix_now() - 1)] {
+    for rejected in [
+        app(false, "monas", unix_now() + 300),
+        app(true, "wrong-audience", unix_now() + 300),
+        app(true, "monas", unix_now() - 1),
+    ] {
         let status = rejected
             .oneshot(
                 Request::builder()
                     .uri("/api/v1/host-session")
-                    .header(COOKIE, cookie)
+                    .header(COOKIE, &cookie)
                     .body(Body::empty())
                     .expect("request builds"),
             )
@@ -152,6 +163,57 @@ async fn authority_backed_monas_session_reuses_the_product_boundary() {
         assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
     cleanup(&root);
+}
+
+#[tokio::test]
+async fn authority_backed_monas_session_preserves_bearer_bound_csrf() {
+    async fn mutate(Extension(verified): Extension<VerifiedHostAuthenticatedContext>) -> String {
+        verified.context().subject_id.clone()
+    }
+
+    let verifier: Arc<dyn MonasLiveSessionVerifier> = Arc::new(AuthorityBackedMonas {
+        valid: true,
+        audience: "monas",
+        expires_at_unix_seconds: unix_now() + 300,
+    });
+    let app = monas_federated_router_with_verifier(
+        Router::new().route("/mutate", post(mutate)),
+        verifier,
+    );
+    let token = AUTHORITY_TOKEN;
+    let cookie = format!("monas_session=operator:{token}");
+    let csrf = monas_csrf_binding(token);
+
+    for (presented_csrf, expected) in [
+        (None, StatusCode::FORBIDDEN),
+        (Some("sha256:wrong"), StatusCode::FORBIDDEN),
+        (Some(csrf.as_str()), StatusCode::OK),
+    ] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/mutate")
+            .header(COOKIE, &cookie);
+        if let Some(value) = presented_csrf {
+            request = request.header(FEDERATED_CSRF_HEADER, value);
+        }
+        let status = app
+            .clone()
+            .oneshot(request.body(Body::empty()).expect("request builds"))
+            .await
+            .expect("request completes")
+            .status();
+        assert_eq!(status, expected);
+    }
+}
+
+#[test]
+fn monas_live_session_verifier_is_object_safe() {
+    fn accepts_object_safe_verifier(_: Arc<dyn MonasLiveSessionVerifier>) {}
+    accepts_object_safe_verifier(Arc::new(AuthorityBackedMonas {
+        valid: false,
+        audience: "monas",
+        expires_at_unix_seconds: 0,
+    }));
 }
 
 #[tokio::test]

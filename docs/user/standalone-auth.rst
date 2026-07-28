@@ -103,8 +103,10 @@ can recheck the same Prosopikon SQLite authority, exact audience, current
 binding generations, expiry, and revocation without creating a second local
 session. The bearer token is never
 placed in the context, response, or audit identity: DASObjectStore receives an
-opaque SHA-256-derived session identifier and a context valid for at most five
-minutes and never longer than the host session. Monas caller input cannot mint
+opaque authority session identifier and a context valid for at most five
+minutes and never longer than the host session. The browser credential is used
+only as input to the one-way CSRF binding and is never returned as identity
+data. Monas caller input cannot mint
 administrator or storage roles; the adapter emits only ``authenticated``.
 
 The ready-to-mount Monas router consumes the host's HttpOnly
@@ -116,6 +118,11 @@ instance/root or receive Monas's authority-backed live-session verifier. A
 missing, malformed, expired, revoked, wrong-audience, or logged-out cookie
 returns ``401`` before the product handler runs. The generic verifier result is
 credential-free; DASObjectStore never opens the Pistis handoff store.
+The verifier must attest the exact ``monas`` Prosopikon audience; a verifier
+result for any product or host audience is rejected before context creation.
+The review build pins Prosopikon hardening commit
+``a2449b9a4dda8ce47e488633dac9590782d5247c``. Release evidence must replace
+that review pin with the eventual merged commit from Prosopikon PR 6.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 

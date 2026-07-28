@@ -3,6 +3,7 @@
 use crate::{
     accept_synoptikon_host_session, accept_verified_monas_host_session, MonasHostSessionIssue,
     MonasVerifiedSession, SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier,
+    MONAS_AUTHORITY_AUDIENCE,
 };
 use axum::{
     body::Body,
@@ -126,6 +127,7 @@ impl MonasLiveSessionVerifier for LocalMonasVerifier {
             principal_id: session.principal_id.to_string(),
             session_id: session.session_id.to_string(),
             username: session.username,
+            audience: MONAS_AUTHORITY_AUDIENCE.to_string(),
             expires_at_unix_seconds: session.expires_at_utc.timestamp(),
         })
     }
@@ -201,7 +203,18 @@ fn parse_monas_session_cookie(request: &Request<Body>) -> Option<(String, String
             continue;
         }
         let (username, session_token) = value.split_once(':')?;
-        return Some((cookie_unescape(username), cookie_unescape(session_token)));
+        let username = cookie_unescape(username);
+        let session_token = cookie_unescape(session_token);
+        if username.is_empty()
+            || username.len() > 128
+            || session_token.len() < 32
+            || session_token.len() > 512
+            || username.chars().any(char::is_control)
+            || session_token.chars().any(char::is_control)
+        {
+            return None;
+        }
+        return Some((username, session_token));
     }
     None
 }
