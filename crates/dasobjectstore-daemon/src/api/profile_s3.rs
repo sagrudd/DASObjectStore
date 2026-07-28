@@ -281,6 +281,51 @@ pub struct ProfileS3MultipartUploadsResponse {
     pub uploads: Vec<ProfileS3MultipartUploadView>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartStatusRequest {
+    pub store_id: StoreId,
+    pub reservation_id: String,
+    pub key: BackendObjectKey,
+}
+
+impl ProfileS3MultipartStatusRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.store_id.as_str().trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField { field: "store_id" });
+        }
+        if self.reservation_id.trim().is_empty() {
+            return Err(DaemonRequestValidationError::BlankField {
+                field: "reservation_id",
+            });
+        }
+        if let Err(value) = validate_object_key(&self.key) {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "key",
+                value,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartReceiptView {
+    pub key: BackendObjectKey,
+    pub size_bytes: u64,
+    pub checksum: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProfileS3MultipartStatusResponse {
+    pub schema_version: String,
+    pub store_id: StoreId,
+    pub reservation_id: String,
+    pub key: BackendObjectKey,
+    pub status: ProfileS3MultipartCompletionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<ProfileS3MultipartReceiptView>,
+}
+
 impl ProfileS3MultipartCompletionRequest {
     pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
         if self.store_id.as_str().trim().is_empty() {
@@ -833,5 +878,23 @@ mod tests {
             },
         };
         response.validate().expect("head response validates");
+    }
+
+    #[test]
+    fn multipart_status_request_is_path_free_and_validated() {
+        let request = ProfileS3MultipartStatusRequest {
+            store_id: StoreId::new("generated-data").expect("store id"),
+            reservation_id: "upload-1".to_string(),
+            key: BackendObjectKey {
+                object_id: "reads/sample.fastq".to_string(),
+                version: 1,
+            },
+        };
+
+        request.validate().expect("valid request");
+        let encoded = serde_json::to_value(&request).expect("serialize");
+        assert_eq!(encoded["reservation_id"], "upload-1");
+        assert_eq!(encoded["key"]["object_id"], "reads/sample.fastq");
+        assert!(!encoded.to_string().contains("/srv/"));
     }
 }

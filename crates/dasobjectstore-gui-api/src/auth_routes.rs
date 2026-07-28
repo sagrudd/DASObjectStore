@@ -138,6 +138,7 @@ pub(crate) use profile_download::provider_stream_download;
 use profile_download::standalone_profile_s3_get;
 use profile_multipart::{
     standalone_profile_s3_multipart_complete, standalone_profile_s3_multipart_part,
+    standalone_profile_s3_multipart_status,
 };
 use profile_upload::standalone_profile_s3_put;
 use serde::{Deserialize, Serialize};
@@ -2071,6 +2072,32 @@ mod tests {
                     .body(Body::from(
                         r#"{"key":{"object_id":"reads/sample.fastq","version":1},"expected_size_bytes":1,"parts":[{"part_number":1,"size_bytes":1,"checksum":"0000000000000000000000000000000000000000000000000000000000000000"}]}"#,
                     ))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn profile_s3_multipart_status_requires_a_local_session() {
+        let root = temp_root("standalone-profile-s3-multipart-status-auth");
+        let app = standalone_dashboard_router_with_state(StandaloneDashboardRouteState {
+            auth_store: registered_auth_store(&root),
+            local_user_provider: Arc::new(FixedLocalUserProvider {
+                current_user: local_user("operator", vec!["users"]),
+            }),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(
+                        "/api/v1/profile-s3/stores/generated-data/multipart/reservation-1/status?key=reads%2Fsample.fastq",
+                    )
+                    .body(Body::empty())
                     .expect("request builds"),
             )
             .await

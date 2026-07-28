@@ -14,6 +14,16 @@ pub struct MultipartUploadStatusRecord {
     pub object: BackendObjectKey,
     pub initiated_at_unix_seconds: u64,
     pub completion: Option<ProfileS3MultipartCompletionStatus>,
+    pub expected_size_bytes: Option<u64>,
+    pub parts: Vec<MultipartPartRecord>,
+    pub subobject: Option<String>,
+    pub scope_recorded: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MultipartCompletionInspection {
+    pub status: ProfileS3MultipartCompletionStatus,
+    pub receipt: Option<MultipartCompletionReceipt>,
 }
 
 impl MultipartPartJournal {
@@ -105,6 +115,16 @@ pub fn inspect_multipart_completion_status(
     reservation_id: &str,
     object: &BackendObjectKey,
 ) -> Result<Option<ProfileS3MultipartCompletionStatus>, MultipartPartJournalError> {
+    inspect_multipart_completion(root, store_id, reservation_id, object)
+        .map(|inspection| inspection.map(|inspection| inspection.status))
+}
+
+pub fn inspect_multipart_completion(
+    root: impl AsRef<Path>,
+    store_id: &str,
+    reservation_id: &str,
+    object: &BackendObjectKey,
+) -> Result<Option<MultipartCompletionInspection>, MultipartPartJournalError> {
     if store_id.trim().is_empty() || !safe_reservation_id(reservation_id) {
         return Err(MultipartPartJournalError::IdentityMismatch);
     }
@@ -124,7 +144,12 @@ pub fn inspect_multipart_completion_status(
     {
         return Err(MultipartPartJournalError::IdentityMismatch);
     }
-    completion_status_from_manifest(&manifest)
+    completion_status_from_manifest(&manifest).map(|status| {
+        status.map(|status| MultipartCompletionInspection {
+            status,
+            receipt: manifest.completion_receipt,
+        })
+    })
 }
 
 pub fn list_recoverable_multipart_uploads(
@@ -159,6 +184,17 @@ pub fn list_recoverable_multipart_uploads(
                     object: manifest.object.clone(),
                     initiated_at_unix_seconds: manifest.created_at_unix_seconds,
                     completion: completion_status_from_manifest(&manifest)?,
+                    expected_size_bytes: manifest
+                        .completion_intent
+                        .as_ref()
+                        .map(|intent| intent.expected_size_bytes),
+                    parts: manifest
+                        .completion_intent
+                        .as_ref()
+                        .map(|intent| intent.parts.clone())
+                        .unwrap_or_default(),
+                    subobject: manifest.completion_subobject.clone(),
+                    scope_recorded: manifest.completion_scope_recorded,
                 });
             }
         }

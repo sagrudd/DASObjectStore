@@ -11,6 +11,7 @@ use crate::auth_routes::profile_multipart::{
 use crate::auth_routes::profile_upload::stream_profile_s3_put;
 use crate::auth_routes::provider_stream_download;
 use crate::s3_gateway_auth::{verify_s3_sigv4, S3Credential, S3SigV4Request};
+use crate::s3_multipart_listing::{render_multipart_upload_listing, MultipartListingQuery};
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
@@ -493,6 +494,12 @@ async fn s3_list_objects(
     };
     let query = parse_list_query(uri.query().unwrap_or_default());
     if query.iter().any(|(name, _)| name == "uploads") {
+        let listing = match MultipartListingQuery::parse(&query) {
+            Ok(listing) => listing,
+            Err(message) => {
+                return s3_error(StatusCode::BAD_REQUEST, "InvalidArgument", &message);
+            }
+        };
         let request = ProfileS3MultipartUploadsRequest {
             store_id: verified.store_id,
         };
@@ -506,25 +513,10 @@ async fn s3_list_objects(
             })
             .await;
         return match result {
-            Ok(uploads) => {
-                let mut xml = format!(
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListMultipartUploadsResult><Bucket>{}</Bucket>",
-                    xml_escape(&bucket)
-                );
-                for upload in uploads.uploads {
-                    let initiated = dasobjectstore_core::utc::format_utc_timestamp_seconds(
-                        upload.initiated_at_unix_seconds as i64,
-                    );
-                    xml.push_str(&format!(
-                        "<Upload><Key>{}</Key><UploadId>{}</UploadId><Initiated>{}</Initiated></Upload>",
-                        xml_escape(&upload.key.object_id),
-                        xml_escape(&upload.reservation_id),
-                        initiated
-                    ));
-                }
-                xml.push_str("</ListMultipartUploadsResult>");
-                s3_xml(StatusCode::OK, xml)
-            }
+            Ok(uploads) => s3_xml(
+                StatusCode::OK,
+                render_multipart_upload_listing(&bucket, listing.apply(uploads.uploads)),
+            ),
             Err(_) => s3_error(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "ServiceUnavailable",

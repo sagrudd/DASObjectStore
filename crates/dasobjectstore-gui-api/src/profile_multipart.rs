@@ -18,7 +18,8 @@ use axum::{
 use dasobjectstore_core::{backend::BackendObjectKey, ids::StoreId};
 use dasobjectstore_daemon::api::{
     ProfileS3MultipartCompletionRequest, ProfileS3MultipartCompletionResponse,
-    ProfileS3MultipartCompletionState, ProfileS3MultipartPartRequest, ProviderStreamChunkHeader,
+    ProfileS3MultipartCompletionState, ProfileS3MultipartPartRequest,
+    ProfileS3MultipartStatusRequest, ProfileS3MultipartStatusResponse, ProviderStreamChunkHeader,
     ProviderStreamMultipartPartUploadOpenRequest, PROVIDER_STREAM_MAX_CHUNK_BYTES,
     PROVIDER_STREAM_SCHEMA_VERSION,
 };
@@ -99,6 +100,53 @@ pub(super) async fn standalone_profile_s3_multipart_part(
     })?;
 
     stream_profile_s3_multipart_part(request, body).await
+}
+
+pub(super) async fn standalone_profile_s3_multipart_status(
+    Path((store_id, reservation_id)): Path<(String, String)>,
+    Query(query): Query<ProfileS3MultipartPartQuery>,
+    _actor: AuthenticatedGuiActor,
+) -> Result<Json<ProfileS3MultipartStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = store_id.parse::<StoreId>().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_store_id",
+            error.to_string(),
+        )
+    })?;
+    let object_id = query.key.ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_key",
+            "multipart status requires a key query parameter",
+        )
+    })?;
+    let request = ProfileS3MultipartStatusRequest {
+        store_id,
+        reservation_id,
+        key: BackendObjectKey {
+            object_id,
+            version: query.version.unwrap_or(1),
+        },
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_multipart_status",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_priority_packaged()
+        .call_with_deadline(Duration::from_secs(5), move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .profile_s3_multipart_status(request)
+            .map_err(multipart_completion_client_error)
+        })
+        .await
+        .map(Json)
+        .map_err(multipart_completion_bridge_error)
 }
 
 pub(crate) async fn stream_profile_s3_multipart_part(
@@ -338,7 +386,7 @@ pub(crate) async fn complete_profile_s3_multipart(
     let expires = tokio::time::Instant::now() + deadline;
     loop {
         let request_for_attempt = request.clone();
-        let response = crate::daemon_bridge::DaemonBridge::shared_multipart_completion_packaged()
+        let attempt = crate::daemon_bridge::DaemonBridge::shared_multipart_completion_packaged()
             .call_with_deadline(Duration::from_secs(15), move || {
                 let client =
                     DaemonClient::new(UnixSocketDaemonTransport::for_multipart_completion(
@@ -348,8 +396,22 @@ pub(crate) async fn complete_profile_s3_multipart(
                     .profile_s3_multipart_complete(request_for_attempt)
                     .map_err(multipart_completion_client_error)
             })
-            .await
-            .map_err(multipart_completion_bridge_error)?;
+            .await;
+        let response = match attempt {
+            Ok(response) => response,
+            Err(error) if multipart_completion_poll_error_is_retryable(&error) => {
+                if tokio::time::Instant::now() >= expires {
+                    return Err(route_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "profile_s3_multipart_in_progress",
+                        "multipart completion remains durable; reconnect and retry the same request",
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+            Err(error) => return Err(multipart_completion_bridge_error(error)),
+        };
         match response.status.as_ref().map(|status| status.state) {
             Some(ProfileS3MultipartCompletionState::Committed) if response.committed => {
                 return Ok(axum::Json(response));
@@ -384,6 +446,29 @@ pub(crate) async fn complete_profile_s3_multipart(
             ));
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn multipart_completion_poll_error_is_retryable(
+    error: &crate::daemon_bridge::DaemonBridgeError,
+) -> bool {
+    use crate::daemon_bridge::DaemonBridgeError;
+
+    match error {
+        DaemonBridgeError::Busy
+        | DaemonBridgeError::CircuitOpen
+        | DaemonBridgeError::Deadline
+        | DaemonBridgeError::Join(_) => true,
+        DaemonBridgeError::Client(error) => {
+            error.code == "profile_s3_multipart_transport_failed"
+                || (error.status == StatusCode::SERVICE_UNAVAILABLE
+                    && matches!(
+                        error.code.as_str(),
+                        "profile_s3_multipart_slow_down"
+                            | "profile_s3_multipart_unavailable"
+                            | "daemon_bridge_transport_failed"
+                    ))
+        }
     }
 }
 
@@ -484,5 +569,32 @@ mod completion_deadline_tests {
             multipart_daemon_error_status("profile_s3_multipart_unavailable"),
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    #[test]
+    fn polling_reconnects_after_transport_and_bridge_failures() {
+        use crate::daemon_bridge::DaemonBridgeError;
+        use crate::object_browser_routes::StandaloneObjectBrowserClientError;
+
+        assert!(multipart_completion_poll_error_is_retryable(
+            &DaemonBridgeError::Deadline
+        ));
+        assert!(multipart_completion_poll_error_is_retryable(
+            &DaemonBridgeError::CircuitOpen
+        ));
+        assert!(multipart_completion_poll_error_is_retryable(
+            &DaemonBridgeError::Client(StandaloneObjectBrowserClientError {
+                status: StatusCode::BAD_GATEWAY,
+                code: "profile_s3_multipart_transport_failed".to_string(),
+                message: "daemon transport failed".to_string(),
+            })
+        ));
+        assert!(!multipart_completion_poll_error_is_retryable(
+            &DaemonBridgeError::Client(StandaloneObjectBrowserClientError {
+                status: StatusCode::CONFLICT,
+                code: "profile_s3_multipart_completion_conflict".to_string(),
+                message: "intent changed".to_string(),
+            })
+        ));
     }
 }

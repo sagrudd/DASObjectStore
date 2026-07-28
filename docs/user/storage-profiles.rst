@@ -444,14 +444,22 @@ HTTP or Unix-socket transaction. The daemon records an intent-bound job ID,
 phase, byte progress, attempt count, and typed failure before assembly starts.
 The S3 gateway polls that state through short requests. Losing the browser/API
 process or client connection stops only the polling; it does not cancel the
-accepted operation. Repeating ``CompleteMultipartUpload`` with the exact same
+accepted operation. Broken-pipe, timeout, gateway-restart, and daemon-restart
+polling failures reconnect to the same deterministic job until the bounded
+completion deadline; they are not translated into an abort. Repeating
+``CompleteMultipartUpload`` with the exact same
 store, key, upload ID, size, and ordered part checksums attaches to the existing
 operation and returns its receipt after commit. A conflicting completion fails
 closed. Staged parts remain protected through retryable failure and are
 reclaimed only after the receipt and catalogue acceptance are durable.
 ``ListMultipartUploads`` reads the same daemon journals: receiving,
 in-progress, and retryable operations remain visible, while committed and
-aborted operations are omitted.
+aborted operations are omitted. Its S3 projection honours ``prefix``,
+``max-uploads``, ``key-marker``, and ``upload-id-marker`` and returns the
+effective prefix, truncation state, and continuation markers. Authenticated
+operators may inspect one durable job and its committed receipt without
+resubmitting bytes at
+``/api/v1/profile-s3/stores/{store_id}/multipart/{upload_id}/status?key=...``.
 
 DELETE follows the same authority rule. The daemon removes the private
 catalogue record and payload, reconciles logical capacity, then atomically

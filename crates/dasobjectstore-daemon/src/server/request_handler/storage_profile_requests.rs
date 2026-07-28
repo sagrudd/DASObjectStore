@@ -285,6 +285,77 @@ where
                 },
             ))
         }
+        DaemonApiRequest::ProfileS3MultipartStatus(request) => {
+            let authorized = match handler.authorize_endpoint_write_scope(actor, &request.store_id)
+            {
+                Ok(authorized) => authorized,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
+            let store_id = authorized.store_id.clone();
+            let qualified_key = authorized.qualify_object(&request.key);
+            let binding = match read_profile_binding(
+                &handler.profile_binding_registry_path,
+                store_id.as_str(),
+            ) {
+                Ok(Some(binding)) => binding,
+                Ok(None) | Err(_) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        "multipart status requires a registered bounded folder profile",
+                    )));
+                }
+            };
+            let (backend_root, _) = match crate::runtime::direct_s3_profile_backend(&binding) {
+                Ok(specification) => specification,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            let inspection = match crate::runtime::inspect_multipart_completion(
+                backend_root,
+                store_id.as_str(),
+                &request.reservation_id,
+                &qualified_key,
+            ) {
+                Ok(Some(inspection)) => inspection,
+                Ok(None) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_status_unavailable",
+                        "multipart completion has no durable job status",
+                    )));
+                }
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "profile_s3_multipart_status_unavailable",
+                        error.to_string(),
+                    )));
+                }
+            };
+            Ok(DaemonApiResponse::ProfileS3MultipartStatus(
+                crate::api::ProfileS3MultipartStatusResponse {
+                    schema_version: PROFILE_S3_SCHEMA_VERSION.to_string(),
+                    store_id,
+                    reservation_id: request.reservation_id,
+                    key: qualified_key,
+                    status: inspection.status,
+                    receipt: inspection.receipt.map(|receipt| {
+                        crate::api::ProfileS3MultipartReceiptView {
+                            key: receipt.object,
+                            size_bytes: receipt.size_bytes,
+                            checksum: receipt.checksum,
+                        }
+                    }),
+                },
+            ))
+        }
         DaemonApiRequest::ProfileS3MultipartUploads(request) => {
             let store_id = match handler.authorize_endpoint_read(actor, &request.store_id) {
                 Ok(store_id) => store_id,
@@ -571,10 +642,11 @@ where
                     "multipart completion requires daemon capacity admission",
                 )));
             };
-            if let Err(error) = journal.begin_completion(
+            if let Err(error) = journal.begin_completion_for_subobject(
                 qualified_key.clone(),
                 request.expected_size_bytes,
                 requested_parts,
+                authorized.subobject.as_deref(),
             ) {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "profile_s3_multipart_completion_conflict",
