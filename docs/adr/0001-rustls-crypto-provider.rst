@@ -1,11 +1,11 @@
 ADR-0001: Select the DASObjectStore Rustls cryptographic provider
 ========================================================================
 
-:Status: Proposed
+:Status: Accepted
 :Date: 2026-07-28
 :Deciders: Project owner, security reviewer, cryptography reviewer, supply-chain reviewer, DASObjectStore maintainers
 :Related issue: `DASObjectStore #7 <https://github.com/sagrudd/DASObjectStore/issues/7>`_
-:Related decision: `Monas ADR-0001 at reviewed commit 432dee2e2f7b125013e3f8b516d5d4d65e0978f6 <https://github.com/sagrudd/monas/blob/432dee2e2f7b125013e3f8b516d5d4d65e0978f6/docs/adr/0001-rustls-crypto-provider.rst>`_
+:Related decision: `Monas ADR-0001 at accepted commit ace87c1b613e36b3b1d96c75c2cfaf6cf0840534 <https://github.com/sagrudd/monas/blob/ace87c1b613e36b3b1d96c75c2cfaf6cf0840534/docs/adr/0001-rustls-crypto-provider.rst>`_
 
 Context
 -------
@@ -19,9 +19,11 @@ from a DASObjectStore library.
 
 The provider controls cipher suites, key-exchange groups, signature
 verification, randomness, and private-key operations. Selection is therefore
-a security and native supply-chain decision. This Proposed ADR records the
-DAS-owned policy and acceptance work; it changes no dependency, feature, TLS
-configuration, or runtime behavior.
+a security and native supply-chain decision. The project owner accepted this
+DAS-owned policy on 2026-07-28 after specialist security, cryptography,
+supply-chain, and cross-project review. This record changes no dependency,
+feature, TLS configuration, or runtime behavior; implementation and
+exact-head qualification remain closure gates under issue #7.
 
 Current executable and library inventory
 ----------------------------------------
@@ -31,8 +33,8 @@ The locked workspace contains these shipped executable processes:
 ``dasobjectstore-server``
    Terminates public HTTPS through ``axum-server`` and hosts the separate
    mutual-TLS listener from ``dasobjectstore-gui-api``. Its current ``main``
-   installs Ring before entering the async runtime. If this ADR is accepted,
-   this executable owns the global AWS-LC installation.
+   installs Ring before entering the async runtime. Under this accepted
+   decision, this executable owns the global AWS-LC installation.
 
 ``dasobjectstored``
    Runs the storage daemon and constructs a blocking Reqwest client for
@@ -82,8 +84,8 @@ the normal/build/dev inventory even though they are not shipped products.
 Decision
 --------
 
-If accepted, every DASObjectStore executable whose final locked graph contains
-Rustls will use the non-FIPS
+Every DASObjectStore executable whose final locked graph contains Rustls will
+use the non-FIPS
 ``rustls::crypto::aws_lc_rs::default_provider()`` from exactly pinned Rustls
 0.23.42 as its one process-wide provider.
 
@@ -136,8 +138,8 @@ certified deployment environment require a separate accepted ADR and evidence.
 Peer inventory and compatibility boundary
 -----------------------------------------
 
-The implementation review must close a versioned peer inventory before this
-ADR can be Accepted:
+The implementation review must close and qualify this versioned MVP peer
+inventory before making a release compatibility claim:
 
 Appliance HTTPS
    Browsers, ``dasobjectstore-remote``, Monas, Synoptikon, and operator API
@@ -160,24 +162,23 @@ Jenkins and deployment peers
    Packaged Linux acceptance clients, supported browsers, reverse proxies,
    and every deployment image or appliance currently claimed as supported.
 
-TLS 1.3-only is the recommended target and the Monas-integrated requirement,
-but it is a compatibility-breaking boundary for any deployed TLS 1.2-only
-appliance, S3/object service, reverse proxy, application certificate client,
-or operator tool. No retained deployed-peer evidence currently proves that
-every class above supports TLS 1.3. The project owner must confirm the complete
-peer inventory and accepted compatibility loss before this ADR can become
-Accepted. Until then, TLS 1.3-only remains a proposal, not a product claim.
+TLS 1.3-only is the accepted MVP boundary and the Monas-integrated
+requirement. The owner accepts that a deployed TLS 1.2-only appliance,
+S3/object service, reverse proxy, application certificate client, or operator
+tool is outside the supported MVP profile until separately qualified. Release
+evidence must still prove every peer for which the product makes a TLS 1.3
+compatibility claim; absence of evidence must be reported, not inferred.
 
-If a required standalone peer cannot migrate, the owner may approve a
-separately reviewed executable profile as described above. TLS 1.2 must never
-be re-enabled by feature unification, in a provider-neutral library, or in the
+If a required standalone TLS 1.2-only peer is discovered, it requires a
+separately reviewed, compile-time-distinct executable profile with its own
+inventory, fingerprint, threat review, and evidence. TLS 1.2 must never be
+re-enabled by feature unification, in a provider-neutral library, or in the
 Monas-integrated graph.
 
-Algorithm and proposed inventory contract
+Algorithm and accepted inventory contract
 -----------------------------------------
 
-Subject to that peer confirmation, the proposed default is TLS 1.3 only, with
-this exact ordered inventory:
+The accepted default is TLS 1.3 only, with this exact ordered inventory:
 
 * key exchange: ``X25519MLKEM768``, ``X25519``, ``secp256r1``,
   ``secp384r1``;
