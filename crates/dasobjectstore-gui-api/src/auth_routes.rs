@@ -1469,6 +1469,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn easyconnect_browser_handoff_renders_login_without_session_headers() {
+        let root = temp_root("easyconnect-browser-login-handoff");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store: LocalAuthStore::new(&root),
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/remote/easyconnect/login?pairing_id=pair-1&object_store=CODEX&expires_at_utc=2030-01-01T00%3A00%3A00Z")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        let content_security_policy = response.headers()["content-security-policy"]
+            .to_str()
+            .expect("CSP is text");
+        assert!(content_security_policy.contains("script-src 'nonce-"));
+        assert!(content_security_policy.contains("frame-ancestors 'none'"));
+        assert!(content_security_policy.contains("form-action http://127.0.0.1:*"));
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body reads");
+        let html = String::from_utf8(body.to_vec()).expect("body is UTF-8");
+        assert!(html.contains("Appliance login"));
+        assert!(html.contains("dasobjectstore.session_token"));
+        assert!(html.contains("easyconnect/auth-context"));
+        assert!(!html.contains("missing_credentials"));
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn easyconnect_browser_handoff_script_escapes_hostile_intent() {
+        let root = temp_root("easyconnect-browser-hostile-intent");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store: LocalAuthStore::new(&root),
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/remote/easyconnect/login?pairing_id=pair-1&object_store=%3C%2Fscript%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E&expires_at_utc=2030-01-01T00%3A00%3A00Z")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body reads");
+        let html = String::from_utf8(body.to_vec()).expect("body is UTF-8");
+        assert!(!html.contains("</script><script>alert(1)</script>"));
+        assert!(html.contains("\\u003c/script\\u003e"));
+        assert!(html.contains("&lt;/script&gt;"));
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn easyconnect_browser_handoff_rejects_control_characters() {
+        let root = temp_root("easyconnect-browser-control-query");
+        let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
+            auth_store: LocalAuthStore::new(&root),
+            public_base_url: "https://192.168.1.192:8448".to_string(),
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/remote/easyconnect/login?pairing_id=pair-1%0Ainjected&object_store=CODEX&expires_at_utc=2030-01-01T00%3A00%3A00Z")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        cleanup(&root);
+    }
+
+    #[tokio::test]
     async fn standalone_easyconnect_auth_context_rejects_invalid_session() {
         let root = temp_root("easyconnect-auth-invalid");
         let auth_store = registered_auth_store_for_user(&root, "stephen");

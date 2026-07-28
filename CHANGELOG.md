@@ -10,6 +10,9 @@ agreement before landing.
 
 - Correct standalone EasyConnect URL publication so daemon routes that already
   include the DASObjectStore product mount are not prefixed a second time.
+- Render a bounded standalone login handoff for first-use EasyConnect browser
+  approval, preserving header-based browser sessions without cookies or an
+  authentication bypass and escaping hostile query content.
 
 ## 0.151.0 - 2026-07-28
 

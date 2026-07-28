@@ -710,44 +710,82 @@ pub(super) async fn easyconnect_create_pairing(
 }
 
 pub(super) async fn easyconnect_browser_approval(
-    actor: AuthenticatedGuiActor,
-    Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
+    verified: Option<Extension<crate::VerifiedHostAuthenticatedContext>>,
     Query(query): Query<EasyconnectBrowserApprovalQuery>,
-) -> Result<Html<String>, (StatusCode, Json<AuthRouteError>)> {
-    if query.pairing_id.trim().is_empty()
-        || query.object_store.trim().is_empty()
-        || query.expires_at_utc.trim().is_empty()
-    {
-        return Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_easyconnect_approval_page",
-            "pairing, ObjectStore, and expiry are required",
-        ));
-    }
-    let intent = serde_json::to_string(&EasyconnectBrowserApprovalIntent {
+) -> Result<(HeaderMap, Html<String>), (StatusCode, Json<AuthRouteError>)> {
+    validate_easyconnect_browser_query(&query)?;
+    let intent = script_safe_json(&EasyconnectBrowserApprovalIntent {
         pairing_id: query.pairing_id.clone(),
         object_store: query.object_store.clone(),
         approval_expires_at_utc: query.expires_at_utc.clone(),
-    })
-    .map_err(|error| {
-        route_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "easyconnect_approval_render_failed",
-            error.to_string(),
-        )
     })?;
-    let csrf = serde_json::to_string(&verified.context().csrf_binding_sha256).map_err(|error| {
-        route_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "easyconnect_approval_render_failed",
-            error.to_string(),
-        )
-    })?;
-    let principal = html_escape(&actor.subject_id);
+    let csrf = script_safe_json(
+        &verified.map(|Extension(context)| context.context().csrf_binding_sha256.clone()),
+    )?;
     let object_store = html_escape(&query.object_store);
-    Ok(Html(format!(
-        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd>{principal}</dd><dt>ObjectStore</dt><dd>{object_store}</dd></dl><p>This creates one short-lived, ObjectStore-scoped session. No GitHub credential is sent to DASObjectStore.</p><button id="approve" type="button">Approve connection</button><pre id="status" role="status"></pre></main><script>const intent={intent};const csrf={csrf};document.getElementById("approve").onclick=async()=>{{const status=document.getElementById("status");status.textContent="Approving…";const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json","x-dasobjectstore-csrf":csrf}},body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};</script></body></html>"#
-    )))
+    let script_nonce = uuid::Uuid::new_v4().simple().to_string();
+    let mut headers = HeaderMap::new();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_str(&format!(
+            "default-src 'none'; script-src 'nonce-{script_nonce}'; connect-src 'self'; form-action http://127.0.0.1:* http://[::1]:*; base-uri 'none'; frame-ancestors 'none'"
+        ))
+        .map_err(|error| {
+            route_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "easyconnect_approval_render_failed",
+                error.to_string(),
+            )
+        })?,
+    );
+    Ok((
+        headers,
+        Html(format!(
+            r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd id="principal">Checking session…</dd><dt>ObjectStore</dt><dd>{object_store}</dd></dl><p>This creates one short-lived, ObjectStore-scoped session. No password or upstream identity credential is sent to the remote client.</p><form id="login" hidden><h2>Appliance login</h2><label>Username <input id="username" autocomplete="username" required></label><label>Password <input id="password" type="password" autocomplete="current-password" required></label><button type="submit">Sign in</button></form><button id="approve" type="button" disabled>Approve connection</button><pre id="status" role="status"></pre></main><script nonce="{script_nonce}">const intent={intent};const hostCsrf={csrf};const usernameKey="dasobjectstore.username";const tokenKey="dasobjectstore.session_token";const status=document.getElementById("status");const approve=document.getElementById("approve");const login=document.getElementById("login");function localHeaders(){{const username=localStorage.getItem(usernameKey);const token=localStorage.getItem(tokenKey);return username&&token?{{"x-dasobjectstore-username":username,"x-dasobjectstore-session-token":token,"authorization":`Bearer ${{token}}`}}:{{}};}}async function establishContext(){{const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/auth-context",{{credentials:"same-origin",headers:localHeaders()}});if(!response.ok){{approve.disabled=true;login.hidden=false;document.getElementById("principal").textContent="Authentication required";return false;}}const context=await response.json();document.getElementById("principal").textContent=context.subject_id;login.hidden=true;approve.disabled=false;status.textContent="";return true;}}login.onsubmit=async event=>{{event.preventDefault();status.textContent="Signing in…";const response=await fetch("/products/dasobjectstore/api/login",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json"}},body:JSON.stringify({{username:document.getElementById("username").value,password:document.getElementById("password").value}})}});document.getElementById("password").value="";if(!response.ok){{status.textContent="Login failed.";return;}}const session=await response.json();localStorage.setItem(usernameKey,session.username);localStorage.setItem(tokenKey,session.session_token);await establishContext();}};approve.onclick=async()=>{{if(!await establishContext())return;status.textContent="Approving…";const headers={{"content-type":"application/json",...localHeaders()}};if(hostCsrf)headers["x-dasobjectstore-csrf"]=hostCsrf;const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers,body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};establishContext();</script></body></html>"#
+        )),
+    ))
+}
+
+fn validate_easyconnect_browser_query(
+    query: &EasyconnectBrowserApprovalQuery,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    let bounded = [
+        (&query.pairing_id, 128_usize),
+        (&query.object_store, 256_usize),
+        (&query.expires_at_utc, 64_usize),
+    ];
+    if bounded.iter().any(|(value, limit)| {
+        value.trim().is_empty() || value.len() > *limit || value.chars().any(char::is_control)
+    }) {
+        return Err(route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_approval_page",
+            "pairing, ObjectStore, and expiry must be nonblank, bounded printable values",
+        ));
+    }
+    Ok(())
+}
+
+fn script_safe_json<T: Serialize>(value: &T) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
+    serde_json::to_string(value)
+        .map(|json| {
+            json.replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+                .replace('&', "\\u0026")
+        })
+        .map_err(|error| {
+            route_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "easyconnect_approval_render_failed",
+                error.to_string(),
+            )
+        })
 }
 
 pub(super) async fn easyconnect_approve_pairing(

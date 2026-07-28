@@ -112,6 +112,15 @@ The Monas/Pistis product boundary separates the routes deliberately:
 * the daemon rejects an approval that substitutes a different ObjectStore for
   the one requested when the pairing was created.
 
+Opening the approval URL without an existing standalone browser session renders
+the appliance login form rather than a JSON authentication error. The handoff
+retains only the bounded pairing identifier, exact ObjectStore, and expiry.
+Authentication uses the existing local login API; the resulting browser
+session remains in browser-local storage and is sent as headers only to the
+same-origin context and approval APIs. Passwords, session tokens, and exchange
+codes are never placed in a URL. Host-integrated deployments continue to use
+the host session and its CSRF binding.
+
 The command requires previously enrolled appliance certificate trust. It uses
 that pin for discovery, pairing creation, and exchange; URLs returned by the
 appliance cannot redirect the client away from the pinned HTTPS origin. The
