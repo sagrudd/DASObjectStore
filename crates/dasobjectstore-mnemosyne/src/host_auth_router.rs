@@ -1,8 +1,8 @@
 //! Axum composition for host-authenticated DASObjectStore product routes.
 
 use crate::{
-    accept_monas_host_session, accept_synoptikon_host_session, MonasHostSessionIssue,
-    SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier,
+    accept_synoptikon_host_session, accept_verified_monas_host_session, MonasHostSessionIssue,
+    MonasVerifiedSession, SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier,
 };
 use axum::{
     body::Body,
@@ -31,15 +31,38 @@ pub struct SynoptikonHostRequestAuthentication {
     pub csrf_binding_sha256: String,
 }
 
+/// Host-owned verifier for either a local or authority-backed Monas session.
+pub trait MonasLiveSessionVerifier: Send + Sync {
+    fn verify_session(
+        &self,
+        username: &str,
+        session_token: &str,
+    ) -> Result<MonasVerifiedSession, String>;
+}
+
 pub fn monas_federated_router(router: Router, auth_store: ProsopikonAuthStore) -> Router {
+    monas_federated_router_with_verifier(router, Arc::new(LocalMonasVerifier { auth_store }))
+}
+
+pub fn monas_federated_router_with_verifier(
+    router: Router,
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+) -> Router {
     router.layer(middleware::from_fn_with_state(
-        MonasFederatedAuthState { auth_store },
+        MonasFederatedAuthState { verifier },
         authenticate_monas_request,
     ))
 }
 
 pub fn monas_dasobjectstore_api_router(auth_store: ProsopikonAuthStore) -> Router {
     monas_dasobjectstore_router(Router::new(), auth_store)
+}
+
+pub fn monas_dasobjectstore_api_router_with_verifier(
+    auth_store: ProsopikonAuthStore,
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+) -> Router {
+    monas_dasobjectstore_router_with_verifier(Router::new(), auth_store, verifier)
 }
 
 /// Mount host-owned Web routes and the DASObjectStore operational API behind
@@ -54,6 +77,20 @@ pub fn monas_dasobjectstore_router(
     monas_federated_router(product_router, auth_store)
 }
 
+/// Mount product routes behind a host-owned live-session verifier.
+///
+/// The local auth store remains the product's user-management adapter; it is
+/// not consulted to validate authority-backed browser sessions.
+pub fn monas_dasobjectstore_router_with_verifier(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+) -> Router {
+    let product_router = federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store))
+        .merge(host_product_routes);
+    monas_federated_router_with_verifier(product_router, verifier)
+}
+
 pub fn synoptikon_federated_router(
     router: Router,
     verifier: Arc<dyn SynoptikonLiveSessionVerifier + Send + Sync>,
@@ -66,7 +103,32 @@ pub fn synoptikon_federated_router(
 
 #[derive(Clone)]
 struct MonasFederatedAuthState {
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+}
+
+#[derive(Clone)]
+struct LocalMonasVerifier {
     auth_store: ProsopikonAuthStore,
+}
+
+impl MonasLiveSessionVerifier for LocalMonasVerifier {
+    fn verify_session(
+        &self,
+        username: &str,
+        session_token: &str,
+    ) -> Result<MonasVerifiedSession, String> {
+        let session = self
+            .auth_store
+            .verify_session_identity(username, session_token)
+            .map_err(|error| error.to_string())?;
+        Ok(MonasVerifiedSession {
+            authority_id: session.authority_id.to_string(),
+            principal_id: session.principal_id.to_string(),
+            session_id: session.session_id.to_string(),
+            username: session.username,
+            expires_at_unix_seconds: session.expires_at_utc.timestamp(),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -88,7 +150,13 @@ async fn authenticate_monas_request(
         session_token,
         correlation_id: format!("monas:{}", Uuid::new_v4()),
     };
-    let Ok(verified) = accept_monas_host_session(&state.auth_store, &issue, unix_now()) else {
+    let Ok(session) = state
+        .verifier
+        .verify_session(&issue.username, &issue.session_token)
+    else {
+        return monas_unauthorized(&request);
+    };
+    let Ok(verified) = accept_verified_monas_host_session(&session, &issue, unix_now()) else {
         return monas_unauthorized(&request);
     };
     if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {

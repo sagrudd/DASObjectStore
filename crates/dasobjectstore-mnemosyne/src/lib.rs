@@ -42,13 +42,15 @@ pub use flounder_telemetry::{
     FLOUNDER_APPLIANCE_TELEMETRY_SCHEMA_VERSION, FLOUNDER_TELEMETRY_CHART_CONTRACT_SCHEMA_VERSION,
 };
 pub use host_auth_adapter::{
-    accept_monas_host_session, accept_synoptikon_host_session, HostSessionAdapterError,
-    MonasHostSessionIssue, SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
+    accept_monas_host_session, accept_synoptikon_host_session, accept_verified_monas_host_session,
+    HostSessionAdapterError, MonasHostSessionIssue, MonasVerifiedSession,
+    SynoptikonLiveSessionVerifier, HOST_ADAPTER_CONTEXT_TTL_SECONDS,
 };
 pub use host_auth_router::{
-    monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
-    synoptikon_federated_router, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
-    MONAS_SESSION_COOKIE,
+    monas_dasobjectstore_api_router, monas_dasobjectstore_api_router_with_verifier,
+    monas_dasobjectstore_router, monas_dasobjectstore_router_with_verifier, monas_federated_router,
+    monas_federated_router_with_verifier, synoptikon_federated_router, MonasLiveSessionVerifier,
+    SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,

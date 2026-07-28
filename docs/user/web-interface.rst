@@ -1306,11 +1306,14 @@ into a verified context. Until the pinned host routers are migrated and browser
 acceptance passes, keep the deployment in exactly one compatibility authority
 mode and do not expose both login surfaces.
 
-The integration crate also supplies a Monas product API router which deliberately
+The integration crate also supplies Monas product API routers which deliberately
 omits DASObjectStore's intrinsic browser login/session routes. This is the
 preferred in-process mount because the verified actor cannot be serialized or
-forged as a forwarding header. The legacy header must remain disabled for a
-DASObjectStore mount.
+forged as a forwarding header. The authority-backed constructor accepts a
+narrow live-session verifier, allowing Pistis sessions to be rechecked by Monas
+against Prosopikon SQLite while reusing exactly the same product context and
+CSRF boundary. The legacy header must remain disabled for a DASObjectStore
+mount.
 
 That mount is implemented by Monas ``0.6.0`` commit
 ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. HTTP contract tests cover live

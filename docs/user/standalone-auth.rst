@@ -96,8 +96,12 @@ binding to the host's CSRF state. It does not contain a storage permission.
 Daemon-owned local group, administrator, ObjectStore, pairing, and action policy
 still decide whether an authenticated actor may read or mutate storage.
 
-The Monas adapter reads the host's pinned Prosopikon session store directly and
-verifies the browser session for each adaptation. The bearer token is never
+The Monas adapter verifies the browser session for each adaptation. Local
+password sessions use the pinned ``ProsopikonAuthStore`` directly. A
+Pistis-managed session uses the generic Monas live-session verifier so Monas
+can recheck the same Prosopikon SQLite authority, exact audience, current
+binding generations, expiry, and revocation without creating a second local
+session. The bearer token is never
 placed in the context, response, or audit identity: DASObjectStore receives an
 opaque SHA-256-derived session identifier and a context valid for at most five
 minutes and never longer than the host session. Monas caller input cannot mint
@@ -107,9 +111,11 @@ The ready-to-mount Monas router consumes the host's HttpOnly
 ``monas_session`` cookie in process, inserts the verified actor, and serves the
 normal DASObjectStore operational API without mounting ``/api/login``,
 ``/api/logout``, registration, or product session-issuer routes. The Monas and
-DASObjectStore routers must share the same ``ProsopikonAuthStore`` instance or
-root. A missing, malformed, expired, or logged-out cookie returns ``401`` before
-the product handler runs.
+DASObjectStore routers must either share the same ``ProsopikonAuthStore``
+instance/root or receive Monas's authority-backed live-session verifier. A
+missing, malformed, expired, revoked, wrong-audience, or logged-out cookie
+returns ``401`` before the product handler runs. The generic verifier result is
+credential-free; DASObjectStore never opens the Pistis handoff store.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
 

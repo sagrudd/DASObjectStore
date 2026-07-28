@@ -8,11 +8,13 @@ use axum::{
 use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
-    monas_federated_router, synoptikon_federated_router, HostSessionAdapterError,
-    MonasHostSessionIssue, StorageAuthority, SynoptikonHostRequestAuthentication,
-    SynoptikonIntegratedAcceptedSession, SynoptikonIntegratedHostBoundaryContext,
-    SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID,
-    FEDERATED_CSRF_HEADER, REQUEST_CONTEXT_SCHEMA_VERSION,
+    monas_dasobjectstore_api_router_with_verifier, monas_federated_router,
+    synoptikon_federated_router, HostSessionAdapterError, MonasHostSessionIssue,
+    MonasLiveSessionVerifier, MonasVerifiedSession, StorageAuthority,
+    SynoptikonHostRequestAuthentication, SynoptikonIntegratedAcceptedSession,
+    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
+    SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, FEDERATED_CSRF_HEADER,
+    REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -71,6 +73,84 @@ async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     assert!(!rejection.to_string().contains(&login.session_token));
     assert_monas_router_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
     assert_monas_product_api_accepts(&store, &login.session_token, StatusCode::UNAUTHORIZED).await;
+    cleanup(&root);
+}
+
+#[derive(Debug)]
+struct AuthorityBackedMonas {
+    valid: bool,
+    expires_at_unix_seconds: i64,
+}
+
+impl MonasLiveSessionVerifier for AuthorityBackedMonas {
+    fn verify_session(
+        &self,
+        username: &str,
+        session_token: &str,
+    ) -> Result<MonasVerifiedSession, String> {
+        if !self.valid || username != "operator" || session_token != "authority-secret" {
+            return Err("authority session rejected".to_string());
+        }
+        Ok(MonasVerifiedSession {
+            authority_id: "00000000-0000-0000-0000-000000000001".to_string(),
+            principal_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            session_id: "00000000-0000-0000-0000-000000000003".to_string(),
+            username: username.to_string(),
+            expires_at_unix_seconds: self.expires_at_unix_seconds,
+        })
+    }
+}
+
+#[tokio::test]
+async fn authority_backed_monas_session_reuses_the_product_boundary() {
+    let root = temp_root("monas-authority");
+    let store = registered_store(&root);
+    let cookie = "monas_session=operator:authority-secret";
+    let app = |valid, expires_at_unix_seconds| {
+        monas_dasobjectstore_api_router_with_verifier(
+            store.clone(),
+            Arc::new(AuthorityBackedMonas {
+                valid,
+                expires_at_unix_seconds,
+            }),
+        )
+    };
+
+    let response = app(true, unix_now() + 300)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/host-session")
+                .header(COOKIE, cookie)
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 16 * 1024)
+        .await
+        .expect("session body");
+    let session: serde_json::Value = serde_json::from_slice(&body).expect("session JSON");
+    assert_eq!(
+        session["subject_id"],
+        "00000000-0000-0000-0000-000000000002"
+    );
+    assert!(session.get("session_token").is_none());
+
+    for rejected in [app(false, unix_now() + 300), app(true, unix_now() - 1)] {
+        let status = rejected
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/host-session")
+                    .header(COOKIE, cookie)
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes")
+            .status();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
     cleanup(&root);
 }
 

@@ -3761,6 +3761,11 @@ browser and appliance acceptance remain external validation gates.
     the unforgeable actor, and mounts the complete DASObjectStore operational
     API without intrinsic login/session routes; the Synoptikon composer accepts
     only structurally validated request context with live revocation approval.
+  - [x] Generalize the Monas composer to accept a host-owned live-session
+    verifier so Pistis-managed Prosopikon SQLite sessions reuse the same
+    credential-free product context and CSRF boundary. Preserve the original
+    local-store constructors and reject invalid, expired, revoked, or
+    wrong-audience authority sessions before product handlers run.
   - [x] Mount the DASObjectStore operational router in Monas ``0.4.0`` commit
     ``219038a168005f304cabf179b35c8e063fdee5ff`` using reproducible Git-pinned
     DASObjectStore and Prosopikon dependencies. Prove the shared cookie reaches

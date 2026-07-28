@@ -22,6 +22,16 @@ pub struct MonasHostSessionIssue {
     pub csrf_binding_sha256: String,
 }
 
+/// Credential-free identity returned by a Monas-owned live-session verifier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MonasVerifiedSession {
+    pub authority_id: String,
+    pub principal_id: String,
+    pub session_id: String,
+    pub username: String,
+    pub expires_at_unix_seconds: i64,
+}
+
 pub trait SynoptikonLiveSessionVerifier {
     fn verify_live_session(
         &self,
@@ -58,7 +68,37 @@ pub fn accept_monas_host_session(
     let session = auth_store
         .verify_session_identity(&issue.username, &issue.session_token)
         .map_err(|err| HostSessionAdapterError::MonasSession(err.to_string()))?;
-    let session_expiry = session.expires_at_utc.timestamp();
+    accept_verified_monas_host_session(
+        &MonasVerifiedSession {
+            authority_id: session.authority_id.to_string(),
+            principal_id: session.principal_id.to_string(),
+            session_id: session.session_id.to_string(),
+            username: session.username,
+            expires_at_unix_seconds: session.expires_at_utc.timestamp(),
+        },
+        issue,
+        accepted_at_unix_seconds,
+    )
+}
+
+/// Adapt an identity already verified live by Monas into the product context.
+///
+/// The bearer stays in the host-owned issue and is used only to bind CSRF.
+pub fn accept_verified_monas_host_session(
+    session: &MonasVerifiedSession,
+    issue: &MonasHostSessionIssue,
+    accepted_at_unix_seconds: i64,
+) -> Result<VerifiedHostAuthenticatedContext, HostSessionAdapterError> {
+    if session.username != issue.username
+        || session.authority_id.is_empty()
+        || session.principal_id.is_empty()
+        || session.session_id.is_empty()
+    {
+        return Err(HostSessionAdapterError::MonasSession(
+            "verified session identity is inconsistent".to_string(),
+        ));
+    }
+    let session_expiry = session.expires_at_unix_seconds;
     let context_expiry = session_expiry.min(
         accepted_at_unix_seconds
             .checked_add(HOST_ADAPTER_CONTEXT_TTL_SECONDS)
@@ -71,19 +111,15 @@ pub fn accept_monas_host_session(
             .issuer()
             .to_string(),
         audience: HOST_AUTH_AUDIENCE.to_string(),
-        subject_id: session.principal_id.to_string(),
-        session_id: session.session_id.to_string(),
+        subject_id: session.principal_id.clone(),
+        session_id: session.session_id.clone(),
         roles: vec!["authenticated".to_string()],
         issued_at_unix_seconds: accepted_at_unix_seconds,
         expires_at_unix_seconds: context_expiry,
         correlation_id: issue.correlation_id.clone(),
         csrf_binding_sha256: issue.csrf_binding_sha256.clone(),
     };
-    let verifier = MonasLiveVerifier {
-        auth_store,
-        issue,
-        expected_expiry: session_expiry,
-    };
+    let verifier = AcceptedMonasVerifier { session };
     accept_host_authenticated_context(context, accepted_at_unix_seconds, &verifier)
         .map_err(HostSessionAdapterError::HostContext)
 }
@@ -119,21 +155,15 @@ pub fn accept_synoptikon_host_session(
         .map_err(HostSessionAdapterError::HostContext)
 }
 
-struct MonasLiveVerifier<'a> {
-    auth_store: &'a ProsopikonAuthStore,
-    issue: &'a MonasHostSessionIssue,
-    expected_expiry: i64,
+struct AcceptedMonasVerifier<'a> {
+    session: &'a MonasVerifiedSession,
 }
 
-impl HostAuthenticationContextVerifier for MonasLiveVerifier<'_> {
+impl HostAuthenticationContextVerifier for AcceptedMonasVerifier<'_> {
     fn verify_live_session(&self, context: &HostAuthenticatedContext) -> Result<(), String> {
-        let session = self
-            .auth_store
-            .verify_session_identity(&self.issue.username, &self.issue.session_token)
-            .map_err(|err| err.to_string())?;
-        if session.principal_id.to_string() != context.subject_id
-            || session.expires_at_utc.timestamp() != self.expected_expiry
-            || context.session_id != session.session_id.to_string()
+        if self.session.principal_id != context.subject_id
+            || self.session.expires_at_unix_seconds < context.expires_at_unix_seconds
+            || context.session_id != self.session.session_id
         {
             return Err("Monas session identity changed during adaptation".to_string());
         }
