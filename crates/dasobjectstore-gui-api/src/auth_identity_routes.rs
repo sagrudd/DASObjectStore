@@ -684,6 +684,27 @@ pub(super) fn standalone_easyconnect_discovery_payload(
             dasobjectstore_daemon::REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
         session_policy: RemoteEasyconnectSessionPolicy::default(),
         auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
+        descriptor_schema_version: "dasobjectstore.remote_descriptor.v1".to_string(),
+        server_version: dasobjectstore_core::VERSION.to_string(),
+        api_schema_versions: vec![
+            "dasobjectstore.remote_auth.v1".to_string(),
+            "dasobjectstore.remote_control.v1".to_string(),
+            "dasobjectstore.remote_config.v2".to_string(),
+        ],
+        capabilities: vec![
+            "remote_resync_v1".to_string(),
+            "stable_appliance_identity".to_string(),
+            "trust_repair_v1".to_string(),
+            "temporary_s3_session".to_string(),
+            "store_readiness".to_string(),
+        ],
+        remote_client_protocol_min: dasobjectstore_daemon::REMOTE_CLIENT_PROTOCOL_MIN,
+        remote_client_protocol_max: dasobjectstore_daemon::REMOTE_CLIENT_PROTOCOL_MAX,
+        component_builds: dasobjectstore_daemon::RemoteEasyconnectComponentBuilds {
+            server: dasobjectstore_core::VERSION.to_string(),
+            daemon: dasobjectstore_core::VERSION.to_string(),
+            s3_gateway: dasobjectstore_core::VERSION.to_string(),
+        },
     }
 }
 

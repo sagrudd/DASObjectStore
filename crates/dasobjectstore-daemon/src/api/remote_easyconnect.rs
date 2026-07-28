@@ -28,6 +28,8 @@ pub const REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS: u64 = 8 * 60 * 60
 pub const REMOTE_EASYCONNECT_MAX_SESSION_LIFETIME_SECONDS: u64 = 24 * 60 * 60;
 pub const REMOTE_EASYCONNECT_RENEWAL_LEAD_SECONDS: u64 = 60 * 60;
 pub const REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX: &str = "";
+pub const REMOTE_CLIENT_PROTOCOL_MIN: u32 = 1;
+pub const REMOTE_CLIENT_PROTOCOL_MAX: u32 = 1;
 
 /// Operations exposed by the authenticated remote HTTPS control plane.
 ///
@@ -96,6 +98,27 @@ pub struct RemoteEasyconnectDiscoveryResponse {
     pub default_session_lifetime_seconds: u64,
     pub session_policy: RemoteEasyconnectSessionPolicy,
     pub auth_providers: Vec<RemoteEasyconnectAuthProvider>,
+    #[serde(default)]
+    pub descriptor_schema_version: String,
+    #[serde(default)]
+    pub server_version: String,
+    #[serde(default)]
+    pub api_schema_versions: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+    #[serde(default)]
+    pub remote_client_protocol_min: u32,
+    #[serde(default)]
+    pub remote_client_protocol_max: u32,
+    #[serde(default)]
+    pub component_builds: RemoteEasyconnectComponentBuilds,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectComponentBuilds {
+    pub server: String,
+    pub daemon: String,
+    pub s3_gateway: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

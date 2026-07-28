@@ -431,7 +431,7 @@ fn verify_profile(
             "installed AWS CLI does not honor profile-level endpoint_url; configuration was retained but cannot be used safely".to_string(),
         ));
     }
-    let status = Command::new("aws")
+    let listing = Command::new("aws")
         .args([
             "--profile",
             &association.profile,
@@ -454,18 +454,70 @@ fn verify_profile(
         ])
         .env("AWS_CONFIG_FILE", &paths.config)
         .env("AWS_SHARED_CREDENTIALS_FILE", &paths.credentials)
-        .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .output()
         .map_err(|error| {
             AwsProfileError::Verification(format!("run bounded S3 verification: {error}"))
         })?;
-    if !status.success() {
+    if !listing.status.success() {
         return Err(AwsProfileError::Verification(
             "S3 profile verification failed: the endpoint was unreachable, TLS validation failed, credentials expired or were rejected, or bucket access was denied".to_string(),
         ));
     }
+    let listing: serde_json::Value = serde_json::from_slice(&listing.stdout).map_err(|error| {
+        AwsProfileError::Verification(format!(
+            "S3 profile verification returned malformed ListObjectsV2 JSON: {error}"
+        ))
+    })?;
+    if let Some(key) = verification_head_key(&listing) {
+        let head = Command::new("aws")
+            .args([
+                "--profile",
+                &association.profile,
+                "--region",
+                &association.region,
+                "--endpoint-url",
+                &association.endpoint_url,
+                "--cli-connect-timeout",
+                "5",
+                "--cli-read-timeout",
+                "10",
+                "s3api",
+                "head-object",
+                "--bucket",
+                &association.bucket,
+                "--key",
+                key,
+                "--output",
+                "json",
+            ])
+            .env("AWS_CONFIG_FILE", &paths.config)
+            .env("AWS_SHARED_CREDENTIALS_FILE", &paths.credentials)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|error| {
+                AwsProfileError::Verification(format!(
+                    "run bounded S3 HeadObject verification: {error}"
+                ))
+            })?;
+        if !head.success() {
+            return Err(AwsProfileError::Verification(
+                "S3 profile verification listed an object but could not read its metadata"
+                    .to_string(),
+            ));
+        }
+    }
     Ok(())
+}
+
+fn verification_head_key(listing: &serde_json::Value) -> Option<&str> {
+    listing
+        .get("Contents")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|objects| objects.first())
+        .and_then(|object| object.get("Key"))
+        .and_then(serde_json::Value::as_str)
 }
 
 fn validate_profile_component(value: &str) -> Result<(), AwsProfileError> {
@@ -484,7 +536,7 @@ fn validate_profile_component(value: &str) -> Result<(), AwsProfileError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{replace_section, section_value};
+    use super::{replace_section, section_value, verification_head_key};
 
     #[test]
     fn preserves_unrelated_profiles_and_replaces_target() {
@@ -495,6 +547,25 @@ mod tests {
         assert_eq!(
             section_value(&updated, "target", "fresh").as_deref(),
             Some("yes")
+        );
+    }
+
+    #[test]
+    fn bounded_listing_selects_only_a_real_object_for_head_verification() {
+        let listed = serde_json::json!({
+            "Contents": [{"Key": "EPICv1/GSE224365_RAW.tar"}]
+        });
+        assert_eq!(
+            verification_head_key(&listed),
+            Some("EPICv1/GSE224365_RAW.tar")
+        );
+        assert_eq!(
+            verification_head_key(&serde_json::json!({"Contents": []})),
+            None
+        );
+        assert_eq!(
+            verification_head_key(&serde_json::json!({"Contents": [{"Size": 4}]})),
+            None
         );
     }
 }

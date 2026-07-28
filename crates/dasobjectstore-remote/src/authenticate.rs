@@ -269,13 +269,14 @@ where
                     .to_string(),
             )
         })?;
-    let appliance_id = discover_appliance_id(
+    let appliance_id = discover_appliance_descriptor(
         &host,
         https_port,
         presented.certificate_pem.as_bytes(),
         &tls_server_name,
     )
-    .ok();
+    .ok()
+    .map(|descriptor| descriptor.appliance_id);
     let mut record =
         crate::trust::new_trust_record(&host, https_port, appliance_id.as_deref(), &presented)
             .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
@@ -413,12 +414,12 @@ pub fn authenticate(
     })
 }
 
-fn discover_appliance_id(
+pub fn discover_appliance_descriptor(
     host: &str,
     https_port: u16,
     certificate_pem: &[u8],
     tls_server_name: &str,
-) -> Result<String, RemoteAuthenticateError> {
+) -> Result<RemoteEasyconnectDiscoveryResponse, RemoteAuthenticateError> {
     let socket = format!("{host}:{https_port}")
         .to_socket_addrs()
         .map_err(|error| RemoteAuthenticateError::Http(format!("resolve appliance host: {error}")))?
@@ -459,7 +460,7 @@ fn discover_appliance_id(
             "appliance discovery returned a blank identity".to_string(),
         ));
     }
-    Ok(discovery.appliance_id)
+    Ok(discovery)
 }
 
 fn validate_descriptor(

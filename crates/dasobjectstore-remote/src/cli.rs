@@ -79,6 +79,8 @@ impl RemoteCli {
 pub enum RemoteCommand {
     /// Authenticate to one appliance ObjectStore and emit an 8-hour S3 context.
     Authenticate(AuthenticateArgs),
+    /// Reconcile trust, session, S3 profile, and readiness in one workflow.
+    Resync(ResyncArgs),
     /// Inspect or explicitly change enrolled appliance TLS trust.
     Trust(TrustArgs),
     /// Inspect locally configured S3 access for an authenticated ObjectStore.
@@ -95,6 +97,80 @@ pub enum RemoteCommand {
     Operations(OperationsArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ResyncArgs {
+    host_or_ip: String,
+    object_store: String,
+    #[arg(long, default_value_t = crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    #[arg(long)]
+    username: Option<String>,
+    #[arg(long)]
+    set_s3_config: bool,
+    #[arg(long, requires = "set_s3_config")]
+    s3_profile: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    json: bool,
+    /// Independently obtained SHA-256 certificate fingerprint.
+    #[arg(long)]
+    trust_fingerprint: Option<String>,
+    /// Suppress replacement confirmation only with independent fingerprint evidence.
+    #[arg(long, requires = "trust_fingerprint")]
+    accept_verified_appliance_replacement: bool,
+}
+
+impl ResyncArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn object_store(&self) -> &str {
+        &self.object_store
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+    pub fn set_s3_config(&self) -> bool {
+        self.set_s3_config
+    }
+    pub fn s3_profile(&self) -> Option<&str> {
+        self.s3_profile.as_deref()
+    }
+    pub fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub fn json(&self) -> bool {
+        self.json
+    }
+    pub fn trust_fingerprint(&self) -> Option<&str> {
+        self.trust_fingerprint.as_deref()
+    }
+    pub fn accept_verified_appliance_replacement(&self) -> bool {
+        self.accept_verified_appliance_replacement
+    }
+    pub fn as_authenticate_args(&self) -> AuthenticateArgs {
+        AuthenticateArgs {
+            host_or_ip: self.host_or_ip.clone(),
+            object_store: self.object_store.clone(),
+            https_port: self.https_port,
+            username: self.username.clone(),
+            ca_cert: None,
+            tls_server_name: None,
+            trust_fingerprint: self.trust_fingerprint.clone(),
+            session_lifetime_seconds: None,
+            json: self.json,
+            set_s3_config: self.set_s3_config,
+            s3_profile: self.s3_profile.clone(),
+            force: true,
+            no_verify_s3: false,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -951,6 +1027,46 @@ mod tests {
         assert!(args.set_s3_config());
         assert_eq!(args.s3_profile(), Some("dasobjectstore-porkchop"));
         assert!(args.verify_s3());
+    }
+
+    #[test]
+    fn parses_integrated_resync_command() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "resync",
+            "192.168.1.192",
+            "epic_collection",
+            "--username",
+            "stephen",
+            "--set-s3-config",
+            "--s3-profile",
+            "dasobjectstore-epic",
+            "--dry-run",
+            "--json",
+        ])
+        .expect("resync parses");
+        let RemoteCommand::Resync(args) = cli.command() else {
+            panic!("expected resync command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.object_store(), "epic_collection");
+        assert_eq!(args.username(), Some("stephen"));
+        assert!(args.set_s3_config());
+        assert_eq!(args.s3_profile(), Some("dasobjectstore-epic"));
+        assert!(args.dry_run());
+        assert!(args.json());
+    }
+
+    #[test]
+    fn replacement_acceptance_requires_independent_fingerprint() {
+        assert!(RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "resync",
+            "192.168.1.192",
+            "epic_collection",
+            "--accept-verified-appliance-replacement",
+        ])
+        .is_err());
     }
 
     #[test]

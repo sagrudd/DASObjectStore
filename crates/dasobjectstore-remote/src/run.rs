@@ -11,8 +11,8 @@ use crate::aws_profile::{
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
     ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
-    RemoteCommand, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand, TrustCommand,
-    TrustRepairArgs, UploadArgs,
+    RemoteCommand, ResyncArgs, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand,
+    TrustCommand, TrustRepairArgs, UploadArgs,
 };
 use crate::config::{
     acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
@@ -49,6 +49,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
     match cli.command() {
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
+        RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {
             TrustCommand::Inspect(args) => {
                 run_trust_inspect(args.host_or_ip(), args.https_port(), args.json(), writer)
@@ -102,6 +103,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
 mod authentication;
 mod config_commands;
 mod control_commands;
+mod resync;
 mod upload;
 
 use authentication::*;

@@ -177,6 +177,63 @@ confirmation or ``--yes``. ``--ca-cert`` and ``--tls-server-name`` remain
 advanced administrator-controlled overrides. There is no insecure TLS bypass
 or accept-any-certificate option.
 
+Integrated resynchronization
+----------------------------
+
+Use ``resync`` when a remote workstation may have stale appliance trust,
+temporary sessions, ObjectStore bindings, or AWS profile state. It discovers
+the appliance's versioned capability descriptor, negotiates the remote-client
+protocol, reconciles exactly one authoritative session for the ObjectStore,
+optionally installs and verifies the S3 profile, and finishes with the
+daemon-owned readiness check:
+
+.. code-block:: console
+
+   dasobjectstore-remote resync 192.168.1.192 epic_collection \
+     --username stephen \
+     --set-s3-config
+
+S3 verification performs a bounded ``ListObjectsV2`` and, when the bucket is
+not empty, a ``HeadObject`` against the returned key. The command succeeds only
+after the committed session, profile association, and readiness state all
+refer to the discovered appliance identity.
+
+Inspect the proposed changes without writing trust, session, configuration, or
+AWS files:
+
+.. code-block:: console
+
+   dasobjectstore-remote resync 192.168.1.192 epic_collection \
+     --username stephen \
+     --set-s3-config \
+     --dry-run \
+     --json
+
+The JSON report uses schema ``dasobjectstore.remote_resync.v1`` and contains
+only non-secret appliance identity, component version, compatibility, action,
+warning, blocker, and readiness information. Passwords, tokens, renewal
+material, and S3 credentials are never included.
+
+Ordinary CA-backed certificate renewal and stale session generations are
+repaired automatically. A genuine appliance-identity replacement remains
+fail-closed. Verify the new identity independently with
+``dasobjectstore trust identity --json`` on the appliance. Controlled
+non-interactive recovery requires both the independently obtained fingerprint
+and explicit replacement acceptance:
+
+.. code-block:: console
+
+   dasobjectstore-remote resync 192.168.1.192 epic_collection \
+     --username stephen \
+     --trust-fingerprint ACTUAL_SHA256_FINGERPRINT \
+     --accept-verified-appliance-replacement \
+     --set-s3-config
+
+Protocol incompatibility is reported as either ``remote_client_too_old`` or
+``appliance_too_old`` with the component that must be upgraded. Feature
+availability is negotiated from the descriptor capability set rather than
+inferred from semantic-version ordering.
+
 ``--set-s3-config`` installs the temporary session into the standard AWS
 credentials and config files under the deterministic profile
 ``dasobjectstore-epic_collection``. Use ``--s3-profile NAME`` to override it.
@@ -184,7 +241,8 @@ The API, not the client, supplies the exact endpoint URL, bucket, region and
 addressing style. Profile updates preserve unrelated profiles, are locked and
 atomically replaced, respect ``AWS_CONFIG_FILE`` and
 ``AWS_SHARED_CREDENTIALS_FILE``, and are verified with a bounded authenticated
-bucket listing by default. A conflicting association requires ``--force``;
+bucket listing and an object metadata read when the bucket is non-empty. A
+conflicting association requires ``--force``;
 ``--no-verify-s3`` is reserved for diagnostics.
 
 All text and ``--json`` output is secret-free. Temporary credentials and

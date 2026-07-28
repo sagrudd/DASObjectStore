@@ -1391,6 +1391,20 @@ mod tests {
         assert_eq!(encoded["appliance_id"], "das-appliance-test");
         assert_eq!(encoded["default_session_lifetime_seconds"], 28_800);
         assert_eq!(
+            encoded["descriptor_schema_version"],
+            "dasobjectstore.remote_descriptor.v1"
+        );
+        assert_eq!(encoded["remote_client_protocol_min"], 1);
+        assert_eq!(encoded["remote_client_protocol_max"], 1);
+        assert!(encoded["capabilities"]
+            .as_array()
+            .expect("capabilities")
+            .contains(&serde_json::json!("remote_resync_v1")));
+        assert_eq!(
+            encoded["component_builds"]["daemon"],
+            dasobjectstore_core::VERSION
+        );
+        assert_eq!(
             encoded["session_policy"]["renewal_requires_password_reauthentication"],
             false
         );

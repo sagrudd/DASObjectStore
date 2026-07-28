@@ -32,7 +32,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.151.1``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.152.0``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -1932,6 +1932,11 @@ list until every temporary size-budget exception has been removed.
     ``(appliance_id, store_id)``: doctor, repair, strict lookup, S3 association,
     and authentication now share one uniqueness invariant; repair archives the
     old generation and authentication continues in the same invocation.
+  - [x] Add the integrated ``dasobjectstore-remote resync`` workflow with a
+    versioned capability/build descriptor, protocol negotiation, secret-free
+    dry-run planning, rollback-safe exceptional trust replacement, shared
+    trust/session/profile reconciliation, bounded ListObjectsV2 plus HeadObject
+    verification, and final daemon-owned readiness proof.
 - [x] Remove SSH from production remote ingest finalization: add explicitly
   scoped HTTPS readiness, 20,000-object authoritative snapshots, exact
   payload-group settlement, idempotent three-key S3 reconciliation, and remote

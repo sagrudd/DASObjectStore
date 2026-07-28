@@ -8,6 +8,18 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.152.0 - 2026-07-28
+
+- Add ``dasobjectstore-remote resync`` as one integrated, idempotent workflow
+  for appliance discovery, protocol negotiation, trust and session repair, S3
+  profile installation/verification, and final ObjectStore readiness.
+- Publish a backward-compatible versioned appliance descriptor with explicit
+  protocol range, API schemas, capabilities, and server/daemon/gateway build
+  identities instead of inferring compatibility from semantic versions.
+- Add secret-free dry-run reports, explicit verified-replacement acceptance,
+  rollback-safe provisional trust, and bounded ListObjectsV2 plus HeadObject
+  verification for configured S3 profiles.
+
 ## 0.151.1 - 2026-07-28
 
 - Reconcile authoritative remote sessions by ObjectStore across replaced
