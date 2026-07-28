@@ -334,6 +334,20 @@ Initial macOS beta:
 Docker/Compose is the default deployment path for supporting services, with
 native/systemd support allowed where it improves reliability.
 
+## Development checks and CI
+
+Run formatting, module-size, Clippy, Rust tests, benchmark smoke tests, and the
+Web visual checks locally before review. The Mnemosyne Jenkins Expedition
+infrastructure is the sole automated CI authority: it runs reviewed,
+digest-pinned tasks against exact source revisions and retains the resulting
+dossier evidence.
+
+GitHub is used for source review and pull requests only. This repository does
+not run GitHub Actions or project a private portfolio credential into
+GitHub-hosted workers. The cross-repository Pistis–Monas acceptance lane in the
+Jenkins project verifies the authentication boundary through DASObjectStore
+with the exact Prosopikon and Monas revisions recorded in each lockfile.
+
 ## License
 
 DASObjectStore is intended to be licensed under the Mozilla Public License 2.0.
