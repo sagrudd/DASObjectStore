@@ -423,8 +423,13 @@ mod tests {
 
     #[tokio::test]
     async fn emits_pretty_check_config() {
-        let cli = ServerCli::try_parse_from(["dasobjectstore-server", "--check-config"])
-            .expect("server CLI parses");
+        let cli = ServerCli::try_parse_from([
+            "dasobjectstore-server",
+            "--check-config",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
+        ])
+        .expect("server CLI parses");
         let mut output = Vec::new();
 
         run(&cli, &mut output).await.expect("check config runs");
@@ -436,8 +441,14 @@ mod tests {
 
     #[tokio::test]
     async fn emits_json_check_config() {
-        let cli = ServerCli::try_parse_from(["dasobjectstore-server", "--check-config", "--json"])
-            .expect("server CLI parses");
+        let cli = ServerCli::try_parse_from([
+            "dasobjectstore-server",
+            "--check-config",
+            "--json",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
+        ])
+        .expect("server CLI parses");
         let mut output = Vec::new();
 
         run(&cli, &mut output).await.expect("check config runs");

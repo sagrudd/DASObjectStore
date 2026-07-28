@@ -103,8 +103,13 @@ mod tests {
 
     #[test]
     fn parses_default_check_config() {
-        let cli = ServerCli::try_parse_from(["dasobjectstore-server", "--check-config"])
-            .expect("server CLI parses");
+        let cli = ServerCli::try_parse_from([
+            "dasobjectstore-server",
+            "--check-config",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
+        ])
+        .expect("server CLI parses");
         let config = cli.server_config().expect("default config loads");
 
         assert!(cli.check_config());
