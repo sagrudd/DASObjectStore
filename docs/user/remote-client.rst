@@ -86,10 +86,18 @@ pairing callback:
 
    dasobjectstore-remote easyconnect 192.168.1.192
 
+To bind the request to one ObjectStore before browser approval:
+
+.. code-block:: console
+
+   dasobjectstore-remote easyconnect 192.168.1.192 \
+     --object-store epic_collection
+
 The command resolves the standalone Web application URL using HTTPS port
 ``8448`` by default. After authenticated approval in the browser, the remote
-client receives a one-time pairing result on its loopback callback listener. The
-exchange code is treated as secret-bearing material and is not printed.
+client receives a one-time pairing result as a form-encoded loopback ``POST``.
+The exchange code never enters a URL and is neither printed nor retained after
+the one-time exchange.
 
 The Monas/Pistis product boundary separates the routes deliberately:
 
@@ -104,11 +112,20 @@ The Monas/Pistis product boundary separates the routes deliberately:
 * the daemon rejects an approval that substitutes a different ObjectStore for
   the one requested when the pairing was created.
 
-The current command still stops after receiving the redacted loopback pairing
-result. Wiring its pinned-HTTPS create/exchange calls and protected config
-transaction is tracked by the EasyConnect completion issue. Until that lands,
-use the password-authenticated command below for real remote access. Do not
-interpret the server boundary alone as an end-to-end passwordless release.
+The command requires previously enrolled appliance certificate trust. It uses
+that pin for discovery, pairing creation, and exchange; URLs returned by the
+appliance cannot redirect the client away from the pinned HTTPS origin. The
+server returns the public S3 endpoint, region, and addressing style alongside
+the approved principal, grants, and short-lived session. The client validates
+the envelope and commits the complete session generation atomically. It never
+guesses an S3 endpoint from the browser or control URL.
+
+If certificate trust has not yet been enrolled, inspect and verify it before
+retrying:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust inspect 192.168.1.192
 
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and

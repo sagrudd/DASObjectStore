@@ -28,6 +28,9 @@ Start easyconnect from the remote computer:
 
    dasobjectstore-remote easyconnect 192.168.1.192
 
+Use ``--object-store NAME`` when the requested ObjectStore must be fixed before
+approval. EasyConnect requires an already enrolled appliance certificate pin.
+
 The client starts a loopback callback listener, opens the appliance login page
 in a browser, and waits for authenticated approval. Use ``--no-browser`` on a
 headless remote host; the command prints the browser URL and still waits for
@@ -44,10 +47,13 @@ read or write. Public-read access is not enough for upload; the account must be
 allowed to write the target ObjectStore, normally through the ObjectStore writer
 group or administrator group.
 
-After approval, the remote client stores the issued session, temporary S3
-credentials, expiry time, renewal metadata, and accessible ObjectStore grants
-in its remote config file with owner-only permissions on Unix systems. Do not
-paste those credentials into support tickets or shell history.
+After approval, the remote client performs a one-time exchange and atomically
+stores the issued session, temporary S3 credentials, expiry time, renewal
+metadata, accessible ObjectStore grants, and the server-owned public S3
+connection descriptor. It does not infer the S3 endpoint from the appliance
+address. Config generations and their compatibility mirror use owner-only
+permissions on Unix systems. Do not paste credentials into support tickets or
+shell history.
 
 ObjectStore Selection
 ---------------------
