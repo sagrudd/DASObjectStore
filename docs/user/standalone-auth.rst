@@ -121,7 +121,7 @@ credential-free; DASObjectStore never opens the Pistis handoff store.
 The verifier must attest the exact ``monas`` Prosopikon audience; a verifier
 result for any product or host audience is rejected before context creation.
 The review build pins Prosopikon hardening commit
-``a2449b9a4dda8ce47e488633dac9590782d5247c``. Release evidence must replace
+``fcc9a054dae7d092be5fff7d6c2b6eea25f5ec5a``. Release evidence must replace
 that review pin with the eventual merged commit from Prosopikon PR 6.
 Application mTLS/token endpoints are not mounted beneath this browser-cookie
 middleware; they remain on their separately authenticated service boundary.
