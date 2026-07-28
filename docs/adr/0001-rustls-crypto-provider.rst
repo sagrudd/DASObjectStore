@@ -5,7 +5,7 @@ ADR-0001: Select the DASObjectStore Rustls cryptographic provider
 :Date: 2026-07-28
 :Deciders: Project owner, security reviewer, cryptography reviewer, supply-chain reviewer, DASObjectStore maintainers
 :Related issue: `DASObjectStore #7 <https://github.com/sagrudd/DASObjectStore/issues/7>`_
-:Related decision: `Monas ADR-0001 at reviewed commit 432dee2 <https://github.com/sagrudd/monas/blob/432dee2/docs/adr/0001-rustls-crypto-provider.rst>`_
+:Related decision: `Monas ADR-0001 at reviewed commit 432dee2e2f7b125013e3f8b516d5d4d65e0978f6 <https://github.com/sagrudd/monas/blob/432dee2e2f7b125013e3f8b516d5d4d65e0978f6/docs/adr/0001-rustls-crypto-provider.rst>`_
 
 Context
 -------
@@ -118,14 +118,62 @@ DAS-specific deviation would create incompatible embedded and standalone
 artifacts and therefore requires a superseding accepted ADR with an explicit
 cross-project migration.
 
+An independently reviewed standalone executable profile may differ when a
+real DAS peer class requires it, but only if that profile is compile-time
+distinct, has its own inventory and fingerprint, and does not flow through a
+provider-neutral library into the Monas graph. The embedded Mnemosyne adapter
+must remain compatible with Monas's exact profile. Runtime selection and a
+single executable carrying multiple profiles remain forbidden.
+
 This is expressly non-FIPS. Ordinary ``aws-lc-rs`` does not establish a FIPS
 claim. FIPS AWS-LC, approved algorithms, ``ServerConfig::fips()``, and a
 certified deployment environment require a separate accepted ADR and evidence.
 
-Algorithm and inventory contract
---------------------------------
+Peer inventory and compatibility boundary
+-----------------------------------------
 
-The accepted default is TLS 1.3 only, with this exact ordered inventory:
+The implementation review must close a versioned peer inventory before this
+ADR can be Accepted:
+
+Appliance HTTPS
+   Browsers, ``dasobjectstore-remote``, Monas, Synoptikon, and operator API
+   clients of the public HTTPS listener.
+
+Application mutual TLS
+   Registered applications and operator tooling that reach the dedicated
+   client-certificate listener.
+
+S3 and object services
+   Garage, RustFS, AWS-compatible S3 endpoints, and daemon health/probe
+   targets reached through Reqwest or externally launched AWS tooling.
+
+Daemon and local operator paths
+   CLI-to-daemon, workspace-host, package acceptance, health checks, and any
+   reverse-proxy-to-DAS hop, including paths that are intentionally Unix
+   socket or local HTTP rather than Rustls.
+
+Jenkins and deployment peers
+   Packaged Linux acceptance clients, supported browsers, reverse proxies,
+   and every deployment image or appliance currently claimed as supported.
+
+TLS 1.3-only is the recommended target and the Monas-integrated requirement,
+but it is a compatibility-breaking boundary for any deployed TLS 1.2-only
+appliance, S3/object service, reverse proxy, application certificate client,
+or operator tool. No retained deployed-peer evidence currently proves that
+every class above supports TLS 1.3. The project owner must confirm the complete
+peer inventory and accepted compatibility loss before this ADR can become
+Accepted. Until then, TLS 1.3-only remains a proposal, not a product claim.
+
+If a required standalone peer cannot migrate, the owner may approve a
+separately reviewed executable profile as described above. TLS 1.2 must never
+be re-enabled by feature unification, in a provider-neutral library, or in the
+Monas-integrated graph.
+
+Algorithm and proposed inventory contract
+-----------------------------------------
+
+Subject to that peer confirmation, the proposed default is TLS 1.3 only, with
+this exact ordered inventory:
 
 * key exchange: ``X25519MLKEM768``, ``X25519``, ``secp256r1``,
   ``secp384r1``;
@@ -194,6 +242,26 @@ remote certificate-pinning path must validate CA trust and the requested
 hostname; no implementation or test may disable certificate or hostname
 verification.
 
+Capture-only enrollment is the sole exception, and it is not an authenticated
+application client. The first-contact probe may complete an AWS-LC TLS 1.3
+handshake using signature-valid certificate parsing while deliberately
+withholding chain and hostname trust. It sends zero HTTP or other application
+data, presents no client certificate, token, password, cookie, or credential,
+and treats every captured identity field as explicitly untrusted. It parses
+the leaf certificate only after the server proves possession of its signing
+key, then displays the requested/resolved address, certificate SANs, validity,
+leaf SHA-256 fingerprint, SPKI fingerprint, and whether the requested address
+matches a SAN.
+
+The probe must label mismatch and untrusted state prominently and must not
+discover appliance identity, persist trust, authenticate, or send any
+credential. Enrollment requires the operator to compare the full fingerprint
+over a separate trusted channel and explicitly confirm that exact fingerprint.
+Only after confirmation may a trust record be persisted. Every subsequent
+discovery, authentication, control, renewal, appliance, or S3 credential path
+uses the enrolled certificate/CA or pin *and* validates the selected hostname.
+Capture-only behavior must not be reusable through a general Reqwest client.
+
 Operator-managed reverse-proxy TLS remains a distinct deployment boundary.
 The proxy becomes part of the trusted computing base, its DAS hop must be
 private or authenticated, and forwarded headers are never an identity source.
@@ -214,6 +282,20 @@ subprocesses. Every owning executable must prove:
 
 Packaged Linux qualification must additionally prove:
 
+* capture-only enrollment uses AWS-LC and TLS 1.3, verifies the handshake
+  signature, sends zero application bytes and zero credentials, and records
+  no trust before explicit confirmation;
+* capture display contains the requested/resolved address, SANs, validity,
+  full leaf/SPKI fingerprints, address-match result, and an untrusted label;
+* invalid handshake signatures, missing/invalid leaf certificates, malformed
+  SANs, expired/not-yet-valid certificates, unsupported protocol versions,
+  and operator fingerprint mismatch fail without persistence or application
+  data;
+* a SAN/address mismatch may be displayed for diagnosis but cannot silently
+  choose a trusted server name or proceed without out-of-band fingerprint
+  confirmation;
+* after enrollment, wrong pin/CA, wrong hostname, changed certificate, and
+  changed endpoint fail before credentials or application requests are sent;
 * hostname- and CA-validating public HTTPS health for ECDSA P-256 and RSA-2048;
 * client-CA-validating mutual TLS, including wrong-CA and wrong-host negatives;
 * outbound daemon and remote Reqwest paths against a local CA-authenticated
@@ -222,7 +304,8 @@ Packaged Linux qualification must additionally prove:
   bypassing WebPKI checks;
 * successful TLS 1.3 ``X25519MLKEM768`` and ``X25519`` negotiation, with
   version, suite, and group retained;
-* TLS 1.2-only negotiation fails;
+* TLS 1.2-only negotiation fails for the proposed Monas-compatible profile,
+  with the peer-inventory decision retained as evidence;
 * every executable and test binary's normal/build/dev feature graph matches
   its declared provider-owning or Rustls-absent class; and
 * termination releases listeners and preserves existing rollback behavior.
