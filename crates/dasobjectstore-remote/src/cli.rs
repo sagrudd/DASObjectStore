@@ -442,6 +442,9 @@ impl S3StatusArgs {
 pub struct EasyconnectArgs {
     /// DAS appliance host name or IP address, without a URL scheme.
     host_or_ip: String,
+    /// Exact ObjectStore requested for this session; omit to select it in the approval page.
+    #[arg(long)]
+    object_store: Option<String>,
     /// HTTPS port for the standalone DASObjectStore Web application.
     #[arg(long, default_value_t = crate::easyconnect::DEFAULT_APPLIANCE_HTTPS_PORT)]
     https_port: u16,
@@ -469,6 +472,10 @@ impl EasyconnectArgs {
 
     pub fn https_port(&self) -> u16 {
         self.https_port
+    }
+
+    pub fn object_store(&self) -> Option<&str> {
+        self.object_store.as_deref()
     }
 
     pub fn callback_port(&self) -> Option<u16> {
@@ -978,6 +985,8 @@ mod tests {
             "192.168.1.192",
             "--callback-port",
             "49321",
+            "--object-store",
+            "epic_collection",
             "--json",
             "--timeout-seconds",
             "10",
@@ -989,6 +998,7 @@ mod tests {
         };
         assert_eq!(args.host_or_ip(), "192.168.1.192");
         assert_eq!(args.https_port(), 8448);
+        assert_eq!(args.object_store(), Some("epic_collection"));
         assert_eq!(args.callback_port(), Some(49321));
         assert_eq!(args.timeout_seconds(), 10);
         assert!(!args.no_browser());

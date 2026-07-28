@@ -29,6 +29,9 @@ agreement before landing.
   appliance-local policy username, re-evaluate current ObjectStore access at
   approval time, and reject requested-ObjectStore substitution in the durable
   pairing state machine.
+- Complete the remote CLI's pinned-HTTPS create, form-POST callback, one-time
+  exchange, and atomic config-generation installation using the server-owned
+  S3 connection descriptor and asserted approval identity.
 
 ## 0.152.3 - 2026-07-28
 

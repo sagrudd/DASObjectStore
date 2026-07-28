@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn run_easyconnect(
+    cli: &RemoteCli,
     args: &EasyconnectArgs,
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
@@ -18,17 +19,22 @@ pub(super) fn run_easyconnect(
         let options = RemoteEasyconnectPairingOptions {
             host_or_ip: args.host_or_ip().to_string(),
             https_port: args.https_port(),
+            requested_object_store: args.object_store().map(str::to_string),
             callback_port: args.callback_port(),
             timeout: Duration::from_secs(args.timeout_seconds()),
             open_browser: !args.no_browser(),
         };
         let open_browser = !args.no_browser();
-        let outcome =
-            run_easyconnect_pairing_with_ready(options, &SystemBrowserLauncher, |contract| {
-                write_easyconnect_pairing_ready(contract, open_browser, writer)?;
+        let outcome = run_complete_easyconnect_pairing_with_ready(
+            options,
+            &SystemBrowserLauncher,
+            |contract, browser_login_url| {
+                write_easyconnect_pairing_ready(contract, browser_login_url, open_browser, writer)?;
                 writer.flush()?;
                 Ok(())
-            })?;
+            },
+        )?;
+        install_easyconnect_result(cli, &outcome)?;
         write_easyconnect_pairing(&outcome, writer)?;
     }
     Ok(())
@@ -36,6 +42,7 @@ pub(super) fn run_easyconnect(
 
 pub(super) fn write_easyconnect_pairing_ready(
     contract: &RemoteEasyconnectContract,
+    browser_login_url: &str,
     open_browser: bool,
     writer: &mut impl Write,
 ) -> Result<(), std::io::Error> {
@@ -49,27 +56,129 @@ pub(super) fn write_easyconnect_pairing_ready(
     if open_browser {
         writeln!(writer, "Browser launch: requested")?;
     } else {
-        writeln!(writer, "Open browser URL: {}", contract.browser_login_url)?;
+        writeln!(writer, "Open browser URL: {browser_login_url}")?;
     }
     writeln!(writer, "Waiting for browser-approved pairing callback...")?;
     Ok(())
 }
 
 pub(super) fn write_easyconnect_pairing(
-    outcome: &RemoteEasyconnectPairingOutcome,
+    outcome: &crate::easyconnect::RemoteEasyconnectCompletedPairing,
     writer: &mut impl Write,
 ) -> Result<(), std::io::Error> {
     writeln!(writer, "Pairing result: received")?;
-    writeln!(writer, "Pairing ID: {}", outcome.result.pairing_id)?;
+    writeln!(writer, "Pairing ID: {}", outcome.pairing.pairing_id)?;
+    writeln!(writer, "Exchange code: <redacted>")?;
     writeln!(
         writer,
-        "Exchange code: {}",
-        outcome.result.redacted_exchange_code()
+        "Approved principal: {}",
+        outcome.exchange.exchange.approved_actor
     )?;
     writeln!(
         writer,
-        "Status: browser-approved pairing callback received; session exchange API is not implemented in this build."
+        "Session expires: {}",
+        outcome.exchange.exchange.session.expires_at_utc
     )?;
+    writeln!(
+        writer,
+        "Status: passwordless session and server-owned S3 connection descriptor committed."
+    )?;
+    Ok(())
+}
+
+fn install_easyconnect_result(
+    cli: &RemoteCli,
+    outcome: &crate::easyconnect::RemoteEasyconnectCompletedPairing,
+) -> Result<(), RemoteRunError> {
+    use dasobjectstore_daemon::RemoteEasyconnectAuthProvider;
+
+    let path = config_path(cli)?;
+    let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    let exchange = &outcome.exchange.exchange;
+    let auth_authority = match exchange.auth_provider {
+        RemoteEasyconnectAuthProvider::StandaloneLocalUser => RemoteAuthAuthority::LocalPassword,
+        RemoteEasyconnectAuthProvider::Synoptikon => RemoteAuthAuthority::Synoptikon,
+        RemoteEasyconnectAuthProvider::Mneion => RemoteAuthAuthority::Mneion,
+    };
+    let session = RemoteUploadSession {
+        session_id: exchange.session.session_id.clone(),
+        issued_at: exchange.session.issued_at_utc.clone(),
+        expires_at: exchange.session.expires_at_utc.clone(),
+        credentials: RemoteSessionCredentials {
+            access_key_id: exchange.session.credentials.access_key_id.clone(),
+            secret_access_key: exchange.session.credentials.secret_access_key.clone(),
+            session_token: exchange.session.credentials.session_token.clone(),
+        },
+        renewal: Some(RemoteSessionRenewalMetadata {
+            renew_url: format!(
+                "{}/products/dasobjectstore{}",
+                outcome.contract.appliance_base_url, exchange.session.renewal.renew_url
+            ),
+            renew_after: exchange.session.renewal.renew_after_utc.clone(),
+            renewal_token: Some(exchange.session.renewal.renewal_token.clone()),
+            last_renewed_at: None,
+        }),
+    };
+    let grants = exchange
+        .object_stores
+        .iter()
+        .map(|grant| RemoteObjectStoreGrant {
+            object_store: grant.object_store.clone(),
+            bucket: grant.bucket.clone(),
+            can_read: grant.can_read,
+            can_write: grant.can_write,
+            writer_group: grant.writer_group.clone(),
+            object_type: grant.object_type.clone(),
+        })
+        .collect::<Vec<_>>();
+    let default_object_store = if grants.len() == 1 {
+        Some(grants[0].object_store.clone())
+    } else {
+        None
+    };
+    config
+        .paired_appliances
+        .retain(|appliance| appliance.appliance_id != exchange.appliance_id);
+    config.paired_appliances.push(RemotePairedAppliance {
+        appliance_id: exchange.appliance_id.clone(),
+        display_name: outcome.discovery.display_name.clone(),
+        appliance_base_url: outcome.contract.appliance_base_url.clone(),
+        discovery_url: outcome.contract.discovery_url.clone(),
+        auth_authority,
+        paired_actor: Some(exchange.approved_actor.clone()),
+        default_object_store: default_object_store.clone(),
+        session: Some(session.clone()),
+        object_stores: grants.clone(),
+    });
+    let trust = crate::trust::load_trust(&outcome.contract.host_or_ip, outcome.https_port)?
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(
+                "easyconnect appliance trust disappeared before config commit".to_string(),
+            )
+        })?;
+    config
+        .session_bindings
+        .retain(|binding| binding.appliance_id != exchange.appliance_id);
+    for grant in &grants {
+        config.session_bindings.push(RemoteSessionBinding {
+            appliance_id: exchange.appliance_id.clone(),
+            store_id: grant.object_store.clone(),
+            control_base_url: outcome.contract.appliance_base_url.clone(),
+            s3_endpoint_url: outcome.exchange.s3.endpoint_url.clone(),
+            bucket: grant.bucket.clone(),
+            region: outcome.exchange.s3.region.clone(),
+            addressing_style: outcome.exchange.s3.addressing_style.clone(),
+            s3_profile: None,
+            trust_fingerprint_sha256: trust.fingerprint_sha256.clone(),
+            trust_spki_sha256: trust.spki_sha256.clone(),
+            session: session.clone(),
+        });
+    }
+    config.default_appliance_id = Some(exchange.appliance_id.clone());
+    config.endpoint_url = outcome.exchange.s3.endpoint_url.clone();
+    config.region = outcome.exchange.s3.region.clone();
+    config.auth_authority = auth_authority;
+    write_config(&path, &config)?;
     Ok(())
 }
 
@@ -119,7 +228,7 @@ pub(super) fn write_easyconnect_contract(
     }
     writeln!(
         writer,
-        "Status: contract defined; run without --contract/--json to launch browser pairing. Session exchange API is not implemented in this build."
+        "Status: run without --contract/--json to create, approve, exchange, and commit a passwordless session."
     )?;
     Ok(())
 }

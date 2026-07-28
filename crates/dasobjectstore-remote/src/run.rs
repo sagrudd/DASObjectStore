@@ -25,10 +25,9 @@ use crate::control::{
     renew_store_session_if_due, ReconcileS3Request, RemoteControlClient, RemoteControlError,
 };
 use crate::easyconnect::{
-    define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
-    RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
-    RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions,
-    RemoteEasyconnectPairingOutcome, SystemBrowserLauncher,
+    define_easyconnect_contract, run_complete_easyconnect_pairing_with_ready,
+    RemoteEasyconnectContract, RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
+    RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions, SystemBrowserLauncher,
 };
 use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
@@ -66,7 +65,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
                 run_s3_status(cli, args.store(), args.profile(), args.json(), writer)
             }
         },
-        RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
+        RemoteCommand::Easyconnect(args) => run_easyconnect(cli, args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
             ConfigCommand::Show(args) => run_config_show(cli, args.json(), writer),
