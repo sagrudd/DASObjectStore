@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use super::aggregate::parse_mergerfs_process;
 use super::*;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
