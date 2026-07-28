@@ -29,6 +29,40 @@ use tower::ServiceExt;
 const AUTHORITY_TOKEN: &str = "authority-secret-credential-0001";
 
 #[tokio::test]
+async fn monas_exposes_only_pairing_create_and_exchange_without_a_session() {
+    let root = temp_root("monas-easyconnect-public");
+    let store = registered_store(&root);
+    let create = monas_dasobjectstore_api_router(store.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/remote/easyconnect/pairings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"client_name":"remote CLI","callback_url":"https://customer.example/callback","requested_object_store":"store-1","requested_session_lifetime_seconds":null,"client_request_id":"request-1"}"#,
+                ))
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes");
+    assert_eq!(create.status(), StatusCode::BAD_REQUEST);
+
+    let approval = monas_dasobjectstore_api_router(store)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/remote/easyconnect/pairings/approve")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .expect("request builds"),
+        )
+        .await
+        .expect("request completes");
+    assert_eq!(approval.status(), StatusCode::UNAUTHORIZED);
+    cleanup(&root);
+}
+
+#[tokio::test]
 async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {
     let root = temp_root("monas-live");
     let store = registered_store(&root);

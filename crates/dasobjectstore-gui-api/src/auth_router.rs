@@ -35,7 +35,8 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
     match host_mode {
         GuiApiHostMode::Standalone => {
             let router = federated_operational_router(auth_store.clone())
-                .merge(standalone_session_auth_router(auth_store));
+                .merge(standalone_session_auth_router(auth_store))
+                .merge(easyconnect_public_router());
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -54,15 +55,17 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone()).merge(
-                standalone_session_auth_router_with_state(StandaloneAuthRouteState {
-                    auth_store,
-                    local_password_authenticator: Arc::new(
-                        SystemLocalPasswordAuthenticator::default(),
-                    ),
-                    s3_descriptor,
-                }),
-            );
+            let router = federated_operational_router(auth_store.clone())
+                .merge(standalone_session_auth_router_with_state(
+                    StandaloneAuthRouteState {
+                        auth_store,
+                        local_password_authenticator: Arc::new(
+                            SystemLocalPasswordAuthenticator::default(),
+                        ),
+                        s3_descriptor,
+                    },
+                ))
+                .merge(easyconnect_public_router());
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -97,7 +100,9 @@ fn federated_operational_router(auth_store: LocalAuthStore) -> Router {
         .merge(crate::remote_control_routes::remote_control_router())
         .merge(standalone_dashboard_router(auth_store.clone()))
         .merge(standalone_live_status_router(auth_store.clone()))
-        .merge(standalone_easyconnect_router(auth_store.clone()))
+        .merge(standalone_easyconnect_router_with_state(
+            StandaloneEasyconnectRouteState::system(auth_store.clone()),
+        ))
         .merge(standalone_users_groups_router(auth_store.clone()))
         .merge(standalone_enclosure_admin_router(auth_store.clone()))
         .merge(crate::object_browser_routes::standalone_object_browser_router(auth_store.clone()))
@@ -200,6 +205,22 @@ async fn application_no_store(mut response: axum::response::Response) -> axum::r
 
 pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
     standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState::system(auth_store))
+        .merge(easyconnect_public_router())
+}
+
+/// Pairing creation and one-time exchange routes that do not require a browser
+/// session. Approval is deliberately absent and remains behind host auth.
+pub fn easyconnect_public_router() -> Router {
+    Router::new()
+        .route(
+            "/api/v1/remote/easyconnect/pairings",
+            post(easyconnect_create_pairing),
+        )
+        .route(
+            "/api/v1/remote/easyconnect/pairings/exchange",
+            post(easyconnect_exchange_pairing),
+        )
+        .layer(DefaultBodyLimit::max(64 * 1024))
 }
 
 pub(crate) fn standalone_easyconnect_router_with_state(
@@ -213,6 +234,14 @@ pub(crate) fn standalone_easyconnect_router_with_state(
         .route(
             "/api/v1/remote/easyconnect/auth-context",
             get(easyconnect_auth_context),
+        )
+        .route(
+            "/api/v1/remote/easyconnect/pairings/approve",
+            post(easyconnect_approve_pairing),
+        )
+        .route(
+            "/remote/easyconnect/login",
+            get(easyconnect_browser_approval),
         )
         .layer(Extension(state.auth_store.clone()))
         .with_state(state)

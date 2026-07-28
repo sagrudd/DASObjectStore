@@ -8,6 +8,17 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.151.0 - 2026-07-28
+
+- Add the Monas/Pistis EasyConnect HTTP boundary: loopback-only public pairing
+  creation, host-session and CSRF-protected approval, one-time public exchange,
+  and a browser approval page that posts the exchange capability directly to
+  the loopback client without placing it in a URL.
+- Preserve the immutable Prosopikon principal separately from the verified
+  appliance-local policy username, re-evaluate current ObjectStore access at
+  approval time, and reject requested-ObjectStore substitution in the durable
+  pairing state machine.
+
 ## 0.150.0 - 2026-07-28
 
 - Make direct-S3 multipart completion survive gateway transport loss and

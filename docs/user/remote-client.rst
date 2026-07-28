@@ -76,7 +76,7 @@ variable for that child process.
 Easyconnect Contract
 --------------------
 
-``easyconnect`` is the planned browser-approved connection flow for users who
+``easyconnect`` is the browser-approved connection contract for users who
 know the appliance host or IP address but should not paste passwords, S3 access
 keys, or bucket names into the terminal. The command binds a loopback callback
 listener, opens the appliance login page in a browser, and waits for a one-time
@@ -90,6 +90,25 @@ The command resolves the standalone Web application URL using HTTPS port
 ``8448`` by default. After authenticated approval in the browser, the remote
 client receives a one-time pairing result on its loopback callback listener. The
 exchange code is treated as secret-bearing material and is not printed.
+
+The Monas/Pistis product boundary separates the routes deliberately:
+
+* pairing creation and one-time exchange are public, bounded JSON operations;
+* creation accepts only an exact loopback callback on ``127.0.0.1`` or ``::1``
+  with an explicit port and the fixed EasyConnect callback path;
+* approval requires a live host browser session and its session-bound CSRF
+  value;
+* the immutable Prosopikon principal remains the audit subject while a
+  separately host-verified local username is used for appliance group policy;
+  and
+* the daemon rejects an approval that substitutes a different ObjectStore for
+  the one requested when the pairing was created.
+
+The current command still stops after receiving the redacted loopback pairing
+result. Wiring its pinned-HTTPS create/exchange calls and protected config
+transaction is tracked by the EasyConnect completion issue. Until that lands,
+use the password-authenticated command below for real remote access. Do not
+interpret the server boundary alone as an end-to-end passwordless release.
 
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and
@@ -193,8 +212,10 @@ local-user Web session as the rest of the standalone console: the user logs in
 with their appliance OS/PAM credentials, and protected easyconnect approval
 routes resolve the authenticated local subject from the browser session token.
 The API shape also reserves ``synoptikon`` and ``mneion`` providers for later
-integrated-host deployments, but those providers are not active in standalone
-mode.
+integrated-host deployments. A Monas-hosted approval carries the immutable
+Prosopikon subject and a separately verified appliance-local policy subject;
+neither GitHub display values nor email addresses are accepted as product
+authorization.
 
 Session exchange responses carry a daemon-generated access key, secret,
 mandatory session token, one exact ObjectStore/bucket grant, expiry time, and

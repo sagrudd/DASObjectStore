@@ -264,25 +264,37 @@ fn parse_pairing_callback_request(
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let target = parts.next().unwrap_or_default();
-    if method != "GET" {
+    let values = if method == "GET" {
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
+        if path != EASYCONNECT_CALLBACK_PATH {
+            return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
+                "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
+            )));
+        }
+        query
+    } else if method == "POST" {
+        if target != EASYCONNECT_CALLBACK_PATH {
+            return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
+                "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
+            )));
+        }
+        request
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .unwrap_or("")
+    } else {
         return Err(RemoteEasyconnectPairingError::InvalidCallback(
-            "pairing callback must use GET".to_string(),
+            "pairing callback must use GET or form-encoded POST".to_string(),
         ));
-    }
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if path != EASYCONNECT_CALLBACK_PATH {
-        return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
-            "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
-        )));
-    }
-    if let Some(error) = query_value(query, "error") {
+    };
+    if let Some(error) = query_value(values, "error") {
         return Err(RemoteEasyconnectPairingError::PairingDenied(error));
     }
-    let pairing_id = query_value(query, "pairing_id").ok_or_else(|| {
+    let pairing_id = query_value(values, "pairing_id").ok_or_else(|| {
         RemoteEasyconnectPairingError::InvalidCallback("missing pairing_id".to_string())
     })?;
-    let exchange_code = query_value(query, "exchange_code")
-        .or_else(|| query_value(query, "code"))
+    let exchange_code = query_value(values, "exchange_code")
+        .or_else(|| query_value(values, "code"))
         .ok_or_else(|| {
             RemoteEasyconnectPairingError::InvalidCallback(
                 "missing one-time exchange_code".to_string(),
@@ -643,6 +655,18 @@ mod tests {
 
         assert_eq!(result.pairing_id, "pair-123");
         assert_eq!(result.exchange_code, "one-time-code");
+    }
+
+    #[test]
+    fn parses_form_post_pairing_callback_without_secret_query_values() {
+        let body = "pairing_id=pairing-123&exchange_code=exchange-secret";
+        let request = format!(
+            "POST {EASYCONNECT_CALLBACK_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let result = parse_pairing_callback_request(&request).expect("callback parses");
+        assert_eq!(result.pairing_id, "pairing-123");
+        assert_eq!(result.exchange_code, "exchange-secret");
     }
 
     #[test]

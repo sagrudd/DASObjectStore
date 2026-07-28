@@ -10,6 +10,12 @@ and NAS-backed storage.
 
    user/index
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Architecture
+
+   architecture/managed-compute-workspaces
+
 Design Notes
 ------------
 
