@@ -2595,13 +2595,18 @@ mod tests {
             local_user("operator", vec!["wheel"]),
             Some(client.clone()),
         ));
+        let request = prepare_enclosure_request();
+        let expected_mount_root = request
+            .mount_root
+            .clone()
+            .expect("test enclosure request has a mount root");
 
         let response = post_json_with_session::<StandaloneEnclosurePrepareResponse>(
             app,
             "/api/v1/workspaces/enclosures/prepare",
             "admin",
             &login.session_token,
-            &prepare_enclosure_request(),
+            &request,
         )
         .await;
 
@@ -2616,7 +2621,7 @@ mod tests {
                     disk_id: "qnap-1057".to_string(),
                     device_path: "/dev/disk/by-id/usb-qnap-1057".to_string(),
                 }],
-                mount_root: "/srv/dasobjectstore".to_string(),
+                mount_root: expected_mount_root,
                 filesystem: dasobjectstore_daemon::PrepareEnclosureFilesystem::Ext4,
                 owner: Some("stephen".to_string()),
                 dry_run: false,
