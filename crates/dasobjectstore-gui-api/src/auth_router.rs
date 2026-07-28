@@ -94,6 +94,18 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
         .merge(federated_operational_router(auth_store))
 }
 
+pub fn federated_gui_api_router_with_public_base_url(
+    auth_store: LocalAuthStore,
+    public_base_url: &str,
+) -> Router {
+    Router::new()
+        .route("/api/v1/host-session", get(federated_host_session))
+        .merge(federated_operational_router_with_public_base_url(
+            auth_store,
+            public_base_url,
+        ))
+}
+
 async fn federated_host_session(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
@@ -243,6 +255,17 @@ pub fn easyconnect_public_router_with_s3_descriptor(
     easyconnect_public_router_with_state(EasyconnectPublicRouteState {
         s3_descriptor,
         ..EasyconnectPublicRouteState::default()
+    })
+}
+
+/// Public pairing routes with an authority-owned external origin and S3 tuple.
+pub fn easyconnect_public_router_with_deployment(
+    public_base_url: String,
+    s3_descriptor: StandaloneS3ConnectionDescriptor,
+) -> Router {
+    easyconnect_public_router_with_state(EasyconnectPublicRouteState {
+        s3_descriptor: Some(s3_descriptor),
+        public_base_url,
     })
 }
 

@@ -15,6 +15,7 @@ dasobjectstore-daemon.workspace = true
 dasobjectstore-gui-api.workspace = true
 dasobjectstore-object-service.workspace = true
 prosopikon-core.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 sha2.workspace = true
 uuid.workspace = true

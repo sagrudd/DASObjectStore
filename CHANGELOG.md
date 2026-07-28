@@ -25,6 +25,8 @@ agreement before landing.
   clients without weakening certificate enrollment to trust-on-first-use.
 - Propagate the configured non-loopback ``public_base_url`` through root and
   product EasyConnect discovery, creation, polling, and browser URLs.
+- Add a validated Monas deployment adapter carrying its authority-owned public
+  HTTPS origin and S3 descriptor without trusting request headers.
 
 ## 0.150.0 - 2026-07-28
 

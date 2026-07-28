@@ -48,12 +48,13 @@ pub use host_auth_adapter::{
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_api_router_with_verifier,
-    monas_dasobjectstore_router, monas_dasobjectstore_router_with_s3_descriptor,
-    monas_dasobjectstore_router_with_verifier,
+    monas_dasobjectstore_router, monas_dasobjectstore_router_with_deployment,
+    monas_dasobjectstore_router_with_s3_descriptor, monas_dasobjectstore_router_with_verifier,
+    monas_dasobjectstore_router_with_verifier_and_deployment,
     monas_dasobjectstore_router_with_verifier_and_s3_descriptor, monas_federated_router,
-    monas_federated_router_with_verifier, synoptikon_federated_router, MonasLiveSessionVerifier,
-    MonasS3ConnectionDescriptor, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
-    MONAS_SESSION_COOKIE,
+    monas_federated_router_with_verifier, synoptikon_federated_router,
+    MonasDasObjectStoreDeployment, MonasLiveSessionVerifier, MonasS3ConnectionDescriptor,
+    SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,

@@ -851,6 +851,7 @@ dependencies = [
  "dasobjectstore-gui-api",
  "dasobjectstore-object-service",
  "prosopikon-core",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

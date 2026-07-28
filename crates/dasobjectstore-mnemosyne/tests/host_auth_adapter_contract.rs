@@ -10,9 +10,10 @@ use dasobjectstore_gui_api::{
 };
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
-    monas_dasobjectstore_api_router_with_verifier, monas_federated_router,
-    monas_federated_router_with_verifier, synoptikon_federated_router, HostSessionAdapterError,
-    MonasHostSessionIssue, MonasLiveSessionVerifier, MonasVerifiedSession, StorageAuthority,
+    monas_dasobjectstore_api_router_with_verifier, monas_dasobjectstore_router_with_deployment,
+    monas_federated_router, monas_federated_router_with_verifier, synoptikon_federated_router,
+    HostSessionAdapterError, MonasDasObjectStoreDeployment, MonasHostSessionIssue,
+    MonasLiveSessionVerifier, MonasS3ConnectionDescriptor, MonasVerifiedSession, StorageAuthority,
     SynoptikonHostRequestAuthentication, SynoptikonIntegratedAcceptedSession,
     SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
     SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, FEDERATED_CSRF_HEADER,
@@ -27,6 +28,57 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
 
 const AUTHORITY_TOKEN: &str = "authority-secret-credential-0001";
+
+#[tokio::test]
+async fn monas_deployment_advertises_authority_owned_non_loopback_origin() {
+    let root = temp_root("monas-easyconnect-deployment");
+    let store = registered_store(&root);
+    let login = store
+        .login_with_session_ttl_seconds("operator", "secret", Some(3_600))
+        .expect("login");
+    let deployment = MonasDasObjectStoreDeployment::new(
+        "https://monas.customer.example:8448",
+        MonasS3ConnectionDescriptor {
+            endpoint_url: "https://s3.customer.example:3900".to_string(),
+            region: "garage".to_string(),
+            addressing_style: "path".to_string(),
+        },
+    )
+    .expect("deployment");
+    let response = monas_dasobjectstore_router_with_deployment(Router::new(), store, deployment)
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/remote/easyconnect/discovery")
+                .header(
+                    COOKIE,
+                    format!("monas_session=operator:{}", login.session_token),
+                )
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+        .await
+        .expect("body");
+    let discovery: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+    assert_eq!(
+        discovery["pairing_create_url"],
+        "https://monas.customer.example:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+    );
+    assert!(!discovery.to_string().contains("127.0.0.1"));
+    assert!(MonasDasObjectStoreDeployment::new(
+        "https://monas.customer.example:8448/path",
+        MonasS3ConnectionDescriptor {
+            endpoint_url: "https://s3.customer.example:3900".to_string(),
+            region: "garage".to_string(),
+            addressing_style: "path".to_string(),
+        },
+    )
+    .is_err());
+    cleanup(&root);
+}
 
 #[tokio::test]
 async fn monas_exposes_only_pairing_create_and_exchange_without_a_session() {

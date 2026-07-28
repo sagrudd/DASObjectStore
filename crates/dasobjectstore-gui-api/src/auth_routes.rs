@@ -44,8 +44,9 @@ use auth_identity_routes::*;
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
-    easyconnect_public_router, easyconnect_public_router_with_s3_descriptor,
-    federated_gui_api_router, gui_api_router_for_host_mode,
+    easyconnect_public_router, easyconnect_public_router_with_deployment,
+    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
+    federated_gui_api_router_with_public_base_url, gui_api_router_for_host_mode,
     gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
     standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,

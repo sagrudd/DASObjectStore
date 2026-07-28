@@ -17,8 +17,8 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    easyconnect_public_router, easyconnect_public_router_with_s3_descriptor,
-    federated_gui_api_router, AuthenticatedLocalPolicySubject, LocalAuthStore,
+    easyconnect_public_router, easyconnect_public_router_with_deployment, federated_gui_api_router,
+    federated_gui_api_router_with_public_base_url, AuthenticatedLocalPolicySubject, LocalAuthStore,
     StandaloneS3ConnectionDescriptor,
 };
 use prosopikon_core::ProsopikonAuthStore;
@@ -36,6 +36,39 @@ pub struct MonasS3ConnectionDescriptor {
     pub endpoint_url: String,
     pub region: String,
     pub addressing_style: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MonasDasObjectStoreDeployment {
+    pub public_base_url: String,
+    pub s3: MonasS3ConnectionDescriptor,
+}
+
+impl MonasDasObjectStoreDeployment {
+    pub fn new(
+        public_base_url: impl Into<String>,
+        s3: MonasS3ConnectionDescriptor,
+    ) -> Result<Self, String> {
+        let public_base_url = public_base_url.into();
+        let valid = reqwest::Url::parse(&public_base_url).is_ok_and(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some()
+                && url.path() == "/"
+                && url.query().is_none()
+                && url.fragment().is_none()
+                && url.username().is_empty()
+                && url.password().is_none()
+        });
+        if !valid {
+            return Err(
+                "Monas DASObjectStore public_base_url must be a clean HTTPS origin".to_string(),
+            );
+        }
+        Ok(Self {
+            public_base_url,
+            s3,
+        })
+    }
 }
 
 impl From<MonasS3ConnectionDescriptor> for StandaloneS3ConnectionDescriptor {
@@ -105,13 +138,29 @@ pub fn monas_dasobjectstore_router(
 pub fn monas_dasobjectstore_router_with_s3_descriptor(
     host_product_routes: Router,
     auth_store: ProsopikonAuthStore,
-    s3_descriptor: MonasS3ConnectionDescriptor,
+    _s3_descriptor: MonasS3ConnectionDescriptor,
 ) -> Router {
     let product_router =
         federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
             .merge(host_product_routes);
+    // Compatibility entry point cannot safely infer the Monas public origin.
+    // Keep discovery available at the documented default and fail exchange
+    // with 503 until the deployment-aware constructor is used.
+    monas_federated_router(product_router, auth_store).merge(easyconnect_public_router())
+}
+
+pub fn monas_dasobjectstore_router_with_deployment(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+    deployment: MonasDasObjectStoreDeployment,
+) -> Router {
+    let product_router = federated_gui_api_router_with_public_base_url(
+        LocalAuthStore::from_prosopikon(auth_store.clone()),
+        &deployment.public_base_url,
+    )
+    .merge(host_product_routes);
     monas_federated_router(product_router, auth_store).merge(
-        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor.into())),
+        easyconnect_public_router_with_deployment(deployment.public_base_url, deployment.s3.into()),
     )
 }
 
@@ -136,12 +185,27 @@ pub fn monas_dasobjectstore_router_with_verifier_and_s3_descriptor(
     host_product_routes: Router,
     auth_store: ProsopikonAuthStore,
     verifier: Arc<dyn MonasLiveSessionVerifier>,
-    s3_descriptor: MonasS3ConnectionDescriptor,
+    _s3_descriptor: MonasS3ConnectionDescriptor,
 ) -> Router {
     let product_router = federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store))
         .merge(host_product_routes);
+    monas_federated_router_with_verifier(product_router, verifier)
+        .merge(easyconnect_public_router())
+}
+
+pub fn monas_dasobjectstore_router_with_verifier_and_deployment(
+    host_product_routes: Router,
+    auth_store: ProsopikonAuthStore,
+    verifier: Arc<dyn MonasLiveSessionVerifier>,
+    deployment: MonasDasObjectStoreDeployment,
+) -> Router {
+    let product_router = federated_gui_api_router_with_public_base_url(
+        LocalAuthStore::from_prosopikon(auth_store),
+        &deployment.public_base_url,
+    )
+    .merge(host_product_routes);
     monas_federated_router_with_verifier(product_router, verifier).merge(
-        easyconnect_public_router_with_s3_descriptor(Some(s3_descriptor.into())),
+        easyconnect_public_router_with_deployment(deployment.public_base_url, deployment.s3.into()),
     )
 }
 

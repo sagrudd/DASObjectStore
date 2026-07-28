@@ -127,6 +127,13 @@ pairing creation, polling, and browser approval URLs on both the root API and
 the ``/products/dasobjectstore`` mount. A returned route cannot substitute
 another origin, and clients continue to reject any cross-origin response.
 
+Monas hosts must supply the equivalent deployment contract explicitly: the
+validated externally reachable Monas HTTPS origin and the public S3 descriptor.
+The adapter never derives either value from ``Host``, forwarding, or origin
+request headers. Legacy adapter constructors that provide only an S3 tuple do
+not enable exchange; they retain default discovery compatibility and return
+service unavailable until the deployment-aware constructor is used.
+
 If certificate trust has not yet been enrolled, obtain the leaf-certificate
 SHA-256 fingerprint through an independent administrator channel, then enrol
 that exact fingerprint before retrying:
