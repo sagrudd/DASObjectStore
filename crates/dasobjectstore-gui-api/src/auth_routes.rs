@@ -124,10 +124,10 @@ use dasobjectstore_daemon::{
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectExchangeConnectionResponse, RemoteEasyconnectExchangePairingRequest,
     RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectSessionPolicy,
-    UnixSocketDaemonTransport,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectS3ConnectionDescriptor,
+    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -947,20 +947,21 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
-        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
-        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
-        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
-        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
-        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
-        IngestControlAction, IngestControlRequest, IngestControlResponse,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
-        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
+        easyconnect_public_router, gui_api_router_for_host_mode, local_standalone_user,
+        standalone_auth_router_with_state, standalone_dashboard_router_with_state,
+        standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
+        standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
+        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
+        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
+        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        RemoteAuthenticateRequest, RemoteEasyconnectExchangePairingRequest, SessionCheckRequest,
         StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
         StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
         StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
@@ -1414,6 +1415,27 @@ mod tests {
         );
 
         cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn public_exchange_fails_before_session_issue_without_deployment_descriptor() {
+        let response = post_json_response(
+            easyconnect_public_router(),
+            "/api/v1/remote/easyconnect/pairings/exchange",
+            &RemoteEasyconnectExchangePairingRequest {
+                pairing_id: "pairing-test".to_string(),
+                exchange_code: "exchange-test".to_string(),
+                client_request_id: Some("request-test".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let encoded = response_json(response).await;
+        assert_eq!(
+            encoded["code"], "s3_connection_descriptor_unavailable",
+            "the adapter must not issue a session whose endpoint would need to be guessed"
+        );
     }
 
     #[tokio::test]

@@ -852,6 +852,8 @@ where
         let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
             &self.remote_easyconnect_session_store_path,
         );
+        let approved_actor = approval.approved_actor.clone();
+        let auth_provider = approval.auth_provider;
         session_store
             .upsert(RemoteEasyconnectPairedSessionRecord {
                 session_id: session_id.clone(),
@@ -870,6 +872,8 @@ where
         Ok(RemoteEasyconnectExchangePairingResponse {
             appliance_id: "standalone-dasobjectstore".to_string(),
             appliance_base_url: "/products/dasobjectstore/api".to_string(),
+            approved_actor,
+            auth_provider,
             session: RemoteEasyconnectSession {
                 session_id: session_id.clone(),
                 issued_at_utc: exchanged_at_utc.to_string(),

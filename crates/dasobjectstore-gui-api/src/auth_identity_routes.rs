@@ -22,6 +22,11 @@ pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) public_base_url: String,
 }
 
+#[derive(Clone, Default)]
+pub(crate) struct EasyconnectPublicRouteState {
+    pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+}
+
 impl StandaloneAuthRouteState {
     pub(super) fn system(auth_store: LocalAuthStore) -> Self {
         Self {
@@ -825,8 +830,9 @@ fn html_escape(value: &str) -> String {
 }
 
 pub(super) async fn easyconnect_exchange_pairing(
+    State(state): State<EasyconnectPublicRouteState>,
     Json(request): Json<RemoteEasyconnectExchangePairingRequest>,
-) -> Result<Json<RemoteEasyconnectExchangePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+) -> Result<Json<RemoteEasyconnectExchangeConnectionResponse>, (StatusCode, Json<AuthRouteError>)> {
     request.validate().map_err(|error| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -834,7 +840,14 @@ pub(super) async fn easyconnect_exchange_pairing(
             error.to_string(),
         )
     })?;
-    crate::daemon_bridge::DaemonBridge::shared_packaged()
+    let s3_descriptor = state.s3_descriptor.ok_or_else(|| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "s3_connection_descriptor_unavailable",
+            "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
+        )
+    })?;
+    let exchange = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
@@ -843,8 +856,16 @@ pub(super) async fn easyconnect_exchange_pairing(
             .map_err(|error| error.to_string())
         })
         .await
-        .map(Json)
-        .map_err(remote_auth_bridge_error)
+        .map_err(remote_auth_bridge_error)?;
+    Ok(Json(RemoteEasyconnectExchangeConnectionResponse {
+        schema_version: "dasobjectstore.remote_easyconnect_exchange.v1".to_string(),
+        exchange,
+        s3: RemoteEasyconnectS3ConnectionDescriptor {
+            endpoint_url: s3_descriptor.endpoint_url,
+            region: s3_descriptor.region,
+            addressing_style: s3_descriptor.addressing_style,
+        },
+    }))
 }
 
 fn validate_loopback_callback(

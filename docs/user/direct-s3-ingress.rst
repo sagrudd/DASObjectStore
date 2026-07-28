@@ -104,9 +104,21 @@ The standalone server configuration at
        "bind_address": "0.0.0.0",
        "port": 3900,
        "legacy_upstream_endpoint": "http://127.0.0.1:3901",
-       "max_concurrent_uploads": 8
+       "max_concurrent_uploads": 8,
+       "public_endpoint_url": "https://objects.appliance.example:3900",
+       "region": "mnemosyne-local",
+       "addressing_style": "path"
      }
    }
+
+The public endpoint, region, and addressing style are an all-or-none,
+operator-owned deployment descriptor. They are required before the public
+EasyConnect exchange can return a session to a remote client. The Web/API
+listener and S3 listener are separate trust boundaries, so DASObjectStore
+never derives this endpoint from the incoming request, guesses a port, or
+rewrites it from ``bind_address``. Use the externally reachable HTTPS S3 URL
+that is covered by the deployed certificate. Addressing style must be
+``path`` or ``virtual``.
 
 Omitting ``s3_ingress`` is backward compatible and resolves to:
 

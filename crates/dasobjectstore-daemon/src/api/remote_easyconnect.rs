@@ -213,8 +213,33 @@ impl RemoteEasyconnectExchangePairingRequest {
 pub struct RemoteEasyconnectExchangePairingResponse {
     pub appliance_id: String,
     pub appliance_base_url: String,
+    pub approved_actor: String,
+    pub auth_provider: RemoteEasyconnectAuthProvider,
     pub session: RemoteEasyconnectSession,
     pub object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
+}
+
+/// Operator-owned S3 connection details returned at the product HTTP boundary.
+///
+/// These values describe the externally reachable object service. Clients must
+/// not derive them from the control-plane listener or assume a default port.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectS3ConnectionDescriptor {
+    pub endpoint_url: String,
+    pub region: String,
+    pub addressing_style: String,
+}
+
+/// Public EasyConnect exchange result, enriched by the product host.
+///
+/// The daemon remains authoritative for the pairing and session transaction;
+/// the hosting adapter adds its deployment-owned S3 descriptor.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectExchangeConnectionResponse {
+    pub schema_version: String,
+    #[serde(flatten)]
+    pub exchange: RemoteEasyconnectExchangePairingResponse,
+    pub s3: RemoteEasyconnectS3ConnectionDescriptor,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -961,24 +986,80 @@ mod tests {
         remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-        RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSessionPolicy, RemoteEasyconnectSessionRenewal,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
-        RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
-        RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
-        REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
-        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
-        REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangeConnectionResponse,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreAccessPolicy,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
+        RemoteEasyconnectSessionRenewal, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, RemoteEasyconnectUploadHandoffMode,
+        RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffResponse,
+        RemoteEasyconnectUploadHandoffState, RemoteEasyconnectUploadSelectionEntry,
+        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
     };
     use crate::auth::DaemonLocalActor;
     use dasobjectstore_core::remote_upload::{
         RemoteUploadBackpressureAction, RemoteUploadBackpressurePolicy,
     };
+
+    #[test]
+    fn public_exchange_envelope_preserves_daemon_result_and_host_descriptor() {
+        let response: RemoteEasyconnectExchangeConnectionResponse =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": "dasobjectstore.remote_easyconnect_exchange.v1",
+                "appliance_id": "appliance-1",
+                "appliance_base_url": "/products/dasobjectstore/api",
+                "approved_actor": "github:12345",
+                "auth_provider": "synoptikon",
+                "session": {
+                    "session_id": "session-1",
+                    "issued_at_utc": "2026-07-28T10:00:00Z",
+                    "expires_at_utc": "2026-07-28T18:00:00Z",
+                    "credentials": {
+                        "access_key_id": "DOSTEXAMPLE",
+                        "secret_access_key": "test-secret",
+                        "session_token": "test-session-token"
+                    },
+                    "renewal": {
+                        "renew_url": "/api/v1/remote/easyconnect/sessions/session-1/renew",
+                        "renew_after_utc": "2026-07-28T17:00:00Z",
+                        "renewal_token": "test-renewal-token"
+                    }
+                },
+                "object_stores": [{
+                    "object_store": "CODEX",
+                    "bucket": "das-code",
+                    "can_read": true,
+                    "can_write": true,
+                    "writer_group": "das-code-writers",
+                    "object_type": "generic",
+                    "control_operations": [],
+                    "allowed_prefixes": []
+                }],
+                "s3": {
+                    "endpoint_url": "https://objects.example.test:9443",
+                    "region": "mnemosyne-local",
+                    "addressing_style": "path"
+                }
+            }))
+            .expect("public exchange response decodes");
+
+        assert_eq!(response.exchange.session.session_id, "session-1");
+        assert_eq!(response.exchange.approved_actor, "github:12345");
+        assert_eq!(
+            response.exchange.auth_provider,
+            RemoteEasyconnectAuthProvider::Synoptikon
+        );
+        assert_eq!(response.exchange.object_stores[0].object_store, "CODEX");
+        assert_eq!(
+            response.s3.endpoint_url,
+            "https://objects.example.test:9443"
+        );
+        assert_eq!(response.s3.addressing_style, "path");
+    }
 
     #[test]
     fn validates_create_pairing_contract() {

@@ -62,10 +62,12 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
                         local_password_authenticator: Arc::new(
                             SystemLocalPasswordAuthenticator::default(),
                         ),
-                        s3_descriptor,
+                        s3_descriptor: s3_descriptor.clone(),
                     },
                 ))
-                .merge(easyconnect_public_router());
+                .merge(easyconnect_public_router_with_state(
+                    EasyconnectPublicRouteState { s3_descriptor },
+                ));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -211,6 +213,10 @@ pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
 /// Pairing creation and one-time exchange routes that do not require a browser
 /// session. Approval is deliberately absent and remains behind host auth.
 pub fn easyconnect_public_router() -> Router {
+    easyconnect_public_router_with_state(EasyconnectPublicRouteState::default())
+}
+
+fn easyconnect_public_router_with_state(state: EasyconnectPublicRouteState) -> Router {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings",
@@ -221,6 +227,7 @@ pub fn easyconnect_public_router() -> Router {
             post(easyconnect_exchange_pairing),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
+        .with_state(state)
 }
 
 pub(crate) fn standalone_easyconnect_router_with_state(
