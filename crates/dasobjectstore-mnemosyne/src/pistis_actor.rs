@@ -295,19 +295,19 @@ mod tests {
         let wrong_authority = PistisActorBoundary {
             authority_id: Uuid::nil(),
         };
-        assert_eq!(
+        assert!(matches!(
             accept_preverified_pistis_actor(&actor, &bindings(), wrong_authority, NOW),
             Err(PistisActorError::WrongAuthority)
-        );
+        ));
 
         let mut wrong_audience = actor.clone();
         wrong_audience.audience = "jenkins".to_owned();
-        assert_eq!(
+        assert!(matches!(
             accept_preverified_pistis_actor(&wrong_audience, &bindings(), boundary(&actor), NOW),
             Err(PistisActorError::WrongAudience)
-        );
+        ));
 
-        assert_eq!(
+        assert!(matches!(
             accept_preverified_pistis_actor(
                 &actor,
                 &bindings(),
@@ -315,7 +315,7 @@ mod tests {
                 actor.actor.session.expires_at_utc.timestamp()
             ),
             Err(PistisActorError::SessionNotCurrent)
-        );
+        ));
     }
 
     #[test]
@@ -324,17 +324,17 @@ mod tests {
         let mut inactive = serde_json::to_value(&actor).expect("serialize");
         inactive["actor"]["principal"]["status"] = json!("locked");
         let inactive = serde_json::from_value(inactive).expect("inactive actor");
-        assert_eq!(
+        assert!(matches!(
             accept_preverified_pistis_actor(&inactive, &bindings(), boundary(&actor), NOW),
             Err(PistisActorError::InactivePrincipal)
-        );
+        ));
 
         let mut mismatch = actor.clone();
         mismatch.actor.session.principal_id = Uuid::nil();
-        assert_eq!(
+        assert!(matches!(
             accept_preverified_pistis_actor(&mismatch, &bindings(), boundary(&actor), NOW),
             Err(PistisActorError::SessionPrincipalMismatch)
-        );
+        ));
 
         let mut malformed = bindings();
         malformed.csrf_binding_sha256 = "raw-secret".to_owned();
