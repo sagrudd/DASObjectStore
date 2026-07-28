@@ -69,6 +69,10 @@ pub use dashboard::{
     IngestProgressView, IngestQueueJobView, IngestQueueView, ObjectStateView, PoolAccessMode,
     PoolStateView, PoolStatusView, QueuePressureView, StorageGroupView, WriterPolicyReadinessView,
 };
+pub use dasobjectstore_daemon::runtime::{
+    appliance_identity_path, ensure_appliance_identity, load_appliance_identity,
+    ApplianceIdentityRecord,
+};
 pub use endpoints::{
     EndpointBindingReadinessView, EndpointBindingView, EndpointInventoryItemView,
     EndpointInventoryView, EndpointKindView, EndpointValidationStateView, EndpointValidationView,

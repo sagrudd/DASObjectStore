@@ -8,6 +8,21 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.151.0 - 2026-07-28
+
+- Separate the stable daemon-owned appliance identity from replaceable HTTPS
+  certificates and preserve it across package reinstall, service restart and
+  certificate renewal.
+- Validate enrolled domain-cert certificate chains, server EKU, validity and
+  DNS/IP SAN before automatically rotating a renewed leaf/SPKI binding, then
+  require the authenticated API to prove appliance-identity continuity.
+- Add the single-command ``dasobjectstore-remote trust repair`` recovery
+  workflow and appliance-local ``dasobjectstore trust identity --json``
+  evidence, with atomic rollback, real certificate details and fail-closed
+  handling of replacement, wrong-CA, wrong-SAN and invalid certificates.
+- Retire obsolete endpoint-alias session generations after authentication and
+  bind the surviving session to the exact committed trust generation.
+
 ## 0.150.0 - 2026-07-28
 
 - Make direct-S3 multipart completion survive gateway transport loss and

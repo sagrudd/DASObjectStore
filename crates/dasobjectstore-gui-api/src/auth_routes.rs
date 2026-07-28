@@ -1367,6 +1367,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let response = app
@@ -1387,6 +1388,7 @@ mod tests {
             encoded["auth_providers"],
             serde_json::json!(["standalone_local_user"])
         );
+        assert_eq!(encoded["appliance_id"], "das-appliance-test");
         assert_eq!(encoded["default_session_lifetime_seconds"], 28_800);
         assert_eq!(
             encoded["session_policy"]["renewal_requires_password_reauthentication"],
@@ -1407,6 +1409,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let response = app
@@ -1432,6 +1435,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let response = get_response_with_session(
@@ -1458,6 +1462,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let response = get_response_with_session(
@@ -1486,6 +1491,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let response = get_response_with_session(
@@ -1511,6 +1517,7 @@ mod tests {
         let app = standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
+            appliance_id: "das-appliance-test".to_string(),
         });
 
         let encoded = get_json_with_session::<serde_json::Value>(

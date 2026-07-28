@@ -5,6 +5,15 @@ pub(super) fn run_authenticate(
     args: &AuthenticateArgs,
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
+    run_authenticate_with_identity_policy(cli, args, writer, false)
+}
+
+pub(super) fn run_authenticate_with_identity_policy(
+    cli: &RemoteCli,
+    args: &AuthenticateArgs,
+    writer: &mut impl Write,
+    allow_confirmed_identity_replacement: bool,
+) -> Result<(), RemoteRunError> {
     let username = args
         .username()
         .map(ToOwned::to_owned)
@@ -12,7 +21,7 @@ pub(super) fn run_authenticate(
         .ok_or_else(|| {
             RemoteRunError::UploadRouting("username is required; pass --username".to_string())
         })?;
-    let trust = prepare_appliance_trust(
+    let trust_result = prepare_appliance_trust(
         args.host_or_ip(),
         args.https_port(),
         args.ca_cert(),
@@ -43,7 +52,42 @@ pub(super) fn run_authenticate(
                 "y" | "yes"
             ))
         },
-    )?;
+    );
+    let mut trust = match trust_result {
+        Ok(trust) => trust,
+        Err(error) => {
+            if let (Ok(Some(existing)), Ok(presented)) = (
+                crate::trust::load_trust(args.host_or_ip(), args.https_port()),
+                crate::trust::probe_certificate(args.host_or_ip(), args.https_port()),
+            ) {
+                if existing.fingerprint_sha256 != presented.fingerprint_sha256 {
+                    return Err(RemoteRunError::Config(RemoteConfigError::Integrity {
+                        code: "certificate_binding_mismatch",
+                        message: format!(
+                            "{}\nOld SHA-256: {}\nNew SHA-256: {}\n{}",
+                            crate::trust::format_certificate_details(
+                                args.host_or_ip(),
+                                args.https_port(),
+                                &presented,
+                                Some(&existing.appliance_id),
+                            ),
+                            existing.fingerprint_sha256,
+                            presented.fingerprint_sha256,
+                            error
+                        ),
+                        remediation: format!(
+                            "independently verify with `dasobjectstore trust identity --json` on the appliance, then run `dasobjectstore-remote trust repair {} --username {} --store {}{}`",
+                            args.host_or_ip(),
+                            username,
+                            args.object_store(),
+                            if args.set_s3_config() { " --set-s3-config" } else { "" }
+                        ),
+                    }));
+                }
+            }
+            return Err(error.into());
+        }
+    };
     if trust.newly_enrolled {
         eprintln!(
             "Enrolled appliance identity: {} ({})",
@@ -71,16 +115,63 @@ pub(super) fn run_authenticate(
         .as_deref()
         .is_some_and(|appliance_id| appliance_id != context.appliance_id)
     {
-        return Err(RemoteRunError::Config(RemoteConfigError::Integrity {
-            code: "certificate_binding_mismatch",
-            message: "the authenticated appliance identity does not match enrolled TLS trust"
-                .to_string(),
-            remediation: format!(
-                "dasobjectstore-remote trust inspect {} --https-port {} --json",
-                args.host_or_ip(),
-                args.https_port()
-            ),
-        }));
+        if !allow_confirmed_identity_replacement {
+            let record = crate::trust::load_trust(args.host_or_ip(), args.https_port())?
+                .ok_or_else(|| {
+                    RemoteRunError::UploadRouting(
+                        "certificate_binding_mismatch: enrolled trust disappeared".to_string(),
+                    )
+                })?;
+            return Err(RemoteRunError::Config(RemoteConfigError::Integrity {
+                code: "certificate_binding_mismatch",
+                message: format!(
+                    "authenticated appliance identity {} does not match enrolled identity {}",
+                    context.appliance_id, record.appliance_id
+                ),
+                remediation: format!(
+                    "verify locally with `dasobjectstore trust identity --json`, then run `dasobjectstore-remote trust repair {} --username {} --store {}{}`",
+                    args.host_or_ip(),
+                    username,
+                    args.object_store(),
+                    if args.set_s3_config() { " --set-s3-config" } else { "" }
+                ),
+            }));
+        }
+        let existing =
+            crate::trust::load_trust(args.host_or_ip(), args.https_port())?.ok_or_else(|| {
+                RemoteRunError::UploadRouting(
+                    "certificate_binding_mismatch: enrolled trust disappeared".to_string(),
+                )
+            })?;
+        let mut replacement = existing.clone();
+        replacement.appliance_id = context.appliance_id.clone();
+        let path = crate::trust::trust_record_path(args.host_or_ip(), args.https_port())?;
+        crate::trust::replace_trust_if_current(&path, &existing, &replacement)?;
+        trust.appliance_id = Some(context.appliance_id.clone());
+    }
+    let mut prior_trust_record = crate::trust::load_trust(args.host_or_ip(), args.https_port())?;
+    if prior_trust_record.is_none() {
+        if let Some(mut enrollment) = trust.pending_replacement.take() {
+            enrollment.appliance_id = context.appliance_id.clone();
+            crate::trust::persist_trust(&enrollment)?;
+            trust.appliance_id = Some(context.appliance_id.clone());
+            prior_trust_record = Some(enrollment);
+        }
+    }
+    let mut rotated_trust = false;
+    if let (Some(existing), Some(replacement)) = (
+        prior_trust_record.as_ref(),
+        trust.pending_replacement.as_ref(),
+    ) {
+        let path = crate::trust::trust_record_path(args.host_or_ip(), args.https_port())?;
+        crate::trust::replace_trust_if_current(&path, existing, replacement)?;
+        rotated_trust = true;
+        eprintln!(
+            "Verified CA-backed certificate renewal for appliance {}\nOld SHA-256: {}\nNew SHA-256: {}",
+            replacement.appliance_id,
+            existing.fingerprint_sha256,
+            replacement.fingerprint_sha256
+        );
     }
     let profile_name = args
         .s3_profile()
@@ -154,6 +245,16 @@ pub(super) fn run_authenticate(
             if let Some(backup) = &aws_backup {
                 restore_profile_state(backup)?;
             }
+            if rotated_trust {
+                if let (Some(previous), Some(current)) = (
+                    prior_trust_record.as_ref(),
+                    trust.pending_replacement.as_ref(),
+                ) {
+                    let path =
+                        crate::trust::trust_record_path(args.host_or_ip(), args.https_port())?;
+                    crate::trust::replace_trust_if_current(&path, current, previous)?;
+                }
+            }
             return Err(error);
         }
     };
@@ -202,6 +303,7 @@ pub(super) fn authenticated_context_config(
         config.s3_profiles.push(association);
     }
     let appliance_id = context.appliance_id.clone();
+    let control_base_url = format!("https://{}:{}", context.appliance_host, https_port);
     config.default_appliance_id = Some(appliance_id.clone());
     let session = RemoteUploadSession {
         session_id: context.session_id.clone(),
@@ -230,13 +332,13 @@ pub(super) fn authenticated_context_config(
     // Host aliases and historical endpoint spellings cannot create a second
     // logical session. The server-returned appliance/store identities are the
     // sole replacement key.
-    config
-        .session_bindings
-        .retain(|binding| binding.store_id != context.object_store);
+    config.session_bindings.retain(|binding| {
+        !(binding.appliance_id == appliance_id && binding.store_id == context.object_store)
+    });
     config.session_bindings.push(RemoteSessionBinding {
         appliance_id: appliance_id.clone(),
         store_id: context.object_store.clone(),
-        control_base_url: format!("https://{}:{}", context.appliance_host, https_port),
+        control_base_url: control_base_url.clone(),
         s3_endpoint_url: context.endpoint_url.clone(),
         bucket: context.bucket.clone(),
         region: context.region.clone(),

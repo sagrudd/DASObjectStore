@@ -16,7 +16,7 @@ use crate::cli::{
     StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
     StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
     StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
-    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs,
+    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs, TrustCommand,
 };
 mod application_auth;
 mod command_handlers;
@@ -53,6 +53,7 @@ mod storage_lifecycle;
 mod store_read;
 mod store_write;
 mod subobject;
+mod trust_identity;
 mod workspace;
 
 use self::performance_direct_hdd::benchmark_direct_hdd;
@@ -101,6 +102,7 @@ use self::command_handlers::{
 };
 #[cfg(feature = "debug-commands")]
 use self::command_handlers::{run_pool_mark_clean, run_pool_mark_dirty};
+use self::trust_identity::run_trust_identity;
 use self::workspace::run_workspace;
 
 use self::health::run_health;
@@ -355,6 +357,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             ObjectCommand::Export(args) => run_object_export(args, writer),
             ObjectCommand::Inspect(args) => run_object_inspect(args, writer),
             ObjectCommand::Put(args) => run_object_put(args, writer),
+        },
+        Some(Command::Trust(args)) => match args.command() {
+            TrustCommand::Identity(args) => run_trust_identity(args, writer),
         },
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),

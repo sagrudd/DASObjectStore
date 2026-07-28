@@ -119,6 +119,8 @@ pub enum TrustCommand {
     Remove(TrustRemoveArgs),
     /// Replace a changed certificate using an independently verified fingerprint.
     Rotate(TrustRotateArgs),
+    /// Repair certificate trust, renew the session, and optionally configure S3.
+    Repair(TrustRepairArgs),
 }
 
 #[derive(Debug, Args)]
@@ -184,6 +186,57 @@ impl TrustRotateArgs {
     }
     pub fn trust_fingerprint(&self) -> &str {
         &self.trust_fingerprint
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct TrustRepairArgs {
+    host_or_ip: String,
+    #[arg(long, default_value_t = crate::authenticate::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    #[arg(long)]
+    username: Option<String>,
+    #[arg(long)]
+    store: String,
+    #[arg(long)]
+    set_s3_config: bool,
+    #[arg(long, requires = "set_s3_config")]
+    s3_profile: Option<String>,
+    #[arg(long, requires = "set_s3_config")]
+    force: bool,
+    #[arg(long, requires = "set_s3_config")]
+    no_verify_s3: bool,
+}
+
+impl TrustRepairArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+    pub fn store(&self) -> &str {
+        &self.store
+    }
+    pub fn as_authenticate_args(&self) -> AuthenticateArgs {
+        AuthenticateArgs {
+            host_or_ip: self.host_or_ip.clone(),
+            object_store: self.store.clone(),
+            https_port: self.https_port,
+            username: self.username.clone(),
+            ca_cert: None,
+            tls_server_name: None,
+            trust_fingerprint: None,
+            session_lifetime_seconds: None,
+            json: false,
+            set_s3_config: self.set_s3_config,
+            s3_profile: self.s3_profile.clone(),
+            force: self.force,
+            no_verify_s3: self.no_verify_s3,
+        }
     }
 }
 
@@ -989,6 +1042,29 @@ mod tests {
             panic!("expected trust command");
         };
         assert!(matches!(args.command(), TrustCommand::Rotate(_)));
+
+        let repair = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "repair",
+            "192.168.1.192",
+            "--username",
+            "stephen",
+            "--store",
+            "epic_collection",
+            "--set-s3-config",
+        ])
+        .expect("trust repair parses");
+        let RemoteCommand::Trust(args) = repair.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Repair(args) = args.command() else {
+            panic!("expected repair command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.192");
+        assert_eq!(args.store(), "epic_collection");
+        assert_eq!(args.username(), Some("stephen"));
+        assert!(args.as_authenticate_args().set_s3_config());
     }
 
     #[test]

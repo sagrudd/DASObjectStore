@@ -785,6 +785,15 @@ where
         exchanged_at_utc: &str,
     ) -> Result<RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectExchangeDispatchError>
     {
+        let state_dir = self
+            .remote_easyconnect_session_store_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                message: "remote EasyConnect session state has no appliance state root".to_string(),
+            })?;
+        let appliance_identity = crate::runtime::ensure_appliance_identity(state_dir)
+            .map_err(RemoteEasyconnectExchangeDispatchError::ApplianceIdentity)?;
         let pairing_store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
@@ -868,7 +877,7 @@ where
             .map_err(RemoteEasyconnectExchangeDispatchError::SessionStore)?;
 
         Ok(RemoteEasyconnectExchangePairingResponse {
-            appliance_id: "standalone-dasobjectstore".to_string(),
+            appliance_id: appliance_identity.appliance_id,
             appliance_base_url: "/products/dasobjectstore/api".to_string(),
             session: RemoteEasyconnectSession {
                 session_id: session_id.clone(),
