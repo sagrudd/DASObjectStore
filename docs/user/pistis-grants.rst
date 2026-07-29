@@ -74,3 +74,40 @@ registries.
 Approval fails closed for a missing, inactive, read-only, duplicate,
 stale-revision, wrong-authority, wrong-principal, substituted, unknown, or
 non-S3-exported grant. Existing standalone PAM/OS policy remains independent.
+
+Bare-earth evaluation
+---------------------
+
+Never reuse a grant registry created for an older Prosopikon authority. The
+isolated evaluation keeps its compare-and-swap policy below the same private
+root as the fresh authority:
+
+.. code-block:: console
+
+   install -d -m 0700 "$HOME/.mnemosyne/pistis-evaluation/das"
+   /usr/local/libexec/mnemosyne/pistis-evaluation/dasobjectstore \
+     pistis-grant inspect \
+     --grant-registry \
+       "$HOME/.mnemosyne/pistis-evaluation/das/pistis-grants.json"
+   /usr/local/libexec/mnemosyne/pistis-evaluation/dasobjectstore \
+     pistis-grant grant \
+     --authority \
+       "$HOME/.mnemosyne/pistis-evaluation/authority/prosopikon.sqlite3" \
+     --email stephen@mnemosyne.co.uk \
+     --grant-registry \
+       "$HOME/.mnemosyne/pistis-evaluation/das/pistis-grants.json" \
+     --store-registry /var/lib/dasobjectstore/stores.json \
+     --expected-revision 0 \
+     --object-store epic_collection \
+     --read --write
+
+The first command reports revision 0 without creating a registry. Run the
+grant only after personally commissioning the fresh authority and confirming
+``epic_collection`` in the live ObjectStore registry. The result must contain
+the new authority and principal UUIDs, revision 1, read and write permission,
+and no email selector. Keep the resulting file mode ``0600``.
+
+The evaluation's parallel TLS endpoint uses port ``3902`` and the separately
+prepared development certificate. It does not modify or replace the live
+port-3900 listener. This policy preparation still grants no session: Monas
+requires a completed, audience-bound Pistis enrolment and authentication.

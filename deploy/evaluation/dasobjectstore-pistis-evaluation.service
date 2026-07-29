@@ -1,0 +1,38 @@
+[Unit]
+Description=DASObjectStore TLS S3 endpoint for the Pistis development evaluation
+Documentation=https://github.com/sagrudd/DASObjectStore/blob/main/docs/user/direct-s3-ingress.rst
+After=network-online.target dasobjectstored.service
+Wants=network-online.target
+Requires=dasobjectstored.service
+
+[Service]
+Type=simple
+User=stephen
+Group=stephen
+UMask=0077
+ExecStartPre=/usr/bin/test -f /home/stephen/.mnemosyne/pistis-evaluation/das/server.json
+ExecStart=/usr/local/libexec/mnemosyne/pistis-evaluation/dasobjectstore-server --config /home/stephen/.mnemosyne/pistis-evaluation/das/server.json
+Restart=no
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadOnlyPaths=/usr/local/libexec/mnemosyne/pistis-evaluation
+
+# Deliberately no [Install] section. This parallel endpoint is attended,
+# disposable, and must not replace or alter the port-3900 appliance service.

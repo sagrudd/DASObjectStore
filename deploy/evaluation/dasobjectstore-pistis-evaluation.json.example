@@ -1,0 +1,27 @@
+{
+  "bind_address": "127.0.0.1",
+  "https_port": 8740,
+  "public_base_url": "https://REPLACE_HOSTNAME:8740",
+  "product_root": "/opt/dasobjectstore",
+  "authentication": {
+    "authority": "local_user",
+    "session_ttl_seconds": 3600
+  },
+  "tls": {
+    "certificate_path": "/home/REPLACE_USER/.mnemosyne/pistis-evaluation/tls/server.crt",
+    "private_key_path": "/home/REPLACE_USER/.mnemosyne/pistis-evaluation/tls/server.key"
+  },
+  "application_mtls": {
+    "enabled": false
+  },
+  "s3_ingress": {
+    "mode": "direct_gateway",
+    "bind_address": "0.0.0.0",
+    "port": 3902,
+    "legacy_upstream_endpoint": "http://127.0.0.1:3901",
+    "max_concurrent_uploads": 8,
+    "public_endpoint_url": "https://REPLACE_HOSTNAME:3902",
+    "region": "garage",
+    "addressing_style": "path"
+  }
+}

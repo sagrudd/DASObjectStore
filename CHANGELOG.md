@@ -8,6 +8,8 @@ agreement before landing.
 
 ## Unreleased
 
+- Add an isolated, static evaluation service and configuration for a parallel
+  TLS S3 listener, plus the fresh-authority Pistis grant procedure.
 - Advance the exact Prosopikon pin to the bare-earth authority candidate whose
   atomic enrolment transaction makes the committed device immediately
   resolvable by Monas.
