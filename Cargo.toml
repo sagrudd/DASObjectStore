@@ -46,8 +46,8 @@ gloo-timers = "0.3.0"
 flate2 = "1.1.5"
 js-sys = "0.3.83"
 plist = "1"
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "0b570e83d5edab786201341b7b319f1ce3479011" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "0b570e83d5edab786201341b7b319f1ce3479011" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e7dc74fd061fc01bfa401d11b11cfe42bc135677" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e7dc74fd061fc01bfa401d11b11cfe42bc135677" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
