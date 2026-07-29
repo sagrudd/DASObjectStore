@@ -4566,7 +4566,11 @@ mod tests {
                 .expect("authoritative appliance identity")
                 .appliance_id
         );
-        assert_eq!(exchange.session.expires_at_utc, "2026-07-10T00:20:00Z");
+        assert_eq!(exchange.session.expires_at_utc, "2026-07-09T16:30:00Z");
+        assert_eq!(
+            exchange.session.renewal.renew_after_utc,
+            "2026-07-09T16:25:00Z"
+        );
         assert_ne!(exchange.session.credentials.access_key_id, "DOSMANAGEDKEY");
         assert_ne!(
             exchange.session.credentials.secret_access_key,

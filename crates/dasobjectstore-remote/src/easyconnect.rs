@@ -760,7 +760,7 @@ mod tests {
             "appliance_id": "appliance-1",
             "appliance_base_url": "/products/dasobjectstore/api",
             "approved_actor": "github:12345",
-            "auth_provider": "synoptikon",
+            "auth_provider": "pistis",
             "session": {
                 "session_id": "session-1",
                 "issued_at_utc": "2026-07-28T10:00:00Z",

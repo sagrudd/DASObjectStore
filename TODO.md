@@ -28,6 +28,10 @@ requirement unless the dashboard links it.
 
 ## Authoritative MVP Release-Candidate Dashboard
 
+- [ ] Split EasyConnect pairing/session transactions from application upload
+  handling and remove the reviewed temporary module-size exception
+  ([issue #18](https://github.com/sagrudd/DASObjectStore/issues/18)).
+
 Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder

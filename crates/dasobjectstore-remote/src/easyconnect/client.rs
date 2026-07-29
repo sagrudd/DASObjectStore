@@ -2,7 +2,8 @@ use super::*;
 use dasobjectstore_daemon::{
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangeConnectionResponse,
-    RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectPairingState,
+    RemoteEasyconnectPairingStatusResponse,
 };
 use reqwest::blocking::Client;
 use serde::Serialize;
@@ -93,7 +94,18 @@ where
     if options.open_browser {
         launcher.open(&pairing.browser_login_url)?;
     }
-    let callback = wait_for_pairing_callback(&listener, options.timeout)?;
+    let callback = wait_for_pairing_callback_or_poll(
+        &listener,
+        &transport.client,
+        &transport_url(
+            &contract.appliance_base_url,
+            &transport.base_url,
+            &pairing.polling_url,
+            "polling_url",
+        )?,
+        &pairing.pairing_id,
+        options.timeout,
+    )?;
     if callback.pairing_id != pairing.pairing_id {
         return Err(RemoteEasyconnectPairingError::Protocol(
             "loopback callback pairing ID did not match the created pairing".to_string(),
@@ -132,6 +144,79 @@ where
     })
 }
 
+fn wait_for_pairing_callback_or_poll(
+    listener: &TcpListener,
+    client: &Client,
+    polling_url: &str,
+    pairing_id: &str,
+    timeout: Duration,
+) -> Result<RemoteEasyconnectPairingResult, RemoteEasyconnectPairingError> {
+    let callback_listener = listener.try_clone()?;
+    let callback_pairing_id = pairing_id.to_string();
+    let polling_pairing_id = pairing_id.to_string();
+    let polling_url = polling_url.to_string();
+    let polling_client = client.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let callback_sender = sender.clone();
+    std::thread::spawn(move || {
+        let result = wait_for_pairing_callback(&callback_listener, timeout).and_then(|result| {
+            if result.pairing_id == callback_pairing_id {
+                Ok(result)
+            } else {
+                Err(RemoteEasyconnectPairingError::Protocol(
+                    "loopback callback pairing ID did not match the created pairing".to_string(),
+                ))
+            }
+        });
+        let _ = callback_sender.send(result);
+    });
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            match get_json::<RemoteEasyconnectPairingStatusResponse>(&polling_client, &polling_url)
+            {
+                Ok(status)
+                    if status.pairing_id == polling_pairing_id
+                        && status.state == RemoteEasyconnectPairingState::Approved =>
+                {
+                    let result = status
+                        .exchange_code
+                        .filter(|code| !code.is_empty())
+                        .map(|exchange_code| RemoteEasyconnectPairingResult {
+                            pairing_id: polling_pairing_id.clone(),
+                            exchange_code,
+                        })
+                        .ok_or_else(|| {
+                            RemoteEasyconnectPairingError::Protocol(
+                                "approved polling response omitted the exchange capability"
+                                    .to_string(),
+                            )
+                        });
+                    let _ = sender.send(result);
+                    return;
+                }
+                Ok(status)
+                    if matches!(
+                        status.state,
+                        RemoteEasyconnectPairingState::Expired
+                            | RemoteEasyconnectPairingState::Exchanged
+                    ) =>
+                {
+                    let _ = sender.send(Err(RemoteEasyconnectPairingError::Protocol(
+                        "pairing became unusable before exchange".to_string(),
+                    )));
+                    return;
+                }
+                Ok(_) | Err(_) => std::thread::sleep(Duration::from_millis(250)),
+            }
+        }
+        let _ = sender.send(Err(RemoteEasyconnectPairingError::PairingTimedOut));
+    });
+    receiver
+        .recv_timeout(timeout + Duration::from_secs(1))
+        .map_err(|_| RemoteEasyconnectPairingError::PairingTimedOut)?
+}
+
 pub(super) fn validate_requested_store(
     requested: Option<&str>,
     grants: &[dasobjectstore_daemon::RemoteEasyconnectObjectStoreGrant],
@@ -154,7 +239,8 @@ pub(super) fn validate_exchange_envelope(
         ));
     }
     let exchange = &response.exchange;
-    if exchange.appliance_id.trim().is_empty()
+    if exchange.auth_provider != dasobjectstore_daemon::RemoteEasyconnectAuthProvider::Pistis
+        || exchange.appliance_id.trim().is_empty()
         || exchange.approved_actor.trim().is_empty()
         || exchange.session.session_id.trim().is_empty()
         || exchange.session.credentials.access_key_id.trim().is_empty()

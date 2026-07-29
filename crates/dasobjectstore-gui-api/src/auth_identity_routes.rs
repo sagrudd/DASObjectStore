@@ -1,9 +1,14 @@
 //! Standalone local authentication and EasyConnect route handlers.
 
 use super::*;
+
+mod easyconnect_approval_page;
 use dasobjectstore_daemon::{
     RemoteEasyconnectApprovalContext, RemoteEasyconnectPairingStatusRequest,
     RemoteEasyconnectPairingStatusResponse,
+};
+pub(super) use easyconnect_approval_page::{
+    easyconnect_browser_approval, easyconnect_pairing_status,
 };
 
 #[derive(Clone)]
@@ -30,6 +35,7 @@ pub(crate) struct StandaloneEasyconnectRouteState {
 #[derive(Clone, Default)]
 pub(crate) struct EasyconnectPublicRouteState {
     pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    pub(super) public_base_url: Option<String>,
 }
 
 impl StandaloneAuthRouteState {
@@ -112,9 +118,8 @@ pub(super) async fn login(
         .map_err(auth_route_error)
 }
 
-/// Exchange a registered application's signed proof for a short-lived access
-/// token through the daemon authority. The proof is the request credential;
-/// this route deliberately does not accept a local GUI session token.
+/// Exchange an application's signed proof for a daemon-owned short-lived
+/// token; this route deliberately does not accept a local GUI session token.
 pub(super) async fn exchange_application_access_token(
     Json(request): Json<DaemonApplicationAccessTokenExchangeRequest>,
 ) -> Result<Json<DaemonApplicationAccessTokenExchangeResponse>, (StatusCode, Json<AuthRouteError>)>
@@ -698,6 +703,7 @@ pub(super) async fn easyconnect_auth_context(
 }
 
 pub(super) async fn easyconnect_create_pairing(
+    State(state): State<EasyconnectPublicRouteState>,
     Json(request): Json<RemoteEasyconnectCreatePairingRequest>,
 ) -> Result<Json<RemoteEasyconnectCreatePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
     request.validate().map_err(|error| {
@@ -715,6 +721,13 @@ pub(super) async fn easyconnect_create_pairing(
             "passwordless EasyConnect requires one exact ObjectStore",
         )
     })?;
+    let public_base_url = state.public_base_url.ok_or_else(|| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "easyconnect_public_origin_unavailable",
+            "the appliance has not configured an authoritative public HTTPS origin",
+        )
+    })?;
     let mut response = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
@@ -726,7 +739,8 @@ pub(super) async fn easyconnect_create_pairing(
         .await
         .map_err(remote_auth_bridge_error)?;
     let mut browser_url = reqwest::Url::parse(&format!(
-        "https://pistis.invalid{}",
+        "{}{}",
+        public_base_url.trim_end_matches('/'),
         response.browser_login_url
     ))
     .map_err(|_| {
@@ -740,76 +754,13 @@ pub(super) async fn easyconnect_create_pairing(
         .query_pairs_mut()
         .append_pair("object_store", &requested_object_store)
         .append_pair("expires_at_utc", &response.expires_at_utc);
-    response.browser_login_url = format!(
-        "{}?{}",
-        browser_url.path(),
-        browser_url.query().unwrap_or_default()
+    response.browser_login_url = browser_url.to_string();
+    response.polling_url = format!(
+        "{}{}",
+        public_base_url.trim_end_matches('/'),
+        response.polling_url
     );
     Ok(Json(response))
-}
-
-pub(super) async fn easyconnect_pairing_status(
-    Path(pairing_id): Path<String>,
-) -> Result<Json<RemoteEasyconnectPairingStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
-    let request = RemoteEasyconnectPairingStatusRequest { pairing_id };
-    request.validate().map_err(|error| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_easyconnect_pairing_status",
-            error.to_string(),
-        )
-    })?;
-    crate::daemon_bridge::DaemonBridge::shared_packaged()
-        .call_message(move || {
-            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
-            ))
-            .remote_easyconnect_pairing_status(request)
-            .map_err(|error| error.to_string())
-        })
-        .await
-        .map(Json)
-        .map_err(remote_auth_bridge_error)
-}
-
-pub(super) async fn easyconnect_browser_approval(
-    actor: AuthenticatedGuiActor,
-    Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
-    Query(query): Query<EasyconnectBrowserApprovalQuery>,
-) -> Result<Html<String>, (StatusCode, Json<AuthRouteError>)> {
-    if query.pairing_id.trim().is_empty()
-        || query.object_store.trim().is_empty()
-        || query.expires_at_utc.trim().is_empty()
-    {
-        return Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_easyconnect_approval_page",
-            "pairing, ObjectStore, and expiry are required",
-        ));
-    }
-    let intent = serde_json::to_string(&EasyconnectBrowserApprovalIntent {
-        pairing_id: query.pairing_id.clone(),
-        object_store: query.object_store.clone(),
-    })
-    .map_err(|error| {
-        route_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "easyconnect_approval_render_failed",
-            error.to_string(),
-        )
-    })?;
-    let csrf = serde_json::to_string(&verified.context().csrf_binding_sha256).map_err(|error| {
-        route_error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "easyconnect_approval_render_failed",
-            error.to_string(),
-        )
-    })?;
-    let principal = html_escape(&actor.subject_id);
-    let object_store = html_escape(&query.object_store);
-    Ok(Html(format!(
-        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd>{principal}</dd><dt>ObjectStore</dt><dd>{object_store}</dd></dl><p>This creates one short-lived, ObjectStore-scoped session. No GitHub credential is sent to DASObjectStore.</p><button id="approve" type="button">Approve connection</button><pre id="status" role="status"></pre></main><script>const intent={intent};const csrf={csrf};document.getElementById("approve").onclick=async()=>{{const status=document.getElementById("status");status.textContent="Approving…";const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json","x-dasobjectstore-csrf":csrf}},body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};</script></body></html>"#
-    )))
 }
 
 pub(super) async fn easyconnect_approve_pairing(

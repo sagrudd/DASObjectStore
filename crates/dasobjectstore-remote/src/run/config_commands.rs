@@ -97,6 +97,7 @@ fn install_easyconnect_result(
     let exchange = &outcome.exchange.exchange;
     let auth_authority = match exchange.auth_provider {
         RemoteEasyconnectAuthProvider::StandaloneLocalUser => RemoteAuthAuthority::LocalPassword,
+        RemoteEasyconnectAuthProvider::Pistis => RemoteAuthAuthority::Pistis,
         RemoteEasyconnectAuthProvider::Synoptikon => RemoteAuthAuthority::Synoptikon,
         RemoteEasyconnectAuthProvider::Mneion => RemoteAuthAuthority::Mneion,
     };

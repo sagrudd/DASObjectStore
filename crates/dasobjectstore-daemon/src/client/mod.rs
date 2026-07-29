@@ -1,5 +1,6 @@
 //! Client boundary for callers that submit requests to `dasobjectstored`.
 
+mod easyconnect;
 mod error;
 mod in_process;
 mod profile_s3;
@@ -804,16 +805,6 @@ where
         match self.send(DaemonApiRequest::RemoteEasyconnectCreatePairing(request))? {
             DaemonApiResponse::RemoteEasyconnectCreatePairing(response) => Ok(response),
             response => Err(unexpected("remote_easyconnect_create_pairing", response)),
-        }
-    }
-
-    pub fn remote_easyconnect_pairing_status(
-        &self,
-        request: RemoteEasyconnectPairingStatusRequest,
-    ) -> Result<RemoteEasyconnectPairingStatusResponse, DaemonClientError> {
-        match self.send(DaemonApiRequest::RemoteEasyconnectPairingStatus(request))? {
-            DaemonApiResponse::RemoteEasyconnectPairingStatus(response) => Ok(response),
-            response => Err(unexpected("remote_easyconnect_pairing_status", response)),
         }
     }
 

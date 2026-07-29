@@ -70,30 +70,26 @@ The daemon owns ceremony time and identity:
   independent of the requested remote-session lifetime;
 * approval expiry is derived from daemon pairing state and the verified host
   session, never from a query parameter or approval JSON field;
-* an optional client request identifier is an idempotency key bound to the
-  canonical creation request, and reuse with different input is rejected; and
+* the resulting remote session is clamped to the remaining verified host
+  session lifetime;
 * the exact requested ObjectStore cannot be changed during approval or
   exchange.
 
-Approval and exchange use one durable transaction journal rather than
+Approval and exchange use a prepare/persist/commit sequence rather than
 competing pairing and session state machines.  Exchange first prepares and
 persists the remote session, its exact grant, credential generation, audit
 linkage, and response identity.  Only then may the pairing become consumed.
-The durable transition atomically links both records where the persistence
-engine permits it; otherwise a journaled prepare/commit protocol makes recovery
-converge to the same result.  A retry with the same valid one-time exchange
-capability returns the already committed session result, subject to a short
-bounded recovery window, and never issues a second session.  A wrong,
-expired, or replayed capability cannot reveal or replace the committed result.
-Restart recovery completes or rolls back an interrupted prepare deterministically.
+The session is keyed by pairing identifier, so retry after interruption cannot
+issue a second session.  A wrong, expired, or replayed capability cannot
+replace the committed result.
 
-Pairing creation returns a separate high-entropy poll capability.  A bounded
-poll endpoint reports only pending, approved, denied, expired, or exchanged
-state and releases the exchange result only to the matching poll capability.
+The high-entropy pairing identifier is also the poll capability.  A bounded
+poll endpoint reports only pending, approved, expired, or exchanged state and
+releases the one-time exchange capability only to its holder.
 The CLI prefers the loopback form-POST callback, never places the exchange
 secret in a URL, and falls back to bounded polling when callback binding or
-delivery is unavailable.  Polling uses a deadline, capped exponential
-backoff, and explicit cancellation.  Callback and polling must converge on the
+delivery is unavailable.  Polling uses a deadline and bounded intervals.
+Callback and polling must converge on the
 same durable exchange transaction.
 
 Consequences

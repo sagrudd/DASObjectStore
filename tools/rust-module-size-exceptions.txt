@@ -4,4 +4,5 @@
 crates/dasobjectstore-daemon/src/runtime/capacity_provider.rs
 crates/dasobjectstore-daemon/src/runtime/ingest_files.rs
 crates/dasobjectstore-daemon/src/runtime/profile_s3.rs
+crates/dasobjectstore-daemon/src/server/request_handler/easyconnect.rs
 crates/dasobjectstore-daemon/src/server/request_handler/service.rs

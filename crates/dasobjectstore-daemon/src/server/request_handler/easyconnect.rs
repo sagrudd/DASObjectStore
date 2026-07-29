@@ -845,7 +845,7 @@ where
                 },
             )
         })?;
-        let lifetime_seconds = resolve_remote_easyconnect_session_lifetime_seconds(
+        let requested_lifetime_seconds = resolve_remote_easyconnect_session_lifetime_seconds(
             pairing.requested_session_lifetime_seconds,
         )
         .map_err(
@@ -853,6 +853,31 @@ where
                 message: error.to_string(),
             },
         )?;
+        let exchanged_at_seconds =
+            dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds(exchanged_at_utc)
+                .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidClock {
+                    value: exchanged_at_utc.to_string(),
+                })?;
+        let host_expiry_seconds = dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds(
+            &approval.context.host_session_expires_at_utc,
+        )
+        .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+            message: "Pistis host-session expiry was not canonical UTC".to_string(),
+        })?;
+        let host_remaining_seconds = u64::try_from(
+            host_expiry_seconds
+                .checked_sub(exchanged_at_seconds)
+                .filter(|remaining| *remaining >= 60)
+                .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+                    message:
+                        "Pistis host session has insufficient remaining lifetime for EasyConnect"
+                            .to_string(),
+                })?,
+        )
+        .map_err(|_| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+            message: "Pistis host-session lifetime was invalid".to_string(),
+        })?;
+        let lifetime_seconds = requested_lifetime_seconds.min(host_remaining_seconds);
         let renew_after_offset = remote_easyconnect_renew_after_offset_seconds(lifetime_seconds)
             .map_err(
                 |error| RemoteEasyconnectExchangeDispatchError::InvalidRequest {

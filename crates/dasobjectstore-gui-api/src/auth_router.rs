@@ -56,7 +56,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone(), public_base_url)
+            let router = federated_operational_router(auth_store.clone(), public_base_url.clone())
                 .merge(standalone_session_auth_router_with_state(
                     StandaloneAuthRouteState {
                         auth_store,
@@ -66,7 +66,10 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
                         s3_descriptor: s3_descriptor.clone(),
                     },
                 ))
-                .merge(easyconnect_public_router_with_s3_descriptor(s3_descriptor));
+                .merge(easyconnect_public_router_with_config(
+                    s3_descriptor,
+                    public_base_url,
+                ));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -221,13 +224,20 @@ pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
 /// Pairing creation and one-time exchange routes that do not require a browser
 /// session. Approval is deliberately absent and remains behind host auth.
 pub fn easyconnect_public_router() -> Router {
-    easyconnect_public_router_with_s3_descriptor(None)
+    easyconnect_public_router_with_config(None, None)
 }
 
 /// Public create, status, and exchange routes with a deployment-owned S3
 /// descriptor. Exchange fails closed when the descriptor is absent.
 pub fn easyconnect_public_router_with_s3_descriptor(
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+) -> Router {
+    easyconnect_public_router_with_config(s3_descriptor, None)
+}
+
+pub fn easyconnect_public_router_with_config(
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
 ) -> Router {
     Router::new()
         .route(
@@ -243,7 +253,10 @@ pub fn easyconnect_public_router_with_s3_descriptor(
             get(easyconnect_pairing_status),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
-        .with_state(EasyconnectPublicRouteState { s3_descriptor })
+        .with_state(EasyconnectPublicRouteState {
+            s3_descriptor,
+            public_base_url,
+        })
 }
 
 /// Pistis approval routes that must be mounted behind a host-verified actor and
