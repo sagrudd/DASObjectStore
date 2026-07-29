@@ -71,9 +71,27 @@ The daemon owns ceremony time and identity:
 * approval expiry is derived from daemon pairing state and the verified host
   session, never from a query parameter or approval JSON field;
 * the resulting remote session is clamped to the remaining verified host
-  session lifetime;
+  session lifetime, and that immutable authority expiry is persisted with the
+  session and caps every later renewal;
 * the exact requested ObjectStore cannot be changed during approval or
   exchange.
+
+A persisted Pistis session that predates the immutable authority-expiry field
+must fail closed after restart; it cannot be renewed or exposed as an active
+storage credential.  Legacy standalone local-user sessions retain their
+existing renewal behaviour because they do not originate in a federated host
+session.
+
+Online host-authority revocation during renewal requires a separately reviewed
+daemon-to-authority liveness interface.  The current typed host verifier accepts
+the complete request-time host context and is not available to the public
+renewal-token route; the persisted authority, principal, and session identifiers
+are insufficient to reconstruct it.  This ADR does not authorize a synthetic
+context or a second session authority.  Before online revocation is implemented,
+an accepted amendment must define a narrow liveness query keyed by the immutable
+authority, principal, and host-session identifiers, its authenticated local
+transport, availability policy, audit binding, and deterministic fail-closed
+behaviour.
 
 Approval and exchange use a prepare/persist/commit sequence rather than
 competing pairing and session state machines.  Exchange first prepares and

@@ -276,6 +276,7 @@ fn seed_session(path: &Path) {
             principal_id: "synoptikon".to_string(),
             approved_actor: "synoptikon".to_string(),
             authority_session_id: "authority-session-1".to_string(),
+            originating_authority_expires_at_utc: None,
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
             correlation_id: "correlation-1".to_string(),
             audit_identity: "standalone:synoptikon".to_string(),

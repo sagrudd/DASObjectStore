@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::{
     ApplicationObjectDeleteOutcome, ApplicationObjectDeleteReason, ApplicationObjectDeleteRequest,
-    ApplicationObjectDeleteResponse, CapacityAdmissionDecision,
+    ApplicationObjectDeleteResponse, CapacityAdmissionDecision, RemoteEasyconnectAuthProvider,
     RemoteEasyconnectAwsCliEnvironmentVariable, APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
 };
 use crate::runtime::{
@@ -935,6 +935,9 @@ where
                 principal_id: approval.context.principal_id.clone(),
                 approved_actor: approval.context.principal_id.clone(),
                 authority_session_id: approval.context.session_id.clone(),
+                originating_authority_expires_at_utc: (approval.context.auth_provider
+                    == RemoteEasyconnectAuthProvider::Pistis)
+                    .then(|| approval.context.host_session_expires_at_utc.clone()),
                 auth_provider: approval.context.auth_provider,
                 correlation_id: approval.context.correlation_id.clone(),
                 audit_identity: approval.context.audit_identity.clone(),

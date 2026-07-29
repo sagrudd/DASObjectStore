@@ -4584,6 +4584,10 @@ mod tests {
             .expect("session persisted");
         assert_eq!(stored.approved_actor, "stephen");
         assert_eq!(stored.object_stores.len(), 1);
+        assert_eq!(
+            stored.originating_authority_expires_at_utc.as_deref(),
+            Some("2026-07-09T16:30:00Z")
+        );
 
         cleanup(&root);
     }
@@ -4848,6 +4852,7 @@ mod tests {
             principal_id: "stephen".to_string(),
             approved_actor: "stephen".to_string(),
             authority_session_id: "authority-session-1".to_string(),
+            originating_authority_expires_at_utc: None,
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
             correlation_id: "correlation-1".to_string(),
             audit_identity: "local-os:stephen".to_string(),
