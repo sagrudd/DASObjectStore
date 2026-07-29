@@ -270,11 +270,15 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
             .lock
             .lock()
             .expect("paired session store lock poisoned");
-        Ok(read_store(&self.path)?
+        let record = read_store(&self.path)?
             .sessions
             .iter()
             .find(|session| session.pairing_id == pairing_id)
-            .cloned())
+            .cloned();
+        if let Some(session) = &record {
+            session.validate()?;
+        }
+        Ok(record)
     }
 
     fn get(
@@ -289,7 +293,11 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
             .lock
             .lock()
             .expect("paired session store lock poisoned");
-        Ok(read_store(&self.path)?.session(session_id).cloned())
+        let record = read_store(&self.path)?.session(session_id).cloned();
+        if let Some(session) = &record {
+            session.validate()?;
+        }
+        Ok(record)
     }
 
     fn revoke(
@@ -1219,6 +1227,12 @@ mod tests {
         .expect("legacy store written");
 
         let restarted = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        assert!(matches!(
+            restarted
+                .get_by_pairing_id("pairing-session-1")
+                .expect_err("legacy Pistis exchange lookup rejected"),
+            RemoteEasyconnectPairedSessionStoreError::MissingOriginatingAuthorityExpiry { .. }
+        ));
         let err = restarted
             .renew(renewal_request("2026-07-10T04:00:00Z"))
             .expect_err("legacy Pistis renewal rejected");
