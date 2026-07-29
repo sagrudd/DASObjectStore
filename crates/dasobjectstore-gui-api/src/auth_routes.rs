@@ -24,6 +24,8 @@ mod auth_router;
 mod auth_validation;
 #[path = "auth_contracts.rs"]
 mod contracts;
+#[path = "easyconnect_discovery.rs"]
+mod easyconnect_discovery;
 #[path = "profile_catalogue.rs"]
 mod profile_catalogue;
 #[path = "profile_delete.rs"]
@@ -135,6 +137,7 @@ use dasobjectstore_daemon::{
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
+use easyconnect_discovery::*;
 use profile_catalogue::{standalone_profile_catalogue_export, standalone_profile_catalogue_import};
 use profile_delete::standalone_profile_s3_delete;
 pub(crate) use profile_download::provider_stream_download;
@@ -947,23 +950,24 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
-        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
-        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
-        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
-        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
-        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
-        IngestControlAction, IngestControlRequest, IngestControlResponse,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
-        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
-        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
-        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
-        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        easyconnect_public_router_with_config, gui_api_router_for_host_mode, local_standalone_user,
+        standalone_auth_router_with_state, standalone_dashboard_router_with_state,
+        standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
+        standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
+        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
+        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
+        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
@@ -1434,6 +1438,66 @@ mod tests {
         );
 
         cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_discovery_advertises_pistis_and_deployment_origin() {
+        let app = easyconnect_public_router_with_config(
+            None,
+            Some("https://das.example.test:8448/".to_string()),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/remote/easyconnect/discovery")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["auth_providers"], serde_json::json!(["pistis"]));
+        assert_eq!(encoded["appliance_id"], "das-appliance-test");
+        assert_eq!(
+            encoded["pairing_create_url"],
+            "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+        );
+        assert_eq!(
+            encoded["pairing_exchange_url"],
+            "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_discovery_rejects_untrusted_origin_configuration() {
+        for public_base_url in [
+            None,
+            Some("http://das.example.test:8448".to_string()),
+            Some("https://operator@das.example.test:8448".to_string()),
+            Some("https://das.example.test:8448/untrusted-path".to_string()),
+        ] {
+            let response = easyconnect_public_router_with_config(None, public_base_url)
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/v1/remote/easyconnect/discovery")
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("request completes");
+
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            let encoded = response_json(response).await;
+            assert_eq!(
+                encoded["code"],
+                serde_json::json!("easyconnect_public_origin_unavailable")
+            );
+        }
     }
 
     #[tokio::test]

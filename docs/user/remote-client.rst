@@ -120,6 +120,14 @@ the approved principal, grants, and short-lived session. The client validates
 the envelope and commits the complete session generation atomically. It never
 guesses an S3 endpoint from the browser or control URL.
 
+In a Monas/Pistis deployment, the public EasyConnect router exposes discovery,
+pairing creation, bounded status polling, and one-time exchange without a
+browser session. Discovery is emitted only from the deployment-owned HTTPS
+origin and persisted appliance identity; missing, non-HTTPS, credential-bearing,
+or path-bearing origin configuration fails closed. The discovery contract
+advertises ``pistis`` as the authentication provider. Pairing approval is not
+part of this public router and remains behind the verified host actor boundary.
+
 If certificate trust has not yet been enrolled, inspect and verify it before
 retrying:
 

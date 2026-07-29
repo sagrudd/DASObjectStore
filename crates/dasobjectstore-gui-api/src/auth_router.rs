@@ -36,7 +36,7 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
         GuiApiHostMode::Standalone => {
             let router = federated_operational_router(auth_store.clone(), None)
                 .merge(standalone_session_auth_router(auth_store))
-                .merge(easyconnect_public_router());
+                .merge(easyconnect_public_pairing_router_with_config(None, None));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -66,7 +66,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
                         s3_descriptor: s3_descriptor.clone(),
                     },
                 ))
-                .merge(easyconnect_public_router_with_config(
+                .merge(easyconnect_public_pairing_router_with_config(
                     s3_descriptor,
                     public_base_url,
                 ));
@@ -218,13 +218,16 @@ async fn application_no_store(mut response: axum::response::Response) -> axum::r
 
 pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
     standalone_easyconnect_router_with_state(StandaloneEasyconnectRouteState::system(auth_store))
-        .merge(easyconnect_public_router())
+        .merge(easyconnect_public_pairing_router_with_config(None, None))
 }
 
-/// Pairing creation and one-time exchange routes that do not require a browser
-/// session. Approval is deliberately absent and remains behind host auth.
+/// Public pairing creation, status, and one-time exchange without discovery.
+///
+/// Embeddings that have an authoritative HTTPS origin should use
+/// [`easyconnect_public_router_with_config`] to expose Pistis discovery too.
+/// Approval is deliberately absent and remains behind host authentication.
 pub fn easyconnect_public_router() -> Router {
-    easyconnect_public_router_with_config(None, None)
+    easyconnect_public_pairing_router_with_config(None, None)
 }
 
 /// Public create, status, and exchange routes with a deployment-owned S3
@@ -232,13 +235,43 @@ pub fn easyconnect_public_router() -> Router {
 pub fn easyconnect_public_router_with_s3_descriptor(
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
 ) -> Router {
-    easyconnect_public_router_with_config(s3_descriptor, None)
+    easyconnect_public_pairing_router_with_config(s3_descriptor, None)
 }
 
+/// Public Pistis discovery and pairing routes from deployment-owned config.
+///
+/// An absent or invalid public origin leaves discovery available only as an
+/// explicit service-unavailable response and also prevents pairing creation.
 pub fn easyconnect_public_router_with_config(
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
     public_base_url: Option<String>,
 ) -> Router {
+    let state = EasyconnectPublicRouteState {
+        s3_descriptor,
+        public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
+        appliance_id: super::auth_identity_routes::system_appliance_id(),
+    };
+    easyconnect_public_pairing_router()
+        .route(
+            "/api/v1/remote/easyconnect/discovery",
+            get(pistis_easyconnect_discovery),
+        )
+        .with_state(state)
+}
+
+fn easyconnect_public_pairing_router_with_config(
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
+) -> Router {
+    let state = EasyconnectPublicRouteState {
+        s3_descriptor,
+        public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
+        appliance_id: super::auth_identity_routes::system_appliance_id(),
+    };
+    easyconnect_public_pairing_router().with_state(state)
+}
+
+fn easyconnect_public_pairing_router() -> Router<EasyconnectPublicRouteState> {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings",
@@ -253,10 +286,21 @@ pub fn easyconnect_public_router_with_config(
             get(easyconnect_pairing_status),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
-        .with_state(EasyconnectPublicRouteState {
-            s3_descriptor,
-            public_base_url,
-        })
+}
+
+fn validated_easyconnect_public_base_url(public_base_url: String) -> Option<String> {
+    let parsed = reqwest::Url::parse(&public_base_url).ok()?;
+    if parsed.scheme() != "https"
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+        || !matches!(parsed.path(), "" | "/")
+    {
+        return None;
+    }
+    Some(public_base_url.trim_end_matches('/').to_string())
 }
 
 /// Pistis approval routes that must be mounted behind a host-verified actor and
