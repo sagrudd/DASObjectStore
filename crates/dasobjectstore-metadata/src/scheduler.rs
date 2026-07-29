@@ -329,10 +329,11 @@ pub(crate) fn submit_destage_scheduler_job_tx(
     )?;
     let scheduler_job_id = format!("scheduler-{}", submission.destage_job_id);
     let idempotency_key = format!("destage:{}", submission.object_id.as_str());
+    let byte_cost = submission.byte_cost.max(1);
     let request_digest = format!(
         "{}:{}:{}:{}",
         submission.object_id.as_str(),
-        submission.byte_cost,
+        byte_cost,
         submission.required_copy_count,
         submission.acknowledgement_policy
     );
@@ -351,7 +352,7 @@ pub(crate) fn submit_destage_scheduler_job_tx(
             submission.store_id.as_str(),
             submission.object_id.as_str(),
             submission.priority,
-            to_i64(submission.byte_cost)?,
+            to_i64(byte_cost)?,
             submission.acknowledgement_policy,
             submission.required_copy_count,
             submission.created_at_utc,
@@ -378,7 +379,7 @@ pub(crate) fn submit_destage_scheduler_job_tx(
             request_digest,
             submission.store_id.as_str().to_string(),
             submission.object_id.as_str().to_string(),
-            submission.byte_cost,
+            byte_cost,
             submission.required_copy_count,
         )
     {

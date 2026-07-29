@@ -197,6 +197,12 @@ client is told that its source copy may be released. Claims remain associated
 with the durable work across retry and are released only after verified
 promotion or an explicit safe terminal transition.
 
+Empty files remain valid immutable objects. Their catalogue size and checksum
+describe the exact zero-byte payload, while capacity claims and scheduler
+admission use a one-byte accounting floor so the positive-reservation
+invariants remain intact. Each required HDD placement is still created and
+verified normally.
+
 New intake is rejected before copying when the complete file would cross the
 critical SSD reserve. This is intentional backpressure: inspect the ingest and
 destage queue, resolve HDD availability or failed work, and retry. Do not delete

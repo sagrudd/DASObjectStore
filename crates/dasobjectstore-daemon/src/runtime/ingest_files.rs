@@ -1653,6 +1653,66 @@ mod tests {
     }
 
     #[test]
+    fn direct_ingest_settles_empty_object() {
+        let root = temp_root("daemon-ingest-mixed-empty");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source dir");
+        fs::write(source_root.join("empty.log"), b"").expect("empty source");
+        let mut policy = StorePolicy::defaults_for(StoreClass::ReproducibleCache);
+        policy.ingest_mode = IngestMode::DirectToHdd;
+        write_store_registry_with_policy(&registry_path, policy);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let executor = LocalFileIngestExecutor {
+            ssd_root: ssd_root.clone(),
+            hdd_root: hdd_root.clone(),
+            live_sqlite_path: ssd_root.join(".dasobjectstore").join("live.sqlite"),
+            store_registry_path: registry_path,
+            subobject_registry_path,
+            source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: None,
+            resource_gate: None,
+        };
+
+        executor
+            .submit(
+                SubmitIngestFilesRequest {
+                    endpoint: StoreId::new("zymo_fecal_2025.05").expect("store id"),
+                    source_path: source_root,
+                    object_type: ObjectType::Naive,
+                    copies: Some(1),
+                    hdd_workers: Some(1),
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
+                    conflict_policy: DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: None,
+                },
+                "2026-07-29T16:27:36Z",
+                |_| Ok(()),
+            )
+            .expect("mixed empty ingest succeeds");
+
+        assert_eq!(
+            find_payloads(&hdd_root.join("disk-a").join("objects")),
+            vec![Vec::<u8>::new()]
+        );
+        assert!(read_outstanding_disk_capacity(
+            ssd_root.join(".dasobjectstore").join("live.sqlite")
+        )
+        .expect("capacity claims")
+        .is_empty());
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
     fn external_origins_use_ssd_first_executor_path_under_direct_policy() {
         for origin in [
             DaemonIngressOrigin::UsbMountedDisk,

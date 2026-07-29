@@ -11,6 +11,8 @@ agreement before landing.
 - Keep the opt-in development self-signing fixture compatible with the
   governed-identity schema while explicitly refusing any dynamic authority
   binding.
+- Keep parallel daemon transport tests isolated even when the operating-system
+  clock returns the same timestamp to concurrent socket fixtures.
 - Add an atomic, revision-checked Pistis grant policy store and supported
   ``pistis-grant inspect/grant/revoke`` administrator workflow that resolves an
   email to exactly one active Prosopikon principal, persists immutable IDs, and
@@ -45,6 +47,14 @@ agreement before landing.
 - Bound the daemon's live EasyConnect pairing repository, reclaim terminal and
   expired records during admission, and protect its Unix directory and
   secret-bearing file with owner-only permissions.
+
+## 0.152.4 - 2026-07-29
+
+### Fixed
+
+- Settle zero-byte objects through native ingest by reserving a one-byte
+  accounting floor per required HDD copy while preserving the object's true
+  zero-byte catalogue size and checksum.
 
 ## 0.152.3 - 2026-07-28
 

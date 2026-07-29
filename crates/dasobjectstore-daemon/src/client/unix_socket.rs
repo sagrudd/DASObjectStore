@@ -502,6 +502,7 @@ mod tests {
     use std::io::{BufRead, BufReader, Error as IoError, ErrorKind, Write};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -941,11 +942,16 @@ mod tests {
     }
 
     fn unique_socket_path() -> PathBuf {
+        static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(0);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock")
             .as_nanos();
-        std::env::temp_dir().join(format!("dasobjectstore-{}-{now}.sock", std::process::id()))
+        let socket_id = NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-{}-{now}-{socket_id}.sock",
+            std::process::id()
+        ))
     }
 
     struct ProviderStreamHandler;

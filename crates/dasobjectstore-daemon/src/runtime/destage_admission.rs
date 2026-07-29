@@ -33,7 +33,7 @@ pub(crate) fn build_destage_capacity_claim(
             Ok(DiskCapacityClaimAllocation {
                 disk_id: root.disk_id.clone(),
                 measured_available_bytes: measured.available_bytes,
-                requested_bytes: size_bytes,
+                requested_bytes: size_bytes.max(1),
             })
         })
         .collect::<Result<Vec<_>, String>>()?;

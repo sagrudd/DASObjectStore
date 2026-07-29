@@ -172,7 +172,7 @@ pub fn commit_verified_ssd_and_enqueue_with_capacity_claims(
         || capacity
             .allocations
             .iter()
-            .any(|allocation| allocation.requested_bytes != request.size_bytes)
+            .any(|allocation| allocation.requested_bytes != request.size_bytes.max(1))
     {
         return Err(DestageMetadataError::InvalidCapacityReservation);
     }

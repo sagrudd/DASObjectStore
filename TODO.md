@@ -36,7 +36,7 @@ Scope approved 2026-07-27: the MVP release candidate is the Ubuntu x86_64
 appliance installed through APT, with Garage and native ingest, Web/CLI/TUI
 operator surfaces, Monas/Prosopikon human authentication, bounded-folder
 compatibility, and SSD-to-HDD durability. Development continues through
-compatible pre-1.0 semantic-version releases (currently ``0.152.3``); EPIC E
+compatible pre-1.0 semantic-version releases (currently ``0.152.4``); EPIC E
 will bind the first promoted release-candidate tag to its exact accepted
 commit. A ``1.0.0`` release requires a separate explicit compatibility
 decision.
@@ -66,8 +66,10 @@ Work is dependency ordered. Only these entries define open release work:
   now share the only public SSD-publication boundary: one transaction publishes
   identity/catalogue/destage/scheduler state while holding one physical
   capacity claim for every required HDD copy. The unreserved compatibility
-  helper is test-only. Packaged physical acceptance remains correctly owned by
-  EPIC E rather than reopening this source-contract EPIC.
+  helper is test-only. Zero-byte objects retain their true logical size and
+  checksum while using a one-byte capacity/scheduler accounting floor, with
+  direct-ingest regression coverage. Packaged physical acceptance remains
+  correctly owned by EPIC E rather than reopening this source-contract EPIC.
 - [~] **EPIC C — durability maintenance, availability, and observability.**
   Durable journalled idle maintenance now recovers claims and relocation
   phases across restart, completes only empty disk drains, preempts bounded
