@@ -25,6 +25,7 @@ const PACKAGE_AUTH_GUARD: &str =
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const LOCAL_DOCKERFILE: &str = include_str!("../../../deploy/local-docker/Dockerfile");
+const WORKSPACE_MANIFEST: &str = include_str!("../../../Cargo.toml");
 const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
 const RELEASE_READINESS: &str =
     include_str!("../../../deploy/acceptance/verify-release-readiness.sh");
@@ -113,6 +114,26 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
     assert_contains(LOCAL_DOCKER, "org.opencontainers.image.revision");
     assert_contains(LOCAL_DOCKERFILE, "DASOBJECTSTORE_SOURCE_COMMIT");
     assert_contains(LOCAL_DOCKERFILE, "org.opencontainers.image.revision");
+}
+
+#[test]
+fn local_docker_build_fails_closed_when_the_prosopikon_pin_drifts() {
+    let dependency = WORKSPACE_MANIFEST
+        .lines()
+        .find(|line| line.starts_with("prosopikon-core = { git = "))
+        .expect("workspace Prosopikon dependency");
+
+    assert_contains(LOCAL_DOCKERFILE, dependency);
+    assert_contains(LOCAL_DOCKERFILE, "grep -Fqx");
+    assert_contains(
+        LOCAL_DOCKERFILE,
+        r#"prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }"#,
+    );
+    assert_contains(
+        LOCAL_DOCKERFILE,
+        r#"! grep -Fq \
+        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git"'"#,
+    );
 }
 
 #[test]

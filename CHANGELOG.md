@@ -8,6 +8,9 @@ agreement before landing.
 
 ## Unreleased
 
+- Fail the local Docker build when its reviewed Prosopikon sibling-source
+  substitution drifts from the workspace dependency instead of silently
+  falling back to a private Git fetch.
 - Keep the opt-in development self-signing fixture compatible with the
   governed-identity schema while explicitly refusing any dynamic authority
   binding.

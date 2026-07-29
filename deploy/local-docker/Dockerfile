@@ -15,8 +15,17 @@ WORKDIR /src
 COPY DASObjectStore /src/DASObjectStore
 COPY prosopikon /src/prosopikon
 WORKDIR /src/DASObjectStore
-RUN sed -i \
-        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "c1dd477270e3ab34f5444e2c0565af845a930a70" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
+RUN grep -Fqx \
+        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e7dc74fd061fc01bfa401d11b11cfe42bc135677" }' \
+        Cargo.toml \
+    && sed -i \
+        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e7dc74fd061fc01bfa401d11b11cfe42bc135677" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
+        Cargo.toml \
+    && grep -Fqx \
+        'prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }' \
+        Cargo.toml \
+    && ! grep -Fq \
+        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git"' \
         Cargo.toml \
     && cargo build --release \
         -p dasobjectstore-cli \
