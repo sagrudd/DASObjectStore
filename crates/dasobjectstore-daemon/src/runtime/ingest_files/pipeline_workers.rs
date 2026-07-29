@@ -135,7 +135,7 @@ pub(super) fn spawn_hdd_settlement_workers(
                         Ok(DiskCapacityClaimAllocation {
                             disk_id: root.disk_id.clone(),
                             measured_available_bytes: capacity.available_bytes,
-                            requested_bytes: work.entry.size_bytes,
+                            requested_bytes: work.entry.size_bytes.max(1),
                         })
                     })
                     .collect::<Result<Vec<_>, String>>();

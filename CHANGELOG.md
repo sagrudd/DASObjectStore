@@ -8,6 +8,14 @@ agreement before landing.
 
 ## Unreleased
 
+## 0.152.4 - 2026-07-29
+
+### Fixed
+
+- Settle zero-byte objects through native ingest by reserving a one-byte
+  accounting floor per required HDD copy while preserving the object's true
+  zero-byte catalogue size and checksum.
+
 ## 0.152.3 - 2026-07-28
 
 ### Changed
