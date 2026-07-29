@@ -107,7 +107,7 @@ grant only after personally commissioning the fresh authority and confirming
 the new authority and principal UUIDs, revision 1, read and write permission,
 and no email selector. Keep the resulting file mode ``0600``.
 
-The evaluation's parallel TLS endpoint uses port ``3902`` and the separately
+The evaluation's parallel TLS endpoint uses port ``3943`` and the separately
 prepared development certificate. It does not modify or replace the live
 port-3900 listener. This policy preparation still grants no session: Monas
 requires a completed, audience-bound Pistis enrolment and authentication.

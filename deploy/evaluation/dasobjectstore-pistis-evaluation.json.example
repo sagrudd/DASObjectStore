@@ -17,10 +17,10 @@
   "s3_ingress": {
     "mode": "direct_gateway",
     "bind_address": "0.0.0.0",
-    "port": 3902,
+    "port": 3943,
     "legacy_upstream_endpoint": "http://127.0.0.1:3901",
     "max_concurrent_uploads": 8,
-    "public_endpoint_url": "https://REPLACE_HOSTNAME:3902",
+    "public_endpoint_url": "https://REPLACE_HOSTNAME:3943",
     "region": "garage",
     "addressing_style": "path"
   }

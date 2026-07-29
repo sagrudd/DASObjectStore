@@ -16,10 +16,10 @@ fn parallel_evaluation_configuration_is_valid_and_tls_only() {
     config.validate().unwrap();
     assert_eq!(config.bind_address, "127.0.0.1");
     assert_eq!(config.https_port, 8740);
-    assert_eq!(config.s3_ingress.port, 3902);
+    assert_eq!(config.s3_ingress.port, 3943);
     assert_eq!(
         config.s3_ingress.public_endpoint_url.as_deref(),
-        Some("https://pistis-evaluation.example:3902")
+        Some("https://pistis-evaluation.example:3943")
     );
     assert_eq!(
         config.s3_ingress.legacy_upstream_endpoint,
