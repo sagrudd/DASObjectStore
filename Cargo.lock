@@ -2711,7 +2711,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-core"
 version = "0.16.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=fecd8ab8d1455a15089ac61dc33f7a9ce9819492#fecd8ab8d1455a15089ac61dc33f7a9ce9819492"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=a9486541ef902d30d43d291fe5a8146572091e1e#a9486541ef902d30d43d291fe5a8146572091e1e"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2734,7 +2734,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=fecd8ab8d1455a15089ac61dc33f7a9ce9819492#fecd8ab8d1455a15089ac61dc33f7a9ce9819492"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=a9486541ef902d30d43d291fe5a8146572091e1e#a9486541ef902d30d43d291fe5a8146572091e1e"
 dependencies = [
  "prosopikon-core",
  "web-sys",
