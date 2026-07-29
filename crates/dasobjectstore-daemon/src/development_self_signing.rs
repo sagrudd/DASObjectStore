@@ -81,6 +81,7 @@ impl DevelopmentSelfSignedPolicy {
             purpose: self.purpose.clone(),
             environment: ApplicationEnvironment::Development,
             credential_kind: ApplicationCredentialKind::DevelopmentSelfSigned,
+            dynamic_binding: None,
             scope: ApplicationScope {
                 store_ids: vec![self.synthetic_store_id.clone()],
                 prefixes: vec![self.synthetic_prefix.clone()],
@@ -227,6 +228,10 @@ mod tests {
         assert_eq!(
             identity.expires_at_unix_seconds,
             1_000 + policy.token_ttl_seconds
+        );
+        assert!(
+            identity.dynamic_binding.is_none(),
+            "development self-signing must not synthesize governed authority"
         );
     }
 

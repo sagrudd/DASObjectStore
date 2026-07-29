@@ -8,6 +8,9 @@ agreement before landing.
 
 ## Unreleased
 
+- Keep the opt-in development self-signing fixture compatible with the
+  governed-identity schema while explicitly refusing any dynamic authority
+  binding.
 - Add an atomic, revision-checked Pistis grant policy store and supported
   ``pistis-grant inspect/grant/revoke`` administrator workflow that resolves an
   email to exactly one active Prosopikon principal, persists immutable IDs, and
