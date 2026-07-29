@@ -132,13 +132,14 @@ update. A value from 1 through 256 is valid; production limits should normally
 be much lower than the schema maximum.
 
 The public endpoint is authoritative remote-client configuration. The direct
-gateway currently serves plaintext HTTP, independently of the HTTPS Web/control
-listener on port 8448, so its URL must begin with ``http://``. Advertising
-``https://`` for the plaintext listener is rejected as
-``advertised_endpoint_protocol_mismatch``. Before issuing temporary
-credentials, the server also probes the public origin and requires a valid S3
-XML response. Remote clients independently reject plaintext HTTP observed
-behind an advertised HTTPS URL and never silently downgrade it.
+gateway uses the appliance's native Rustls listener and its URL must begin with
+``https://``. Before issuing temporary credentials, the server probes the
+public origin, requires the configured appliance certificate to be presented
+exactly, and requires a bounded valid S3 XML response. Advertising
+``https://`` for a plaintext listener is rejected as
+``advertised_endpoint_protocol_mismatch``. Remote clients independently reject
+plaintext HTTP observed behind an advertised HTTPS URL and never silently
+downgrade it.
 
 Before migration
 ----------------

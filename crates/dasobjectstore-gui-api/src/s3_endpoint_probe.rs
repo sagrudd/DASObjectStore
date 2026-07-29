@@ -1,6 +1,7 @@
 //! Non-secret runtime proof that the public S3 endpoint matches its descriptor.
 
 use std::fmt;
+use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 
@@ -113,34 +114,40 @@ pub async fn verify_public_s3_endpoint(
             endpoint: endpoint.to_string(),
             reason: format!("configured TLS trust material cannot be read: {error}"),
         })?;
-    let certificates = reqwest::Certificate::from_pem_bundle(&trust_pem).map_err(|_| {
-        S3EndpointProbeError::Unavailable {
+    let configured_certificates = rustls_pemfile::certs(&mut BufReader::new(trust_pem.as_slice()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| S3EndpointProbeError::Unavailable {
             endpoint: endpoint.to_string(),
             reason: "configured TLS trust material is not a valid PEM certificate bundle"
                 .to_string(),
-        }
-    })?;
-    if certificates.is_empty() {
-        return Err(S3EndpointProbeError::Unavailable {
-            endpoint: endpoint.to_string(),
-            reason: "configured TLS trust material contains no certificates".to_string(),
-        });
-    }
-
+        })?;
+    let configured_leaf =
+        configured_certificates
+            .first()
+            .ok_or_else(|| S3EndpointProbeError::Unavailable {
+                endpoint: endpoint.to_string(),
+                reason: "configured TLS trust material contains no certificates".to_string(),
+            })?;
+    let configured_leaf_root =
+        reqwest::Certificate::from_der(configured_leaf.as_ref()).map_err(|_| {
+            S3EndpointProbeError::Unavailable {
+                endpoint: endpoint.to_string(),
+                reason: "configured TLS leaf certificate cannot be loaded".to_string(),
+            }
+        })?;
     let probe_url = format!(
         "{}/{}?list-type=2&max-keys=0",
         endpoint.trim_end_matches('/'),
         PROBE_BUCKET
     );
-    let mut client = reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .https_only(true)
         .tls_built_in_root_certs(false)
-        .min_tls_version(reqwest::tls::Version::TLS_1_3);
-    for certificate in certificates {
-        client = client.add_root_certificate(certificate);
-    }
+        .min_tls_version(reqwest::tls::Version::TLS_1_3)
+        .tls_info(true)
+        .add_root_certificate(configured_leaf_root);
     let mut response = client
         .build()
         .map_err(|error| S3EndpointProbeError::Unavailable {
@@ -154,6 +161,17 @@ pub async fn verify_public_s3_endpoint(
             endpoint: endpoint.to_string(),
             reason: error.to_string(),
         })?;
+    let presented_leaf = response
+        .extensions()
+        .get::<reqwest::tls::TlsInfo>()
+        .and_then(reqwest::tls::TlsInfo::peer_certificate);
+    if presented_leaf != Some(configured_leaf.as_ref()) {
+        return Err(S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: "the endpoint did not present the configured appliance TLS certificate"
+                .to_string(),
+        });
+    }
     let status = response.status().as_u16();
     let content_type_is_xml = response
         .headers()
@@ -239,6 +257,63 @@ mod tests {
     use std::path::PathBuf;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    struct TlsS3Fixture {
+        address: std::net::SocketAddr,
+        certificate_path: PathBuf,
+        root: PathBuf,
+        server: tokio::task::JoinHandle<std::io::Result<()>>,
+    }
+
+    impl Drop for TlsS3Fixture {
+        fn drop(&mut self) {
+            self.server.abort();
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    async fn tls_s3_server(label: &str, app: Router) -> TlsS3Fixture {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let root = test_root(label);
+        std::fs::create_dir_all(&root).expect("create test root");
+        let certificate = generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("generate certificate");
+        let certificate_path = root.join("server.crt");
+        let private_key_path = root.join("server.key");
+        std::fs::write(&certificate_path, certificate.cert.pem()).expect("write certificate");
+        std::fs::write(&private_key_path, certificate.signing_key.serialize_pem())
+            .expect("write private key");
+        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
+            .await
+            .expect("load TLS");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        let address = listener.local_addr().expect("address");
+        drop(listener);
+        let server = tokio::spawn(async move {
+            axum_server::bind_rustls(address, tls)
+                .serve(app.into_make_service())
+                .await
+        });
+        TlsS3Fixture {
+            address,
+            certificate_path,
+            root,
+            server,
+        }
+    }
+
+    fn valid_s3_app() -> Router {
+        Router::new().route(
+            "/{*path}",
+            get(|| async {
+                (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "application/xml")],
+                    r#"<?xml version="1.0"?><Error><Code>SignatureDoesNotMatch</Code></Error>"#,
+                )
+            }),
+        )
+    }
+
     async fn plaintext_s3_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -267,47 +342,72 @@ mod tests {
 
     #[tokio::test]
     async fn verifies_native_tls_s3_with_configured_trust_material() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        let root = test_root("native-tls");
-        std::fs::create_dir_all(&root).expect("create test root");
-        let certificate = generate_simple_self_signed(vec!["localhost".to_string()])
-            .expect("generate certificate");
-        let certificate_path = root.join("server.crt");
-        let private_key_path = root.join("server.key");
-        std::fs::write(&certificate_path, certificate.cert.pem()).expect("write certificate");
-        std::fs::write(&private_key_path, certificate.signing_key.serialize_pem())
-            .expect("write private key");
-        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
-            .await
-            .expect("load TLS");
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
-        let address = listener.local_addr().expect("address");
-        drop(listener);
-        let app = Router::new().route(
-            "/{*path}",
-            get(|| async {
-                (
-                    StatusCode::FORBIDDEN,
-                    [(header::CONTENT_TYPE, "application/xml")],
-                    r#"<?xml version="1.0"?><Error><Code>SignatureDoesNotMatch</Code></Error>"#,
-                )
-            }),
-        );
-        let server = tokio::spawn(async move {
-            axum_server::bind_rustls(address, tls)
-                .serve(app.into_make_service())
-                .await
-        });
-
-        let endpoint = format!("https://localhost:{}", address.port());
-        let verified = verify_public_s3_endpoint(&endpoint, &certificate_path)
+        let fixture = tls_s3_server("native-tls", valid_s3_app()).await;
+        let endpoint = format!("https://localhost:{}", fixture.address.port());
+        let verified = verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
             .await
             .expect("native TLS S3 endpoint verifies");
         assert_eq!(verified.scheme, "https");
         assert_eq!(verified.host, "localhost");
-        assert_eq!(verified.port, address.port());
-        server.abort();
-        let _ = std::fs::remove_dir_all(root);
+        assert_eq!(verified.port, fixture.address.port());
+    }
+
+    #[tokio::test]
+    async fn rejects_redirect_wrong_certificate_and_wrong_san() {
+        let redirect = tls_s3_server(
+            "redirect",
+            Router::new().route(
+                "/{*path}",
+                get(|| async { axum::response::Redirect::temporary("https://example.invalid/") }),
+            ),
+        )
+        .await;
+        let endpoint = format!("https://localhost:{}", redirect.address.port());
+        let error = verify_public_s3_endpoint(&endpoint, &redirect.certificate_path)
+            .await
+            .expect_err("redirect is not followed or accepted as S3");
+        assert_eq!(error.code(), "s3_endpoint_protocol_invalid");
+
+        let fixture = tls_s3_server("wrong-certificate", valid_s3_app()).await;
+        let other_certificate = generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("generate other certificate");
+        let other_certificate_path = fixture.root.join("other.crt");
+        std::fs::write(&other_certificate_path, other_certificate.cert.pem())
+            .expect("write other certificate");
+        let endpoint = format!("https://localhost:{}", fixture.address.port());
+        let error = verify_public_s3_endpoint(&endpoint, &other_certificate_path)
+            .await
+            .expect_err("different leaf is rejected");
+        assert_eq!(error.code(), "s3_endpoint_unavailable");
+
+        let wrong_san_endpoint = format!("https://127.0.0.1:{}", fixture.address.port());
+        let error = verify_public_s3_endpoint(&wrong_san_endpoint, &fixture.certificate_path)
+            .await
+            .expect_err("wrong SAN is rejected");
+        assert_eq!(error.code(), "s3_endpoint_unavailable");
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_s3_response() {
+        let fixture = tls_s3_server(
+            "oversized",
+            Router::new().route(
+                "/{*path}",
+                get(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [(header::CONTENT_TYPE, "application/xml")],
+                        vec![b'x'; MAX_PROBE_RESPONSE_BYTES + 1],
+                    )
+                }),
+            ),
+        )
+        .await;
+        let endpoint = format!("https://localhost:{}", fixture.address.port());
+        let error = verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
+            .await
+            .expect_err("oversized response is rejected");
+        assert_eq!(error.code(), "s3_endpoint_protocol_invalid");
     }
 
     #[tokio::test]
