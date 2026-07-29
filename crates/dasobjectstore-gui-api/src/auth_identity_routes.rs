@@ -3,6 +3,7 @@
 use super::*;
 
 mod easyconnect_approval_page;
+mod pistis_approval_route;
 use dasobjectstore_daemon::{
     RemoteEasyconnectApprovalContext, RemoteEasyconnectPairingStatusRequest,
     RemoteEasyconnectPairingStatusResponse,
@@ -10,6 +11,7 @@ use dasobjectstore_daemon::{
 pub(super) use easyconnect_approval_page::{
     easyconnect_browser_approval, easyconnect_pairing_status,
 };
+pub(super) use pistis_approval_route::pistis_easyconnect_approve_pairing;
 
 #[derive(Clone)]
 pub(crate) struct StandaloneAuthRouteState {

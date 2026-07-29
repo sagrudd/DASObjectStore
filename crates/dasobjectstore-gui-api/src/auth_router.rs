@@ -336,12 +336,12 @@ fn validated_easyconnect_public_base_url(public_base_url: String) -> Option<Stri
 }
 
 /// Pistis approval routes that must be mounted behind a host-verified actor and
-/// a credential-free [`RemoteEasyconnectApprovalContext`] extension.
+/// a credential-free [`SharedPistisEasyconnectApprovalResolver`] extension.
 pub fn pistis_easyconnect_approval_router(s3_endpoint: EasyconnectS3EndpointConfig) -> Router {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings/approve",
-            post(easyconnect_approve_pairing),
+            post(pistis_easyconnect_approve_pairing),
         )
         .route(
             "/remote/easyconnect/login",

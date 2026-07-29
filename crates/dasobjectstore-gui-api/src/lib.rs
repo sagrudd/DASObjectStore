@@ -18,6 +18,7 @@ mod live_status;
 mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
+mod pistis_approval;
 pub mod remote_control_guard;
 pub mod remote_control_routes;
 mod remote_upload_aggregator;
@@ -97,6 +98,10 @@ pub use live_status::{
 pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,
     MtlsApplicationListener, MtlsListenerError,
+};
+pub use pistis_approval::{
+    PistisApprovalResolutionError, PistisEasyconnectApprovalResolver,
+    SharedPistisEasyconnectApprovalResolver,
 };
 pub use remote_control_guard::{
     RemoteControlGuardState, RemoteControlRejection, REMOTE_CONTROL_ACCESS_KEY_HEADER,
