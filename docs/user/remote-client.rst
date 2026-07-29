@@ -110,6 +110,15 @@ transaction is tracked by the EasyConnect completion issue. Until that lands,
 use the password-authenticated command below for real remote access. Do not
 interpret the server boundary alone as an end-to-end passwordless release.
 
+The credential-free Pistis completion design is recorded as Proposed
+:doc:`../adr/0003-credential-free-pistis-easyconnect-approval`.  It requires a
+distinct Pistis provider and binds the Prosopikon authority, principal,
+session, exact ObjectStore grant, correlation, and audit identities without an
+OS-account lookup.  It also requires daemon-owned ceremony expiry and random
+identifiers, durable session commit before pairing consumption, idempotent
+crash recovery, and a bounded polling fallback.  These are review requirements,
+not behavior available in the current command.
+
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and
 returns a single-store, eight-hour Garage context:

@@ -3821,6 +3821,15 @@ browser and appliance acceptance remain external validation gates.
     administration, EasyConnect, and ObjectStore browsing; host roles never
     grant storage authority. Synoptikon remains fail-closed pending an explicit
     central-to-local identity mapping.
+  - [ ] Obtain specialist and owner review of Proposed ADR 0003, then implement
+    the credential-free Pistis EasyConnect approval transaction without an OS
+    identity lookup. Add the distinct Pistis provider, exact
+    authority/principal/session/ObjectStore grant and correlation/audit
+    bindings, daemon-owned five-minute ceremony TTL and random capabilities,
+    durable-session-before-consumption recovery, and bounded polling fallback.
+    Prove replay, expiry, collision, CSRF, crash recovery, grant substitution,
+    callback loss, and real Monas/Pistis CLI approval before marking the
+    passwordless path complete.
   - [x] Complete the remaining Monas host evidence against ``0.6.0`` commit
     ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. Mounted-router tests prove
     CSRF wiring, and the real browser proves ordinary/admin OS-policy access,

@@ -8,6 +8,10 @@ agreement before landing.
 
 ## Unreleased
 
+- Propose the credential-free Pistis EasyConnect approval contract, including
+  exact authority/principal/session/grant/audit binding, explicit separation
+  from OS identity, server-owned ceremony limits, idempotent durable exchange,
+  and callback-to-polling recovery requirements.
 - Correct standalone EasyConnect URL publication so daemon routes that already
   include the DASObjectStore product mount are not prefixed a second time.
 - Render a bounded standalone login handoff for first-use EasyConnect browser

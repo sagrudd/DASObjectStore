@@ -157,6 +157,16 @@ audit context and cannot grant storage authority. Synoptikon subjects are not
 assumed to be local usernames and fail closed until an explicit central-to-
 local identity mapping is configured.
 
+That lookup describes the current compatibility implementation.  Proposed
+:doc:`../adr/0003-credential-free-pistis-easyconnect-approval` separates Pistis
+EasyConnect approval from appliance-local identity.  Under that proposal, a
+Pistis principal is identified by immutable Prosopikon authority, principal,
+and session identifiers and receives only an explicitly configured DAS-owned
+principal-to-ObjectStore grant.  It is never treated as an OS username.  The
+proposal is not accepted or implemented yet; until it is, do not present the
+current Monas EasyConnect path as portable to federated identities without
+matching local accounts.
+
 The Synoptikon adapter first validates the integrated request/session boundary,
 then requires Synoptikon to confirm the live entitlement and revocation state.
 Its governance storage binding is not copied into the GUI authentication
