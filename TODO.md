@@ -3825,9 +3825,12 @@ browser and appliance acceptance remain external validation gates.
     administration, EasyConnect, and ObjectStore browsing; host roles never
     grant storage authority. Synoptikon remains fail-closed pending an explicit
     central-to-local identity mapping.
-  - [ ] Obtain specialist and owner review of Proposed ADR 0003, then implement
-    the credential-free Pistis EasyConnect approval transaction without an OS
-    identity lookup. Add the distinct Pistis provider, exact
+  - [x] Obtain specialist and owner review and accept ADR 0003. The accepted
+    design fixes the credential-free Pistis authority and durable transaction
+    boundaries but does not activate the incomplete path.
+  - [ ] Implement the credential-free Pistis EasyConnect approval transaction
+    without an OS identity lookup under issue #20. Add the distinct Pistis
+    provider, exact
     authority/principal/session/ObjectStore grant and correlation/audit
     bindings, daemon-owned five-minute ceremony TTL and random capabilities,
     durable-session-before-consumption recovery, and bounded polling fallback.

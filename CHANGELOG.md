@@ -8,7 +8,7 @@ agreement before landing.
 
 ## Unreleased
 
-- Propose the credential-free Pistis EasyConnect approval contract, including
+- Accept the credential-free Pistis EasyConnect approval contract, including
   exact authority/principal/session/grant/audit binding, explicit separation
   from OS identity, server-owned ceremony limits, idempotent durable exchange,
   and callback-to-polling recovery requirements.

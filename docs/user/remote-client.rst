@@ -135,14 +135,17 @@ retrying:
 
    dasobjectstore-remote trust inspect 192.168.1.192
 
-The credential-free Pistis completion design is recorded as Proposed
+The credential-free Pistis completion design is recorded as Accepted
 :doc:`../adr/0003-credential-free-pistis-easyconnect-approval`.  It requires a
 distinct Pistis provider and binds the Prosopikon authority, principal,
 session, exact ObjectStore grant, correlation, and audit identities without an
 OS-account lookup.  It also requires daemon-owned ceremony expiry and random
 identifiers, durable session commit before pairing consumption, idempotent
 crash recovery, and a bounded polling fallback.  These are review requirements,
-not behavior available in the current command.
+not behavior available in the current command.  Acceptance fixes the security
+design; activation remains gated by the immutable principal-to-ObjectStore
+resolver, reviewed liveness adapter, negative and crash/replay tests, and
+evidence through the real Monas/Pistis route.
 
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and

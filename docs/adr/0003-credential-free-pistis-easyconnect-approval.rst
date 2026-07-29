@@ -1,8 +1,10 @@
 ADR 0003: Credential-free Pistis EasyConnect approval
 =====================================================
 
-:Status: Proposed
+:Status: Accepted
 :Date: 2026-07-29
+:Deciders: Project owner, security reviewer, protocol reviewer, DASObjectStore and cross-project maintainers
+:Related issue: `DASObjectStore #20 <https://github.com/sagrudd/DASObjectStore/issues/20>`_
 
 Context
 -------
@@ -25,8 +27,17 @@ transaction.  Client-supplied expiry, predictable pairing identifiers,
 unimplemented polling, or consuming a pairing before its session is durable
 can leave that transaction ambiguous after retries or service failure.
 
-Proposed decision
------------------
+The project owner accepted this design on 2026-07-29 after the recorded
+security, protocol, persistence, and cross-project review.  Acceptance fixes
+the authority boundaries and transaction invariants below; it does not claim
+that the passwordless path is implemented or safe to activate.  Activation
+remains gated by issue #20, including the immutable
+principal-to-ObjectStore resolver, the reviewed liveness adapter, negative
+fixtures, crash/replay tests, and evidence through the real Monas/Pistis route.
+Standalone completion remains tracked separately by issue #21.
+
+Decision
+--------
 
 Pistis approval uses a typed ``EasyConnectApprovalContext`` derived from the
 request-time ``AudienceBoundActorContext``.  It contains no bearer credential,
@@ -123,5 +134,6 @@ The provider enum, approval context, persisted transaction schema, audit
 schema, policy registry, and polling contract are compatibility-sensitive.
 Implementation requires specialist security/protocol review, migration and
 negative fixtures, crash/replay testing, and acceptance through the real
-Monas/Pistis route.  This Proposed record authorizes no implementation and
-does not indicate project-owner acceptance.
+Monas/Pistis route.  This accepted record authorizes implementation within the
+stated boundaries, but neither authorizes deployment nor indicates that the
+activation gates have passed.
