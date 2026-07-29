@@ -11,6 +11,8 @@ agreement before landing.
 - Advance the exact Prosopikon pin to the bare-earth authority candidate whose
   atomic enrolment transaction makes the committed device immediately
   resolvable by Monas.
+- Keep the reviewed local-container sibling substitution on that same exact
+  Prosopikon revision so packaging qualification continues to fail closed.
 - Fail the local Docker build when its reviewed Prosopikon sibling-source
   substitution drifts from the workspace dependency instead of silently
   falling back to a private Git fetch.
