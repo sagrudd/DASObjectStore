@@ -223,9 +223,15 @@ mod tests {
 
     fn session() -> RemoteEasyconnectPairedSessionRecord {
         RemoteEasyconnectPairedSessionRecord {
+            pairing_id: "pairing-1".to_string(),
             session_id: "session-1".to_string(),
+            authority_id: "authority-1".to_string(),
+            principal_id: "stephen".to_string(),
             approved_actor: "stephen".to_string(),
+            authority_session_id: "authority-session-1".to_string(),
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            correlation_id: "correlation-1".to_string(),
+            audit_identity: "standalone:stephen".to_string(),
             issued_at_utc: "2026-07-25T00:00:00Z".to_string(),
             expires_at_utc: "2999-07-25T08:00:00Z".to_string(),
             renew_after_utc: "2999-07-25T07:00:00Z".to_string(),

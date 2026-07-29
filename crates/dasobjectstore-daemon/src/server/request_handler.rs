@@ -4529,10 +4529,16 @@ mod tests {
             .handle(DaemonApiRequest::RemoteEasyconnectApprovePairing(
                 RemoteEasyconnectApprovePairingRequest {
                     pairing_id: create.pairing_id.clone(),
-                    approved_actor: "stephen".to_string(),
-                    auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-                    allowed_object_stores: vec![grant],
-                    approval_expires_at_utc: "2026-07-09T16:30:00Z".to_string(),
+                    approval_context: crate::RemoteEasyconnectApprovalContext {
+                        authority_id: "authority-1".to_string(),
+                        principal_id: "stephen".to_string(),
+                        session_id: "authority-session-1".to_string(),
+                        auth_provider: RemoteEasyconnectAuthProvider::Pistis,
+                        allowed_object_stores: vec![grant],
+                        host_session_expires_at_utc: "2026-07-09T16:30:00Z".to_string(),
+                        correlation_id: "correlation-1".to_string(),
+                        audit_identity: "pistis:stephen".to_string(),
+                    },
                 },
             ))
             .expect("approve handled");
@@ -4832,9 +4838,15 @@ mod tests {
 
     fn paired_session(session_id: &str) -> RemoteEasyconnectPairedSessionRecord {
         RemoteEasyconnectPairedSessionRecord {
+            pairing_id: format!("pairing-{session_id}"),
             session_id: session_id.to_string(),
+            authority_id: "authority-1".to_string(),
+            principal_id: "stephen".to_string(),
             approved_actor: "stephen".to_string(),
+            authority_session_id: "authority-session-1".to_string(),
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            correlation_id: "correlation-1".to_string(),
+            audit_identity: "local-os:stephen".to_string(),
             issued_at_utc: "2026-07-09T16:10:00Z".to_string(),
             expires_at_utc: "2026-07-10T00:10:00Z".to_string(),
             renew_after_utc: "2026-07-09T23:10:00Z".to_string(),

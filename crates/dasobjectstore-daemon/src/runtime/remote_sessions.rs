@@ -29,6 +29,19 @@ pub trait RemoteEasyconnectPairedSessionStore: Send + Sync {
         session: RemoteEasyconnectPairedSessionRecord,
     ) -> Result<(), RemoteEasyconnectPairedSessionStoreError>;
 
+    fn create_for_pairing(
+        &self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError>;
+
+    fn get_by_pairing_id(
+        &self,
+        pairing_id: &str,
+    ) -> Result<
+        Option<RemoteEasyconnectPairedSessionRecord>,
+        RemoteEasyconnectPairedSessionStoreError,
+    >;
+
     fn get(
         &self,
         session_id: &str,
@@ -95,9 +108,17 @@ pub struct RemoteEasyconnectS3Credential {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairedSessionRecord {
+    pub pairing_id: String,
     pub session_id: String,
+    pub authority_id: String,
+    pub principal_id: String,
+    /// Compatibility projection of `principal_id` for existing control audit
+    /// responses. New code must keep the values identical.
     pub approved_actor: String,
+    pub authority_session_id: String,
     pub auth_provider: RemoteEasyconnectAuthProvider,
+    pub correlation_id: String,
+    pub audit_identity: String,
     pub issued_at_utc: String,
     pub expires_at_utc: String,
     pub renew_after_utc: String,
@@ -109,8 +130,17 @@ pub struct RemoteEasyconnectPairedSessionRecord {
 
 impl RemoteEasyconnectPairedSessionRecord {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        require_non_blank("pairing_id", &self.pairing_id)?;
         require_non_blank("session_id", &self.session_id)?;
+        require_non_blank("authority_id", &self.authority_id)?;
+        require_non_blank("principal_id", &self.principal_id)?;
         require_non_blank("approved_actor", &self.approved_actor)?;
+        if self.principal_id != self.approved_actor {
+            return Err(RemoteEasyconnectPairedSessionStoreError::PrincipalMismatch);
+        }
+        require_non_blank("authority_session_id", &self.authority_session_id)?;
+        require_non_blank("correlation_id", &self.correlation_id)?;
+        require_non_blank("audit_identity", &self.audit_identity)?;
         require_non_blank("issued_at_utc", &self.issued_at_utc)?;
         require_non_blank("expires_at_utc", &self.expires_at_utc)?;
         require_non_blank("renew_after_utc", &self.renew_after_utc)?;
@@ -198,6 +228,39 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
         let mut store = read_store(&self.path)?;
         store.upsert(session);
         write_store(&self.path, &store)
+    }
+
+    fn create_for_pairing(
+        &self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        session.validate()?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let mut store = read_store(&self.path)?;
+        store.create(session)?;
+        write_store(&self.path, &store)
+    }
+
+    fn get_by_pairing_id(
+        &self,
+        pairing_id: &str,
+    ) -> Result<
+        Option<RemoteEasyconnectPairedSessionRecord>,
+        RemoteEasyconnectPairedSessionStoreError,
+    > {
+        require_non_blank("pairing_id", pairing_id)?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        Ok(read_store(&self.path)?
+            .sessions
+            .iter()
+            .find(|session| session.pairing_id == pairing_id)
+            .cloned())
     }
 
     fn get(
@@ -554,6 +617,23 @@ impl RemoteEasyconnectPairedSessionStoreFile {
             self.sessions.push(session);
         }
     }
+
+    fn create(
+        &mut self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        if self.sessions.iter().any(|stored| {
+            stored.session_id == session.session_id || stored.pairing_id == session.pairing_id
+        }) {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::SessionAlreadyExists {
+                    session_id: session.session_id,
+                },
+            );
+        }
+        self.sessions.push(session);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -575,6 +655,10 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
     SessionNotFound {
         session_id: String,
     },
+    SessionAlreadyExists {
+        session_id: String,
+    },
+    PrincipalMismatch,
     SessionRevoked {
         session_id: String,
         revoked_at_utc: String,
@@ -631,6 +715,12 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
                     formatter,
                     "paired easyconnect session {session_id} was not found"
                 )
+            }
+            Self::SessionAlreadyExists { session_id } => {
+                write!(formatter, "paired easyconnect session {session_id} already exists")
+            }
+            Self::PrincipalMismatch => {
+                formatter.write_str("paired session principal projections must match")
             }
             Self::SessionRevoked {
                 session_id,
@@ -1265,9 +1355,15 @@ mod tests {
 
     fn session(session_id: &str) -> RemoteEasyconnectPairedSessionRecord {
         RemoteEasyconnectPairedSessionRecord {
+            pairing_id: format!("pairing-{session_id}"),
             session_id: session_id.to_string(),
+            authority_id: "authority-1".to_string(),
+            principal_id: "stephen".to_string(),
             approved_actor: "stephen".to_string(),
+            authority_session_id: "authority-session-1".to_string(),
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            correlation_id: "correlation-1".to_string(),
+            audit_identity: "local-os:stephen".to_string(),
             issued_at_utc: "2026-07-09T16:10:00Z".to_string(),
             expires_at_utc: "2026-07-10T00:10:00Z".to_string(),
             renew_after_utc: "2026-07-09T23:10:00Z".to_string(),

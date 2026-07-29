@@ -16,8 +16,9 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    easyconnect_public_router, federated_gui_api_router, AuthenticatedGuiActor,
-    FederatedHostSessionResponse, LocalAuthStore, VerifiedHostAuthenticatedContext,
+    easyconnect_public_router, federated_gui_api_router, pistis_easyconnect_approval_router,
+    AuthenticatedGuiActor, FederatedHostSessionResponse, LocalAuthStore,
+    VerifiedHostAuthenticatedContext,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -62,6 +63,7 @@ pub fn preverified_dasobjectstore_router(host_product_routes: Router) -> Router 
             "/api/v1/remote/host-context",
             axum::routing::get(preverified_host_session),
         )
+        .merge(pistis_easyconnect_approval_router())
         .merge(host_product_routes)
         .layer(middleware::from_fn(require_preverified_actor))
 }
@@ -118,11 +120,6 @@ async fn authenticate_monas_request(
     if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {
         return csrf_rejected();
     }
-    request
-        .extensions_mut()
-        .insert(AuthenticatedLocalPolicySubject {
-            username: session.username,
-        });
     request.extensions_mut().insert(verified);
     next.run(request).await
 }

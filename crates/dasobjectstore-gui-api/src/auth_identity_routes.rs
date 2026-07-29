@@ -1,6 +1,10 @@
 //! Standalone local authentication and EasyConnect route handlers.
 
 use super::*;
+use dasobjectstore_daemon::{
+    RemoteEasyconnectApprovalContext, RemoteEasyconnectPairingStatusRequest,
+    RemoteEasyconnectPairingStatusResponse,
+};
 
 #[derive(Clone)]
 pub(crate) struct StandaloneAuthRouteState {
@@ -21,6 +25,11 @@ pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) auth_store: LocalAuthStore,
     pub(super) public_base_url: String,
     pub(super) appliance_id: String,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct EasyconnectPublicRouteState {
+    pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
 }
 
 impl StandaloneAuthRouteState {
@@ -476,10 +485,16 @@ pub(super) async fn remote_authenticate(
             let approved = client
                 .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
                     pairing_id: created.pairing_id.clone(),
-                    approved_actor: current_user.username,
-                    auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-                    allowed_object_stores: vec![grant],
-                    approval_expires_at_utc: created.expires_at_utc,
+                    approval_context: RemoteEasyconnectApprovalContext {
+                        authority_id: "dasobjectstore-local-os".to_string(),
+                        principal_id: current_user.username.clone(),
+                        session_id: format!("local-password:{}", created.pairing_id),
+                        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+                        allowed_object_stores: vec![grant],
+                        host_session_expires_at_utc: created.expires_at_utc,
+                        correlation_id: format!("remote-authenticate:{}", created.pairing_id),
+                        audit_identity: format!("local-os:{}", current_user.username),
+                    },
                 })
                 .map_err(|error| error.to_string())?;
             let exchanged = client
@@ -733,6 +748,30 @@ pub(super) async fn easyconnect_create_pairing(
     Ok(Json(response))
 }
 
+pub(super) async fn easyconnect_pairing_status(
+    Path(pairing_id): Path<String>,
+) -> Result<Json<RemoteEasyconnectPairingStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let request = RemoteEasyconnectPairingStatusRequest { pairing_id };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_pairing_status",
+            error.to_string(),
+        )
+    })?;
+    crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                DaemonRuntimeConfig::default_packaged().socket_path,
+            ))
+            .remote_easyconnect_pairing_status(request)
+            .map_err(|error| error.to_string())
+        })
+        .await
+        .map(Json)
+        .map_err(remote_auth_bridge_error)
+}
+
 pub(super) async fn easyconnect_browser_approval(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
@@ -751,7 +790,6 @@ pub(super) async fn easyconnect_browser_approval(
     let intent = serde_json::to_string(&EasyconnectBrowserApprovalIntent {
         pairing_id: query.pairing_id.clone(),
         object_store: query.object_store.clone(),
-        approval_expires_at_utc: query.expires_at_utc.clone(),
     })
     .map_err(|error| {
         route_error(
@@ -776,68 +814,52 @@ pub(super) async fn easyconnect_browser_approval(
 
 pub(super) async fn easyconnect_approve_pairing(
     actor: AuthenticatedGuiActor,
-    local_policy_subject: Option<Extension<crate::AuthenticatedLocalPolicySubject>>,
+    Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
+    Extension(approval_context): Extension<RemoteEasyconnectApprovalContext>,
     Json(intent): Json<EasyconnectBrowserApprovalIntent>,
 ) -> Result<Json<RemoteEasyconnectApprovePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
-    if !actor.authority.uses_local_os_policy() {
+    if approval_context.auth_provider != RemoteEasyconnectAuthProvider::Pistis {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "local_os_policy_identity_required",
-            "EasyConnect approval requires a host-verified appliance-local policy subject",
+            "pistis_approval_context_required",
+            "EasyConnect host approval requires a credential-free Pistis approval context",
         ));
     }
-    let username = local_policy_subject
-        .map(|Extension(subject)| subject.username)
-        .unwrap_or_else(|| actor.subject_id.clone());
-    let current_user = discover_local_user(&username).map_err(|error| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "local_user_discovery_failed",
-            error.to_string(),
-        )
-    })?;
-    let workspace = crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
-        current_user.username.clone(),
-        current_user.groups,
-        current_user.sudo_administrator,
+    let expected_expiry = dasobjectstore_core::utc::format_utc_timestamp_seconds(
+        verified.context().expires_at_unix_seconds,
     );
-    let store = workspace
-        .stores
-        .iter()
-        .find(|store| store.store_id == intent.object_store)
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::FORBIDDEN,
-                "object_store_not_authorized",
-                "the authenticated user has no remote access to the requested ObjectStore",
-            )
-        })?;
-    if !store.upload_allowed {
+    if approval_context.principal_id != actor.subject_id
+        || approval_context.session_id != verified.context().session_id
+        || approval_context.correlation_id != verified.context().correlation_id
+        || approval_context.host_session_expires_at_utc != expected_expiry
+    {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "object_store_write_authorization_required",
-            "remote EasyConnect sessions require current ObjectStore write authority",
+            "pistis_approval_context_mismatch",
+            "Pistis approval context does not match the current verified host session",
+        ));
+    }
+    let Some(grant) = approval_context
+        .allowed_object_stores
+        .iter()
+        .find(|grant| grant.object_store == intent.object_store)
+    else {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "object_store_not_authorized",
+            "the Pistis approval context does not grant the requested ObjectStore",
+        ));
+    };
+    if approval_context.allowed_object_stores.len() != 1 || !grant.can_write {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "exact_writable_object_store_grant_required",
+            "EasyConnect requires exactly one writable ObjectStore grant",
         ));
     }
     let request = RemoteEasyconnectApprovePairingRequest {
         pairing_id: intent.pairing_id,
-        approved_actor: actor.subject_id,
-        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-        allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
-            object_store: store.store_id.clone(),
-            bucket: store.bucket.clone(),
-            can_read: true,
-            can_write: true,
-            writer_group: store.writer_group.clone(),
-            object_type: store.object_type.clone(),
-            control_operations: dasobjectstore_daemon::api::remote_easyconnect_control_operations(
-                true,
-            ),
-            allowed_prefixes: vec![
-                dasobjectstore_daemon::api::REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string(),
-            ],
-        }],
-        approval_expires_at_utc: intent.approval_expires_at_utc,
+        approval_context,
     };
     request.validate().map_err(|error| {
         route_error(
@@ -869,8 +891,9 @@ fn html_escape(value: &str) -> String {
 }
 
 pub(super) async fn easyconnect_exchange_pairing(
+    State(state): State<EasyconnectPublicRouteState>,
     Json(request): Json<RemoteEasyconnectExchangePairingRequest>,
-) -> Result<Json<RemoteEasyconnectExchangePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+) -> Result<Json<RemoteEasyconnectExchangeConnectionResponse>, (StatusCode, Json<AuthRouteError>)> {
     request.validate().map_err(|error| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -878,7 +901,14 @@ pub(super) async fn easyconnect_exchange_pairing(
             error.to_string(),
         )
     })?;
-    crate::daemon_bridge::DaemonBridge::shared_packaged()
+    let s3_descriptor = state.s3_descriptor.ok_or_else(|| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "s3_connection_descriptor_unavailable",
+            "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
+        )
+    })?;
+    let exchange = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
                 DaemonRuntimeConfig::default_packaged().socket_path,
@@ -887,8 +917,16 @@ pub(super) async fn easyconnect_exchange_pairing(
             .map_err(|error| error.to_string())
         })
         .await
-        .map(Json)
-        .map_err(remote_auth_bridge_error)
+        .map_err(remote_auth_bridge_error)?;
+    Ok(Json(RemoteEasyconnectExchangeConnectionResponse {
+        schema_version: "dasobjectstore.remote_easyconnect_exchange.v1".to_string(),
+        exchange,
+        s3: RemoteEasyconnectS3ConnectionDescriptor {
+            endpoint_url: s3_descriptor.endpoint_url,
+            region: s3_descriptor.region,
+            addressing_style: s3_descriptor.addressing_style,
+        },
+    }))
 }
 
 fn validate_loopback_callback(

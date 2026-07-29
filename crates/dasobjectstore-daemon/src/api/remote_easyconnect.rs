@@ -148,6 +148,7 @@ impl Default for RemoteEasyconnectSessionPolicy {
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEasyconnectAuthProvider {
     StandaloneLocalUser,
+    Pistis,
     Synoptikon,
     Mneion,
 }
@@ -185,19 +186,85 @@ pub struct RemoteEasyconnectCreatePairingResponse {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectPairingStatusRequest {
+    pub pairing_id: String,
+}
+
+impl RemoteEasyconnectPairingStatusRequest {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        require_non_blank("pairing_id", &self.pairing_id)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectPairingState {
+    Pending,
+    Approved,
+    Exchanged,
+    Expired,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectPairingStatusResponse {
+    pub pairing_id: String,
+    pub state: RemoteEasyconnectPairingState,
+    pub expires_at_utc: String,
+    /// Returned only while an unexpired approval is ready for the holder of
+    /// the 256-bit pairing capability.
+    pub exchange_code: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectApprovePairingRequest {
     pub pairing_id: String,
-    pub approved_actor: String,
-    pub auth_provider: RemoteEasyconnectAuthProvider,
-    pub allowed_object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
-    pub approval_expires_at_utc: String,
+    pub approval_context: RemoteEasyconnectApprovalContext,
 }
 
 impl RemoteEasyconnectApprovePairingRequest {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
         require_non_blank("pairing_id", &self.pairing_id)?;
-        require_non_blank("approved_actor", &self.approved_actor)?;
-        require_non_blank("approval_expires_at_utc", &self.approval_expires_at_utc)?;
+        self.approval_context.validate()
+    }
+}
+
+/// Credential-free authority and authorization facts supplied by the
+/// embedding host after it verifies the live Pistis session.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteEasyconnectApprovalContext {
+    pub authority_id: String,
+    pub principal_id: String,
+    pub session_id: String,
+    pub auth_provider: RemoteEasyconnectAuthProvider,
+    pub allowed_object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
+    pub host_session_expires_at_utc: String,
+    pub correlation_id: String,
+    pub audit_identity: String,
+}
+
+impl RemoteEasyconnectApprovalContext {
+    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
+        for (field, value) in [
+            ("authority_id", self.authority_id.as_str()),
+            ("principal_id", self.principal_id.as_str()),
+            ("session_id", self.session_id.as_str()),
+            (
+                "host_session_expires_at_utc",
+                self.host_session_expires_at_utc.as_str(),
+            ),
+            ("correlation_id", self.correlation_id.as_str()),
+            ("audit_identity", self.audit_identity.as_str()),
+        ] {
+            require_non_blank(field, value)?;
+        }
+        if !matches!(
+            self.auth_provider,
+            RemoteEasyconnectAuthProvider::StandaloneLocalUser
+                | RemoteEasyconnectAuthProvider::Pistis
+        ) {
+            return Err(RemoteEasyconnectValidationError::InvalidApprovalProvider);
+        }
         if self.allowed_object_stores.is_empty() {
             return Err(RemoteEasyconnectValidationError::EmptyObjectStoreGrants);
         }
@@ -236,8 +303,25 @@ impl RemoteEasyconnectExchangePairingRequest {
 pub struct RemoteEasyconnectExchangePairingResponse {
     pub appliance_id: String,
     pub appliance_base_url: String,
+    pub approved_actor: String,
+    pub auth_provider: RemoteEasyconnectAuthProvider,
     pub session: RemoteEasyconnectSession,
     pub object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectS3ConnectionDescriptor {
+    pub endpoint_url: String,
+    pub region: String,
+    pub addressing_style: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RemoteEasyconnectExchangeConnectionResponse {
+    pub schema_version: String,
+    #[serde(flatten)]
+    pub exchange: RemoteEasyconnectExchangePairingResponse,
+    pub s3: RemoteEasyconnectS3ConnectionDescriptor,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -797,6 +881,7 @@ pub enum RemoteEasyconnectValidationError {
     InvalidLoopbackUrl { field: &'static str, value: String },
     InvalidRequestedLifetime { seconds: u64 },
     EmptyObjectStoreGrants,
+    InvalidApprovalProvider,
     GrantWithoutAccess { object_store: String },
     InvalidControlPrefix { prefix: String },
     EmptyUploadSelection,
@@ -845,6 +930,11 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
             ),
             Self::EmptyObjectStoreGrants => {
                 formatter.write_str("at least one object store grant is required")
+            }
+            Self::InvalidApprovalProvider => {
+                formatter.write_str(
+                    "approval context must use the standalone_local_user or pistis provider",
+                )
             }
             Self::GrantWithoutAccess { object_store } => write!(
                 formatter,

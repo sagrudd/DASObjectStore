@@ -91,6 +91,7 @@ where
             storage::request(handler, storage_request, actor, emit_progress)
         }
         easyconnect_request @ (DaemonApiRequest::RemoteEasyconnectCreatePairing(_)
+        | DaemonApiRequest::RemoteEasyconnectPairingStatus(_)
         | DaemonApiRequest::RemoteEasyconnectApprovePairing(_)
         | DaemonApiRequest::RemoteEasyconnectExchangePairing(_)
         | DaemonApiRequest::RemoteEasyconnectRevokeSession(_)

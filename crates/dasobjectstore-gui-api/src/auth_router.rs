@@ -56,16 +56,17 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone(), public_base_url).merge(
-                standalone_session_auth_router_with_state(StandaloneAuthRouteState {
-                    auth_store,
-                    local_password_authenticator: Arc::new(
-                        SystemLocalPasswordAuthenticator::default(),
-                    ),
-                    s3_descriptor,
-                }),
-            )
-            .merge(easyconnect_public_router());
+            let router = federated_operational_router(auth_store.clone(), public_base_url)
+                .merge(standalone_session_auth_router_with_state(
+                    StandaloneAuthRouteState {
+                        auth_store,
+                        local_password_authenticator: Arc::new(
+                            SystemLocalPasswordAuthenticator::default(),
+                        ),
+                        s3_descriptor: s3_descriptor.clone(),
+                    },
+                ))
+                .merge(easyconnect_public_router_with_s3_descriptor(s3_descriptor));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -220,6 +221,14 @@ pub fn standalone_easyconnect_router(auth_store: LocalAuthStore) -> Router {
 /// Pairing creation and one-time exchange routes that do not require a browser
 /// session. Approval is deliberately absent and remains behind host auth.
 pub fn easyconnect_public_router() -> Router {
+    easyconnect_public_router_with_s3_descriptor(None)
+}
+
+/// Public create, status, and exchange routes with a deployment-owned S3
+/// descriptor. Exchange fails closed when the descriptor is absent.
+pub fn easyconnect_public_router_with_s3_descriptor(
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+) -> Router {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings",
@@ -228,6 +237,26 @@ pub fn easyconnect_public_router() -> Router {
         .route(
             "/api/v1/remote/easyconnect/pairings/exchange",
             post(easyconnect_exchange_pairing),
+        )
+        .route(
+            "/api/v1/remote/easyconnect/pairings/{pairing_id}",
+            get(easyconnect_pairing_status),
+        )
+        .layer(DefaultBodyLimit::max(64 * 1024))
+        .with_state(EasyconnectPublicRouteState { s3_descriptor })
+}
+
+/// Pistis approval routes that must be mounted behind a host-verified actor and
+/// a credential-free [`RemoteEasyconnectApprovalContext`] extension.
+pub fn pistis_easyconnect_approval_router() -> Router {
+    Router::new()
+        .route(
+            "/api/v1/remote/easyconnect/pairings/approve",
+            post(easyconnect_approve_pairing),
+        )
+        .route(
+            "/remote/easyconnect/login",
+            get(easyconnect_browser_approval),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
 }

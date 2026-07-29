@@ -50,6 +50,7 @@ use crate::api::{
     RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
     RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectPairingStatusRequest, RemoteEasyconnectPairingStatusResponse,
     RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
     RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
@@ -806,6 +807,16 @@ where
         }
     }
 
+    pub fn remote_easyconnect_pairing_status(
+        &self,
+        request: RemoteEasyconnectPairingStatusRequest,
+    ) -> Result<RemoteEasyconnectPairingStatusResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::RemoteEasyconnectPairingStatus(request))? {
+            DaemonApiResponse::RemoteEasyconnectPairingStatus(response) => Ok(response),
+            response => Err(unexpected("remote_easyconnect_pairing_status", response)),
+        }
+    }
+
     pub fn remote_easyconnect_approve_pairing(
         &self,
         request: RemoteEasyconnectApprovePairingRequest,
@@ -962,6 +973,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
         DaemonApiResponse::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
         DaemonApiResponse::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
+        DaemonApiResponse::RemoteEasyconnectPairingStatus(_) => "remote_easyconnect_pairing_status",
         DaemonApiResponse::RemoteEasyconnectApprovePairing(_) => {
             "remote_easyconnect_approve_pairing"
         }

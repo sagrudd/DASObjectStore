@@ -41,11 +41,12 @@ use auth_identity_routes::*;
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
-    easyconnect_public_router, federated_gui_api_router, gui_api_router_for_host_mode,
+    easyconnect_public_router, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, gui_api_router_for_host_mode,
     gui_api_router_for_host_mode_with_application_auth,
-    gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
-    standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,
-    standalone_reporting_router, standalone_users_groups_router,
+    gui_api_router_for_host_mode_with_s3_descriptor, pistis_easyconnect_approval_router,
+    standalone_auth_router, standalone_easyconnect_router, standalone_enclosure_admin_router,
+    standalone_gui_api_router, standalone_reporting_router, standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{
@@ -124,10 +125,10 @@ use dasobjectstore_daemon::{
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
     RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
+    RemoteEasyconnectExchangeConnectionResponse, RemoteEasyconnectExchangePairingRequest,
     RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectSessionPolicy,
-    UnixSocketDaemonTransport,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectS3ConnectionDescriptor,
+    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -175,7 +176,6 @@ struct EasyconnectBrowserApprovalQuery {
 struct EasyconnectBrowserApprovalIntent {
     pairing_id: String,
     object_store: String,
-    approval_expires_at_utc: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

@@ -623,8 +623,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("discovery body");
-        let discovery: serde_json::Value =
-            serde_json::from_slice(&body).expect("discovery JSON");
+        let discovery: serde_json::Value = serde_json::from_slice(&body).expect("discovery JSON");
         assert_eq!(
             discovery["pairing_create_url"],
             "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"

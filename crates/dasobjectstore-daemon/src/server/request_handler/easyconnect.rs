@@ -4,9 +4,14 @@ use crate::api::{
     ApplicationObjectDeleteResponse, CapacityAdmissionDecision,
     RemoteEasyconnectAwsCliEnvironmentVariable, APPLICATION_OBJECT_DELETE_SCHEMA_VERSION,
 };
+use crate::runtime::{
+    REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS, REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS,
+};
 use ring::rand::{SecureRandom, SystemRandom};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
+
+static REMOTE_EASYCONNECT_EXCHANGE_GUARD: Mutex<()> = Mutex::new(());
 
 fn lock_application_store_mutation(
     store_id: &StoreId,
@@ -154,8 +159,23 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::RemoteEasyconnectPairingStatus(request) => {
+            let now_utc = handler.clock.now_utc();
+            match FileBackedRemoteEasyconnectPairingStore::new(
+                &handler.remote_easyconnect_pairing_store_path,
+            )
+            .status(&request.pairing_id, &now_utc)
+            {
+                Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectPairingStatus(response)),
+                Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "remote_easyconnect_pairing_status_failed",
+                    error.to_string(),
+                ))),
+            }
+        }
         DaemonApiRequest::RemoteEasyconnectApprovePairing(request) => {
-            match handler.approve_remote_easyconnect_pairing(request) {
+            let approved_at_utc = handler.clock.now_utc();
+            match handler.approve_remote_easyconnect_pairing(request, &approved_at_utc) {
                 Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectApprovePairing(response)),
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "remote_easyconnect_pairing_approve_failed",
@@ -707,25 +727,24 @@ where
         request: RemoteEasyconnectCreatePairingRequest,
         created_at_utc: &str,
     ) -> Result<RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectPairingStoreError> {
-        let lifetime_seconds = resolve_remote_easyconnect_session_lifetime_seconds(
-            request.requested_session_lifetime_seconds,
-        )
-        .map_err(|error| RemoteEasyconnectPairingStoreError::Json {
-            path: self.remote_easyconnect_pairing_store_path.clone(),
-            message: error.to_string(),
-        })?;
-        let expires_at_utc = add_seconds_to_utc_timestamp(created_at_utc, lifetime_seconds)
-            .ok_or_else(|| RemoteEasyconnectPairingStoreError::Json {
+        let expires_at_utc =
+            add_seconds_to_utc_timestamp(created_at_utc, REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS)
+                .ok_or_else(|| RemoteEasyconnectPairingStoreError::Json {
+                    path: self.remote_easyconnect_pairing_store_path.clone(),
+                    message: format!(
+                        "daemon clock value {created_at_utc} is not a supported UTC timestamp"
+                    ),
+                })?;
+        let pairing_id = random_easyconnect_value("pairing-", 32).map_err(|message| {
+            RemoteEasyconnectPairingStoreError::Json {
                 path: self.remote_easyconnect_pairing_store_path.clone(),
-                message: format!(
-                    "daemon clock value {created_at_utc} is not a supported UTC timestamp"
-                ),
-            })?;
-        let pairing_id = stable_easyconnect_id("pairing", &request.client_name, created_at_utc);
+                message,
+            }
+        })?;
         let store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
-        store.upsert(RemoteEasyconnectPairingRecord {
+        store.create(RemoteEasyconnectPairingRecord {
             pairing_id: pairing_id.clone(),
             client_name: request.client_name,
             callback_url: request.callback_url.clone(),
@@ -752,6 +771,7 @@ where
     fn approve_remote_easyconnect_pairing(
         &self,
         request: RemoteEasyconnectApprovePairingRequest,
+        approved_at_utc: &str,
     ) -> Result<RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectPairingStoreError> {
         let exchange_code = random_easyconnect_value("exchange-", 24).map_err(|message| {
             RemoteEasyconnectPairingStoreError::Json {
@@ -762,20 +782,30 @@ where
         let store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
-        let pairing = store.approve(RemoteEasyconnectPairingApproval {
-            pairing_id: request.pairing_id.clone(),
-            approved_actor: request.approved_actor,
-            auth_provider: request.auth_provider,
-            allowed_object_stores: request.allowed_object_stores,
-            approval_expires_at_utc: request.approval_expires_at_utc.clone(),
-            exchange_code: exchange_code.clone(),
-        })?;
+        let approval_expires_at_utc =
+            add_seconds_to_utc_timestamp(approved_at_utc, REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS)
+                .ok_or_else(|| RemoteEasyconnectPairingStoreError::Json {
+                    path: self.remote_easyconnect_pairing_store_path.clone(),
+                    message: format!(
+                        "daemon clock value {approved_at_utc} is not a supported UTC timestamp"
+                    ),
+                })?;
+        let pairing = store.approve(
+            RemoteEasyconnectPairingApproval {
+                pairing_id: request.pairing_id.clone(),
+                context: request.approval_context,
+                approval_expires_at_utc,
+                exchange_code: exchange_code.clone(),
+            },
+            approved_at_utc,
+        )?;
+        let approval = pairing.approval.expect("approved pairing carries approval");
 
         Ok(RemoteEasyconnectApprovePairingResponse {
             pairing_id: request.pairing_id,
             exchange_code,
             callback_url: pairing.callback_url,
-            expires_at_utc: request.approval_expires_at_utc,
+            expires_at_utc: approval.approval_expires_at_utc,
         })
     }
 
@@ -785,6 +815,9 @@ where
         exchanged_at_utc: &str,
     ) -> Result<RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectExchangeDispatchError>
     {
+        let _exchange_guard = REMOTE_EASYCONNECT_EXCHANGE_GUARD
+            .lock()
+            .expect("remote EasyConnect exchange guard poisoned");
         let state_dir = self
             .remote_easyconnect_session_store_path
             .parent()
@@ -797,12 +830,13 @@ where
         let pairing_store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
+        let exchange = RemoteEasyconnectPairingExchange {
+            pairing_id: request.pairing_id,
+            exchange_code: request.exchange_code,
+            exchanged_at_utc: exchanged_at_utc.to_string(),
+        };
         let pairing = pairing_store
-            .exchange(RemoteEasyconnectPairingExchange {
-                pairing_id: request.pairing_id,
-                exchange_code: request.exchange_code,
-                exchanged_at_utc: exchanged_at_utc.to_string(),
-            })
+            .prepare_exchange(&exchange)
             .map_err(RemoteEasyconnectExchangeDispatchError::PairingStore)?;
         let approval = pairing.approval.ok_or_else(|| {
             RemoteEasyconnectExchangeDispatchError::PairingStore(
@@ -833,12 +867,14 @@ where
             .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidClock {
                 value: exchanged_at_utc.to_string(),
             })?;
-        let first_grant = approval.allowed_object_stores.first().ok_or_else(|| {
-            RemoteEasyconnectExchangeDispatchError::InvalidRequest {
+        let first_grant = approval
+            .context
+            .allowed_object_stores
+            .first()
+            .ok_or_else(|| RemoteEasyconnectExchangeDispatchError::InvalidRequest {
                 message: "approved pairing did not contain object store grants".to_string(),
-            }
-        })?;
-        if approval.allowed_object_stores.len() != 1 {
+            })?;
+        if approval.context.allowed_object_stores.len() != 1 {
             return Err(RemoteEasyconnectExchangeDispatchError::InvalidRequest {
                 message: "remote S3 sessions must contain exactly one ObjectStore grant"
                     .to_string(),
@@ -849,48 +885,71 @@ where
                 message: "remote S3 sessions require a writable ObjectStore grant until Garage read-only credential provisioning is available".to_string(),
             });
         }
-        let credentials = temporary_s3_session_credentials().map_err(|message| {
-            RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
-        })?;
-        let session_id = random_easyconnect_value("session-", 16).map_err(|message| {
-            RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
-        })?;
-        let renewal_token = random_easyconnect_value("renewal-", 32).map_err(|message| {
-            RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
-        })?;
         let session_store = FileBackedRemoteEasyconnectPairedSessionStore::new(
             &self.remote_easyconnect_session_store_path,
         );
-        session_store
-            .upsert(RemoteEasyconnectPairedSessionRecord {
+        let persisted = if let Some(existing) = session_store
+            .get_by_pairing_id(&pairing.pairing_id)
+            .map_err(RemoteEasyconnectExchangeDispatchError::SessionStore)?
+        {
+            existing
+        } else {
+            let credentials = temporary_s3_session_credentials().map_err(|message| {
+                RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
+            })?;
+            let session_id = random_easyconnect_value("session-", 16).map_err(|message| {
+                RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
+            })?;
+            let renewal_token = random_easyconnect_value("renewal-", 32).map_err(|message| {
+                RemoteEasyconnectExchangeDispatchError::InvalidRequest { message }
+            })?;
+            let session = RemoteEasyconnectPairedSessionRecord {
+                pairing_id: pairing.pairing_id.clone(),
                 session_id: session_id.clone(),
-                approved_actor: approval.approved_actor,
-                auth_provider: approval.auth_provider,
+                authority_id: approval.context.authority_id.clone(),
+                principal_id: approval.context.principal_id.clone(),
+                approved_actor: approval.context.principal_id.clone(),
+                authority_session_id: approval.context.session_id.clone(),
+                auth_provider: approval.context.auth_provider,
+                correlation_id: approval.context.correlation_id.clone(),
+                audit_identity: approval.context.audit_identity.clone(),
                 issued_at_utc: exchanged_at_utc.to_string(),
                 expires_at_utc: expires_at_utc.clone(),
                 renew_after_utc: renew_after_utc.clone(),
                 renewal_token: renewal_token.clone(),
                 credentials: credentials.clone(),
-                object_stores: approval.allowed_object_stores.clone(),
+                object_stores: approval.context.allowed_object_stores.clone(),
                 revoked_at_utc: None,
-            })
-            .map_err(RemoteEasyconnectExchangeDispatchError::SessionStore)?;
+            };
+            session_store
+                .create_for_pairing(session.clone())
+                .map_err(RemoteEasyconnectExchangeDispatchError::SessionStore)?;
+            session
+        };
+        pairing_store
+            .commit_exchange(exchange)
+            .map_err(RemoteEasyconnectExchangeDispatchError::PairingStore)?;
 
         Ok(RemoteEasyconnectExchangePairingResponse {
             appliance_id: appliance_identity.appliance_id,
             appliance_base_url: "/products/dasobjectstore/api".to_string(),
+            approved_actor: persisted.principal_id.clone(),
+            auth_provider: persisted.auth_provider,
             session: RemoteEasyconnectSession {
-                session_id: session_id.clone(),
-                issued_at_utc: exchanged_at_utc.to_string(),
-                expires_at_utc,
-                credentials,
+                session_id: persisted.session_id.clone(),
+                issued_at_utc: persisted.issued_at_utc.clone(),
+                expires_at_utc: persisted.expires_at_utc.clone(),
+                credentials: persisted.credentials,
                 renewal: RemoteEasyconnectSessionRenewal {
-                    renew_url: format!("/api/v1/remote/easyconnect/sessions/{session_id}/renew"),
-                    renew_after_utc,
-                    renewal_token,
+                    renew_url: format!(
+                        "/api/v1/remote/easyconnect/sessions/{}/renew",
+                        persisted.session_id
+                    ),
+                    renew_after_utc: persisted.renew_after_utc,
+                    renewal_token: persisted.renewal_token,
                 },
             },
-            object_stores: approval.allowed_object_stores,
+            object_stores: persisted.object_stores,
         })
     }
 
