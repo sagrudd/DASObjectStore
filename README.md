@@ -348,6 +348,31 @@ GitHub-hosted workers. The cross-repository Pistis–Monas acceptance lane in th
 Jenkins project verifies the authentication boundary through DASObjectStore
 with the exact Prosopikon and Monas revisions recorded in each lockfile.
 
+### Pistis storage policy
+
+Passwordless authentication never implies storage authorization. Provision one
+exact Prosopikon principal and ObjectStore tuple through the supported
+compare-and-swap command:
+
+```sh
+dasobjectstore pistis-grant inspect \
+  --grant-registry /var/lib/dasobjectstore/pistis-grants.json
+dasobjectstore pistis-grant grant \
+  --authority /var/lib/prosopikon/authority.sqlite3 \
+  --email stephen@mnemosyne.co.uk \
+  --grant-registry /var/lib/dasobjectstore/pistis-grants.json \
+  --store-registry /var/lib/dasobjectstore/stores.json \
+  --expected-revision 0 \
+  --object-store epic_collection \
+  --read --write
+```
+
+The email is used only to resolve exactly one active principal. Runtime policy
+stores immutable authority and principal UUIDs and derives bucket and service
+permissions from the current DAS registry. See the Sphinx
+`Pistis ObjectStore grants` operator page for revoke, backup, rollback, and
+customer-hosted deployment guidance.
+
 ## License
 
 DASObjectStore is intended to be licensed under the Mozilla Public License 2.0.

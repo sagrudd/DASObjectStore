@@ -8,6 +8,10 @@ agreement before landing.
 
 ## Unreleased
 
+- Add an atomic, revision-checked Pistis grant policy store and supported
+  ``pistis-grant inspect/grant/revoke`` administrator workflow that resolves an
+  email to exactly one active Prosopikon principal, persists immutable IDs, and
+  validates the exact current S3-exported ObjectStore.
 - Accept the credential-free Pistis EasyConnect approval contract, including
   exact authority/principal/session/grant/audit binding, explicit separation
   from OS identity, server-owned ceremony limits, idempotent durable exchange,

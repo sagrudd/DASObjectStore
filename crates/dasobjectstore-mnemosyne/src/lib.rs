@@ -88,7 +88,8 @@ pub use pistis_actor::{
     PistisHostRequestBindings, PISTIS_DASOBJECTSTORE_PRODUCT_ID,
 };
 pub use pistis_grants::{
-    FilePistisEasyconnectApprovalResolver, PistisObjectStoreGrantRecord,
+    FilePistisEasyconnectApprovalResolver, PistisGrantAuditEvent, PistisGrantAuditOperation,
+    PistisGrantPolicyError, PistisGrantPolicyStore, PistisObjectStoreGrantRecord,
     PistisObjectStoreGrantRegistry, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
 };
 pub use policy_templates::{

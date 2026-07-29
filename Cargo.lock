@@ -748,6 +748,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64",
+ "chrono",
  "clap",
  "dasobjectstore-core",
  "dasobjectstore-daemon",
@@ -768,6 +769,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tower",
+ "uuid",
  "x509-parser",
 ]
 
@@ -2723,6 +2725,7 @@ dependencies = [
  "pam-client",
  "parking_lot",
  "rand_core 0.6.4",
+ "rusqlite",
  "serde",
  "serde_jcs",
  "serde_json",

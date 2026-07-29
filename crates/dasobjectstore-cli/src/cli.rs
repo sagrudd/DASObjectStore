@@ -8,6 +8,7 @@ mod disk;
 mod ingest;
 mod object;
 mod performance;
+mod pistis_grant;
 mod pool;
 mod service;
 mod store;
@@ -26,6 +27,10 @@ pub(crate) use ingest::{
 };
 pub(crate) use object::{
     ObjectArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs, ObjectPutArgs,
+};
+pub(crate) use pistis_grant::{
+    PistisGrantArgs, PistisGrantCommand, PistisGrantInspectArgs, PistisGrantMutationArgs,
+    PistisGrantRevokeArgs,
 };
 #[cfg(feature = "debug-commands")]
 pub(crate) use pool::PoolMarkerArgs;
@@ -120,6 +125,9 @@ pub(crate) enum Command {
     Service(ServiceArgs),
     /// Export Mnemosyne/Synoptikon integration metadata.
     Mnemosyne(MnemosyneArgs),
+    /// Manage immutable Prosopikon principal-to-ObjectStore grants.
+    #[command(name = "pistis-grant")]
+    PistisGrant(PistisGrantArgs),
     /// Benchmark SSD and HDD ingest settlement performance.
     PerformanceTest(PerformanceTestArgs),
     /// Rebuild a formal performance PDF report from an existing JSON artifact.
@@ -322,8 +330,8 @@ impl MnemosyneValidateNasNfsEndpointArgs {
 mod tests {
     use super::{
         Cli, Command, EndpointCommand, MnemosyneCommand, PerformanceFileOrder,
-        PerformanceFileSelection, PerformanceScenarioSelection, ProbeArgs, StatusArgs,
-        TrustCommand,
+        PerformanceFileSelection, PerformanceScenarioSelection, PistisGrantCommand, ProbeArgs,
+        StatusArgs, TrustCommand,
     };
     use clap::Parser;
     use std::path::Path;
@@ -583,6 +591,46 @@ mod tests {
             }
             MnemosyneCommand::Export(_) => panic!("expected NAS/NFS endpoint validation command"),
         }
+    }
+
+    #[test]
+    fn parses_exact_pistis_grant_provisioning() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "pistis-grant",
+            "grant",
+            "--authority",
+            "/var/lib/prosopikon/authority.sqlite3",
+            "--email",
+            "stephen@mnemosyne.co.uk",
+            "--grant-registry",
+            "/var/lib/dasobjectstore/pistis-grants.json",
+            "--store-registry",
+            "/var/lib/dasobjectstore/stores.json",
+            "--expected-revision",
+            "0",
+            "--object-store",
+            "epic_collection",
+            "--read",
+            "--write",
+        ])
+        .expect("Pistis grant command parses");
+
+        let Some(Command::PistisGrant(args)) = cli.command() else {
+            panic!("expected Pistis grant command");
+        };
+        let PistisGrantCommand::Grant(grant) = args.command() else {
+            panic!("expected grant operation");
+        };
+        assert_eq!(
+            grant.authority(),
+            Path::new("/var/lib/prosopikon/authority.sqlite3")
+        );
+        assert_eq!(grant.email(), "stephen@mnemosyne.co.uk");
+        assert_eq!(grant.expected_revision(), 0);
+        assert_eq!(grant.object_store(), "epic_collection");
+        assert!(grant.read());
+        assert!(grant.write());
     }
 
     #[test]

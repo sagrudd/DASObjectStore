@@ -7,8 +7,8 @@ use crate::cli::{
     IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
     MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
     ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection,
-    PerformanceReportArgs, PerformanceScenarioSelection, PerformanceTestArgs, PoolCommand,
-    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
+    PerformanceReportArgs, PerformanceScenarioSelection, PerformanceTestArgs, PistisGrantCommand,
+    PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
     ServiceRenderComposeArgs, StoreAcknowledgementPolicyArgs, StoreAdoptArgs,
     StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
     StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
@@ -45,6 +45,7 @@ mod performance_ssd_pipeline;
 mod performance_ssd_stage_then_drain;
 mod performance_tui;
 mod performance_workload;
+mod pistis_grant;
 mod probe;
 mod registry_access;
 mod runtime_status;
@@ -373,6 +374,11 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             MnemosyneCommand::ValidateNasNfsEndpoint(args) => {
                 run_mnemosyne_validate_nas_nfs_endpoint(args, writer)
             }
+        },
+        Some(Command::PistisGrant(args)) => match args.command() {
+            PistisGrantCommand::Inspect(args) => pistis_grant::inspect(args, writer),
+            PistisGrantCommand::Grant(args) => pistis_grant::grant(args, writer),
+            PistisGrantCommand::Revoke(args) => pistis_grant::revoke(args, writer),
         },
         Some(Command::PerformanceTest(args)) => run_performance_test(args, writer),
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
