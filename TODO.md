@@ -3830,15 +3830,28 @@ browser and appliance acceptance remain external validation gates.
   - [x] Obtain specialist and owner review and accept ADR 0003. The accepted
     design fixes the credential-free Pistis authority and durable transaction
     boundaries but does not activate the incomplete path.
-  - [ ] Implement the credential-free Pistis EasyConnect approval transaction
-    without an OS identity lookup under issue #20. Add the distinct Pistis
-    provider, exact
-    authority/principal/session/ObjectStore grant and correlation/audit
-    bindings, daemon-owned five-minute ceremony TTL and random capabilities,
-    durable-session-before-consumption recovery, and bounded polling fallback.
-    Prove replay, expiry, collision, CSRF, crash recovery, grant substitution,
-    callback loss, and real Monas/Pistis CLI approval before marking the
-    passwordless path complete.
+  - [~] Implement the credential-free Pistis EasyConnect approval transaction
+    without an OS identity lookup under issue #20.
+    - [x] The distinct Pistis provider, exact
+      authority/principal/session/ObjectStore grant, correlation/audit
+      bindings, daemon-owned five-minute ceremony TTL and random capabilities,
+      durable-session-before-consumption recovery, and bounded polling
+      fallback are implemented and regression-tested.
+    - [x] The accepted tuple-keyed policy resolver derives one exact current
+      DAS-owned ObjectStore grant, fails closed for hostile substitutions and
+      missing/read-only/stale policy, and has CAS-safe private persistence plus
+      supported inspect/grant/revoke CLI operations. The evaluation host has
+      one immutable initial-administrator grant for ``epic_collection``.
+    - [ ] Move policy mutation and its authenticated administrator audit
+      receipt behind the existing peer-credential Unix-socket daemon boundary;
+      the current administrator process remains a direct writer. Preserve the
+      v1 registry or accept and migrate an explicit v2 audit schema before
+      implementation.
+    - [ ] Prove the real Monas/Pistis CLI approval through create, protected
+      approve, poll/callback recovery, and single-use exchange. Retain replay,
+      expiry, collision, CSRF, crash-recovery, grant-substitution, callback-loss,
+      restart, and missing-context evidence before marking the passwordless
+      path complete.
   - [x] Complete the remaining Monas host evidence against ``0.6.0`` commit
     ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. Mounted-router tests prove
     CSRF wiring, and the real browser proves ordinary/admin OS-policy access,
