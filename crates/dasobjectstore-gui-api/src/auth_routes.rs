@@ -46,9 +46,11 @@ pub use auth_router::{
     easyconnect_public_router, easyconnect_public_router_with_config,
     easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
     gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
-    gui_api_router_for_host_mode_with_s3_descriptor, pistis_easyconnect_approval_router,
-    standalone_auth_router, standalone_easyconnect_router, standalone_enclosure_admin_router,
-    standalone_gui_api_router, standalone_reporting_router, standalone_users_groups_router,
+    gui_api_router_for_host_mode_with_s3_descriptor,
+    gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
+    pistis_easyconnect_approval_router, standalone_auth_router, standalone_easyconnect_router,
+    standalone_enclosure_admin_router, standalone_gui_api_router, standalone_reporting_router,
+    standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{
@@ -1127,6 +1129,9 @@ mod tests {
                 accepted_credentials: vec![("user".to_string(), "secret".to_string())],
             }),
             s3_descriptor: None,
+            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         };
         let response = post_json_response(
             standalone_auth_router_with_state(state),
@@ -3781,6 +3786,9 @@ mod tests {
                 region: "test-region".to_string(),
                 addressing_style: "path".to_string(),
             }),
+            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         })
     }
 

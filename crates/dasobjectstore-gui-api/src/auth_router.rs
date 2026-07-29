@@ -54,6 +54,29 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
     public_base_url: Option<String>,
 ) -> Router {
+    gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
+        host_mode,
+        auth_store,
+        include_application_auth,
+        s3_descriptor,
+        public_base_url,
+        crate::StandaloneServerConfig::default_localhost()
+            .tls
+            .certificate_path,
+    )
+}
+
+/// Compose the host-mode API with an authoritative S3 descriptor and the
+/// certificate bundle used to verify that endpoint before remote grant
+/// issuance.
+pub fn gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
+    host_mode: GuiApiHostMode,
+    auth_store: LocalAuthStore,
+    include_application_auth: bool,
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
+    s3_tls_certificate_path: PathBuf,
+) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
             let router = federated_operational_router(auth_store.clone(), public_base_url.clone())
@@ -64,6 +87,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor(
                             SystemLocalPasswordAuthenticator::default(),
                         ),
                         s3_descriptor: s3_descriptor.clone(),
+                        s3_tls_certificate_path,
                     },
                 ))
                 .merge(easyconnect_public_pairing_router_with_config(

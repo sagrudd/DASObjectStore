@@ -16,6 +16,7 @@ pub(crate) struct StandaloneAuthRouteState {
     pub(super) auth_store: LocalAuthStore,
     pub(super) local_password_authenticator: Arc<dyn LocalPasswordAuthenticator>,
     pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    pub(super) s3_tls_certificate_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,6 +46,9 @@ impl StandaloneAuthRouteState {
             auth_store,
             local_password_authenticator: Arc::new(SystemLocalPasswordAuthenticator::default()),
             s3_descriptor: None,
+            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         }
     }
 }
@@ -448,16 +452,18 @@ pub(super) async fn remote_authenticate(
             "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
         )
     })?;
-    let verified_endpoint =
-        crate::s3_endpoint_probe::verify_public_s3_endpoint(&s3_descriptor.endpoint_url)
-            .await
-            .map_err(|error| {
-                route_error(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    error.code(),
-                    error.to_string(),
-                )
-            })?;
+    let verified_endpoint = crate::s3_endpoint_probe::verify_public_s3_endpoint(
+        &s3_descriptor.endpoint_url,
+        &state.s3_tls_certificate_path,
+    )
+    .await
+    .map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.code(),
+            error.to_string(),
+        )
+    })?;
 
     let grant = RemoteEasyconnectObjectStoreGrant {
         object_store: store.store_id.clone(),

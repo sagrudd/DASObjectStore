@@ -105,7 +105,7 @@ The standalone server configuration at
        "port": 3900,
        "legacy_upstream_endpoint": "http://127.0.0.1:3901",
        "max_concurrent_uploads": 8,
-       "public_endpoint_url": "http://192.168.1.192:3900",
+       "public_endpoint_url": "https://objects.appliance.example:3900",
        "region": "garage",
        "addressing_style": "path"
      }

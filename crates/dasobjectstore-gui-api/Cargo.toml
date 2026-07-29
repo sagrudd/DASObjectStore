@@ -34,5 +34,6 @@ tokio-util.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+axum-server.workspace = true
 rusqlite.workspace = true
 tower.workspace = true

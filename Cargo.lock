@@ -805,6 +805,7 @@ name = "dasobjectstore-gui-api"
 version = "0.152.3"
 dependencies = [
  "axum",
+ "axum-server",
  "bytes",
  "dasobjectstore-core",
  "dasobjectstore-daemon",

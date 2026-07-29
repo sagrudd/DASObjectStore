@@ -1,10 +1,13 @@
 //! Non-secret runtime proof that the public S3 endpoint matches its descriptor.
 
 use std::fmt;
+use std::path::Path;
 use std::time::Duration;
 
 const PROBE_BUCKET: &str = "dasobjectstore-protocol-probe";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PROBE_RESPONSE_BYTES: usize = 64 * 1024;
+const MAX_TRUST_BUNDLE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedS3Endpoint {
@@ -65,6 +68,7 @@ impl fmt::Display for S3EndpointProbeError {
 
 pub async fn verify_public_s3_endpoint(
     endpoint: &str,
+    trusted_certificate_path: &Path,
 ) -> Result<VerifiedS3Endpoint, S3EndpointProbeError> {
     let parsed = reqwest::Url::parse(endpoint).map_err(|_| {
         S3EndpointProbeError::InvalidDescriptor("public S3 endpoint is not a URL".to_string())
@@ -80,16 +84,46 @@ pub async fn verify_public_s3_endpoint(
             "public S3 endpoint does not contain a usable port".to_string(),
         )
     })?;
+    if scheme != "https" {
+        return Err(S3EndpointProbeError::InvalidDescriptor(
+            "public S3 endpoint must use HTTPS".to_string(),
+        ));
+    }
     if scheme == "https" && plaintext_http_responds(host, port).await {
         return Err(S3EndpointProbeError::ProtocolMismatch {
             advertised_endpoint: endpoint.to_string(),
             observed_protocol: format!("plaintext HTTP on {host}:{port}"),
         });
     }
-    if scheme != "http" {
+    let trust_metadata = tokio::fs::metadata(trusted_certificate_path)
+        .await
+        .map_err(|error| S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: format!("configured TLS trust material is unavailable: {error}"),
+        })?;
+    if trust_metadata.len() == 0 || trust_metadata.len() > MAX_TRUST_BUNDLE_BYTES {
         return Err(S3EndpointProbeError::Unavailable {
             endpoint: endpoint.to_string(),
-            reason: "the direct S3 gateway has no configured TLS listener".to_string(),
+            reason: "configured TLS trust material has an invalid size".to_string(),
+        });
+    }
+    let trust_pem = tokio::fs::read(trusted_certificate_path)
+        .await
+        .map_err(|error| S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: format!("configured TLS trust material cannot be read: {error}"),
+        })?;
+    let certificates = reqwest::Certificate::from_pem_bundle(&trust_pem).map_err(|_| {
+        S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: "configured TLS trust material is not a valid PEM certificate bundle"
+                .to_string(),
+        }
+    })?;
+    if certificates.is_empty() {
+        return Err(S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: "configured TLS trust material contains no certificates".to_string(),
         });
     }
 
@@ -98,8 +132,16 @@ pub async fn verify_public_s3_endpoint(
         endpoint.trim_end_matches('/'),
         PROBE_BUCKET
     );
-    let response = reqwest::Client::builder()
+    let mut client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .https_only(true)
+        .tls_built_in_root_certs(false)
+        .min_tls_version(reqwest::tls::Version::TLS_1_3);
+    for certificate in certificates {
+        client = client.add_root_certificate(certificate);
+    }
+    let mut response = client
         .build()
         .map_err(|error| S3EndpointProbeError::Unavailable {
             endpoint: endpoint.to_string(),
@@ -118,13 +160,33 @@ pub async fn verify_public_s3_endpoint(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/xml"));
-    let body = response
-        .bytes()
-        .await
-        .map_err(|error| S3EndpointProbeError::Unavailable {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_PROBE_RESPONSE_BYTES as u64)
+    {
+        return Err(S3EndpointProbeError::InvalidS3Response {
             endpoint: endpoint.to_string(),
-            reason: error.to_string(),
-        })?;
+            status,
+        });
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) =
+        response
+            .chunk()
+            .await
+            .map_err(|error| S3EndpointProbeError::Unavailable {
+                endpoint: endpoint.to_string(),
+                reason: error.to_string(),
+            })?
+    {
+        if chunk.len() > MAX_PROBE_RESPONSE_BYTES - body.len() {
+            return Err(S3EndpointProbeError::InvalidS3Response {
+                endpoint: endpoint.to_string(),
+                status,
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
     let body_is_s3_xml = body.starts_with(b"<?xml")
         && (body
             .windows(b"<Error>".len())
@@ -169,6 +231,12 @@ async fn plaintext_http_responds(host: &str, port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::{header, StatusCode};
+    use axum::routing::get;
+    use axum::Router;
+    use axum_server::tls_rustls::RustlsConfig;
+    use rcgen::generate_simple_self_signed;
+    use std::path::PathBuf;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn plaintext_s3_server() -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
@@ -198,17 +266,75 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verifies_plaintext_s3_and_rejects_false_https_advertisement() {
-        let (address, task) = plaintext_s3_server().await;
-        let verified = verify_public_s3_endpoint(&format!("http://{address}"))
+    async fn verifies_native_tls_s3_with_configured_trust_material() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let root = test_root("native-tls");
+        std::fs::create_dir_all(&root).expect("create test root");
+        let certificate = generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("generate certificate");
+        let certificate_path = root.join("server.crt");
+        let private_key_path = root.join("server.key");
+        std::fs::write(&certificate_path, certificate.cert.pem()).expect("write certificate");
+        std::fs::write(&private_key_path, certificate.signing_key.serialize_pem())
+            .expect("write private key");
+        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
             .await
-            .expect("HTTP S3 endpoint verifies");
-        assert_eq!(verified.scheme, "http");
+            .expect("load TLS");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        let address = listener.local_addr().expect("address");
+        drop(listener);
+        let app = Router::new().route(
+            "/{*path}",
+            get(|| async {
+                (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "application/xml")],
+                    r#"<?xml version="1.0"?><Error><Code>SignatureDoesNotMatch</Code></Error>"#,
+                )
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum_server::bind_rustls(address, tls)
+                .serve(app.into_make_service())
+                .await
+        });
 
-        let error = verify_public_s3_endpoint(&format!("https://{address}"))
+        let endpoint = format!("https://localhost:{}", address.port());
+        let verified = verify_public_s3_endpoint(&endpoint, &certificate_path)
             .await
-            .expect_err("false HTTPS rejected");
+            .expect("native TLS S3 endpoint verifies");
+        assert_eq!(verified.scheme, "https");
+        assert_eq!(verified.host, "localhost");
+        assert_eq!(verified.port, address.port());
+        server.abort();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn rejects_plaintext_endpoint_and_false_https_advertisement() {
+        let (address, task) = plaintext_s3_server().await;
+        let error = verify_public_s3_endpoint(
+            &format!("http://{address}"),
+            Path::new("/unused-for-plaintext-rejection"),
+        )
+        .await
+        .expect_err("plaintext descriptor rejected");
+        assert!(matches!(error, S3EndpointProbeError::InvalidDescriptor(_)));
+
+        let error = verify_public_s3_endpoint(
+            &format!("https://{address}"),
+            Path::new("/unused-for-protocol-mismatch"),
+        )
+        .await
+        .expect_err("false HTTPS rejected");
         assert_eq!(error.code(), "advertised_endpoint_protocol_mismatch");
         task.abort();
+    }
+
+    fn test_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-s3-endpoint-probe-{label}-{}",
+            uuid::Uuid::new_v4()
+        ))
     }
 }
