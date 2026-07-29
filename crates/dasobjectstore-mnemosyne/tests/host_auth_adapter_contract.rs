@@ -8,11 +8,12 @@ use axum::{
 use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
-    monas_federated_router, synoptikon_federated_router, HostSessionAdapterError,
-    MonasHostSessionIssue, StorageAuthority, SynoptikonHostRequestAuthentication,
-    SynoptikonIntegratedAcceptedSession, SynoptikonIntegratedHostBoundaryContext,
-    SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID,
-    FEDERATED_CSRF_HEADER, REQUEST_CONTEXT_SCHEMA_VERSION,
+    monas_federated_router, preverified_dasobjectstore_router, synoptikon_federated_router,
+    HostSessionAdapterError, MonasHostSessionIssue, StorageAuthority,
+    SynoptikonHostRequestAuthentication, SynoptikonIntegratedAcceptedSession,
+    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
+    SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, FEDERATED_CSRF_HEADER,
+    REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -21,6 +22,59 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tower::ServiceExt;
+
+#[tokio::test]
+async fn preverified_router_rejects_legacy_credentials_and_missing_context() {
+    let app = preverified_dasobjectstore_router(Router::new());
+    for request in [
+        Request::builder()
+            .uri("/api/v1/host-session")
+            .header(COOKIE, "monas_session=operator:legacy-token")
+            .body(Body::empty())
+            .expect("cookie request"),
+        Request::builder()
+            .uri("/api/v1/remote/host-context")
+            .header("authorization", "Bearer legacy-token")
+            .body(Body::empty())
+            .expect("bearer request"),
+    ] {
+        assert_eq!(
+            app.clone()
+                .oneshot(request)
+                .await
+                .expect("response")
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+}
+
+#[tokio::test]
+async fn preverified_router_accepts_only_inserted_verified_context() {
+    let root = temp_root("preverified-only");
+    let store = registered_store(&root);
+    let login = store
+        .login_with_session_ttl_seconds("operator", "secret", Some(3_600))
+        .expect("login");
+    let issue = MonasHostSessionIssue {
+        username: "operator".to_owned(),
+        session_token: login.session_token,
+        correlation_id: "corr-preverified-1".to_owned(),
+        csrf_binding_sha256: csrf_binding(),
+    };
+    let verified = accept_monas_host_session(&store, &issue, unix_now()).expect("verified fixture");
+    let app = preverified_dasobjectstore_router(Router::new()).layer(Extension(verified));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/host-session")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::OK);
+}
 
 #[tokio::test]
 async fn live_monas_session_drives_gui_actor_without_exposing_bearer() {

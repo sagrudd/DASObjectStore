@@ -3808,6 +3808,14 @@ browser and appliance acceptance remain external validation gates.
     endpoint returns a non-authorizing same-origin token, Yew retains it only
     in process memory and attaches it to mutations, and mounted-router tests
     reject missing or mismatched values before dispatch.
+  - [x] Add the credential-free Pistis actor boundary for Monas. Pin
+    Prosopikon ``0.16`` exactly, accept only its request-time
+    ``AudienceBoundActorContext`` for the configured authority and
+    ``dasobjectstore`` audience, and map explicit active product grants without
+    accepting a raw credential, Pistis message, verifier, or second session
+    store. Hostile tests reject stale sessions, wrong authority/audience,
+    inactive or mismatched principals, malformed bindings, and unrelated or
+    suspended grants.
   - [x] Preserve standalone OS policy under Monas composition. Monas subjects
     resolve through the appliance-local user provider for dashboards,
     administration, EasyConnect, and ObjectStore browsing; host roles never

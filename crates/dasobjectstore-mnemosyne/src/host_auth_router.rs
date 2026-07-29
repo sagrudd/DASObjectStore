@@ -15,7 +15,10 @@ use axum::{
     response::{IntoResponse, Response},
     Router,
 };
-use dasobjectstore_gui_api::{federated_gui_api_router, LocalAuthStore};
+use dasobjectstore_gui_api::{
+    federated_gui_api_router, AuthenticatedGuiActor, FederatedHostSessionResponse, LocalAuthStore,
+    VerifiedHostAuthenticatedContext,
+};
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -40,6 +43,27 @@ pub fn monas_federated_router(router: Router, auth_store: ProsopikonAuthStore) -
 
 pub fn monas_dasobjectstore_api_router(auth_store: ProsopikonAuthStore) -> Router {
     monas_dasobjectstore_router(Router::new(), auth_store)
+}
+
+/// Mount host-supplied product routes behind an already verified actor.
+///
+/// This constructor has no credential or session-store argument. The embedding
+/// Monas middleware must resolve Prosopikon on the current request and insert a
+/// [`VerifiedHostAuthenticatedContext`]. Missing context fails closed. The
+/// legacy Monas cookie parser and intrinsic DASObjectStore login routes are not
+/// mounted.
+pub fn preverified_dasobjectstore_router(host_product_routes: Router) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/host-session",
+            axum::routing::get(preverified_host_session),
+        )
+        .route(
+            "/api/v1/remote/host-context",
+            axum::routing::get(preverified_host_session),
+        )
+        .merge(host_product_routes)
+        .layer(middleware::from_fn(require_preverified_actor))
 }
 
 /// Mount host-owned Web routes and the DASObjectStore operational API behind
@@ -123,6 +147,29 @@ async fn authenticate_synoptikon_request(
     }
     request.extensions_mut().insert(verified);
     next.run(request).await
+}
+
+async fn require_preverified_actor(request: Request<Body>, next: Next) -> Response {
+    let Some(verified) = request
+        .extensions()
+        .get::<VerifiedHostAuthenticatedContext>()
+    else {
+        return unauthorized();
+    };
+    if !csrf_is_valid(&request, verified.context().csrf_binding_sha256.as_str()) {
+        return csrf_rejected();
+    }
+    next.run(request).await
+}
+
+async fn preverified_host_session(
+    actor: AuthenticatedGuiActor,
+    axum::Extension(verified): axum::Extension<VerifiedHostAuthenticatedContext>,
+) -> axum::Json<FederatedHostSessionResponse> {
+    axum::Json(FederatedHostSessionResponse::from_host_actor(
+        actor,
+        verified.context().csrf_binding_sha256.clone(),
+    ))
 }
 
 fn parse_monas_session_cookie(request: &Request<Body>) -> Option<(String, String)> {
