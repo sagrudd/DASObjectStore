@@ -93,6 +93,13 @@ Work is dependency ordered. Only these entries define open release work:
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,
   restart recovery, control SLOs, and a performance baseline with no
   unexplained staging growth. Promote only commit-bound evidence.
+  **CONCURRENT INGEST DEFECT (2026-07-29):** appliance ``0.152.4`` correctly
+  settled an empty object, but mixed-file SSD-first ingest with three HDD
+  workers reproduced ``object metadata commit failed: database is locked``.
+  Serial one-worker strict ingests recovered every object without identity
+  drift. Add a deterministic mixed empty/non-empty regression, serialize or
+  boundedly retry catalogue finalization, and prove partial-job recovery on
+  the appliance before closing this gate.
 
 ### Tier 1 — required for v1.0, not the MVP candidate
 
