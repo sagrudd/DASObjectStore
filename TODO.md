@@ -3840,8 +3840,13 @@ browser and appliance acceptance remain external validation gates.
     - [x] The accepted tuple-keyed policy resolver derives one exact current
       DAS-owned ObjectStore grant, fails closed for hostile substitutions and
       missing/read-only/stale policy, and has CAS-safe private persistence plus
-      supported inspect/grant/revoke CLI operations. The evaluation host has
-      one immutable initial-administrator grant for ``epic_collection``.
+      supported inspect/grant/revoke CLI operations. The isolated bare-earth
+      evaluation registry remains at revision zero with no grants until the
+      owner commissions and enrols the fresh principal.
+    - [x] Add a password-free first-use TLS trust command for the remote
+      EasyConnect client. ``trust enroll`` requires either a CA file or an
+      independently verified leaf fingerprint, refuses replacement, and
+      persists no authentication credential.
     - [ ] Move policy mutation and its authenticated administrator audit
       receipt behind the existing peer-credential Unix-socket daemon boundary;
       the current administrator process remains a direct writer. Preserve the

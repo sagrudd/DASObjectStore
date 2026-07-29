@@ -112,13 +112,32 @@ The Monas/Pistis product boundary separates the routes deliberately:
 * the daemon rejects an approval that substitutes a different ObjectStore for
   the one requested when the pairing was created.
 
-The command requires previously enrolled appliance certificate trust. It uses
-that pin for discovery, pairing creation, and exchange; URLs returned by the
-appliance cannot redirect the client away from the pinned HTTPS origin. The
-server returns the public S3 endpoint, region, and addressing style alongside
-the approved principal, grants, and short-lived session. The client validates
-the envelope and commits the complete session generation atomically. It never
-guesses an S3 endpoint from the browser or control URL.
+The command requires previously enrolled appliance certificate trust. Enrol
+that trust without a password before the first EasyConnect run, using exactly
+one independently obtained evidence source:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust enroll das.example \
+     --ca-cert /secure/site-ca.crt
+
+   # Or, when no private CA is available:
+   dasobjectstore-remote trust enroll das.example \
+     --trust-fingerprint VERIFIED_LEAF_SHA256
+
+The CA form verifies both the presented certificate chain and the exact host
+name. The fingerprint form accepts only the independently compared leaf
+fingerprint. The command performs no password prompt and sends no
+authentication credential. It refuses to overwrite an existing trust record;
+use ``trust inspect`` and the explicit rotation or repair workflow instead.
+
+EasyConnect uses the resulting pin for discovery, pairing creation, and
+exchange; URLs returned by the appliance cannot redirect the client away from
+the pinned HTTPS origin. The server returns the public S3 endpoint, region, and
+addressing style alongside the approved principal, grants, and short-lived
+session. The client validates the envelope and commits the complete session
+generation atomically. It never guesses an S3 endpoint from the browser or
+control URL.
 
 In a Monas/Pistis deployment, the public EasyConnect router exposes discovery,
 pairing creation, bounded status polling, and one-time exchange without a
@@ -128,12 +147,11 @@ or path-bearing origin configuration fails closed. The discovery contract
 advertises ``pistis`` as the authentication provider. Pairing approval is not
 part of this public router and remains behind the verified host actor boundary.
 
-If certificate trust has not yet been enrolled, inspect and verify it before
-retrying:
+Inspect the enrolled, non-secret certificate identity before pairing:
 
 .. code-block:: console
 
-   dasobjectstore-remote trust inspect 192.168.1.192
+   dasobjectstore-remote trust inspect das.example
 
 The credential-free Pistis completion design is recorded as Accepted
 :doc:`../adr/0003-credential-free-pistis-easyconnect-approval`.  It requires a

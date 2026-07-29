@@ -8,6 +8,9 @@ agreement before landing.
 
 ## Unreleased
 
+- Add a dedicated password-free ``dasobjectstore-remote trust enroll`` workflow
+  that requires an explicit CA certificate or independently verified leaf
+  fingerprint before the first EasyConnect pairing.
 - Add an isolated, static evaluation service and configuration for a parallel
   TLS S3 listener, plus the fresh-authority Pistis grant procedure.
 - Advance the exact Prosopikon pin to the bare-earth authority candidate whose

@@ -373,6 +373,21 @@ permissions from the current DAS registry. See the Sphinx
 `Pistis ObjectStore grants` operator page for revoke, backup, rollback, and
 customer-hosted deployment guidance.
 
+On a remote workstation, first enrol appliance TLS trust without supplying a
+DAS password, then start the browser-approved pairing:
+
+```sh
+dasobjectstore-remote trust enroll das.example \
+  --ca-cert /secure/site-ca.crt
+dasobjectstore-remote easyconnect das.example \
+  --object-store epic_collection
+```
+
+Use ``--trust-fingerprint VERIFIED_LEAF_SHA256`` instead of ``--ca-cert`` only
+after comparing the leaf fingerprint through an independent channel. Trust
+enrolment refuses to replace an existing record. The Sphinx `Remote Client CLI`
+guide documents headless pairing, inspection, rotation, and recovery.
+
 ## License
 
 DASObjectStore is intended to be licensed under the Mozilla Public License 2.0.
