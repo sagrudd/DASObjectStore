@@ -133,9 +133,12 @@ be much lower than the schema maximum.
 
 The public endpoint is authoritative remote-client configuration. The direct
 gateway uses the appliance's native Rustls listener and its URL must begin with
-``https://``. Before issuing temporary credentials, the server probes the
-public origin, requires the configured appliance certificate to be presented
-exactly, and requires a bounded valid S3 XML response. Advertising
+``https://``. Before approving or exchanging an EasyConnect grant, the server
+probes the public origin, requires the first certificate in the configured
+fullchain to be presented exactly, validates it through only the remaining
+configured CA/intermediate chain, and requires a bounded valid S3 XML response.
+A one-certificate self-signed deployment trusts that exact certificate.
+Advertising
 ``https://`` for a plaintext listener is rejected as
 ``advertised_endpoint_protocol_mismatch``. Remote clients independently reject
 plaintext HTTP observed behind an advertised HTTPS URL and never silently
@@ -281,6 +284,12 @@ configuration-management channel. Never fetch a CA from the untrusted
 endpoint and trust it implicitly. Retain the certificate chain, SHA-256
 fingerprint, SANs, expiry, negotiated TLS version, configuration digest, and
 exact package revision as acceptance evidence.
+
+Order the configured certificate file as a conventional fullchain: the exact
+appliance leaf first, followed by its intermediate and root CA certificates.
+Built-in operating-system roots are not consulted by the EasyConnect verifier.
+A sibling certificate issued by the same CA cannot substitute for the
+configured appliance leaf.
 
 Acceptance tests
 ----------------

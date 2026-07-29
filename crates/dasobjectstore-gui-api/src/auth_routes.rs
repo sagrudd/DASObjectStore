@@ -38,8 +38,8 @@ pub(crate) mod profile_multipart;
 pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
-pub use auth_identity_routes::StandaloneS3ConnectionDescriptor;
 use auth_identity_routes::*;
+pub use auth_identity_routes::{EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor};
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
@@ -985,8 +985,9 @@ mod tests {
         LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
-        AuthenticatedActorAuthority, AuthenticatedGuiActor, LocalAuthStore, LocalPasswordAuthError,
-        LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, STANDALONE_SESSION_TOKEN_HEADER,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectS3EndpointConfig,
+        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
+        LoginResponse, StandaloneS3ConnectionDescriptor, STANDALONE_SESSION_TOKEN_HEADER,
         STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
@@ -1393,6 +1394,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = app
@@ -1506,6 +1508,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_easyconnect_exchange_verifies_deployment_tls_before_daemon_transition() {
+        let app = easyconnect_public_router_with_config(
+            Some(EasyconnectS3EndpointConfig {
+                descriptor: StandaloneS3ConnectionDescriptor {
+                    endpoint_url: "https://objects.example.test:3900".to_string(),
+                    region: "test-region".to_string(),
+                    addressing_style: "path".to_string(),
+                },
+                tls_certificate_path: PathBuf::from("/missing/appliance-fullchain.pem"),
+            }),
+            Some("https://das.example.test:8448".to_string()),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/remote/easyconnect/pairings/exchange")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"pairing_id":"pair-1","exchange_code":"exchange-1","client_request_id":"request-1"}"#,
+                    ))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "s3_endpoint_unavailable");
+    }
+
+    #[tokio::test]
     async fn standalone_easyconnect_auth_context_requires_session() {
         let root = temp_root("easyconnect-auth-required");
         let auth_store = registered_auth_store(&root);
@@ -1513,6 +1547,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = app
@@ -1539,6 +1574,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1566,6 +1602,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1595,6 +1632,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1621,6 +1659,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let encoded = get_json_with_session::<serde_json::Value>(

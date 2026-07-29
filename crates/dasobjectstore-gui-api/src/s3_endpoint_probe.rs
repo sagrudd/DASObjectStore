@@ -128,26 +128,32 @@ pub async fn verify_public_s3_endpoint(
                 endpoint: endpoint.to_string(),
                 reason: "configured TLS trust material contains no certificates".to_string(),
             })?;
-    let configured_leaf_root =
-        reqwest::Certificate::from_der(configured_leaf.as_ref()).map_err(|_| {
-            S3EndpointProbeError::Unavailable {
-                endpoint: endpoint.to_string(),
-                reason: "configured TLS leaf certificate cannot be loaded".to_string(),
-            }
-        })?;
+    let trust_anchors = if configured_certificates.len() == 1 {
+        &configured_certificates[..1]
+    } else {
+        &configured_certificates[1..]
+    };
     let probe_url = format!(
         "{}/{}?list-type=2&max-keys=0",
         endpoint.trim_end_matches('/'),
         PROBE_BUCKET
     );
-    let client = reqwest::Client::builder()
+    let mut client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .https_only(true)
         .tls_built_in_root_certs(false)
         .min_tls_version(reqwest::tls::Version::TLS_1_3)
-        .tls_info(true)
-        .add_root_certificate(configured_leaf_root);
+        .tls_info(true);
+    for trust_anchor in trust_anchors {
+        let trust_anchor = reqwest::Certificate::from_der(trust_anchor.as_ref()).map_err(|_| {
+            S3EndpointProbeError::Unavailable {
+                endpoint: endpoint.to_string(),
+                reason: "configured TLS trust chain contains an invalid certificate".to_string(),
+            }
+        })?;
+        client = client.add_root_certificate(trust_anchor);
+    }
     let mut response = client
         .build()
         .map_err(|error| S3EndpointProbeError::Unavailable {
@@ -253,7 +259,10 @@ mod tests {
     use axum::routing::get;
     use axum::Router;
     use axum_server::tls_rustls::RustlsConfig;
-    use rcgen::generate_simple_self_signed;
+    use rcgen::{
+        generate_simple_self_signed, BasicConstraints, CertificateParams, CertifiedIssuer, IsCa,
+        KeyPair,
+    };
     use std::path::PathBuf;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -272,16 +281,30 @@ mod tests {
     }
 
     async fn tls_s3_server(label: &str, app: Router) -> TlsS3Fixture {
+        let certificate = generate_simple_self_signed(vec!["localhost".to_string()])
+            .expect("generate certificate");
+        tls_s3_server_with_pem(
+            label,
+            app,
+            certificate.cert.pem(),
+            certificate.signing_key.serialize_pem(),
+        )
+        .await
+    }
+
+    async fn tls_s3_server_with_pem(
+        label: &str,
+        app: Router,
+        certificate_pem: String,
+        private_key_pem: String,
+    ) -> TlsS3Fixture {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let root = test_root(label);
         std::fs::create_dir_all(&root).expect("create test root");
-        let certificate = generate_simple_self_signed(vec!["localhost".to_string()])
-            .expect("generate certificate");
         let certificate_path = root.join("server.crt");
         let private_key_path = root.join("server.key");
-        std::fs::write(&certificate_path, certificate.cert.pem()).expect("write certificate");
-        std::fs::write(&private_key_path, certificate.signing_key.serialize_pem())
-            .expect("write private key");
+        std::fs::write(&certificate_path, certificate_pem).expect("write certificate");
+        std::fs::write(&private_key_path, private_key_pem).expect("write private key");
         let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
             .await
             .expect("load TLS");
@@ -299,6 +322,30 @@ mod tests {
             root,
             server,
         }
+    }
+
+    fn ca_issued_fullchains() -> (String, String, String) {
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca =
+            CertifiedIssuer::self_signed(ca_params, KeyPair::generate().expect("generate CA key"))
+                .expect("generate CA");
+
+        let server_key = KeyPair::generate().expect("generate server key");
+        let server = CertificateParams::new(vec!["localhost".to_string()])
+            .expect("server parameters")
+            .signed_by(&server_key, &ca)
+            .expect("sign server certificate");
+        let sibling_key = KeyPair::generate().expect("generate sibling key");
+        let sibling = CertificateParams::new(vec!["localhost".to_string()])
+            .expect("sibling parameters")
+            .signed_by(&sibling_key, &ca)
+            .expect("sign sibling certificate");
+        (
+            format!("{}{}", server.pem(), ca.pem()),
+            server_key.serialize_pem(),
+            format!("{}{}", sibling.pem(), ca.pem()),
+        )
     }
 
     fn valid_s3_app() -> Router {
@@ -350,6 +397,28 @@ mod tests {
         assert_eq!(verified.scheme, "https");
         assert_eq!(verified.host, "localhost");
         assert_eq!(verified.port, fixture.address.port());
+    }
+
+    #[tokio::test]
+    async fn verifies_ca_issued_fullchain_and_rejects_sibling_leaf() {
+        let (server_fullchain, server_key, sibling_fullchain) = ca_issued_fullchains();
+        let fixture =
+            tls_s3_server_with_pem("ca-fullchain", valid_s3_app(), server_fullchain, server_key)
+                .await;
+        let endpoint = format!("https://localhost:{}", fixture.address.port());
+        verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
+            .await
+            .expect("CA-issued configured leaf verifies");
+
+        let sibling_path = fixture.root.join("sibling-fullchain.pem");
+        std::fs::write(&sibling_path, sibling_fullchain).expect("write sibling fullchain");
+        let error = verify_public_s3_endpoint(&endpoint, &sibling_path)
+            .await
+            .expect_err("sibling signed by the same CA is not the configured leaf");
+        assert_eq!(error.code(), "s3_endpoint_unavailable");
+        assert!(error
+            .to_string()
+            .contains("configured appliance TLS certificate"));
     }
 
     #[tokio::test]

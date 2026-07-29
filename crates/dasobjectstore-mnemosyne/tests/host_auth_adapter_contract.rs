@@ -5,7 +5,10 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dasobjectstore_gui_api::{AuthenticatedGuiActor, HostAuthenticationAuthority};
+use dasobjectstore_gui_api::{
+    AuthenticatedGuiActor, EasyconnectS3EndpointConfig, HostAuthenticationAuthority,
+    StandaloneS3ConnectionDescriptor,
+};
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
     monas_federated_router, preverified_dasobjectstore_router, synoptikon_federated_router,
@@ -25,7 +28,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn preverified_router_rejects_legacy_credentials_and_missing_context() {
-    let app = preverified_dasobjectstore_router(Router::new());
+    let app = preverified_dasobjectstore_router(Router::new(), Some(test_s3_endpoint()));
     for request in [
         Request::builder()
             .uri("/api/v1/host-session")
@@ -63,7 +66,8 @@ async fn preverified_router_accepts_only_inserted_verified_context() {
         csrf_binding_sha256: csrf_binding(),
     };
     let verified = accept_monas_host_session(&store, &issue, unix_now()).expect("verified fixture");
-    let app = preverified_dasobjectstore_router(Router::new()).layer(Extension(verified));
+    let app = preverified_dasobjectstore_router(Router::new(), Some(test_s3_endpoint()))
+        .layer(Extension(verified));
     let response = app
         .oneshot(
             Request::builder()
@@ -520,6 +524,17 @@ fn registered_store(root: &Path) -> ProsopikonAuthStore {
 
 fn csrf_binding() -> String {
     format!("sha256:{}", "a".repeat(64))
+}
+
+fn test_s3_endpoint() -> EasyconnectS3EndpointConfig {
+    EasyconnectS3EndpointConfig {
+        descriptor: StandaloneS3ConnectionDescriptor {
+            endpoint_url: "https://objects.example.test:3900".to_string(),
+            region: "test-region".to_string(),
+            addressing_style: "path".to_string(),
+        },
+        tls_certificate_path: PathBuf::from("/test/appliance-fullchain.pem"),
+    }
 }
 
 fn monas_csrf_binding(session_token: &str) -> String {

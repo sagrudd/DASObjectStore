@@ -60,11 +60,11 @@ pub use auth_routes::{
     gui_api_router_for_host_mode_with_s3_descriptor,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
     pistis_easyconnect_approval_router, standalone_auth_router, standalone_gui_api_router,
-    AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest, GuiApiHostMode,
-    LoginRequest, LogoutRequest, RegisterRequest, SessionCheckRequest,
-    StandaloneEasyconnectAuthContextResponse, StandaloneLocalGroupAdminAcceptedResponse,
-    StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-    StandaloneS3ConnectionDescriptor,
+    AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest,
+    EasyconnectS3EndpointConfig, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
+    SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,
+    StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
+    StandaloneLocalGroupOperation, StandaloneS3ConnectionDescriptor,
 };
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,

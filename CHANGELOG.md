@@ -21,8 +21,8 @@ agreement before landing.
   reject plaintext or port-substituted public descriptors, and document
   explicit certificate trust, deployment evidence, and recoverable rollback.
 - Verify the advertised direct S3 endpoint over native Rustls with the
-  appliance's configured certificate trust, bounded responses, and no
-  redirects before issuing a remote EasyConnect grant.
+  appliance's exact configured leaf and fullchain trust, bounded responses,
+  and no redirects before protected approval and public exchange transitions.
 
 - Add the Monas/Pistis EasyConnect HTTP boundary: loopback-only public pairing
   creation, host-session and CSRF-protected approval, one-time public exchange,

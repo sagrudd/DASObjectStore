@@ -34,7 +34,7 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone(), None)
+            let router = federated_operational_router(auth_store.clone(), None, None)
                 .merge(standalone_session_auth_router(auth_store))
                 .merge(easyconnect_public_pairing_router_with_config(None, None));
             if include_application_auth {
@@ -79,21 +79,31 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = federated_operational_router(auth_store.clone(), public_base_url.clone())
-                .merge(standalone_session_auth_router_with_state(
-                    StandaloneAuthRouteState {
-                        auth_store,
-                        local_password_authenticator: Arc::new(
-                            SystemLocalPasswordAuthenticator::default(),
-                        ),
-                        s3_descriptor: s3_descriptor.clone(),
-                        s3_tls_certificate_path,
-                    },
-                ))
-                .merge(easyconnect_public_pairing_router_with_config(
-                    s3_descriptor,
-                    public_base_url,
-                ));
+            let s3_endpoint = s3_descriptor
+                .clone()
+                .map(|descriptor| EasyconnectS3EndpointConfig {
+                    descriptor,
+                    tls_certificate_path: s3_tls_certificate_path.clone(),
+                });
+            let router = federated_operational_router(
+                auth_store.clone(),
+                public_base_url.clone(),
+                s3_endpoint.clone(),
+            )
+            .merge(standalone_session_auth_router_with_state(
+                StandaloneAuthRouteState {
+                    auth_store,
+                    local_password_authenticator: Arc::new(
+                        SystemLocalPasswordAuthenticator::default(),
+                    ),
+                    s3_descriptor: s3_descriptor.clone(),
+                    s3_tls_certificate_path,
+                },
+            ))
+            .merge(easyconnect_public_pairing_router_with_config(
+                s3_endpoint,
+                public_base_url,
+            ));
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -110,7 +120,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
 pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
     Router::new()
         .route("/api/v1/host-session", get(federated_host_session))
-        .merge(federated_operational_router(auth_store, None))
+        .merge(federated_operational_router(auth_store, None, None))
 }
 
 async fn federated_host_session(
@@ -126,15 +136,13 @@ async fn federated_host_session(
 fn federated_operational_router(
     auth_store: LocalAuthStore,
     public_base_url: Option<String>,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
 ) -> Router {
-    let easyconnect_state = match public_base_url {
-        Some(public_base_url) => StandaloneEasyconnectRouteState {
-            auth_store: auth_store.clone(),
-            public_base_url,
-            appliance_id: super::auth_identity_routes::system_appliance_id(),
-        },
-        None => StandaloneEasyconnectRouteState::system(auth_store.clone()),
-    };
+    let mut easyconnect_state = StandaloneEasyconnectRouteState::system(auth_store.clone());
+    if let Some(public_base_url) = public_base_url {
+        easyconnect_state.public_base_url = public_base_url;
+    }
+    easyconnect_state.s3_endpoint = s3_endpoint;
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(crate::remote_control_routes::remote_control_router())
         .merge(standalone_dashboard_router(auth_store.clone()))
@@ -257,9 +265,9 @@ pub fn easyconnect_public_router() -> Router {
 /// Public create, status, and exchange routes with a deployment-owned S3
 /// descriptor. Exchange fails closed when the descriptor is absent.
 pub fn easyconnect_public_router_with_s3_descriptor(
-    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
 ) -> Router {
-    easyconnect_public_pairing_router_with_config(s3_descriptor, None)
+    easyconnect_public_pairing_router_with_config(s3_endpoint, None)
 }
 
 /// Public Pistis discovery and pairing routes from deployment-owned config.
@@ -267,11 +275,11 @@ pub fn easyconnect_public_router_with_s3_descriptor(
 /// An absent or invalid public origin leaves discovery available only as an
 /// explicit service-unavailable response and also prevents pairing creation.
 pub fn easyconnect_public_router_with_config(
-    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     public_base_url: Option<String>,
 ) -> Router {
     let state = EasyconnectPublicRouteState {
-        s3_descriptor,
+        s3_endpoint,
         public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
         appliance_id: super::auth_identity_routes::system_appliance_id(),
     };
@@ -284,11 +292,11 @@ pub fn easyconnect_public_router_with_config(
 }
 
 fn easyconnect_public_pairing_router_with_config(
-    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     public_base_url: Option<String>,
 ) -> Router {
     let state = EasyconnectPublicRouteState {
-        s3_descriptor,
+        s3_endpoint,
         public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
         appliance_id: super::auth_identity_routes::system_appliance_id(),
     };
@@ -329,7 +337,7 @@ fn validated_easyconnect_public_base_url(public_base_url: String) -> Option<Stri
 
 /// Pistis approval routes that must be mounted behind a host-verified actor and
 /// a credential-free [`RemoteEasyconnectApprovalContext`] extension.
-pub fn pistis_easyconnect_approval_router() -> Router {
+pub fn pistis_easyconnect_approval_router(s3_endpoint: EasyconnectS3EndpointConfig) -> Router {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings/approve",
@@ -340,11 +348,13 @@ pub fn pistis_easyconnect_approval_router() -> Router {
             get(easyconnect_browser_approval),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(Extension(Some(s3_endpoint)))
 }
 
 pub(crate) fn standalone_easyconnect_router_with_state(
     state: StandaloneEasyconnectRouteState,
 ) -> Router {
+    let s3_endpoint = state.s3_endpoint.clone();
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/discovery",
@@ -363,6 +373,7 @@ pub(crate) fn standalone_easyconnect_router_with_state(
             get(easyconnect_browser_approval),
         )
         .layer(Extension(state.auth_store.clone()))
+        .layer(Extension(s3_endpoint))
         .with_state(state)
 }
 

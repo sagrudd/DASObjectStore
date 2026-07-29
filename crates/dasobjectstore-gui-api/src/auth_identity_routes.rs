@@ -26,16 +26,25 @@ pub struct StandaloneS3ConnectionDescriptor {
     pub addressing_style: String,
 }
 
+/// Deployment-owned S3 endpoint identity and the certificate chain used to
+/// verify it before an EasyConnect approval or exchange transition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EasyconnectS3EndpointConfig {
+    pub descriptor: StandaloneS3ConnectionDescriptor,
+    pub tls_certificate_path: PathBuf,
+}
+
 #[derive(Clone)]
 pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) auth_store: LocalAuthStore,
     pub(super) public_base_url: String,
     pub(super) appliance_id: String,
+    pub(super) s3_endpoint: Option<EasyconnectS3EndpointConfig>,
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct EasyconnectPublicRouteState {
-    pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    pub(super) s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     pub(super) public_base_url: Option<String>,
     pub(super) appliance_id: String,
 }
@@ -59,6 +68,7 @@ impl StandaloneEasyconnectRouteState {
             auth_store,
             public_base_url: crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
             appliance_id: system_appliance_id(),
+            s3_endpoint: None,
         }
     }
 }
@@ -765,6 +775,7 @@ pub(super) async fn easyconnect_approve_pairing(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
     Extension(approval_context): Extension<RemoteEasyconnectApprovalContext>,
+    Extension(s3_endpoint): Extension<Option<EasyconnectS3EndpointConfig>>,
     Json(intent): Json<EasyconnectBrowserApprovalIntent>,
 ) -> Result<Json<RemoteEasyconnectApprovePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
     if approval_context.auth_provider != RemoteEasyconnectAuthProvider::Pistis {
@@ -817,6 +828,7 @@ pub(super) async fn easyconnect_approve_pairing(
             error.to_string(),
         )
     })?;
+    verify_easyconnect_s3_endpoint(s3_endpoint.as_ref()).await?;
     crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
@@ -850,13 +862,12 @@ pub(super) async fn easyconnect_exchange_pairing(
             error.to_string(),
         )
     })?;
-    let s3_descriptor = state.s3_descriptor.ok_or_else(|| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "s3_connection_descriptor_unavailable",
-            "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
-        )
-    })?;
+    let s3_endpoint = state.s3_endpoint.as_ref();
+    verify_easyconnect_s3_endpoint(s3_endpoint).await?;
+    let s3_descriptor = s3_endpoint
+        .expect("verified endpoint configuration is present")
+        .descriptor
+        .clone();
     let exchange = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
@@ -876,6 +887,31 @@ pub(super) async fn easyconnect_exchange_pairing(
             addressing_style: s3_descriptor.addressing_style,
         },
     }))
+}
+
+async fn verify_easyconnect_s3_endpoint(
+    s3_endpoint: Option<&EasyconnectS3EndpointConfig>,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    let s3_endpoint = s3_endpoint.ok_or_else(|| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "s3_connection_descriptor_unavailable",
+            "the appliance has not configured an authoritative public S3 endpoint and TLS certificate chain",
+        )
+    })?;
+    crate::s3_endpoint_probe::verify_public_s3_endpoint(
+        &s3_endpoint.descriptor.endpoint_url,
+        &s3_endpoint.tls_certificate_path,
+    )
+    .await
+    .map(|_| ())
+    .map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error.code(),
+            error.to_string(),
+        )
+    })
 }
 
 fn validate_loopback_callback(
