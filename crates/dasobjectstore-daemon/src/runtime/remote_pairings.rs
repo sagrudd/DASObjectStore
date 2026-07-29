@@ -8,12 +8,16 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};
 
 pub const REMOTE_EASYCONNECT_PAIRING_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_PAIRING_FILE_NAME: &str = "pairings.json";
 pub const REMOTE_EASYCONNECT_PAIRING_SCHEMA: u16 = 1;
 pub const REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS: u64 = 5 * 60;
 pub const REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS: u64 = 2 * 60;
+/// Maximum number of pending or approved pairing capabilities retained at once.
+pub const REMOTE_EASYCONNECT_MAX_LIVE_PAIRINGS: usize = 1_024;
 
 pub fn remote_easyconnect_pairing_store_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir
@@ -127,6 +131,7 @@ pub struct RemoteEasyconnectPairingExchange {
 pub struct FileBackedRemoteEasyconnectPairingStore {
     path: PathBuf,
     lock: Mutex<()>,
+    max_live_pairings: usize,
 }
 
 impl FileBackedRemoteEasyconnectPairingStore {
@@ -134,6 +139,16 @@ impl FileBackedRemoteEasyconnectPairingStore {
         Self {
             path: path.into(),
             lock: Mutex::new(()),
+            max_live_pairings: REMOTE_EASYCONNECT_MAX_LIVE_PAIRINGS,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_max_live_pairings(path: impl Into<PathBuf>, max_live_pairings: usize) -> Self {
+        Self {
+            path: path.into(),
+            lock: Mutex::new(()),
+            max_live_pairings,
         }
     }
 }
@@ -146,7 +161,7 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
         pairing.validate()?;
         let _guard = self.lock.lock().expect("pairing store lock poisoned");
         let mut store = read_store(&self.path)?;
-        store.create(pairing)?;
+        store.create(pairing, self.max_live_pairings)?;
         write_store(&self.path, &store)
     }
 
@@ -335,6 +350,9 @@ pub enum RemoteEasyconnectPairingStoreError {
     PairingAlreadyExists {
         pairing_id: String,
     },
+    CapacityExceeded {
+        max_live_pairings: usize,
+    },
     ApprovalPairingMismatch {
         pairing_id: String,
         approval_pairing_id: String,
@@ -401,6 +419,10 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
             Self::PairingAlreadyExists { pairing_id } => {
                 write!(formatter, "remote easyconnect pairing {pairing_id} already exists")
             }
+            Self::CapacityExceeded { max_live_pairings } => write!(
+                formatter,
+                "remote easyconnect pairing store admits at most {max_live_pairings} live pairings"
+            ),
             Self::ApprovalPairingMismatch {
                 pairing_id,
                 approval_pairing_id,
@@ -483,6 +505,7 @@ impl RemoteEasyconnectPairingStoreFile {
     fn create(
         &mut self,
         pairing: RemoteEasyconnectPairingRecord,
+        max_live_pairings: usize,
     ) -> Result<(), RemoteEasyconnectPairingStoreError> {
         if self
             .pairings
@@ -493,8 +516,23 @@ impl RemoteEasyconnectPairingStoreFile {
                 pairing_id: pairing.pairing_id,
             });
         }
+        self.prune_terminal(&pairing.created_at_utc);
+        if self.pairings.len() >= max_live_pairings {
+            return Err(RemoteEasyconnectPairingStoreError::CapacityExceeded { max_live_pairings });
+        }
         self.pairings.push(pairing);
         Ok(())
+    }
+
+    fn prune_terminal(&mut self, now_utc: &str) {
+        self.pairings.retain(|pairing| {
+            pairing.exchanged_at_utc.is_none()
+                && pairing.expires_at_utc.as_str() > now_utc
+                && pairing
+                    .approval
+                    .as_ref()
+                    .is_none_or(|approval| approval.approval_expires_at_utc.as_str() > now_utc)
+        });
     }
 }
 
@@ -532,6 +570,13 @@ fn write_store(
         path: parent.to_path_buf(),
         source,
     })?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|source| {
+        RemoteEasyconnectPairingStoreError::Io {
+            path: parent.to_path_buf(),
+            source,
+        }
+    })?;
     let encoded = serde_json::to_vec_pretty(store).map_err(|error| {
         RemoteEasyconnectPairingStoreError::Json {
             path: path.to_path_buf(),
@@ -549,14 +594,17 @@ fn write_store(
             .map(|duration| duration.as_nanos())
             .unwrap_or_default()
     ));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
-            path: temporary.clone(),
-            source,
-        })?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file =
+        options
+            .open(&temporary)
+            .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
     file.write_all(&encoded)
         .and_then(|_| file.sync_all())
         .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
@@ -567,6 +615,13 @@ fn write_store(
     fs::rename(&temporary, path).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
         path: path.to_path_buf(),
         source,
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+        RemoteEasyconnectPairingStoreError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
     })?;
     File::open(parent)
         .and_then(|directory| directory.sync_all())
@@ -630,10 +685,10 @@ pub fn session_credentials_from_store_credentials(
 #[cfg(test)]
 mod tests {
     use super::{
-        write_store, FileBackedRemoteEasyconnectPairingStore, RemoteEasyconnectPairingApproval,
-        RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStore,
-        RemoteEasyconnectPairingStoreError, RemoteEasyconnectPairingStoreFile,
-        REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+        read_store, write_store, FileBackedRemoteEasyconnectPairingStore,
+        RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingRecord,
+        RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError,
+        RemoteEasyconnectPairingStoreFile, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
     };
     use crate::api::{
         remote_easyconnect_control_operations, RemoteEasyconnectApprovalContext,
@@ -641,6 +696,8 @@ mod tests {
         REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX,
     };
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -750,6 +807,101 @@ mod tests {
             store.create(pairing).expect_err("collision must fail"),
             RemoteEasyconnectPairingStoreError::PairingAlreadyExists { .. }
         ));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn capacity_rejects_new_live_pairings_after_restart() {
+        let root = root();
+        let path = root.join("pairings.json");
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-1"))
+            .expect("first pairing");
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-2"))
+            .expect("second pairing after restart");
+
+        let error = FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-3"))
+            .expect_err("third live pairing must be rejected");
+        assert!(matches!(
+            error,
+            RemoteEasyconnectPairingStoreError::CapacityExceeded {
+                max_live_pairings: 2
+            }
+        ));
+        assert_eq!(read_store(&path).expect("store").pairings.len(), 2);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn admission_prunes_terminal_and_expired_rows_after_restart() {
+        let root = root();
+        let path = root.join("pairings.json");
+        let mut expired = pairing("expired");
+        expired.expires_at_utc = "2026-07-28T09:59:59Z".to_string();
+        let mut exchanged = pairing("exchanged");
+        exchanged.exchanged_at_utc = Some("2026-07-28T10:01:00Z".to_string());
+        let mut approval_expired = pairing("approval-expired");
+        approval_expired.approval = Some(approval("approval-expired", "requested-store"));
+        approval_expired
+            .approval
+            .as_mut()
+            .expect("approval")
+            .approval_expires_at_utc = "2026-07-28T09:59:59Z".to_string();
+        write_store(
+            &path,
+            &RemoteEasyconnectPairingStoreFile {
+                schema_version: REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+                pairings: vec![pairing("still-live"), expired, exchanged, approval_expired],
+            },
+        )
+        .expect("seed store");
+
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("new-live"))
+            .expect("terminal rows release admission capacity");
+        let stored = read_store(&path).expect("reloaded store");
+        let ids = stored
+            .pairings
+            .iter()
+            .map(|pairing| pairing.pairing_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["still-live", "new-live"]);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistence_repairs_pairing_directory_and_file_modes() {
+        let root = root();
+        let path = root.join("nested/pairings.json");
+        let store = FileBackedRemoteEasyconnectPairingStore::new(&path);
+        store.create(pairing("pairing-1")).expect("first pairing");
+        fs::set_permissions(
+            path.parent().expect("parent"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("relax parent mode");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("relax file mode");
+
+        store.create(pairing("pairing-2")).expect("rewrite store");
+        assert_eq!(
+            fs::metadata(path.parent().expect("parent"))
+                .expect("parent metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path)
+                .expect("file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 

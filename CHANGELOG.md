@@ -32,6 +32,9 @@ agreement before landing.
 - Complete the remote CLI's pinned-HTTPS create, form-POST callback, one-time
   exchange, and atomic config-generation installation using the server-owned
   S3 connection descriptor and asserted approval identity.
+- Bound the daemon's live EasyConnect pairing repository, reclaim terminal and
+  expired records during admission, and protect its Unix directory and
+  secret-bearing file with owner-only permissions.
 
 ## 0.152.3 - 2026-07-28
 

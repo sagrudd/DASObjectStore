@@ -296,9 +296,9 @@ pub use remote_pairings::{
     FileBackedRemoteEasyconnectPairingStore, RemoteEasyconnectPairingApproval,
     RemoteEasyconnectPairingExchange, RemoteEasyconnectPairingRecord,
     RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError,
-    REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS, REMOTE_EASYCONNECT_PAIRING_DIR_NAME,
-    REMOTE_EASYCONNECT_PAIRING_FILE_NAME, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
-    REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS,
+    REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS, REMOTE_EASYCONNECT_MAX_LIVE_PAIRINGS,
+    REMOTE_EASYCONNECT_PAIRING_DIR_NAME, REMOTE_EASYCONNECT_PAIRING_FILE_NAME,
+    REMOTE_EASYCONNECT_PAIRING_SCHEMA, REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS,
 };
 pub use remote_sessions::{
     remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,
