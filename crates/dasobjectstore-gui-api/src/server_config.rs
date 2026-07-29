@@ -803,20 +803,16 @@ mod tests {
     }
 
     #[test]
-    fn direct_gateway_rejects_advertised_https_for_plaintext_listener() {
+    fn direct_gateway_accepts_advertised_https_for_native_tls_listener() {
         let mut config = StandaloneServerConfig::default();
         config.s3_ingress.mode = super::StandaloneS3IngressMode::DirectGateway;
         config.s3_ingress.public_endpoint_url =
             Some("https://objects.lab.example:3900".to_string());
         config.s3_ingress.region = Some("garage".to_string());
         config.s3_ingress.addressing_style = Some("path".to_string());
-        assert_eq!(
-            config.validate().expect_err("protocol mismatch"),
-            StandaloneServerConfigError::AdvertisedS3EndpointProtocolMismatch {
-                advertised: "https".to_string(),
-                observed: "http".to_string(),
-            }
-        );
+        config
+            .validate()
+            .expect("native TLS listener matches advertised HTTPS");
     }
 
     #[test]
