@@ -8,6 +8,8 @@ agreement before landing.
 
 ## Unreleased
 
+- Align the Mnemosyne product manifest with the workspace's 0.153.0 capability
+  version so product discovery cannot advertise the preceding release.
 - Add a dedicated password-free ``dasobjectstore-remote trust enroll`` workflow
   that requires an explicit CA certificate or independently verified leaf
   fingerprint before the first EasyConnect pairing.
