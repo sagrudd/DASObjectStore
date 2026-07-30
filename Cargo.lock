@@ -2600,6 +2600,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "pistis-canonical"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+
+[[package]]
+name = "pistis-cose"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+dependencies = [
+ "pistis-canonical",
+ "pistis-crypto",
+ "pistis-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pistis-crypto"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+dependencies = [
+ "p256",
+ "pistis-domain",
+ "sha2",
+ "subtle",
+]
+
+[[package]]
+name = "pistis-domain"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "pistis-protocol"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+dependencies = [
+ "getrandom 0.3.4",
+ "pistis-canonical",
+ "pistis-cose",
+ "pistis-crypto",
+ "pistis-domain",
+ "subtle",
+ "url",
+]
+
+[[package]]
 name = "pkcs8"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2714,16 +2764,21 @@ dependencies = [
 [[package]]
 name = "prosopikon-core"
 version = "0.16.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=91dfe3f14e6147a01f1a66ee4fd8259f66b69d0b#91dfe3f14e6147a01f1a66ee4fd8259f66b69d0b"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=69195ed57165771b66849278073dbdedbfdd1e5e#69195ed57165771b66849278073dbdedbfdd1e5e"
 dependencies = [
  "argon2",
  "async-trait",
  "base64ct",
  "chrono",
  "ed25519-dalek",
+ "hmac",
  "p256",
  "pam-client",
  "parking_lot",
+ "pistis-canonical",
+ "pistis-cose",
+ "pistis-crypto",
+ "pistis-protocol",
  "rand_core 0.6.4",
  "rusqlite",
  "serde",
@@ -2732,13 +2787,14 @@ dependencies = [
  "sha2",
  "subtle",
  "thiserror 2.0.19",
+ "url",
  "uuid",
 ]
 
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=91dfe3f14e6147a01f1a66ee4fd8259f66b69d0b#91dfe3f14e6147a01f1a66ee4fd8259f66b69d0b"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=69195ed57165771b66849278073dbdedbfdd1e5e#69195ed57165771b66849278073dbdedbfdd1e5e"
 dependencies = [
  "prosopikon-core",
  "web-sys",
