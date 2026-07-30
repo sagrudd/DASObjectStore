@@ -47,8 +47,8 @@ flate2 = "1.1.5"
 getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
 js-sys = "0.3.83"
 plist = "1"
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "bb1473b9934960b812c48c887ed690e3d3abeea3" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "bb1473b9934960b812c48c887ed690e3d3abeea3" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "35dd32cb087d266d9c3412de72c08263554885a0" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "35dd32cb087d266d9c3412de72c08263554885a0" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
