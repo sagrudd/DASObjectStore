@@ -36,6 +36,7 @@ mod object_browser;
 mod object_download;
 mod object_store_creation;
 mod performance_policy;
+mod pistis_grant_policy;
 mod profile_catalogue;
 mod profile_migration;
 mod profile_registry;
@@ -238,6 +239,11 @@ pub use performance_policy::{
     AuthoritativeIngestPolicy, AuthoritativePerformancePolicyError,
     AUTHORITATIVE_PERFORMANCE_DIR_NAME, AUTHORITATIVE_PERFORMANCE_RECOMMENDATION_FILE_NAME,
     PERFORMANCE_RECOMMENDATION_SCHEMA,
+};
+pub use pistis_grant_policy::{
+    PistisGrantAuditEvent, PistisGrantAuditOperation, PistisGrantPolicyError,
+    PistisGrantPolicyStore, PistisObjectStoreGrantRecord, PistisObjectStoreGrantRegistry,
+    PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
 };
 pub use profile_catalogue::{
     export_profile_catalogue, import_profile_catalogue, import_profile_catalogue_with_metadata,

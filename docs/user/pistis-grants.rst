@@ -63,6 +63,13 @@ the supported command, and restarting Monas. Never edit the JSON in place.
 Deployment boundary
 -------------------
 
+The registry types, validation, locking, and atomic persistence belong to the
+DASObjectStore daemon layer. The Monas integration is a read-only resolver and
+does not own or duplicate policy state. The current administrator command is
+an attended offline provisioning path: stop Monas and the DASObjectStore
+daemon before mutation, complete the exact change, inspect the resulting
+revision, then restart the services. Do not operate it as a second live writer.
+
 Invoke the command as the account designated to own policy; do not use root
 merely for convenience. The policy file must be mode ``0600`` and exposed
 read-only to the Monas process through a narrowly scoped service permission.

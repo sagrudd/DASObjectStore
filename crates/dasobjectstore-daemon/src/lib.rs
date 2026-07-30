@@ -172,6 +172,8 @@ pub use runtime::{
     GarageServiceController, GarageServiceRuntimeConfig, GarageStoreRegistryProvisioningSummary,
     LinuxCpuSnapshot, LinuxDiskIoCounters, LinuxHostTelemetrySample, LinuxProcTelemetryCollector,
     ObjectBrowserMetadataEntry, ObjectBrowserMetadataReadError, ObjectBrowserQueryError,
+    PistisGrantAuditEvent, PistisGrantAuditOperation, PistisGrantPolicyError,
+    PistisGrantPolicyStore, PistisObjectStoreGrantRecord, PistisObjectStoreGrantRegistry,
     ReconciliationAction, ReconciliationEntryState, ReconciliationManifest,
     ReconciliationManifestEntry, ReconciliationManifestError, ReconciliationObject,
     ReconciliationPlan, RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
@@ -202,7 +204,8 @@ pub use runtime::{
     DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR,
     DEFAULT_ENDPOINT_REGISTRY_PATH, ENDPOINT_REGISTRY_ENV, ENDPOINT_REGISTRY_SCHEMA,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
-    LINUX_DAEMON_STATE_DIR, PERFORMANCE_RECOMMENDATION_SCHEMA, PROFILE_BINDING_REGISTRY_SCHEMA,
+    LINUX_DAEMON_STATE_DIR, PERFORMANCE_RECOMMENDATION_SCHEMA,
+    PISTIS_GRANT_REGISTRY_SCHEMA_VERSION, PROFILE_BINDING_REGISTRY_SCHEMA,
     RECONCILIATION_MANIFEST_SCHEMA,
 };
 pub use server::{

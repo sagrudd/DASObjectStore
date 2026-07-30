@@ -33,6 +33,11 @@ pub use boundary::{
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
 };
+pub use dasobjectstore_daemon::{
+    PistisGrantAuditEvent, PistisGrantAuditOperation, PistisGrantPolicyError,
+    PistisGrantPolicyStore, PistisObjectStoreGrantRecord, PistisObjectStoreGrantRegistry,
+    PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
+};
 pub use flounder_telemetry::{
     FlounderApplianceTelemetryContract, FlounderTelemetryAudience, FlounderTelemetryAxis,
     FlounderTelemetryBand, FlounderTelemetryChart, FlounderTelemetryChartContract,
@@ -87,11 +92,7 @@ pub use pistis_actor::{
     accept_preverified_pistis_actor, PistisActorBoundary, PistisActorError,
     PistisHostRequestBindings, PISTIS_DASOBJECTSTORE_PRODUCT_ID,
 };
-pub use pistis_grants::{
-    FilePistisEasyconnectApprovalResolver, PistisGrantAuditEvent, PistisGrantAuditOperation,
-    PistisGrantPolicyError, PistisGrantPolicyStore, PistisObjectStoreGrantRecord,
-    PistisObjectStoreGrantRegistry, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
-};
+pub use pistis_grants::FilePistisEasyconnectApprovalResolver;
 pub use policy_templates::{
     ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
     ProductPolicyTemplateEnvelope, PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
