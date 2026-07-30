@@ -8,6 +8,8 @@ agreement before landing.
 
 ## Unreleased
 
+- Align the authority-facing adapters with Prosopikon schema v11 so Monas,
+  DASObjectStore, and Pistis share one product-audience-aware authority type.
 - Restore the browser release build by selecting the reviewed JavaScript
   entropy backend for transitive ``getrandom`` 0.3 use on wasm32 only.
 ### Changed
