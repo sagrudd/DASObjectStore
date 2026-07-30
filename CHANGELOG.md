@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+### Changed
+
+- Pin the accepted Prosopikon bare-earth authority transaction revision so
+  Monas and DASObjectStore share one Rust authority type and schema-v8
+  provider contract.
+
 - Align the Mnemosyne product manifest with the workspace's 0.153.0 capability
   version so product discovery cannot advertise the preceding release.
 - Add a dedicated password-free ``dasobjectstore-remote trust enroll`` workflow
