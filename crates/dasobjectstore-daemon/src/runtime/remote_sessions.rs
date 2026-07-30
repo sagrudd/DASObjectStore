@@ -4,6 +4,10 @@ use crate::api::{
     RemoteEasyconnectSessionCredentials,
 };
 use crate::auth::DaemonLocalActor;
+use authority_lifetime::{
+    ensure_renewal_within_originating_authority, ensure_session_usable,
+    validate_originating_authority_lifetime,
+};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
@@ -11,6 +15,8 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::{os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};
+
+mod authority_lifetime;
 
 pub const REMOTE_EASYCONNECT_SESSION_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_SESSION_FILE_NAME: &str = "sessions.json";
@@ -28,6 +34,19 @@ pub trait RemoteEasyconnectPairedSessionStore: Send + Sync {
         &self,
         session: RemoteEasyconnectPairedSessionRecord,
     ) -> Result<(), RemoteEasyconnectPairedSessionStoreError>;
+
+    fn create_for_pairing(
+        &self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError>;
+
+    fn get_by_pairing_id(
+        &self,
+        pairing_id: &str,
+    ) -> Result<
+        Option<RemoteEasyconnectPairedSessionRecord>,
+        RemoteEasyconnectPairedSessionStoreError,
+    >;
 
     fn get(
         &self,
@@ -95,9 +114,24 @@ pub struct RemoteEasyconnectS3Credential {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairedSessionRecord {
+    pub pairing_id: String,
     pub session_id: String,
+    pub authority_id: String,
+    pub principal_id: String,
+    /// Compatibility projection of `principal_id` for existing control audit
+    /// responses. New code must keep the values identical.
     pub approved_actor: String,
+    pub authority_session_id: String,
+    /// Immutable upper bound inherited from the originating host authority.
+    ///
+    /// Legacy standalone sessions omit this field and retain their existing
+    /// renewal behaviour. Pistis sessions must carry it and fail closed when
+    /// loading an older record that predates this binding.
+    #[serde(default)]
+    pub originating_authority_expires_at_utc: Option<String>,
     pub auth_provider: RemoteEasyconnectAuthProvider,
+    pub correlation_id: String,
+    pub audit_identity: String,
     pub issued_at_utc: String,
     pub expires_at_utc: String,
     pub renew_after_utc: String,
@@ -109,8 +143,18 @@ pub struct RemoteEasyconnectPairedSessionRecord {
 
 impl RemoteEasyconnectPairedSessionRecord {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        require_non_blank("pairing_id", &self.pairing_id)?;
         require_non_blank("session_id", &self.session_id)?;
+        require_non_blank("authority_id", &self.authority_id)?;
+        require_non_blank("principal_id", &self.principal_id)?;
         require_non_blank("approved_actor", &self.approved_actor)?;
+        if self.principal_id != self.approved_actor {
+            return Err(RemoteEasyconnectPairedSessionStoreError::PrincipalMismatch);
+        }
+        require_non_blank("authority_session_id", &self.authority_session_id)?;
+        validate_originating_authority_lifetime(self)?;
+        require_non_blank("correlation_id", &self.correlation_id)?;
+        require_non_blank("audit_identity", &self.audit_identity)?;
         require_non_blank("issued_at_utc", &self.issued_at_utc)?;
         require_non_blank("expires_at_utc", &self.expires_at_utc)?;
         require_non_blank("renew_after_utc", &self.renew_after_utc)?;
@@ -196,8 +240,45 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
             .lock()
             .expect("paired session store lock poisoned");
         let mut store = read_store(&self.path)?;
-        store.upsert(session);
+        store.upsert(session)?;
         write_store(&self.path, &store)
+    }
+
+    fn create_for_pairing(
+        &self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        session.validate()?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let mut store = read_store(&self.path)?;
+        store.create(session)?;
+        write_store(&self.path, &store)
+    }
+
+    fn get_by_pairing_id(
+        &self,
+        pairing_id: &str,
+    ) -> Result<
+        Option<RemoteEasyconnectPairedSessionRecord>,
+        RemoteEasyconnectPairedSessionStoreError,
+    > {
+        require_non_blank("pairing_id", pairing_id)?;
+        let _guard = self
+            .lock
+            .lock()
+            .expect("paired session store lock poisoned");
+        let record = read_store(&self.path)?
+            .sessions
+            .iter()
+            .find(|session| session.pairing_id == pairing_id)
+            .cloned();
+        if let Some(session) = &record {
+            session.validate()?;
+        }
+        Ok(record)
     }
 
     fn get(
@@ -212,7 +293,11 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
             .lock
             .lock()
             .expect("paired session store lock poisoned");
-        Ok(read_store(&self.path)?.session(session_id).cloned())
+        let record = read_store(&self.path)?.session(session_id).cloned();
+        if let Some(session) = &record {
+            session.validate()?;
+        }
+        Ok(record)
     }
 
     fn revoke(
@@ -288,6 +373,7 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
                 },
             );
         }
+        ensure_renewal_within_originating_authority(session, &request.expires_at_utc)?;
         session.issued_at_utc = request.renewed_at_utc;
         session.expires_at_utc = request.expires_at_utc;
         session.renew_after_utc = request.renew_after_utc;
@@ -416,7 +502,7 @@ impl RemoteEasyconnectPairedSessionStore for FileBackedRemoteEasyconnectPairedSe
         let store = read_store(&self.path)?;
         let mut credentials = Vec::new();
         for session in &store.sessions {
-            if session.revoked_at_utc.is_some() || session.expires_at_utc.as_str() <= now_utc {
+            if ensure_session_usable(session, now_utc).is_err() {
                 continue;
             }
             let Some(session_token) = session.credentials.session_token.clone() else {
@@ -547,12 +633,44 @@ impl RemoteEasyconnectPairedSessionStoreFile {
             .find(|session| session.session_id == session_id)
     }
 
-    fn upsert(&mut self, session: RemoteEasyconnectPairedSessionRecord) {
+    fn upsert(
+        &mut self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
         if let Some(existing) = self.session_mut(&session.session_id) {
+            if existing.authority_id != session.authority_id
+                || existing.authority_session_id != session.authority_session_id
+                || existing.originating_authority_expires_at_utc
+                    != session.originating_authority_expires_at_utc
+            {
+                return Err(
+                    RemoteEasyconnectPairedSessionStoreError::OriginatingAuthorityMutation {
+                        session_id: session.session_id,
+                    },
+                );
+            }
             *existing = session;
         } else {
             self.sessions.push(session);
         }
+        Ok(())
+    }
+
+    fn create(
+        &mut self,
+        session: RemoteEasyconnectPairedSessionRecord,
+    ) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
+        if self.sessions.iter().any(|stored| {
+            stored.session_id == session.session_id || stored.pairing_id == session.pairing_id
+        }) {
+            return Err(
+                RemoteEasyconnectPairedSessionStoreError::SessionAlreadyExists {
+                    session_id: session.session_id,
+                },
+            );
+        }
+        self.sessions.push(session);
+        Ok(())
     }
 }
 
@@ -563,6 +681,9 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
     },
     InvalidGrant {
         message: String,
+    },
+    InvalidTimestamp {
+        field: &'static str,
     },
     Io {
         path: PathBuf,
@@ -575,6 +696,10 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
     SessionNotFound {
         session_id: String,
     },
+    SessionAlreadyExists {
+        session_id: String,
+    },
+    PrincipalMismatch,
     SessionRevoked {
         session_id: String,
         revoked_at_utc: String,
@@ -582,6 +707,16 @@ pub enum RemoteEasyconnectPairedSessionStoreError {
     SessionExpired {
         session_id: String,
         expires_at_utc: String,
+    },
+    MissingOriginatingAuthorityExpiry {
+        session_id: String,
+    },
+    OriginatingAuthorityExpiryExceeded {
+        session_id: String,
+        originating_authority_expires_at_utc: String,
+    },
+    OriginatingAuthorityMutation {
+        session_id: String,
     },
     RenewalTokenMismatch {
         session_id: String,
@@ -620,6 +755,9 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
             Self::InvalidGrant { message } => {
                 write!(formatter, "invalid object store grant: {message}")
             }
+            Self::InvalidTimestamp { field } => {
+                write!(formatter, "{field} must be a canonical UTC timestamp")
+            }
             Self::Io { path, message } => {
                 write!(formatter, "{} IO failed: {message}", path.display())
             }
@@ -631,6 +769,12 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
                     formatter,
                     "paired easyconnect session {session_id} was not found"
                 )
+            }
+            Self::SessionAlreadyExists { session_id } => {
+                write!(formatter, "paired easyconnect session {session_id} already exists")
+            }
+            Self::PrincipalMismatch => {
+                formatter.write_str("paired session principal projections must match")
             }
             Self::SessionRevoked {
                 session_id,
@@ -645,6 +789,21 @@ impl std::fmt::Display for RemoteEasyconnectPairedSessionStoreError {
             } => write!(
                 formatter,
                 "paired easyconnect session {session_id} expired at {expires_at_utc}"
+            ),
+            Self::MissingOriginatingAuthorityExpiry { session_id } => write!(
+                formatter,
+                "Pistis easyconnect session {session_id} has no originating authority expiry"
+            ),
+            Self::OriginatingAuthorityExpiryExceeded {
+                session_id,
+                originating_authority_expires_at_utc,
+            } => write!(
+                formatter,
+                "paired easyconnect session {session_id} cannot outlive its originating authority expiry {originating_authority_expires_at_utc}"
+            ),
+            Self::OriginatingAuthorityMutation { session_id } => write!(
+                formatter,
+                "paired easyconnect session {session_id} cannot change its originating authority binding"
             ),
             Self::RenewalTokenMismatch { session_id } => write!(
                 formatter,
@@ -795,25 +954,6 @@ fn write_store(
             path: parent.to_path_buf(),
             message: error.to_string(),
         })
-}
-
-fn ensure_session_usable(
-    session: &RemoteEasyconnectPairedSessionRecord,
-    now_utc: &str,
-) -> Result<(), RemoteEasyconnectPairedSessionStoreError> {
-    if let Some(revoked_at_utc) = &session.revoked_at_utc {
-        return Err(RemoteEasyconnectPairedSessionStoreError::SessionRevoked {
-            session_id: session.session_id.clone(),
-            revoked_at_utc: revoked_at_utc.clone(),
-        });
-    }
-    if session.expires_at_utc.as_str() <= now_utc {
-        return Err(RemoteEasyconnectPairedSessionStoreError::SessionExpired {
-            session_id: session.session_id.clone(),
-            expires_at_utc: session.expires_at_utc.clone(),
-        });
-    }
-    Ok(())
 }
 
 fn require_non_blank(
@@ -1028,6 +1168,106 @@ mod tests {
         assert!(matches!(
             stale.expect_err("stale token rejected"),
             RemoteEasyconnectPairedSessionStoreError::RenewalTokenMismatch { .. }
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn pistis_renewal_cannot_outlive_immutable_authority_expiry_after_restart() {
+        let root = temp_root("pistis-authority-expiry");
+        let path = remote_easyconnect_session_store_path(&root);
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        let mut pistis = session("session-1");
+        pistis.auth_provider = RemoteEasyconnectAuthProvider::Pistis;
+        pistis.originating_authority_expires_at_utc = Some("2026-07-10T04:00:00Z".to_string());
+        store.upsert(pistis).expect("Pistis session stored");
+
+        let restarted = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        let err = restarted
+            .renew(renewal_request("2026-07-10T04:00:01Z"))
+            .expect_err("renewal beyond authority expiry rejected");
+        assert!(matches!(
+            err,
+            RemoteEasyconnectPairedSessionStoreError::OriginatingAuthorityExpiryExceeded { .. }
+        ));
+
+        let renewed = restarted
+            .renew(renewal_request("2026-07-10T04:00:00Z"))
+            .expect("renewal exactly to authority expiry accepted");
+        assert_eq!(renewed.expires_at_utc, "2026-07-10T04:00:00Z");
+        assert_eq!(
+            renewed.originating_authority_expires_at_utc.as_deref(),
+            Some("2026-07-10T04:00:00Z")
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn legacy_pistis_session_without_authority_expiry_fails_closed_after_restart() {
+        let root = temp_root("legacy-pistis-authority-expiry");
+        let path = remote_easyconnect_session_store_path(&root);
+        let mut legacy = session("session-1");
+        legacy.auth_provider = RemoteEasyconnectAuthProvider::Pistis;
+        let mut encoded = serde_json::to_value(legacy).expect("legacy session encodes");
+        encoded
+            .as_object_mut()
+            .expect("session object")
+            .remove("originating_authority_expires_at_utc");
+        let store = serde_json::json!({
+            "schema_version": REMOTE_EASYCONNECT_SESSION_SCHEMA,
+            "sessions": [encoded],
+        });
+        std::fs::create_dir_all(path.parent().expect("session parent")).expect("parent created");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&store).expect("store encodes"),
+        )
+        .expect("legacy store written");
+
+        let restarted = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        assert!(matches!(
+            restarted
+                .get_by_pairing_id("pairing-session-1")
+                .expect_err("legacy Pistis exchange lookup rejected"),
+            RemoteEasyconnectPairedSessionStoreError::MissingOriginatingAuthorityExpiry { .. }
+        ));
+        let err = restarted
+            .renew(renewal_request("2026-07-10T04:00:00Z"))
+            .expect_err("legacy Pistis renewal rejected");
+        assert!(matches!(
+            err,
+            RemoteEasyconnectPairedSessionStoreError::MissingOriginatingAuthorityExpiry { .. }
+        ));
+        assert!(
+            restarted
+                .active_s3_credentials("2026-07-09T17:00:00Z")
+                .expect("credentials inspected")
+                .is_empty(),
+            "legacy Pistis credentials must not remain active without the authority bound"
+        );
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn stored_originating_authority_binding_is_immutable() {
+        let root = temp_root("immutable-pistis-authority");
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(
+            remote_easyconnect_session_store_path(&root),
+        );
+        let mut pistis = session("session-1");
+        pistis.auth_provider = RemoteEasyconnectAuthProvider::Pistis;
+        pistis.originating_authority_expires_at_utc = Some("2026-07-10T04:00:00Z".to_string());
+        store.upsert(pistis.clone()).expect("Pistis session stored");
+        pistis.originating_authority_expires_at_utc = Some("2026-07-11T04:00:00Z".to_string());
+
+        assert!(matches!(
+            store
+                .upsert(pistis)
+                .expect_err("authority bound cannot be replaced"),
+            RemoteEasyconnectPairedSessionStoreError::OriginatingAuthorityMutation { .. }
         ));
 
         cleanup(&root);
@@ -1265,9 +1505,16 @@ mod tests {
 
     fn session(session_id: &str) -> RemoteEasyconnectPairedSessionRecord {
         RemoteEasyconnectPairedSessionRecord {
+            pairing_id: format!("pairing-{session_id}"),
             session_id: session_id.to_string(),
+            authority_id: "authority-1".to_string(),
+            principal_id: "stephen".to_string(),
             approved_actor: "stephen".to_string(),
+            authority_session_id: "authority-session-1".to_string(),
+            originating_authority_expires_at_utc: None,
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            correlation_id: "correlation-1".to_string(),
+            audit_identity: "local-os:stephen".to_string(),
             issued_at_utc: "2026-07-09T16:10:00Z".to_string(),
             expires_at_utc: "2026-07-10T00:10:00Z".to_string(),
             renew_after_utc: "2026-07-09T23:10:00Z".to_string(),
@@ -1300,6 +1547,22 @@ mod tests {
                 },
             ],
             revoked_at_utc: None,
+        }
+    }
+
+    fn renewal_request(expires_at_utc: &str) -> RemoteEasyconnectPairedSessionRenewalRequest {
+        RemoteEasyconnectPairedSessionRenewalRequest {
+            session_id: "session-1".to_string(),
+            renewal_token: "renewal-token-1".to_string(),
+            renewed_at_utc: "2026-07-09T23:10:00Z".to_string(),
+            expires_at_utc: expires_at_utc.to_string(),
+            renew_after_utc: "2026-07-10T03:00:00Z".to_string(),
+            rotated_renewal_token: "renewal-token-2".to_string(),
+            rotated_credentials: RemoteEasyconnectSessionCredentials {
+                access_key_id: "DOSTROTATED".to_string(),
+                secret_access_key: "rotated-secret".to_string(),
+                session_token: Some("rotated-session-token".to_string()),
+            },
         }
     }
 

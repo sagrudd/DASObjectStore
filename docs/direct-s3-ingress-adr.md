@@ -27,7 +27,9 @@ an explicit deployment mode, not an automatic upgrade:
 - `direct_gateway` binds the public S3 listener and moves Garage to a private
   loopback upstream port for legacy data and recovery operations.
 
-The public endpoint remains AWS Signature Version 4 compatible.  Authentication
+The public endpoint remains AWS Signature Version 4 compatible and terminates
+TLS natively with the standalone appliance certificate. The packaged profile
+does not add a second reverse proxy or certificate lifecycle. Authentication
 resolves the access key in the daemon-managed Garage credential registry and
 binds it to exactly one `(ObjectStore, bucket)` pair.  A request cannot select a
 store, profile, enclosure, managed root, or placement target.  Filesystem and
@@ -92,8 +94,8 @@ and legacy reconciliation remain supported.  A rollout changes listener
 ownership, not the public endpoint URL:
 
 ```text
-before: client -> :3900 Garage -> later reconciliation -> managed SSD
-after:  client -> :3900 DASObjectStore gateway -> managed SSD -> HDD destage
+before: client -> :3900 Garage HTTP -> later reconciliation -> managed SSD
+after:  client -> :3900 DASObjectStore gateway HTTPS -> managed SSD -> HDD destage
                             \\-> :3901 Garage (private legacy/recovery service)
 ```
 

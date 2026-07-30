@@ -76,7 +76,7 @@ variable for that child process.
 Easyconnect Contract
 --------------------
 
-``easyconnect`` is the planned browser-approved connection flow for users who
+``easyconnect`` is the browser-approved connection contract for users who
 know the appliance host or IP address but should not paste passwords, S3 access
 keys, or bucket names into the terminal. The command binds a loopback callback
 listener, opens the appliance login page in a browser, and waits for a one-time
@@ -86,10 +86,84 @@ pairing callback:
 
    dasobjectstore-remote easyconnect 192.168.1.192
 
+To bind the request to one ObjectStore before browser approval:
+
+.. code-block:: console
+
+   dasobjectstore-remote easyconnect 192.168.1.192 \
+     --object-store epic_collection
+
 The command resolves the standalone Web application URL using HTTPS port
 ``8448`` by default. After authenticated approval in the browser, the remote
-client receives a one-time pairing result on its loopback callback listener. The
-exchange code is treated as secret-bearing material and is not printed.
+client receives a one-time pairing result as a form-encoded loopback ``POST``.
+The exchange code never enters a URL and is neither printed nor retained after
+the one-time exchange.
+
+The Monas/Pistis product boundary separates the routes deliberately:
+
+* pairing creation and one-time exchange are public, bounded JSON operations;
+* creation accepts only an exact loopback callback on ``127.0.0.1`` or ``::1``
+  with an explicit port and the fixed EasyConnect callback path;
+* approval requires a live host browser session and its session-bound CSRF
+  value;
+* the immutable Prosopikon principal remains the audit subject while a
+  separately host-verified local username is used for appliance group policy;
+  and
+* the daemon rejects an approval that substitutes a different ObjectStore for
+  the one requested when the pairing was created.
+
+The command requires previously enrolled appliance certificate trust. Enrol
+that trust without a password before the first EasyConnect run, using exactly
+one independently obtained evidence source:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust enroll das.example \
+     --ca-cert /secure/site-ca.crt
+
+   # Or, when no private CA is available:
+   dasobjectstore-remote trust enroll das.example \
+     --trust-fingerprint VERIFIED_LEAF_SHA256
+
+The CA form verifies both the presented certificate chain and the exact host
+name. The fingerprint form accepts only the independently compared leaf
+fingerprint. The command performs no password prompt and sends no
+authentication credential. It refuses to overwrite an existing trust record;
+use ``trust inspect`` and the explicit rotation or repair workflow instead.
+
+EasyConnect uses the resulting pin for discovery, pairing creation, and
+exchange; URLs returned by the appliance cannot redirect the client away from
+the pinned HTTPS origin. The server returns the public S3 endpoint, region, and
+addressing style alongside the approved principal, grants, and short-lived
+session. The client validates the envelope and commits the complete session
+generation atomically. It never guesses an S3 endpoint from the browser or
+control URL.
+
+In a Monas/Pistis deployment, the public EasyConnect router exposes discovery,
+pairing creation, bounded status polling, and one-time exchange without a
+browser session. Discovery is emitted only from the deployment-owned HTTPS
+origin and persisted appliance identity; missing, non-HTTPS, credential-bearing,
+or path-bearing origin configuration fails closed. The discovery contract
+advertises ``pistis`` as the authentication provider. Pairing approval is not
+part of this public router and remains behind the verified host actor boundary.
+
+Inspect the enrolled, non-secret certificate identity before pairing:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust inspect das.example
+
+The credential-free Pistis completion design is recorded as Accepted
+:doc:`../adr/0003-credential-free-pistis-easyconnect-approval`.  It requires a
+distinct Pistis provider and binds the Prosopikon authority, principal,
+session, exact ObjectStore grant, correlation, and audit identities without an
+OS-account lookup.  It also requires daemon-owned ceremony expiry and random
+identifiers, durable session commit before pairing consumption, idempotent
+crash recovery, and a bounded polling fallback.  These are review requirements,
+not behavior available in the current command.  Acceptance fixes the security
+design; activation remains gated by the immutable principal-to-ObjectStore
+resolver, reviewed liveness adapter, negative and crash/replay tests, and
+evidence through the real Monas/Pistis route.
 
 For non-browser automation, use the password-authenticated ObjectStore
 connection command. It prompts without echo, uses the appliance HTTPS API, and
@@ -294,8 +368,10 @@ local-user Web session as the rest of the standalone console: the user logs in
 with their appliance OS/PAM credentials, and protected easyconnect approval
 routes resolve the authenticated local subject from the browser session token.
 The API shape also reserves ``synoptikon`` and ``mneion`` providers for later
-integrated-host deployments, but those providers are not active in standalone
-mode.
+integrated-host deployments. A Monas-hosted approval carries the immutable
+Prosopikon subject and a separately verified appliance-local policy subject;
+neither GitHub display values nor email addresses are accepted as product
+authorization.
 
 Session exchange responses carry a daemon-generated access key, secret,
 mandatory session token, one exact ObjectStore/bucket grant, expiry time, and
@@ -388,7 +464,7 @@ Configure the DASObjectStore S3 endpoint once on the remote computer:
 .. code-block:: console
 
    dasobjectstore-remote config set \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --region garage \
      --profile dasobjectstore
 

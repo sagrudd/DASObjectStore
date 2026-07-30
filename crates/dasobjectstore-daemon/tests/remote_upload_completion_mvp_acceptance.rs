@@ -270,9 +270,16 @@ fn issue_request(upload_id: &str, object_key: &str) -> ApplicationUploadCapabili
 fn seed_session(path: &Path) {
     FileBackedRemoteEasyconnectPairedSessionStore::new(path)
         .upsert(RemoteEasyconnectPairedSessionRecord {
+            pairing_id: "pairing-1".to_string(),
             session_id: "session-1".to_string(),
+            authority_id: "authority-1".to_string(),
+            principal_id: "synoptikon".to_string(),
             approved_actor: "synoptikon".to_string(),
+            authority_session_id: "authority-session-1".to_string(),
+            originating_authority_expires_at_utc: None,
             auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
+            correlation_id: "correlation-1".to_string(),
+            audit_identity: "standalone:synoptikon".to_string(),
             issued_at_utc: "2026-07-16T15:00:00Z".to_string(),
             expires_at_utc: "2026-07-16T18:00:00Z".to_string(),
             renew_after_utc: "2026-07-16T17:00:00Z".to_string(),

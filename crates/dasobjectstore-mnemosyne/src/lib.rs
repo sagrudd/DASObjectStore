@@ -12,6 +12,7 @@ pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
 pub mod nas_nfs_runtime;
 pub mod pistis_actor;
+pub mod pistis_grants;
 pub mod policy_templates;
 pub mod product_provisioning;
 pub mod product_ui;
@@ -85,6 +86,11 @@ pub use nas_nfs_runtime::{
 pub use pistis_actor::{
     accept_preverified_pistis_actor, PistisActorBoundary, PistisActorError,
     PistisHostRequestBindings, PISTIS_DASOBJECTSTORE_PRODUCT_ID,
+};
+pub use pistis_grants::{
+    FilePistisEasyconnectApprovalResolver, PistisGrantAuditEvent, PistisGrantAuditOperation,
+    PistisGrantPolicyError, PistisGrantPolicyStore, PistisObjectStoreGrantRecord,
+    PistisObjectStoreGrantRegistry, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
 };
 pub use policy_templates::{
     ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,

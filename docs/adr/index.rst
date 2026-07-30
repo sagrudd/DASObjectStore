@@ -10,3 +10,4 @@ implementation.
 
    0001-rustls-crypto-provider
    0002-appliance-identity-and-remote-tls-renewal
+   0003-credential-free-pistis-easyconnect-approval

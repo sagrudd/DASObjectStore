@@ -1,5 +1,56 @@
 use super::*;
 
+pub(super) fn run_trust_enroll(
+    args: &TrustEnrollArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let trust_exists = crate::trust::load_trust(args.host_or_ip(), args.https_port())?.is_some();
+    reject_existing_trust(trust_exists, args.host_or_ip(), args.https_port())?;
+    let prepared = prepare_appliance_trust(
+        args.host_or_ip(),
+        args.https_port(),
+        args.ca_cert(),
+        None,
+        args.trust_fingerprint(),
+        |_, _, _| Ok(false),
+    )?;
+    if let Some(record) = prepared.pending_replacement {
+        crate::trust::persist_trust(&record)?;
+    } else if !prepared.newly_enrolled {
+        return Err(RemoteRunError::UploadRouting(
+            "first-use trust enrollment did not produce a new trust record".to_string(),
+        ));
+    }
+    let record =
+        crate::trust::load_trust(args.host_or_ip(), args.https_port())?.ok_or_else(|| {
+            RemoteRunError::UploadRouting(
+                "first-use trust enrollment completed without a readable trust record".to_string(),
+            )
+        })?;
+    if record.fingerprint_sha256 != prepared.fingerprint_sha256 {
+        return Err(RemoteRunError::UploadRouting(
+            "persisted appliance trust does not match the verified certificate".to_string(),
+        ));
+    }
+    serde_json::to_writer_pretty(&mut *writer, &trust_summary(&record))?;
+    writer.write_all(b"\n")?;
+    Ok(())
+}
+
+fn reject_existing_trust(
+    trust_exists: bool,
+    host: &str,
+    https_port: u16,
+) -> Result<(), RemoteRunError> {
+    if trust_exists {
+        return Err(RemoteRunError::UploadRouting(format!(
+            "appliance trust already exists for {}:{}; use trust inspect or the reviewed rotation/repair workflow",
+            host, https_port
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn trust_summary(record: &crate::trust::ApplianceTrustRecord) -> serde_json::Value {
     serde_json::json!({
         "appliance_id": record.appliance_id,
@@ -471,4 +522,19 @@ pub(super) fn write_control_json(
     serde_json::to_writer_pretty(&mut *writer, &value)?;
     writer.write_all(b"\n")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod trust_enroll_tests {
+    use super::reject_existing_trust;
+
+    #[test]
+    fn first_use_enrollment_refuses_existing_trust_before_network_work() {
+        let error = reject_existing_trust(true, "das.example", 8733)
+            .expect_err("existing trust must require the reviewed rotation path");
+        assert_eq!(
+            error.to_string(),
+            "appliance trust already exists for das.example:8733; use trust inspect or the reviewed rotation/repair workflow"
+        );
+    }
 }

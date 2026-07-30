@@ -250,16 +250,19 @@ pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
     remote_easyconnect_control_operations, remote_easyconnect_object_store_grants_for_actor,
     remote_easyconnect_renew_after_offset_seconds,
-    resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovePairingRequest,
-    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectComponentBuilds,
-    RemoteEasyconnectControlAuthorization, RemoteEasyconnectControlOperation,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovalContext,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
+    RemoteEasyconnectComponentBuilds, RemoteEasyconnectControlAuthorization,
+    RemoteEasyconnectControlOperation, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangeConnectionResponse,
     RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
     RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectPairingState, RemoteEasyconnectPairingStatusRequest,
+    RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectS3ConnectionDescriptor,
     RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
     RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
@@ -399,6 +402,7 @@ pub enum DaemonApiRequest {
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupRequest),
     RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryRequest),
     RemoteEasyconnectCreatePairing(RemoteEasyconnectCreatePairingRequest),
+    RemoteEasyconnectPairingStatus(RemoteEasyconnectPairingStatusRequest),
     RemoteEasyconnectApprovePairing(RemoteEasyconnectApprovePairingRequest),
     RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingRequest),
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionRequest),
@@ -486,6 +490,7 @@ impl DaemonApiRequest {
             Self::AssignLocalUserToLocalGroup(_) => "assign_local_user_to_local_group",
             Self::RemoteEasyconnectDiscovery(_) => "remote_easyconnect_discovery",
             Self::RemoteEasyconnectCreatePairing(_) => "remote_easyconnect_create_pairing",
+            Self::RemoteEasyconnectPairingStatus(_) => "remote_easyconnect_pairing_status",
             Self::RemoteEasyconnectApprovePairing(_) => "remote_easyconnect_approve_pairing",
             Self::RemoteEasyconnectExchangePairing(_) => "remote_easyconnect_exchange_pairing",
             Self::RemoteEasyconnectRevokeSession(_) => "remote_easyconnect_revoke_session",
@@ -659,6 +664,7 @@ impl DaemonApiRequest {
             | Self::ApplianceTelemetry(_)
             | Self::DiscoverErgasterionCapability
             | Self::RemoteEasyconnectDiscovery(_)
+            | Self::RemoteEasyconnectPairingStatus(_)
             | Self::RemoteEasyconnectUploadAdmission(_) => Ok(()),
         }
     }
@@ -740,6 +746,7 @@ pub enum DaemonApiResponse {
     AssignLocalUserToLocalGroup(AssignLocalUserToLocalGroupResponse),
     RemoteEasyconnectDiscovery(RemoteEasyconnectDiscoveryResponse),
     RemoteEasyconnectCreatePairing(RemoteEasyconnectCreatePairingResponse),
+    RemoteEasyconnectPairingStatus(RemoteEasyconnectPairingStatusResponse),
     RemoteEasyconnectApprovePairing(RemoteEasyconnectApprovePairingResponse),
     RemoteEasyconnectExchangePairing(RemoteEasyconnectExchangePairingResponse),
     RemoteEasyconnectRevokeSession(RemoteEasyconnectRevokeSessionResponse),
@@ -1307,19 +1314,25 @@ mod tests {
         let request = DaemonApiRequest::RemoteEasyconnectApprovePairing(
             crate::api::RemoteEasyconnectApprovePairingRequest {
                 pairing_id: "pair-1".to_string(),
-                approved_actor: "stephen".to_string(),
-                auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-                allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
-                    object_store: "zymo_fecal_2025.05".to_string(),
-                    bucket: "dos-zymo-fecal-2025-05".to_string(),
-                    can_read: true,
-                    can_write: true,
-                    writer_group: Some("mnemosyne".to_string()),
-                    object_type: "fastq".to_string(),
-                    control_operations: Vec::new(),
-                    allowed_prefixes: Vec::new(),
-                }],
-                approval_expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
+                approval_context: crate::RemoteEasyconnectApprovalContext {
+                    authority_id: "authority-1".to_string(),
+                    principal_id: "stephen".to_string(),
+                    session_id: "authority-session-1".to_string(),
+                    auth_provider: RemoteEasyconnectAuthProvider::Pistis,
+                    allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                        object_store: "zymo_fecal_2025.05".to_string(),
+                        bucket: "dos-zymo-fecal-2025-05".to_string(),
+                        can_read: true,
+                        can_write: true,
+                        writer_group: Some("mnemosyne".to_string()),
+                        object_type: "fastq".to_string(),
+                        control_operations: Vec::new(),
+                        allowed_prefixes: Vec::new(),
+                    }],
+                    host_session_expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
+                    correlation_id: "correlation-1".to_string(),
+                    audit_identity: "pistis:principal:stephen".to_string(),
+                },
             },
         );
 
@@ -1327,7 +1340,10 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("approval serializes");
 
         assert_eq!(encoded["command"], "remote_easyconnect_approve_pairing");
-        assert_eq!(encoded["payload"]["auth_provider"], "standalone_local_user");
+        assert_eq!(
+            encoded["payload"]["approval_context"]["auth_provider"],
+            "pistis"
+        );
     }
 
     fn create_easyconnect_pairing_request() -> RemoteEasyconnectCreatePairingRequest {

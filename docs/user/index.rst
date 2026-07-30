@@ -33,5 +33,6 @@ stabilized in the current MVP.
    direct-s3-ingress
    remote-client
    programmatic-access
+   pistis-grants
    application-object-deletion
    store-repair

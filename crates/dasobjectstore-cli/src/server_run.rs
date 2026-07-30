@@ -7,13 +7,14 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
     application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
-    gui_api_router_for_host_mode_with_s3_descriptor, s3_gateway_router, LocalAuthStore,
-    LocalAuthStoreError, MtlsApplicationConnectInfo, MtlsListenerError,
+    gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate, s3_gateway_router,
+    LocalAuthStore, LocalAuthStoreError, MtlsApplicationConnectInfo, MtlsListenerError,
     StandaloneAuthenticationConfig, StandaloneS3ConnectionDescriptor, StandaloneServerConfig,
     StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
@@ -58,6 +59,8 @@ async fn start_server(
     let tls =
         RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
             .await?;
+    let s3_tls_certificate_path = config.tls.certificate_path.clone();
+    let s3_tls = tls.clone();
     writeln!(
         writer,
         "dasobjectstore-server listening on https://{}",
@@ -94,16 +97,12 @@ async fn start_server(
         !mtls_enabled,
         public_s3_descriptor,
         Some(config.public_base_url.clone()),
+        s3_tls_certificate_path,
     );
     let direct_s3 = async move {
         if s3_ingress.enabled() {
             let address = s3_ingress.socket_addr().map_err(io::Error::other)?;
-            let listener = tokio::net::TcpListener::bind(address).await?;
-            axum::serve(
-                listener,
-                s3_gateway_router(s3_ingress.max_concurrent_uploads).into_make_service(),
-            )
-            .await
+            serve_direct_s3_tls(address, s3_tls, s3_ingress.max_concurrent_uploads).await
         } else {
             std::future::pending::<io::Result<()>>().await
         }
@@ -132,13 +131,37 @@ async fn start_server(
     Ok(())
 }
 
+/// Serve packaged direct S3 ingress through the appliance-owned TLS boundary.
+///
+/// Requiring a fully constructed [`RustlsConfig`] here keeps plaintext binding
+/// out of the direct-gateway startup path.
+async fn serve_direct_s3_tls(
+    address: SocketAddr,
+    tls: RustlsConfig,
+    max_concurrent_uploads: usize,
+) -> io::Result<()> {
+    axum_server::bind_rustls(address, tls)
+        .serve(s3_gateway_router(max_concurrent_uploads).into_make_service())
+        .await
+}
+
 #[cfg(test)]
 fn standalone_router(
     web_root: PathBuf,
     authentication: StandaloneAuthenticationConfig,
     auth_root: PathBuf,
 ) -> Router {
-    standalone_router_with_application_auth(web_root, authentication, auth_root, true, None, None)
+    standalone_router_with_application_auth(
+        web_root,
+        authentication,
+        auth_root,
+        true,
+        None,
+        None,
+        StandaloneServerConfig::default_localhost()
+            .tls
+            .certificate_path,
+    )
 }
 
 fn standalone_router_with_application_auth(
@@ -148,25 +171,28 @@ fn standalone_router_with_application_auth(
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
     public_base_url: Option<String>,
+    s3_tls_certificate_path: PathBuf,
 ) -> Router {
     let index_root = web_root.clone();
     let index_root_with_slash = web_root.clone();
     let asset_root = web_root;
     let host_mode = authentication.gui_api_host_mode();
     let auth_store = LocalAuthStore::new(auth_root);
-    let root_api = gui_api_router_for_host_mode_with_s3_descriptor(
+    let root_api = gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
         host_mode,
         auth_store.clone(),
         include_application_auth,
         s3_descriptor.clone(),
         public_base_url.clone(),
+        s3_tls_certificate_path.clone(),
     );
-    let product_api = gui_api_router_for_host_mode_with_s3_descriptor(
+    let product_api = gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
         host_mode,
         auth_store,
         include_application_auth,
         s3_descriptor,
         public_base_url,
+        s3_tls_certificate_path,
     );
     Router::new()
         .route("/", get(root_redirect))
@@ -413,7 +439,7 @@ fn write_json_config(
 mod tests {
     use super::{
         run, standalone_router, standalone_router_with_application_auth, static_asset_read_permits,
-        STATIC_ASSET_READ_PERMITS,
+        StandaloneServerConfig, STATIC_ASSET_READ_PERMITS,
     };
     use crate::server_cli::ServerCli;
     use axum::body::Body;
@@ -565,6 +591,9 @@ mod tests {
             false,
             None,
             None,
+            StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         )
         .oneshot(request())
         .await
@@ -578,6 +607,9 @@ mod tests {
             true,
             None,
             None,
+            StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         )
         .oneshot(request())
         .await
@@ -598,6 +630,9 @@ mod tests {
             true,
             None,
             Some("https://192.0.2.10:8448".to_string()),
+            StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         )
         .oneshot(
             Request::builder()
@@ -612,8 +647,7 @@ mod tests {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("discovery body");
-        let discovery: serde_json::Value =
-            serde_json::from_slice(&body).expect("discovery JSON");
+        let discovery: serde_json::Value = serde_json::from_slice(&body).expect("discovery JSON");
         assert_eq!(
             discovery["pairing_create_url"],
             "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"

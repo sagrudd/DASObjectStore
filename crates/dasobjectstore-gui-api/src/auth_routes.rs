@@ -24,6 +24,8 @@ mod auth_router;
 mod auth_validation;
 #[path = "auth_contracts.rs"]
 mod contracts;
+#[path = "easyconnect_discovery.rs"]
+mod easyconnect_discovery;
 #[path = "profile_catalogue.rs"]
 mod profile_catalogue;
 #[path = "profile_delete.rs"]
@@ -36,16 +38,19 @@ pub(crate) mod profile_multipart;
 pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
-pub use auth_identity_routes::StandaloneS3ConnectionDescriptor;
 use auth_identity_routes::*;
+pub use auth_identity_routes::{EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor};
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
-    federated_gui_api_router, gui_api_router_for_host_mode,
-    gui_api_router_for_host_mode_with_application_auth,
-    gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
-    standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,
-    standalone_reporting_router, standalone_users_groups_router,
+    easyconnect_public_router, easyconnect_public_router_with_config,
+    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
+    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    gui_api_router_for_host_mode_with_s3_descriptor,
+    gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
+    pistis_easyconnect_approval_router, standalone_auth_router, standalone_easyconnect_router,
+    standalone_enclosure_admin_router, standalone_gui_api_router, standalone_reporting_router,
+    standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{
@@ -57,12 +62,12 @@ pub(crate) use auth_router::{
 use auth_validation::*;
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::{
         header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
     },
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 pub use contracts::*;
@@ -121,10 +126,12 @@ use dasobjectstore_daemon::{
     ProfileS3ListResponse as DaemonProfileS3ListResponse,
     ProfileS3VerifyRequest as DaemonProfileS3VerifyRequest,
     ProfileS3VerifyResponse as DaemonProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangeConnectionResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectS3ConnectionDescriptor,
     RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
@@ -132,6 +139,7 @@ use dasobjectstore_daemon::{
     UpsertEndpointInventoryResponse as DaemonUpsertEndpointInventoryResponse,
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
+use easyconnect_discovery::*;
 use profile_catalogue::{standalone_profile_catalogue_export, standalone_profile_catalogue_import};
 use profile_delete::standalone_profile_s3_delete;
 pub(crate) use profile_download::provider_stream_download;
@@ -160,6 +168,19 @@ struct ProfileS3ListQuery {
 struct ProfileS3HeadQuery {
     key: Option<String>,
     version: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct EasyconnectBrowserApprovalQuery {
+    pairing_id: String,
+    object_store: String,
+    expires_at_utc: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct EasyconnectBrowserApprovalIntent {
+    pairing_id: String,
+    object_store: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -931,23 +952,24 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
-        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
-        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
-        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
-        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
-        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
-        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
-        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
-        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
-        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
-        IngestControlAction, IngestControlRequest, IngestControlResponse,
-        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
-        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
-        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
-        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
-        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
-        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        easyconnect_public_router_with_config, gui_api_router_for_host_mode, local_standalone_user,
+        standalone_auth_router_with_state, standalone_dashboard_router_with_state,
+        standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
+        standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
+        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
+        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
+        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
+        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
+        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
+        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
+        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
+        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
+        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
@@ -963,8 +985,9 @@ mod tests {
         LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
-        AuthenticatedActorAuthority, AuthenticatedGuiActor, LocalAuthStore, LocalPasswordAuthError,
-        LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, STANDALONE_SESSION_TOKEN_HEADER,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectS3EndpointConfig,
+        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
+        LoginResponse, StandaloneS3ConnectionDescriptor, STANDALONE_SESSION_TOKEN_HEADER,
         STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
@@ -1107,6 +1130,9 @@ mod tests {
                 accepted_credentials: vec![("user".to_string(), "secret".to_string())],
             }),
             s3_descriptor: None,
+            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         };
         let response = post_json_response(
             standalone_auth_router_with_state(state),
@@ -1368,6 +1394,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = app
@@ -1421,6 +1448,98 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_easyconnect_discovery_advertises_pistis_and_deployment_origin() {
+        let app = easyconnect_public_router_with_config(
+            None,
+            Some("https://das.example.test:8448/".to_string()),
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/remote/easyconnect/discovery")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["auth_providers"], serde_json::json!(["pistis"]));
+        assert_eq!(encoded["appliance_id"], "das-appliance-test");
+        assert_eq!(
+            encoded["pairing_create_url"],
+            "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+        );
+        assert_eq!(
+            encoded["pairing_exchange_url"],
+            "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
+        );
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_discovery_rejects_untrusted_origin_configuration() {
+        for public_base_url in [
+            None,
+            Some("http://das.example.test:8448".to_string()),
+            Some("https://operator@das.example.test:8448".to_string()),
+            Some("https://das.example.test:8448/untrusted-path".to_string()),
+        ] {
+            let response = easyconnect_public_router_with_config(None, public_base_url)
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/v1/remote/easyconnect/discovery")
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("request completes");
+
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            let encoded = response_json(response).await;
+            assert_eq!(
+                encoded["code"],
+                serde_json::json!("easyconnect_public_origin_unavailable")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_exchange_verifies_deployment_tls_before_daemon_transition() {
+        let app = easyconnect_public_router_with_config(
+            Some(EasyconnectS3EndpointConfig {
+                descriptor: StandaloneS3ConnectionDescriptor {
+                    endpoint_url: "https://objects.example.test:3900".to_string(),
+                    region: "test-region".to_string(),
+                    addressing_style: "path".to_string(),
+                },
+                tls_certificate_path: PathBuf::from("/missing/appliance-fullchain.pem"),
+            }),
+            Some("https://das.example.test:8448".to_string()),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/remote/easyconnect/pairings/exchange")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"pairing_id":"pair-1","exchange_code":"exchange-1","client_request_id":"request-1"}"#,
+                    ))
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let encoded = response_json(response).await;
+        assert_eq!(encoded["code"], "s3_endpoint_unavailable");
+    }
+
+    #[tokio::test]
     async fn standalone_easyconnect_auth_context_requires_session() {
         let root = temp_root("easyconnect-auth-required");
         let auth_store = registered_auth_store(&root);
@@ -1428,6 +1547,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = app
@@ -1454,6 +1574,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1481,6 +1602,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1510,6 +1632,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let response = get_response_with_session(
@@ -1536,6 +1659,7 @@ mod tests {
             auth_store,
             public_base_url: "https://192.168.1.192:8448".to_string(),
             appliance_id: "das-appliance-test".to_string(),
+            s3_endpoint: None,
         });
 
         let encoded = get_json_with_session::<serde_json::Value>(
@@ -3701,6 +3825,9 @@ mod tests {
                 region: "test-region".to_string(),
                 addressing_style: "path".to_string(),
             }),
+            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
         })
     }
 

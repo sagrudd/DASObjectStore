@@ -12,7 +12,7 @@ use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
     ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
     RemoteCommand, ResyncArgs, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand,
-    TrustCommand, TrustRepairArgs, UploadArgs,
+    TrustCommand, TrustEnrollArgs, TrustRepairArgs, UploadArgs,
 };
 use crate::config::{
     acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
@@ -25,10 +25,9 @@ use crate::control::{
     renew_store_session_if_due, ReconcileS3Request, RemoteControlClient, RemoteControlError,
 };
 use crate::easyconnect::{
-    define_easyconnect_contract, run_easyconnect_pairing_with_ready, RemoteEasyconnectContract,
-    RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
-    RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions,
-    RemoteEasyconnectPairingOutcome, SystemBrowserLauncher,
+    define_easyconnect_contract, run_complete_easyconnect_pairing_with_ready,
+    RemoteEasyconnectContract, RemoteEasyconnectContractError, RemoteEasyconnectContractRequest,
+    RemoteEasyconnectPairingError, RemoteEasyconnectPairingOptions, SystemBrowserLauncher,
 };
 use crate::s3::{
     execute_aws_plan, parse_list_buckets, plan_list_stores, plan_upload_with_credentials,
@@ -51,6 +50,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {
+            TrustCommand::Enroll(args) => run_trust_enroll(args, writer),
             TrustCommand::Inspect(args) => {
                 run_trust_inspect(args.host_or_ip(), args.https_port(), args.json(), writer)
             }
@@ -66,7 +66,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
                 run_s3_status(cli, args.store(), args.profile(), args.json(), writer)
             }
         },
-        RemoteCommand::Easyconnect(args) => run_easyconnect(args, writer),
+        RemoteCommand::Easyconnect(args) => run_easyconnect(cli, args, writer),
         RemoteCommand::Config(args) => match args.command() {
             ConfigCommand::Set(args) => run_config_set(cli, args, writer),
             ConfigCommand::Show(args) => run_config_show(cli, args.json(), writer),

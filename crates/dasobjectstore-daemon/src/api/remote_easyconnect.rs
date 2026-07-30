@@ -10,6 +10,9 @@ use dasobjectstore_core::remote_upload::{
 };
 use serde::{Deserialize, Serialize};
 
+mod approval;
+pub use approval::*;
+
 pub const REMOTE_EASYCONNECT_DISCOVERY_ROUTE: &str = "/api/v1/remote/easyconnect/discovery";
 pub const REMOTE_EASYCONNECT_PAIRINGS_ROUTE: &str = "/api/v1/remote/easyconnect/pairings";
 pub const REMOTE_EASYCONNECT_PAIRING_APPROVAL_ROUTE_TEMPLATE: &str =
@@ -148,6 +151,7 @@ impl Default for RemoteEasyconnectSessionPolicy {
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEasyconnectAuthProvider {
     StandaloneLocalUser,
+    Pistis,
     Synoptikon,
     Mneion,
 }
@@ -182,62 +186,6 @@ pub struct RemoteEasyconnectCreatePairingResponse {
     pub callback_url: String,
     pub expires_at_utc: String,
     pub polling_url: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RemoteEasyconnectApprovePairingRequest {
-    pub pairing_id: String,
-    pub approved_actor: String,
-    pub auth_provider: RemoteEasyconnectAuthProvider,
-    pub allowed_object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
-    pub approval_expires_at_utc: String,
-}
-
-impl RemoteEasyconnectApprovePairingRequest {
-    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
-        require_non_blank("pairing_id", &self.pairing_id)?;
-        require_non_blank("approved_actor", &self.approved_actor)?;
-        require_non_blank("approval_expires_at_utc", &self.approval_expires_at_utc)?;
-        if self.allowed_object_stores.is_empty() {
-            return Err(RemoteEasyconnectValidationError::EmptyObjectStoreGrants);
-        }
-        for grant in &self.allowed_object_stores {
-            grant.validate()?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RemoteEasyconnectApprovePairingResponse {
-    pub pairing_id: String,
-    pub exchange_code: String,
-    pub callback_url: String,
-    pub expires_at_utc: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RemoteEasyconnectExchangePairingRequest {
-    pub pairing_id: String,
-    pub exchange_code: String,
-    pub client_request_id: Option<String>,
-}
-
-impl RemoteEasyconnectExchangePairingRequest {
-    pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
-        require_non_blank("pairing_id", &self.pairing_id)?;
-        require_non_blank("exchange_code", &self.exchange_code)?;
-        validate_optional_non_blank("client_request_id", self.client_request_id.as_deref())?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct RemoteEasyconnectExchangePairingResponse {
-    pub appliance_id: String,
-    pub appliance_base_url: String,
-    pub session: RemoteEasyconnectSession,
-    pub object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -797,6 +745,7 @@ pub enum RemoteEasyconnectValidationError {
     InvalidLoopbackUrl { field: &'static str, value: String },
     InvalidRequestedLifetime { seconds: u64 },
     EmptyObjectStoreGrants,
+    InvalidApprovalProvider,
     GrantWithoutAccess { object_store: String },
     InvalidControlPrefix { prefix: String },
     EmptyUploadSelection,
@@ -845,6 +794,11 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
             ),
             Self::EmptyObjectStoreGrants => {
                 formatter.write_str("at least one object store grant is required")
+            }
+            Self::InvalidApprovalProvider => {
+                formatter.write_str(
+                    "approval context must use the standalone_local_user or pistis provider",
+                )
             }
             Self::GrantWithoutAccess { object_store } => write!(
                 formatter,

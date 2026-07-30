@@ -18,6 +18,7 @@ mod live_status;
 mod mtls_listener;
 mod object_browser_routes;
 mod object_stores_aggregator;
+mod pistis_approval;
 pub mod remote_control_guard;
 pub mod remote_control_routes;
 mod remote_upload_aggregator;
@@ -50,14 +51,18 @@ pub use auth::{
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
-    FederatedHostSessionResponse, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+    AuthenticatedLocalPolicySubject, FederatedHostSessionResponse, STANDALONE_SESSION_TOKEN_HEADER,
+    STANDALONE_USERNAME_HEADER,
 };
 pub use auth_routes::{
-    federated_gui_api_router, gui_api_router_for_host_mode,
-    gui_api_router_for_host_mode_with_application_auth,
-    gui_api_router_for_host_mode_with_s3_descriptor, standalone_auth_router,
-    standalone_gui_api_router, AssignLocalUserToGroupRequest, AuthRouteError,
-    CreateLocalGroupRequest, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
+    easyconnect_public_router, easyconnect_public_router_with_config,
+    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
+    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    gui_api_router_for_host_mode_with_s3_descriptor,
+    gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
+    pistis_easyconnect_approval_router, standalone_auth_router, standalone_gui_api_router,
+    AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest,
+    EasyconnectS3EndpointConfig, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
     SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,
     StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
     StandaloneLocalGroupOperation, StandaloneS3ConnectionDescriptor,
@@ -93,6 +98,10 @@ pub use live_status::{
 pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,
     MtlsApplicationListener, MtlsListenerError,
+};
+pub use pistis_approval::{
+    PistisApprovalResolutionError, PistisEasyconnectApprovalResolver,
+    SharedPistisEasyconnectApprovalResolver,
 };
 pub use remote_control_guard::{
     RemoteControlGuardState, RemoteControlRejection, REMOTE_CONTROL_ACCESS_KEY_HEADER,

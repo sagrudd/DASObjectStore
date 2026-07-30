@@ -8,6 +8,67 @@ agreement before landing.
 
 ## Unreleased
 
+### Changed
+
+- Pin the accepted Prosopikon bare-earth authority transaction revision so
+  Monas and DASObjectStore share one Rust authority type and schema-v8
+  provider contract.
+
+- Align the Mnemosyne product manifest with the workspace's 0.153.0 capability
+  version so product discovery cannot advertise the preceding release.
+- Add a dedicated password-free ``dasobjectstore-remote trust enroll`` workflow
+  that requires an explicit CA certificate or independently verified leaf
+  fingerprint before the first EasyConnect pairing.
+- Add an isolated, static evaluation service and configuration for a parallel
+  TLS S3 listener, plus the fresh-authority Pistis grant procedure.
+- Advance the exact Prosopikon pin to the bare-earth authority candidate whose
+  atomic enrolment transaction makes the committed device immediately
+  resolvable by Monas.
+- Keep the reviewed local-container sibling substitution on that same exact
+  Prosopikon revision so packaging qualification continues to fail closed.
+- Fail the local Docker build when its reviewed Prosopikon sibling-source
+  substitution drifts from the workspace dependency instead of silently
+  falling back to a private Git fetch.
+- Keep the opt-in development self-signing fixture compatible with the
+  governed-identity schema while explicitly refusing any dynamic authority
+  binding.
+- Keep parallel daemon transport tests isolated even when the operating-system
+  clock returns the same timestamp to concurrent socket fixtures.
+- Add an atomic, revision-checked Pistis grant policy store and supported
+  ``pistis-grant inspect/grant/revoke`` administrator workflow that resolves an
+  email to exactly one active Prosopikon principal, persists immutable IDs, and
+  validates the exact current S3-exported ObjectStore.
+- Accept the credential-free Pistis EasyConnect approval contract, including
+  exact authority/principal/session/grant/audit binding, explicit separation
+  from OS identity, server-owned ceremony limits, idempotent durable exchange,
+  and callback-to-polling recovery requirements.
+- Correct standalone EasyConnect URL publication so daemon routes that already
+  include the DASObjectStore product mount are not prefixed a second time.
+- Render a bounded standalone login handoff for first-use EasyConnect browser
+  approval, preserving header-based browser sessions without cookies or an
+  authentication bypass and escaping hostile query content.
+- Terminate direct S3 ingress with the appliance's native Rustls listener,
+  reject plaintext or port-substituted public descriptors, and document
+  explicit certificate trust, deployment evidence, and recoverable rollback.
+- Verify the advertised direct S3 endpoint over native Rustls with the
+  appliance's exact configured leaf and fullchain trust, bounded responses,
+  and no redirects before protected approval and public exchange transitions.
+
+- Add the Monas/Pistis EasyConnect HTTP boundary: loopback-only public pairing
+  creation, host-session and CSRF-protected approval, one-time public exchange,
+  and a browser approval page that posts the exchange capability directly to
+  the loopback client without placing it in a URL.
+- Preserve the immutable Prosopikon principal separately from the verified
+  appliance-local policy username, re-evaluate current ObjectStore access at
+  approval time, and reject requested-ObjectStore substitution in the durable
+  pairing state machine.
+- Complete the remote CLI's pinned-HTTPS create, form-POST callback, one-time
+  exchange, and atomic config-generation installation using the server-owned
+  S3 connection descriptor and asserted approval identity.
+- Bound the daemon's live EasyConnect pairing repository, reclaim terminal and
+  expired records during admission, and protect its Unix directory and
+  secret-bearing file with owner-only permissions.
+
 ## 0.152.4 - 2026-07-29
 
 ### Fixed

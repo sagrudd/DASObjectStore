@@ -1,6 +1,6 @@
 use crate::api::{
-    RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectSessionCredentials,
+    RemoteEasyconnectApprovalContext, RemoteEasyconnectPairingState,
+    RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectSessionCredentials,
 };
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -8,10 +8,16 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(unix)]
+use std::{os::unix::fs::OpenOptionsExt, os::unix::fs::PermissionsExt};
 
 pub const REMOTE_EASYCONNECT_PAIRING_DIR_NAME: &str = "remote-easyconnect";
 pub const REMOTE_EASYCONNECT_PAIRING_FILE_NAME: &str = "pairings.json";
 pub const REMOTE_EASYCONNECT_PAIRING_SCHEMA: u16 = 1;
+pub const REMOTE_EASYCONNECT_PAIRING_TTL_SECONDS: u64 = 5 * 60;
+pub const REMOTE_EASYCONNECT_APPROVAL_TTL_SECONDS: u64 = 2 * 60;
+/// Maximum number of pending or approved pairing capabilities retained at once.
+pub const REMOTE_EASYCONNECT_MAX_LIVE_PAIRINGS: usize = 1_024;
 
 pub fn remote_easyconnect_pairing_store_path(state_dir: impl AsRef<Path>) -> PathBuf {
     state_dir
@@ -21,7 +27,7 @@ pub fn remote_easyconnect_pairing_store_path(state_dir: impl AsRef<Path>) -> Pat
 }
 
 pub trait RemoteEasyconnectPairingStore: Send + Sync {
-    fn upsert(
+    fn create(
         &self,
         pairing: RemoteEasyconnectPairingRecord,
     ) -> Result<(), RemoteEasyconnectPairingStoreError>;
@@ -29,9 +35,21 @@ pub trait RemoteEasyconnectPairingStore: Send + Sync {
     fn approve(
         &self,
         approval: RemoteEasyconnectPairingApproval,
+        approved_at_utc: &str,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError>;
 
-    fn exchange(
+    fn status(
+        &self,
+        pairing_id: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectPairingStoreError>;
+
+    fn prepare_exchange(
+        &self,
+        request: &RemoteEasyconnectPairingExchange,
+    ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError>;
+
+    fn commit_exchange(
         &self,
         request: RemoteEasyconnectPairingExchange,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError>;
@@ -82,9 +100,7 @@ impl RemoteEasyconnectPairingRecord {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairingApproval {
     pub pairing_id: String,
-    pub approved_actor: String,
-    pub auth_provider: RemoteEasyconnectAuthProvider,
-    pub allowed_object_stores: Vec<RemoteEasyconnectObjectStoreGrant>,
+    pub context: RemoteEasyconnectApprovalContext,
     pub approval_expires_at_utc: String,
     pub exchange_code: String,
 }
@@ -92,22 +108,14 @@ pub struct RemoteEasyconnectPairingApproval {
 impl RemoteEasyconnectPairingApproval {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectPairingStoreError> {
         require_non_blank("pairing_id", &self.pairing_id)?;
-        require_non_blank("approved_actor", &self.approved_actor)?;
         require_non_blank("approval_expires_at_utc", &self.approval_expires_at_utc)?;
         require_non_blank("exchange_code", &self.exchange_code)?;
-        if self.allowed_object_stores.is_empty() {
-            return Err(RemoteEasyconnectPairingStoreError::BlankField {
-                field: "allowed_object_stores",
-            });
-        }
-        for grant in &self.allowed_object_stores {
-            grant
-                .validate()
-                .map_err(|error| RemoteEasyconnectPairingStoreError::InvalidGrant {
-                    pairing_id: self.pairing_id.clone(),
-                    message: error.to_string(),
-                })?;
-        }
+        self.context.validate().map_err(|error| {
+            RemoteEasyconnectPairingStoreError::InvalidApprovalContext {
+                pairing_id: self.pairing_id.clone(),
+                message: error.to_string(),
+            }
+        })?;
         Ok(())
     }
 }
@@ -123,6 +131,7 @@ pub struct RemoteEasyconnectPairingExchange {
 pub struct FileBackedRemoteEasyconnectPairingStore {
     path: PathBuf,
     lock: Mutex<()>,
+    max_live_pairings: usize,
 }
 
 impl FileBackedRemoteEasyconnectPairingStore {
@@ -130,27 +139,39 @@ impl FileBackedRemoteEasyconnectPairingStore {
         Self {
             path: path.into(),
             lock: Mutex::new(()),
+            max_live_pairings: REMOTE_EASYCONNECT_MAX_LIVE_PAIRINGS,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_max_live_pairings(path: impl Into<PathBuf>, max_live_pairings: usize) -> Self {
+        Self {
+            path: path.into(),
+            lock: Mutex::new(()),
+            max_live_pairings,
         }
     }
 }
 
 impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
-    fn upsert(
+    fn create(
         &self,
         pairing: RemoteEasyconnectPairingRecord,
     ) -> Result<(), RemoteEasyconnectPairingStoreError> {
         pairing.validate()?;
         let _guard = self.lock.lock().expect("pairing store lock poisoned");
         let mut store = read_store(&self.path)?;
-        store.upsert(pairing);
+        store.create(pairing, self.max_live_pairings)?;
         write_store(&self.path, &store)
     }
 
     fn approve(
         &self,
-        approval: RemoteEasyconnectPairingApproval,
+        mut approval: RemoteEasyconnectPairingApproval,
+        approved_at_utc: &str,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError> {
         approval.validate()?;
+        require_non_blank("approved_at_utc", approved_at_utc)?;
         let _guard = self.lock.lock().expect("pairing store lock poisoned");
         let mut store = read_store(&self.path)?;
         let Some(pairing) = store.pairing_mut(&approval.pairing_id) else {
@@ -158,19 +179,106 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
                 pairing_id: approval.pairing_id,
             });
         };
+        ensure_pairing_usable(pairing, approved_at_utc)?;
+        if approval.context.host_session_expires_at_utc.as_str() <= approved_at_utc {
+            return Err(RemoteEasyconnectPairingStoreError::ApprovalExpired {
+                pairing_id: pairing.pairing_id.clone(),
+                expired_at_utc: approval.context.host_session_expires_at_utc.clone(),
+            });
+        }
+        approval.approval_expires_at_utc = approval
+            .approval_expires_at_utc
+            .min(pairing.expires_at_utc.clone())
+            .min(approval.context.host_session_expires_at_utc.clone());
+        if let Some(requested) = pairing.requested_object_store.as_deref() {
+            if approval.context.allowed_object_stores.len() != 1
+                || approval.context.allowed_object_stores[0].object_store != requested
+            {
+                return Err(
+                    RemoteEasyconnectPairingStoreError::RequestedObjectStoreMismatch {
+                        pairing_id: pairing.pairing_id.clone(),
+                        requested: requested.to_string(),
+                    },
+                );
+            }
+        }
         pairing.approval = Some(approval);
         let approved = pairing.clone();
         write_store(&self.path, &store)?;
         Ok(approved)
     }
 
-    fn exchange(
+    fn status(
+        &self,
+        pairing_id: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectPairingStoreError> {
+        require_non_blank("pairing_id", pairing_id)?;
+        require_non_blank("now_utc", now_utc)?;
+        let _guard = self.lock.lock().expect("pairing store lock poisoned");
+        let store = read_store(&self.path)?;
+        let Some(pairing) = store
+            .pairings
+            .iter()
+            .find(|pairing| pairing.pairing_id == pairing_id)
+        else {
+            return Err(RemoteEasyconnectPairingStoreError::PairingNotFound {
+                pairing_id: pairing_id.to_string(),
+            });
+        };
+        let approval_expired = pairing
+            .approval
+            .as_ref()
+            .is_some_and(|approval| approval.approval_expires_at_utc.as_str() <= now_utc);
+        let state = if pairing.exchanged_at_utc.is_some() {
+            RemoteEasyconnectPairingState::Exchanged
+        } else if pairing.expires_at_utc.as_str() <= now_utc || approval_expired {
+            RemoteEasyconnectPairingState::Expired
+        } else if pairing.approval.is_some() {
+            RemoteEasyconnectPairingState::Approved
+        } else {
+            RemoteEasyconnectPairingState::Pending
+        };
+        Ok(RemoteEasyconnectPairingStatusResponse {
+            pairing_id: pairing.pairing_id.clone(),
+            state,
+            expires_at_utc: pairing.expires_at_utc.clone(),
+            exchange_code: if state == RemoteEasyconnectPairingState::Approved {
+                pairing
+                    .approval
+                    .as_ref()
+                    .map(|approval| approval.exchange_code.clone())
+            } else {
+                None
+            },
+        })
+    }
+
+    fn prepare_exchange(
+        &self,
+        request: &RemoteEasyconnectPairingExchange,
+    ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError> {
+        validate_exchange_request(request)?;
+        let _guard = self.lock.lock().expect("pairing store lock poisoned");
+        let store = read_store(&self.path)?;
+        let Some(pairing) = store
+            .pairings
+            .iter()
+            .find(|pairing| pairing.pairing_id == request.pairing_id)
+        else {
+            return Err(RemoteEasyconnectPairingStoreError::PairingNotFound {
+                pairing_id: request.pairing_id.clone(),
+            });
+        };
+        validate_exchange(pairing, request)?;
+        Ok(pairing.clone())
+    }
+
+    fn commit_exchange(
         &self,
         request: RemoteEasyconnectPairingExchange,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError> {
-        require_non_blank("pairing_id", &request.pairing_id)?;
-        require_non_blank("exchange_code", &request.exchange_code)?;
-        require_non_blank("exchanged_at_utc", &request.exchanged_at_utc)?;
+        validate_exchange_request(&request)?;
         let _guard = self.lock.lock().expect("pairing store lock poisoned");
         let mut store = read_store(&self.path)?;
         let Some(pairing) = store.pairing_mut(&request.pairing_id) else {
@@ -178,28 +286,44 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
                 pairing_id: request.pairing_id,
             });
         };
-        ensure_pairing_usable(pairing, &request.exchanged_at_utc)?;
-        let Some(approval) = &pairing.approval else {
-            return Err(RemoteEasyconnectPairingStoreError::PairingNotApproved {
-                pairing_id: request.pairing_id,
-            });
-        };
-        if approval.exchange_code != request.exchange_code {
-            return Err(RemoteEasyconnectPairingStoreError::ExchangeCodeMismatch {
-                pairing_id: request.pairing_id,
-            });
-        }
-        if approval.approval_expires_at_utc <= request.exchanged_at_utc {
-            return Err(RemoteEasyconnectPairingStoreError::ApprovalExpired {
-                pairing_id: pairing.pairing_id.clone(),
-                expired_at_utc: approval.approval_expires_at_utc.clone(),
-            });
-        }
+        validate_exchange(pairing, &request)?;
         pairing.exchanged_at_utc = Some(request.exchanged_at_utc);
         let exchanged = pairing.clone();
         write_store(&self.path, &store)?;
         Ok(exchanged)
     }
+}
+
+fn validate_exchange_request(
+    request: &RemoteEasyconnectPairingExchange,
+) -> Result<(), RemoteEasyconnectPairingStoreError> {
+    require_non_blank("pairing_id", &request.pairing_id)?;
+    require_non_blank("exchange_code", &request.exchange_code)?;
+    require_non_blank("exchanged_at_utc", &request.exchanged_at_utc)
+}
+
+fn validate_exchange(
+    pairing: &RemoteEasyconnectPairingRecord,
+    request: &RemoteEasyconnectPairingExchange,
+) -> Result<(), RemoteEasyconnectPairingStoreError> {
+    ensure_pairing_usable(pairing, &request.exchanged_at_utc)?;
+    let Some(approval) = &pairing.approval else {
+        return Err(RemoteEasyconnectPairingStoreError::PairingNotApproved {
+            pairing_id: request.pairing_id.clone(),
+        });
+    };
+    if approval.exchange_code != request.exchange_code {
+        return Err(RemoteEasyconnectPairingStoreError::ExchangeCodeMismatch {
+            pairing_id: request.pairing_id.clone(),
+        });
+    }
+    if approval.approval_expires_at_utc <= request.exchanged_at_utc {
+        return Err(RemoteEasyconnectPairingStoreError::ApprovalExpired {
+            pairing_id: pairing.pairing_id.clone(),
+            expired_at_utc: approval.approval_expires_at_utc.clone(),
+        });
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -218,6 +342,16 @@ pub enum RemoteEasyconnectPairingStoreError {
     InvalidGrant {
         pairing_id: String,
         message: String,
+    },
+    InvalidApprovalContext {
+        pairing_id: String,
+        message: String,
+    },
+    PairingAlreadyExists {
+        pairing_id: String,
+    },
+    CapacityExceeded {
+        max_live_pairings: usize,
     },
     ApprovalPairingMismatch {
         pairing_id: String,
@@ -243,6 +377,10 @@ pub enum RemoteEasyconnectPairingStoreError {
     },
     ExchangeCodeMismatch {
         pairing_id: String,
+    },
+    RequestedObjectStoreMismatch {
+        pairing_id: String,
+        requested: String,
     },
 }
 
@@ -270,6 +408,20 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
             } => write!(
                 formatter,
                 "pairing {pairing_id} has invalid object store grant: {message}"
+            ),
+            Self::InvalidApprovalContext {
+                pairing_id,
+                message,
+            } => write!(
+                formatter,
+                "pairing {pairing_id} has invalid approval context: {message}"
+            ),
+            Self::PairingAlreadyExists { pairing_id } => {
+                write!(formatter, "remote easyconnect pairing {pairing_id} already exists")
+            }
+            Self::CapacityExceeded { max_live_pairings } => write!(
+                formatter,
+                "remote easyconnect pairing store admits at most {max_live_pairings} live pairings"
             ),
             Self::ApprovalPairingMismatch {
                 pairing_id,
@@ -315,6 +467,13 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
                 formatter,
                 "remote easyconnect pairing {pairing_id} exchange code did not match"
             ),
+            Self::RequestedObjectStoreMismatch {
+                pairing_id,
+                requested,
+            } => write!(
+                formatter,
+                "remote easyconnect pairing {pairing_id} may approve only requested ObjectStore {requested}"
+            ),
         }
     }
 }
@@ -343,16 +502,37 @@ impl RemoteEasyconnectPairingStoreFile {
             .find(|pairing| pairing.pairing_id == pairing_id)
     }
 
-    fn upsert(&mut self, pairing: RemoteEasyconnectPairingRecord) {
-        if let Some(index) = self
+    fn create(
+        &mut self,
+        pairing: RemoteEasyconnectPairingRecord,
+        max_live_pairings: usize,
+    ) -> Result<(), RemoteEasyconnectPairingStoreError> {
+        if self
             .pairings
             .iter()
-            .position(|stored| stored.pairing_id == pairing.pairing_id)
+            .any(|stored| stored.pairing_id == pairing.pairing_id)
         {
-            self.pairings[index] = pairing;
-        } else {
-            self.pairings.push(pairing);
+            return Err(RemoteEasyconnectPairingStoreError::PairingAlreadyExists {
+                pairing_id: pairing.pairing_id,
+            });
         }
+        self.prune_terminal(&pairing.created_at_utc);
+        if self.pairings.len() >= max_live_pairings {
+            return Err(RemoteEasyconnectPairingStoreError::CapacityExceeded { max_live_pairings });
+        }
+        self.pairings.push(pairing);
+        Ok(())
+    }
+
+    fn prune_terminal(&mut self, now_utc: &str) {
+        self.pairings.retain(|pairing| {
+            pairing.exchanged_at_utc.is_none()
+                && pairing.expires_at_utc.as_str() > now_utc
+                && pairing
+                    .approval
+                    .as_ref()
+                    .is_none_or(|approval| approval.approval_expires_at_utc.as_str() > now_utc)
+        });
     }
 }
 
@@ -390,6 +570,13 @@ fn write_store(
         path: parent.to_path_buf(),
         source,
     })?;
+    #[cfg(unix)]
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|source| {
+        RemoteEasyconnectPairingStoreError::Io {
+            path: parent.to_path_buf(),
+            source,
+        }
+    })?;
     let encoded = serde_json::to_vec_pretty(store).map_err(|error| {
         RemoteEasyconnectPairingStoreError::Json {
             path: path.to_path_buf(),
@@ -407,14 +594,17 @@ fn write_store(
             .map(|duration| duration.as_nanos())
             .unwrap_or_default()
     ));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
-            path: temporary.clone(),
-            source,
-        })?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file =
+        options
+            .open(&temporary)
+            .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
+                path: temporary.clone(),
+                source,
+            })?;
     file.write_all(&encoded)
         .and_then(|_| file.sync_all())
         .map_err(|source| RemoteEasyconnectPairingStoreError::Io {
@@ -425,6 +615,13 @@ fn write_store(
     fs::rename(&temporary, path).map_err(|source| RemoteEasyconnectPairingStoreError::Io {
         path: path.to_path_buf(),
         source,
+    })?;
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+        RemoteEasyconnectPairingStoreError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
     })?;
     File::open(parent)
         .and_then(|directory| directory.sync_all())
@@ -488,9 +685,19 @@ pub fn session_credentials_from_store_credentials(
 #[cfg(test)]
 mod tests {
     use super::{
-        write_store, RemoteEasyconnectPairingStoreFile, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+        read_store, write_store, FileBackedRemoteEasyconnectPairingStore,
+        RemoteEasyconnectPairingApproval, RemoteEasyconnectPairingRecord,
+        RemoteEasyconnectPairingStore, RemoteEasyconnectPairingStoreError,
+        RemoteEasyconnectPairingStoreFile, REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+    };
+    use crate::api::{
+        remote_easyconnect_control_operations, RemoteEasyconnectApprovalContext,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectObjectStoreGrant,
+        REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX,
     };
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -528,5 +735,254 @@ mod tests {
             .expect("entries");
         assert_eq!(entries.len(), 1);
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn approval_cannot_substitute_the_requested_object_store() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        store
+            .create(RemoteEasyconnectPairingRecord {
+                pairing_id: "pairing-1".to_string(),
+                client_name: "remote CLI".to_string(),
+                callback_url:
+                    "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
+                        .to_string(),
+                requested_object_store: Some("requested-store".to_string()),
+                requested_session_lifetime_seconds: None,
+                client_request_id: Some("request-1".to_string()),
+                created_at_utc: "2026-07-28T10:00:00Z".to_string(),
+                expires_at_utc: "2026-07-28T10:05:00Z".to_string(),
+                approval: None,
+                exchanged_at_utc: None,
+            })
+            .expect("pairing is stored");
+        let error = store
+            .approve(
+                RemoteEasyconnectPairingApproval {
+                    pairing_id: "pairing-1".to_string(),
+                    context: RemoteEasyconnectApprovalContext {
+                        authority_id: "authority-1".to_string(),
+                        principal_id: "principal-1".to_string(),
+                        session_id: "session-1".to_string(),
+                        auth_provider: RemoteEasyconnectAuthProvider::Pistis,
+                        allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                            object_store: "different-store".to_string(),
+                            bucket: "bucket".to_string(),
+                            can_read: true,
+                            can_write: true,
+                            writer_group: Some("writers".to_string()),
+                            object_type: "store_scoped_session".to_string(),
+                            control_operations: remote_easyconnect_control_operations(true),
+                            allowed_prefixes: vec![
+                                REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string()
+                            ],
+                        }],
+                        host_session_expires_at_utc: "2026-07-28T10:04:00Z".to_string(),
+                        correlation_id: "correlation-1".to_string(),
+                        audit_identity: "pistis:principal-1".to_string(),
+                    },
+                    approval_expires_at_utc: "2026-07-28T10:04:00Z".to_string(),
+                    exchange_code: "exchange-secret".to_string(),
+                },
+                "2026-07-28T10:01:00Z",
+            )
+            .expect_err("store substitution must fail");
+        assert!(matches!(
+            error,
+            RemoteEasyconnectPairingStoreError::RequestedObjectStoreMismatch { .. }
+        ));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn collision_safe_create_never_overwrites_an_existing_pairing() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        let pairing = pairing("pairing-random-capability");
+        store
+            .create(pairing.clone())
+            .expect("first create succeeds");
+        assert!(matches!(
+            store.create(pairing).expect_err("collision must fail"),
+            RemoteEasyconnectPairingStoreError::PairingAlreadyExists { .. }
+        ));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn capacity_rejects_new_live_pairings_after_restart() {
+        let root = root();
+        let path = root.join("pairings.json");
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-1"))
+            .expect("first pairing");
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-2"))
+            .expect("second pairing after restart");
+
+        let error = FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("pairing-3"))
+            .expect_err("third live pairing must be rejected");
+        assert!(matches!(
+            error,
+            RemoteEasyconnectPairingStoreError::CapacityExceeded {
+                max_live_pairings: 2
+            }
+        ));
+        assert_eq!(read_store(&path).expect("store").pairings.len(), 2);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn admission_prunes_terminal_and_expired_rows_after_restart() {
+        let root = root();
+        let path = root.join("pairings.json");
+        let mut expired = pairing("expired");
+        expired.expires_at_utc = "2026-07-28T09:59:59Z".to_string();
+        let mut exchanged = pairing("exchanged");
+        exchanged.exchanged_at_utc = Some("2026-07-28T10:01:00Z".to_string());
+        let mut approval_expired = pairing("approval-expired");
+        approval_expired.approval = Some(approval("approval-expired", "requested-store"));
+        approval_expired
+            .approval
+            .as_mut()
+            .expect("approval")
+            .approval_expires_at_utc = "2026-07-28T09:59:59Z".to_string();
+        write_store(
+            &path,
+            &RemoteEasyconnectPairingStoreFile {
+                schema_version: REMOTE_EASYCONNECT_PAIRING_SCHEMA,
+                pairings: vec![pairing("still-live"), expired, exchanged, approval_expired],
+            },
+        )
+        .expect("seed store");
+
+        FileBackedRemoteEasyconnectPairingStore::with_max_live_pairings(&path, 2)
+            .create(pairing("new-live"))
+            .expect("terminal rows release admission capacity");
+        let stored = read_store(&path).expect("reloaded store");
+        let ids = stored
+            .pairings
+            .iter()
+            .map(|pairing| pairing.pairing_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["still-live", "new-live"]);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persistence_repairs_pairing_directory_and_file_modes() {
+        let root = root();
+        let path = root.join("nested/pairings.json");
+        let store = FileBackedRemoteEasyconnectPairingStore::new(&path);
+        store.create(pairing("pairing-1")).expect("first pairing");
+        fs::set_permissions(
+            path.parent().expect("parent"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("relax parent mode");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("relax file mode");
+
+        store.create(pairing("pairing-2")).expect("rewrite store");
+        assert_eq!(
+            fs::metadata(path.parent().expect("parent"))
+                .expect("parent metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path)
+                .expect("file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn prepare_exchange_does_not_consume_before_the_session_commit() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        store.create(pairing("pairing-atomic")).expect("created");
+        store
+            .approve(
+                approval("pairing-atomic", "requested-store"),
+                "2026-07-28T10:01:00Z",
+            )
+            .expect("approved");
+        let exchange = super::RemoteEasyconnectPairingExchange {
+            pairing_id: "pairing-atomic".to_string(),
+            exchange_code: "exchange-secret".to_string(),
+            exchanged_at_utc: "2026-07-28T10:02:00Z".to_string(),
+        };
+        store
+            .prepare_exchange(&exchange)
+            .expect("preparation validates");
+        assert_eq!(
+            store
+                .status("pairing-atomic", "2026-07-28T10:02:00Z")
+                .expect("status")
+                .state,
+            crate::RemoteEasyconnectPairingState::Approved
+        );
+        store.commit_exchange(exchange).expect("commit consumes");
+        assert_eq!(
+            store
+                .status("pairing-atomic", "2026-07-28T10:02:01Z")
+                .expect("status")
+                .state,
+            crate::RemoteEasyconnectPairingState::Exchanged
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    fn pairing(pairing_id: &str) -> RemoteEasyconnectPairingRecord {
+        RemoteEasyconnectPairingRecord {
+            pairing_id: pairing_id.to_string(),
+            client_name: "remote CLI".to_string(),
+            callback_url:
+                "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
+                    .to_string(),
+            requested_object_store: Some("requested-store".to_string()),
+            requested_session_lifetime_seconds: None,
+            client_request_id: Some("request-1".to_string()),
+            created_at_utc: "2026-07-28T10:00:00Z".to_string(),
+            expires_at_utc: "2026-07-28T10:05:00Z".to_string(),
+            approval: None,
+            exchanged_at_utc: None,
+        }
+    }
+
+    fn approval(pairing_id: &str, object_store: &str) -> RemoteEasyconnectPairingApproval {
+        RemoteEasyconnectPairingApproval {
+            pairing_id: pairing_id.to_string(),
+            context: RemoteEasyconnectApprovalContext {
+                authority_id: "authority-1".to_string(),
+                principal_id: "principal-1".to_string(),
+                session_id: "session-1".to_string(),
+                auth_provider: RemoteEasyconnectAuthProvider::Pistis,
+                allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                    object_store: object_store.to_string(),
+                    bucket: "bucket".to_string(),
+                    can_read: true,
+                    can_write: true,
+                    writer_group: Some("writers".to_string()),
+                    object_type: "store_scoped_session".to_string(),
+                    control_operations: remote_easyconnect_control_operations(true),
+                    allowed_prefixes: vec![REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string()],
+                }],
+                host_session_expires_at_utc: "2026-07-28T10:04:00Z".to_string(),
+                correlation_id: "correlation-1".to_string(),
+                audit_identity: "pistis:principal-1".to_string(),
+            },
+            approval_expires_at_utc: "2026-07-28T10:03:00Z".to_string(),
+            exchange_code: "exchange-secret".to_string(),
+        }
     }
 }

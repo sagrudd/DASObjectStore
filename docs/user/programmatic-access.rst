@@ -304,7 +304,7 @@ an upload plan without exposing secret values:
 .. code-block:: console
 
    dasobjectstore-remote config set \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --region garage \
      --profile dasobjectstore-epic_collection
    dasobjectstore-remote stores list
@@ -358,7 +358,7 @@ bucket name:
 .. code-block:: console
 
    sudo dasobjectstore store s3-upload alleleanchor_mvp \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      --auth mneion \
      --json
 
@@ -396,7 +396,7 @@ appliance exposes one shared non-TLS endpoint:
 
 .. code-block:: toml
 
-   endpoint_url = "http://192.168.1.192:3900"
+   endpoint_url = "https://objects.appliance.example:3900"
    region = "garage"
    addressing_style = "path"
 
@@ -406,7 +406,7 @@ global default:
 .. code-block:: console
 
    aws --profile dasobjectstore-epic_collection \
-     --endpoint-url http://192.168.1.192:3900 \
+     --endpoint-url https://objects.appliance.example:3900 \
      s3api head-bucket --bucket dos-epic-collection
 
 The command above is a reachability and authorization check; it does not
@@ -453,7 +453,7 @@ writing a credentials file:
 
    s3 = boto3.client(
        "s3",
-       endpoint_url="http://192.168.1.192:3900",
+       endpoint_url="https://objects.appliance.example:3900",
        region_name="garage",
        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],

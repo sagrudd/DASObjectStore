@@ -24,6 +24,12 @@ pub(super) fn remote_easyconnect_validation_error(
                 field: "allowed_object_stores",
             }
         }
+        RemoteEasyconnectValidationError::InvalidApprovalProvider => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "approval_context.auth_provider",
+                value: "unsupported provider".to_string(),
+            }
+        }
         RemoteEasyconnectValidationError::EmptyUploadSelection => {
             DaemonRequestValidationError::BlankField {
                 field: "selected_files",

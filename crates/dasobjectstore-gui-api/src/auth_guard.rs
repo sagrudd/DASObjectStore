@@ -36,6 +36,16 @@ pub struct AuthenticatedGuiActor {
     pub correlation_id: Option<String>,
 }
 
+/// Host-verified appliance-local username used only for product policy lookup.
+///
+/// The immutable authority subject remains [`AuthenticatedGuiActor::subject_id`].
+/// This adapter value must never be used as an identity key or session
+/// credential.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthenticatedLocalPolicySubject {
+    pub username: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FederatedHostSessionResponse {
     pub subject_id: String,

@@ -93,7 +93,7 @@ pub fn accept_preverified_pistis_actor(
             .issuer()
             .to_owned(),
         audience: HOST_AUTH_AUDIENCE.to_owned(),
-        subject_id: actor.actor.principal.username.clone(),
+        subject_id: actor.actor.principal.principal_id.to_string(),
         session_id: session.session_id.to_string(),
         roles: mapped_roles(actor),
         issued_at_unix_seconds: session.verified_at_utc.timestamp(),
@@ -181,7 +181,7 @@ impl HostAuthenticationContextVerifier for BoundActorVerifier<'_> {
     fn verify_live_session(&self, context: &HostAuthenticatedContext) -> Result<(), String> {
         let session = &self.actor.actor.session;
         if context.session_id != session.session_id.to_string()
-            || context.subject_id != self.actor.actor.principal.username
+            || context.subject_id != self.actor.actor.principal.principal_id.to_string()
             || context.expires_at_unix_seconds != session.expires_at_utc.timestamp()
         {
             return Err("derived context does not match preverified actor".to_owned());
@@ -259,7 +259,10 @@ mod tests {
         let actor = fixture();
         let accepted = accept_preverified_pistis_actor(&actor, &bindings(), boundary(&actor), NOW)
             .expect("accepted actor");
-        assert_eq!(accepted.context().subject_id, "stephen");
+        assert_eq!(
+            accepted.context().subject_id,
+            "00000000-0000-0000-0000-000000000003"
+        );
         assert_eq!(
             accepted.context().roles,
             [

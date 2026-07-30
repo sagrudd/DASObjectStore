@@ -9,6 +9,7 @@ pub enum RemoteAuthAuthority {
     AwsProfile,
     LocalPassword,
     Mneion,
+    Pistis,
     Synoptikon,
 }
 
@@ -18,6 +19,7 @@ impl RemoteAuthAuthority {
             Self::AwsProfile => "aws-profile",
             Self::LocalPassword => "local-password",
             Self::Mneion => "mneion",
+            Self::Pistis => "pistis",
             Self::Synoptikon => "synoptikon",
         }
     }
@@ -31,6 +33,7 @@ impl std::str::FromStr for RemoteAuthAuthority {
             "aws-profile" => Ok(Self::AwsProfile),
             "local-password" => Ok(Self::LocalPassword),
             "mneion" => Ok(Self::Mneion),
+            "pistis" => Ok(Self::Pistis),
             "synoptikon" => Ok(Self::Synoptikon),
             _ => Err(format!(
                 "unknown auth authority {value}; expected aws-profile, local-password, mneion, or synoptikon"

@@ -77,6 +77,7 @@ pub struct RemoteEasyconnectFailureState {
 pub struct RemoteEasyconnectPairingOptions {
     pub host_or_ip: String,
     pub https_port: u16,
+    pub requested_object_store: Option<String>,
     pub callback_port: Option<u16>,
     pub timeout: Duration,
     pub open_browser: bool,
@@ -87,6 +88,9 @@ pub struct RemoteEasyconnectPairingOutcome {
     pub contract: RemoteEasyconnectContract,
     pub result: RemoteEasyconnectPairingResult,
 }
+
+mod client;
+pub use client::{run_complete_easyconnect_pairing_with_ready, RemoteEasyconnectCompletedPairing};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteEasyconnectPairingResult {
@@ -264,25 +268,42 @@ fn parse_pairing_callback_request(
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let target = parts.next().unwrap_or_default();
-    if method != "GET" {
+    let values = if method == "POST" {
+        if target != EASYCONNECT_CALLBACK_PATH {
+            return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
+                "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
+            )));
+        }
+        request
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .unwrap_or("")
+    } else if method == "GET" {
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
+        if path != EASYCONNECT_CALLBACK_PATH {
+            return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
+                "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
+            )));
+        }
+        if let Some(error) = query_value(query, "error") {
+            return Err(RemoteEasyconnectPairingError::PairingDenied(error));
+        }
         return Err(RemoteEasyconnectPairingError::InvalidCallback(
-            "pairing callback must use GET".to_string(),
+            "successful pairing callbacks must use form-encoded POST so exchange secrets never enter URLs".to_string(),
         ));
-    }
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    if path != EASYCONNECT_CALLBACK_PATH {
-        return Err(RemoteEasyconnectPairingError::InvalidCallback(format!(
-            "pairing callback path must be {EASYCONNECT_CALLBACK_PATH}"
-        )));
-    }
-    if let Some(error) = query_value(query, "error") {
+    } else {
+        return Err(RemoteEasyconnectPairingError::InvalidCallback(
+            "pairing callback must use form-encoded POST".to_string(),
+        ));
+    };
+    if let Some(error) = query_value(values, "error") {
         return Err(RemoteEasyconnectPairingError::PairingDenied(error));
     }
-    let pairing_id = query_value(query, "pairing_id").ok_or_else(|| {
+    let pairing_id = query_value(values, "pairing_id").ok_or_else(|| {
         RemoteEasyconnectPairingError::InvalidCallback("missing pairing_id".to_string())
     })?;
-    let exchange_code = query_value(query, "exchange_code")
-        .or_else(|| query_value(query, "code"))
+    let exchange_code = query_value(values, "exchange_code")
+        .or_else(|| query_value(values, "code"))
         .ok_or_else(|| {
             RemoteEasyconnectPairingError::InvalidCallback(
                 "missing one-time exchange_code".to_string(),
@@ -517,6 +538,10 @@ pub enum RemoteEasyconnectPairingError {
     PairingTimedOut,
     PairingDenied(String),
     InvalidCallback(String),
+    Trust(String),
+    Transport(String),
+    Server(u16),
+    Protocol(String),
 }
 
 impl fmt::Display for RemoteEasyconnectPairingError {
@@ -536,6 +561,10 @@ impl fmt::Display for RemoteEasyconnectPairingError {
             }
             Self::PairingDenied(error) => write!(formatter, "easyconnect pairing was denied: {error}"),
             Self::InvalidCallback(message) => write!(formatter, "invalid easyconnect callback: {message}"),
+            Self::Trust(message) => write!(formatter, "easyconnect trust failed: {message}"),
+            Self::Transport(message) => write!(formatter, "easyconnect HTTPS request failed: {message}"),
+            Self::Server(status) => write!(formatter, "easyconnect appliance returned HTTP {status}"),
+            Self::Protocol(message) => write!(formatter, "invalid easyconnect appliance response: {message}"),
         }
     }
 }
@@ -556,6 +585,9 @@ impl From<std::io::Error> for RemoteEasyconnectPairingError {
 
 #[cfg(test)]
 mod tests {
+    use super::client::{
+        transport_url, validate_exchange_envelope, validate_requested_store, validate_server_url,
+    };
     use super::{
         define_easyconnect_contract, parse_pairing_callback_request, query_value,
         run_easyconnect_pairing, BrowserLauncher, RemoteEasyconnectContractError,
@@ -632,17 +664,159 @@ mod tests {
     }
 
     #[test]
-    fn parses_pairing_callback_request() {
+    fn rejects_server_urls_that_escape_the_pinned_https_origin() {
+        let base = "https://das.example:8448";
+        assert!(validate_server_url(
+            base,
+            "https://das.example:8448/products/dasobjectstore/pair",
+            "pairing_create_url",
+        )
+        .is_ok());
+        for escaped in [
+            "http://das.example:8448/products/dasobjectstore/pair",
+            "https://attacker.example:8448/products/dasobjectstore/pair",
+            "https://das.example:9443/products/dasobjectstore/pair",
+            "https://user@das.example:8448/products/dasobjectstore/pair",
+        ] {
+            assert!(validate_server_url(base, escaped, "pairing_create_url").is_err());
+        }
+    }
+
+    #[test]
+    fn rewrites_ip_origin_to_enrolled_tls_name_without_changing_route() {
+        let rewritten = transport_url(
+            "https://192.168.1.192:8448",
+            "https://das-appliance.example:8448",
+            "https://192.168.1.192:8448/products/dasobjectstore/pair?state=opaque",
+            "pairing_create_url",
+        )
+        .expect("logical appliance URL is translated to pinned transport");
+        assert_eq!(
+            rewritten,
+            "https://das-appliance.example:8448/products/dasobjectstore/pair?state=opaque"
+        );
+        assert!(transport_url(
+            "https://192.168.1.192:8448",
+            "https://das-appliance.example:8448",
+            "https://attacker.example:8448/products/dasobjectstore/pair",
+            "pairing_create_url",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_substituted_or_incomplete_exchange_identity() {
+        let contract = test_contract();
+        let mut response = valid_exchange_response();
+        response.exchange.appliance_base_url = "https://attacker.example/api".to_string();
+        assert!(validate_exchange_envelope(&contract, &response).is_err());
+
+        let mut response = valid_exchange_response();
+        response.exchange.approved_actor.clear();
+        assert!(validate_exchange_envelope(&contract, &response).is_err());
+
+        let mut response = valid_exchange_response();
+        response
+            .exchange
+            .object_stores
+            .push(response.exchange.object_stores[0].clone());
+        assert!(validate_exchange_envelope(&contract, &response).is_err());
+
+        let response = valid_exchange_response();
+        assert!(validate_requested_store(
+            Some("different_store"),
+            &response.exchange.object_stores
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_or_insecure_s3_descriptor() {
+        let contract = test_contract();
+        for endpoint in [
+            "http://s3.example:3900/",
+            "https://user@s3.example/",
+            "https://s3.example/path",
+        ] {
+            let mut response = valid_exchange_response();
+            response.s3.endpoint_url = endpoint.to_string();
+            assert!(validate_exchange_envelope(&contract, &response).is_err());
+        }
+    }
+
+    fn test_contract() -> super::RemoteEasyconnectContract {
+        define_easyconnect_contract(RemoteEasyconnectContractRequest {
+            host_or_ip: "192.168.1.192".to_string(),
+            https_port: 8448,
+            callback_port: Some(49321),
+        })
+        .expect("contract")
+    }
+
+    fn valid_exchange_response(
+    ) -> dasobjectstore_daemon::RemoteEasyconnectExchangeConnectionResponse {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": "dasobjectstore.remote_easyconnect_exchange.v1",
+            "appliance_id": "appliance-1",
+            "appliance_base_url": "/products/dasobjectstore/api",
+            "approved_actor": "github:12345",
+            "auth_provider": "pistis",
+            "session": {
+                "session_id": "session-1",
+                "issued_at_utc": "2026-07-28T10:00:00Z",
+                "expires_at_utc": "2026-07-28T18:00:00Z",
+                "credentials": {
+                    "access_key_id": "temporary-access",
+                    "secret_access_key": "temporary-secret",
+                    "session_token": "temporary-token"
+                },
+                "renewal": {
+                    "renew_url": "/api/v1/remote/easyconnect/sessions/session-1/renew",
+                    "renew_after_utc": "2026-07-28T17:00:00Z",
+                    "renewal_token": "renewal-secret"
+                }
+            },
+            "object_stores": [{
+                "object_store": "epic_collection",
+                "bucket": "epic-bucket",
+                "can_read": true,
+                "can_write": true,
+                "writer_group": "writers",
+                "object_type": "ScientificObject",
+                "control_operations": [],
+                "allowed_prefixes": []
+            }],
+            "s3": {
+                "endpoint_url": "https://s3.example:3900/",
+                "region": "garage",
+                "addressing_style": "path"
+            }
+        }))
+        .expect("valid response")
+    }
+
+    #[test]
+    fn rejects_exchange_secret_in_callback_url() {
         let request = concat!(
             "GET /products/dasobjectstore/remote/easyconnect/callback?",
             "pairing_id=pair-123&exchange_code=one-time-code HTTP/1.1\r\n",
             "Host: 127.0.0.1\r\n\r\n"
         );
 
-        let result = parse_pairing_callback_request(request).expect("callback parses");
+        let error = parse_pairing_callback_request(request).expect_err("URL secret rejected");
+        assert!(error.to_string().contains("form-encoded POST"));
+    }
 
-        assert_eq!(result.pairing_id, "pair-123");
-        assert_eq!(result.exchange_code, "one-time-code");
+    #[test]
+    fn parses_form_post_pairing_callback_without_secret_query_values() {
+        let body = "pairing_id=pairing-123&exchange_code=exchange-secret";
+        let request = format!(
+            "POST {EASYCONNECT_CALLBACK_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let result = parse_pairing_callback_request(&request).expect("callback parses");
+        assert_eq!(result.pairing_id, "pairing-123");
+        assert_eq!(result.exchange_code, "exchange-secret");
     }
 
     #[test]
@@ -685,6 +859,7 @@ mod tests {
             RemoteEasyconnectPairingOptions {
                 host_or_ip: "192.168.1.192".to_string(),
                 https_port: DEFAULT_APPLIANCE_HTTPS_PORT,
+                requested_object_store: None,
                 callback_port: None,
                 timeout: Duration::from_secs(5),
                 open_browser: true,
@@ -719,11 +894,13 @@ mod tests {
             .expect("loopback callback URL");
         let (port, path) = without_scheme.split_once('/').expect("callback path");
         let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).expect("callback socket");
-        let target = format!("/{path}?pairing_id=pair-123&exchange_code=one-time-code");
+        let target = format!("/{path}");
         assert!(target.starts_with(EASYCONNECT_CALLBACK_PATH));
+        let body = "pairing_id=pair-123&exchange_code=one-time-code";
         write!(
             stream,
-            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            "POST {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
         )
         .expect("write callback");
         let mut response = String::new();

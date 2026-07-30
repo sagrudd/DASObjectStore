@@ -16,8 +16,9 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    federated_gui_api_router, AuthenticatedGuiActor, FederatedHostSessionResponse, LocalAuthStore,
-    VerifiedHostAuthenticatedContext,
+    easyconnect_public_router, federated_gui_api_router, pistis_easyconnect_approval_router,
+    AuthenticatedGuiActor, EasyconnectS3EndpointConfig, FederatedHostSessionResponse,
+    LocalAuthStore, VerifiedHostAuthenticatedContext,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -52,8 +53,11 @@ pub fn monas_dasobjectstore_api_router(auth_store: ProsopikonAuthStore) -> Route
 /// [`VerifiedHostAuthenticatedContext`]. Missing context fails closed. The
 /// legacy Monas cookie parser and intrinsic DASObjectStore login routes are not
 /// mounted.
-pub fn preverified_dasobjectstore_router(host_product_routes: Router) -> Router {
-    Router::new()
+pub fn preverified_dasobjectstore_router(
+    host_product_routes: Router,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
+) -> Router {
+    let router = Router::new()
         .route(
             "/api/v1/host-session",
             axum::routing::get(preverified_host_session),
@@ -62,8 +66,12 @@ pub fn preverified_dasobjectstore_router(host_product_routes: Router) -> Router 
             "/api/v1/remote/host-context",
             axum::routing::get(preverified_host_session),
         )
-        .merge(host_product_routes)
-        .layer(middleware::from_fn(require_preverified_actor))
+        .merge(host_product_routes);
+    let router = match s3_endpoint {
+        Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router(s3_endpoint)),
+        None => router,
+    };
+    router.layer(middleware::from_fn(require_preverified_actor))
 }
 
 /// Mount host-owned Web routes and the DASObjectStore operational API behind
@@ -75,7 +83,7 @@ pub fn monas_dasobjectstore_router(
     let product_router =
         federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
             .merge(host_product_routes);
-    monas_federated_router(product_router, auth_store)
+    monas_federated_router(product_router, auth_store).merge(easyconnect_public_router())
 }
 
 pub fn synoptikon_federated_router(

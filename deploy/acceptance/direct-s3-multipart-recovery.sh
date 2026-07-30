@@ -19,7 +19,7 @@ Usage: direct-s3-multipart-recovery.sh
 
 Required environment:
   DASOBJECTSTORE_MULTIPART_RECOVERY_CONFIRM='RUN CODEX MULTIPART RECOVERY ACCEPTANCE'
-  DASOBJECTSTORE_S3_ENDPOINT=http://127.0.0.1:3900
+  DASOBJECTSTORE_S3_ENDPOINT=https://objects.appliance.example:3900
   DASOBJECTSTORE_S3_PROFILE=<temporary AWS profile>
   DASOBJECTSTORE_ACCEPTANCE_COOKIE_FILE=<authenticated cookie jar>
 
@@ -82,6 +82,10 @@ GATEWAY_SERVICE="${DASOBJECTSTORE_GATEWAY_SERVICE:-dasobjectstore-server}"
 API_BASE="${DASOBJECTSTORE_ACCEPTANCE_BASE_URL:-https://127.0.0.1:8448/products/dasobjectstore}"
 CA_FILE="${DASOBJECTSTORE_ACCEPTANCE_CA_FILE:-/opt/dasobjectstore/tls/server.crt}"
 [ -r "$CA_FILE" ] || fail "acceptance CA file is not readable: $CA_FILE"
+case "$DASOBJECTSTORE_S3_ENDPOINT" in
+    https://*) ;;
+    *) fail "direct S3 acceptance requires an HTTPS endpoint" ;;
+esac
 
 case "$BUCKET" in
     *codex*|*CODEX*) ;;
@@ -118,7 +122,7 @@ chmod 700 "$RUN_ROOT" "$EVIDENCE_DIR"
 truncate -s "$PART_BYTES" "$PART_FILE"
 
 aws_s3() {
-    aws --profile "$DASOBJECTSTORE_S3_PROFILE" \
+    AWS_CA_BUNDLE="$CA_FILE" aws --profile "$DASOBJECTSTORE_S3_PROFILE" \
         --endpoint-url "$DASOBJECTSTORE_S3_ENDPOINT" \
         s3api "$@"
 }
@@ -166,7 +170,7 @@ printf ']}\n' >>"$PARTS_JSON"
 # A short-lived client is deliberately killed. The daemon-owned completion
 # must continue, and the durable upload/job must remain queryable.
 set +e
-timeout 1 aws --profile "$DASOBJECTSTORE_S3_PROFILE" \
+AWS_CA_BUNDLE="$CA_FILE" timeout 1 aws --profile "$DASOBJECTSTORE_S3_PROFILE" \
     --endpoint-url "$DASOBJECTSTORE_S3_ENDPOINT" s3api complete-multipart-upload \
     --bucket "$BUCKET" --key "$KEY" --upload-id "$UPLOAD_ID" \
     --multipart-upload "file://$PARTS_JSON" >"$RUN_ROOT/first-completion.json" 2>"$RUN_ROOT/first-completion.stderr"

@@ -27,6 +27,8 @@ esac
 grep -Fq 'RUN CODEX MULTIPART RECOVERY ACCEPTANCE' "$HARNESS"
 grep -Fq 'uploaded_parts_after_disconnect=0' "$HARNESS"
 grep -Fq 'durable_status_and_receipt=passed' "$HARNESS"
+grep -Fq 'direct S3 acceptance requires an HTTPS endpoint' "$HARNESS"
+grep -Fq 'AWS_CA_BUNDLE="$CA_FILE"' "$HARNESS"
 grep -Fq -- '--key-marker "$NEXT_KEY"' "$HARNESS"
 grep -Fq -- '--upload-id-marker "$NEXT_UPLOAD"' "$HARNESS"
 grep -Fq 'sudo systemctl restart "$GATEWAY_SERVICE"' "$HARNESS"
