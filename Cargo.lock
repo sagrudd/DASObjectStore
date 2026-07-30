@@ -2602,12 +2602,12 @@ dependencies = [
 [[package]]
 name = "pistis-canonical"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+source = "git+https://github.com/sagrudd/pistis.git?rev=f5c97e22086a9dd159d29f2f1d26a3319df85eec#f5c97e22086a9dd159d29f2f1d26a3319df85eec"
 
 [[package]]
 name = "pistis-cose"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+source = "git+https://github.com/sagrudd/pistis.git?rev=f5c97e22086a9dd159d29f2f1d26a3319df85eec#f5c97e22086a9dd159d29f2f1d26a3319df85eec"
 dependencies = [
  "pistis-canonical",
  "pistis-crypto",
@@ -2619,7 +2619,7 @@ dependencies = [
 [[package]]
 name = "pistis-crypto"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+source = "git+https://github.com/sagrudd/pistis.git?rev=f5c97e22086a9dd159d29f2f1d26a3319df85eec#f5c97e22086a9dd159d29f2f1d26a3319df85eec"
 dependencies = [
  "p256",
  "pistis-domain",
@@ -2630,7 +2630,7 @@ dependencies = [
 [[package]]
 name = "pistis-domain"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+source = "git+https://github.com/sagrudd/pistis.git?rev=f5c97e22086a9dd159d29f2f1d26a3319df85eec#f5c97e22086a9dd159d29f2f1d26a3319df85eec"
 dependencies = [
  "serde",
 ]
@@ -2638,7 +2638,7 @@ dependencies = [
 [[package]]
 name = "pistis-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=cb72191375fcbc521ba4b0c473e919b52e3d96a9#cb72191375fcbc521ba4b0c473e919b52e3d96a9"
+source = "git+https://github.com/sagrudd/pistis.git?rev=f5c97e22086a9dd159d29f2f1d26a3319df85eec#f5c97e22086a9dd159d29f2f1d26a3319df85eec"
 dependencies = [
  "getrandom 0.3.4",
  "pistis-canonical",
@@ -2764,7 +2764,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-core"
 version = "0.16.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=69195ed57165771b66849278073dbdedbfdd1e5e#69195ed57165771b66849278073dbdedbfdd1e5e"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=b175d0b776c49ba272e79d9bf38fdd647d19cee7#b175d0b776c49ba272e79d9bf38fdd647d19cee7"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2794,7 +2794,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=69195ed57165771b66849278073dbdedbfdd1e5e#69195ed57165771b66849278073dbdedbfdd1e5e"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=b175d0b776c49ba272e79d9bf38fdd647d19cee7#b175d0b776c49ba272e79d9bf38fdd647d19cee7"
 dependencies = [
  "prosopikon-core",
  "web-sys",

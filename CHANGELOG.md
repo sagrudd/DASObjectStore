@@ -10,9 +10,9 @@ agreement before landing.
 
 ### Changed
 
-- Pin the accepted Prosopikon bare-earth authority transaction revision so
-  Monas and DASObjectStore share one Rust authority type and schema-v8
-  provider contract.
+- Pin the merged Prosopikon bare-earth authority transaction revision so Monas
+  and DASObjectStore share one reachable Rust authority type and schema-v8
+  provider contract after review branches are deleted.
 
 - Align the Mnemosyne product manifest with the workspace's 0.153.0 capability
   version so product discovery cannot advertise the preceding release.
