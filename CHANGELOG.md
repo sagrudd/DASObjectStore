@@ -8,6 +8,8 @@ agreement before landing.
 
 ## Unreleased
 
+- Restore the browser release build by selecting the reviewed JavaScript
+  entropy backend for transitive ``getrandom`` 0.3 use on wasm32 only.
 ### Changed
 
 - Align the Prosopikon authority pin with QR-bound Pistis host trust v4 so
