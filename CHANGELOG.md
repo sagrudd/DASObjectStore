@@ -10,6 +10,9 @@ agreement before landing.
 
 ### Changed
 
+- Align the Prosopikon authority pin with QR-bound Pistis host trust v4 so
+  DASObjectStore and Monas use one exact authority type during the documented
+  Kanon pre-lockset compatibility window.
 - Pin the merged Prosopikon bare-earth authority transaction revision so Monas
   and DASObjectStore share one reachable Rust authority type and schema-v8
   provider contract after review branches are deleted.
