@@ -268,27 +268,69 @@ uncommitted catalogue row cannot produce a reference.
 
 Every immutable-put request carries a canonical lowercase UUID
 ``put_operation_id``.  It is a non-secret, caller-scoped idempotency identity,
-not part of ObjectRef identity and not a capability.  The daemon atomically
-binds it to the independently authenticated caller/application authority,
-complete authority scope, exact ObjectStore, requested logical operation,
-size, raw content digest, and exact bytes in the same transaction that commits
-the server-owned object identity, version, and acknowledgement state.  The
-binding is retained for at least the complete retained lifecycle of the object
-and tombstone, so deletion cannot make an operation identifier reusable.
+not part of ObjectRef identity and not a capability.
 
-Before consulting an existing operation binding, object identity, or provider
-placement, the daemon re-resolves current authority and requires the exact
+The idempotency binding includes one canonical operation projection.  It is the
+complete semantic immutable-put command after strict validation, represented
+by the accepted versioned put API schema, with exactly:
+
+* that command's schema identity;
+* the complete authority scope and exact ObjectStore;
+* the operation kind;
+* the complete logical-target selector;
+* every replacement, expected-version, or other mutation precondition;
+* the exact size and raw content digest; and
+* no ``put_operation_id``, payload bytes, transport headers, credentials,
+  timestamps, tracing fields, or other non-semantic request metadata.
+
+The put API schema must define the exact member set and canonical form of its
+logical-target selector, operation kind, and preconditions; an implementation
+cannot substitute a display name, provider key, path, best-effort normalized
+request, or generic extension map.  The operation digest is:
+
+.. code-block:: text
+
+   SHA-256(
+     UTF8("DASOBJECTSTORE_IMMUTABLE_PUT_OPERATION_V1") || 0x00 ||
+     JCS(operation_projection)
+   )
+
+The daemon retains both the canonical projection bytes and the lowercase
+``sha256`` operation digest.  The digest may index comparison, but replay
+equality is byte-for-byte equality of the canonical projection plus equality
+of the exact payload bytes.  Any changed semantic member is deterministic
+drift even if a transport field or field order differs.
+
+The daemon atomically binds ``put_operation_id`` to the independently
+authenticated caller/application authority, canonical operation projection
+and digest, and exact payload bytes in the same transaction that commits the
+server-owned object identity, version, and acknowledgement state.  The binding
+is retained for at least the complete retained lifecycle of the object and
+tombstone, so deletion cannot make an operation identifier reusable.
+
+After strict request validation and before consulting an existing operation
+binding, object identity, catalogue row, or provider placement, the daemon
+re-resolves current authority and requires the exact
 ``immutable_object_put`` action for the authenticated scope and ObjectStore.
 An absent, stale, revoked, cross-scope, or cross-store grant returns
 ``not_authorized`` without revealing whether the operation identifier or
 object already exists.
 
+The daemon re-resolves that same exact grant again immediately before either
+returning an ObjectRef from an existing replay binding or atomically committing
+a new put binding, object identity, version, and acknowledgement state.  If
+this second check fails, it returns ``not_authorized``, issues no ObjectRef, and
+commits no mutation.  Bytes staged before the second check remain
+unacknowledged and are handled only by the ordinary orphan and recovery rules.
+
 Put is immutable:
 
 * exact replay of one ``put_operation_id`` with the same authenticated
-  authority, scope, store, logical operation, size, content digest, and bytes
-  returns the same ObjectRef, including after the original response was lost;
-* reuse of ``put_operation_id`` with any changed binding or bytes is
+  authority, byte-identical canonical operation projection, operation digest,
+  and payload bytes returns the same ObjectRef, including after the original
+  response was lost;
+* reuse of ``put_operation_id`` with any changed canonical operation
+  projection, authority binding, operation digest, or payload bytes is
   ``identity_conflict`` and changes nothing;
 * the same immutable object identity with different size, content digest, or
   bytes is also ``identity_conflict`` and changes nothing;
@@ -298,20 +340,27 @@ Put is immutable:
 * no put API may accept a caller-computed ObjectRef as proof that catalogue
   commit or durability has occurred.
 
-EvidenceRef may be issued only after its ObjectRef resolves to the same
-immutable evidence bytes and the registered evidence-kind validator accepts
-the subject binding.  Immediately before issuance, the daemon independently
-re-resolves authority and requires the exact
-``evidence_ref_issue:<evidence_kind>`` action for the authenticated scope and
-ObjectStore.  Ordinary immutable-put or read authority does not imply evidence
-issuer authority.  The evidence-kind contract defines the permitted issuer
-class and the exact content, subject, signature, and lineage validation needed
-for that kind; where an intrinsic signature is required, successful
-cryptographic verification is part of issuance rather than caller metadata.
-An unauthorized issuer receives ``not_authorized`` before catalogue lookup and
-cannot learn whether matching bytes or an ObjectRef exist.  DASObjectStore
-stores no private signing key, approval response, access token, or secret
-merely because evidence is signed.
+Before resolving the supplied ObjectRef, consulting the catalogue, or invoking
+an evidence-kind validator, the daemon independently resolves authority and
+requires the exact ``evidence_ref_issue:<evidence_kind>`` action for the
+authenticated scope and ObjectStore.  Ordinary immutable-put or read authority
+does not imply evidence issuer authority.  An unauthorized issuer receives
+``not_authorized`` before catalogue or validator lookup and cannot learn
+whether matching bytes or an ObjectRef exist.
+
+After that preauthorization, EvidenceRef may be issued only when its ObjectRef
+resolves to the same immutable evidence bytes and the registered evidence-kind
+validator accepts the subject binding.  Immediately before issuance, the
+daemon re-resolves the same exact evidence-kind grant.  If this second check
+fails, it returns ``not_authorized``, persists no evidence assertion, and
+issues no EvidenceRef.
+
+The evidence-kind contract defines the permitted issuer class and the exact
+content, subject, signature, and lineage validation needed for that kind;
+where an intrinsic signature is required, successful cryptographic verification
+is part of issuance rather than caller metadata.  DASObjectStore stores no
+private signing key, approval response, access token, or secret merely because
+evidence is signed.
 
 Authorized resolution and read-back
 -----------------------------------
@@ -478,12 +527,21 @@ Issue #31 remains open until at least:
   ``9007199254740993``, ``9223372036854775807``, exponent, fractional,
   negative, negative-zero, leading-zero, and string-encoded forms before
   generic numeric conversion;
-* immutable-put tests prove atomic ``put_operation_id`` binding, exact retry
-  after response loss, drift conflict, retained non-reuse after tombstone, and
-  no mutation or existence disclosure for an unauthorized scope or store;
+* immutable-put tests prove canonical operation-projection and digest fixtures,
+  byte-identical replay despite JSON member reordering or transport-metadata
+  changes, deterministic conflict for every changed semantic member or payload
+  byte, atomic ``put_operation_id`` binding, exact retry after response loss,
+  retained non-reuse after tombstone, and no mutation or existence disclosure
+  for an unauthorized scope or store;
+* immutable-put authorization tests prove exact-grant denial before operation,
+  catalogue, or provider lookup and same-grant re-resolution immediately
+  before replay return or new commit, including revocation between both checks
+  with no mutation or ObjectRef issuance;
 * evidence issuance tests prove an ordinary object writer cannot issue an
-  EvidenceRef, exact evidence-kind issuer authority is rechecked at action
-  time, and required subject/content/signature validation fails closed;
+  EvidenceRef, exact evidence-kind issuer authority is checked before ObjectRef,
+  catalogue, or validator lookup and re-resolved immediately before issuance,
+  revocation between both checks causes no mutation or issuance, and required
+  subject/content/signature validation fails closed;
 * immutable put, authorized read-back, cross-scope denial, digest substitution,
   tombstone, unavailable, quarantine, orphan, and manual-recovery behavior are
   implemented and restart-tested;
