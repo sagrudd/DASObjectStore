@@ -150,7 +150,7 @@ The exact v1 shape is:
        "project_id": "oikodome-images"
      },
      "store_id": "oikodome-default",
-     "object_id": "lov-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+     "object_id": "obj-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
      "object_version": 1,
      "size_bytes": 4096,
      "content_digest": {
@@ -163,11 +163,19 @@ The exact v1 shape is:
      }
    }
 
-``object_id`` is the DAS-owned immutable logical-version identifier published
-by the owner contract.  It is opaque to consumers.  Consumers must not derive
-it from a key, filename, provider object ID, path, digest, or database row.
-``object_version`` is non-zero and identifies the immutable logical version;
-it is not a mutable catalogue revision.
+``object_id`` is the DAS-owned stable opaque logical-object identifier
+published by the owner contract.  Every immutable version of that same logical
+object retains the same ``object_id``.  It is opaque to consumers.  Consumers
+must not derive it from a key, filename, provider object ID, path, digest, or
+database row.  ``object_version`` is non-zero and identifies one immutable
+version of that logical object; it is not a mutable catalogue revision.
+Consequently
+``(authority_scope, store_id, object_id, object_version)`` identifies exactly
+one immutable version.  Creation of a different logical object allocates a new
+``object_id``.  Replacement or correction of an existing logical object
+retains ``object_id`` and advances ``object_version`` monotonically under the
+accepted mutation precondition; a deleted version and its number are never
+reused.
 
 ``size_bytes`` and ``content_digest`` describe the exact raw bytes accepted by
 DASObjectStore.  Equal content digests in different scopes, ObjectStores,
@@ -209,7 +217,7 @@ Its exact v1 shape is:
          "project_id": "oikodome-images"
        },
        "store_id": "oikodome-default",
-       "object_id": "lov-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+       "object_id": "obj-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
        "object_version": 1,
        "size_bytes": 4096,
        "content_digest": {
@@ -268,7 +276,14 @@ uncommitted catalogue row cannot produce a reference.
 
 Every immutable-put request carries a canonical lowercase UUID
 ``put_operation_id``.  It is a non-secret, caller-scoped idempotency identity,
-not part of ObjectRef identity and not a capability.
+not part of ObjectRef identity and not a capability.  Its uniqueness key is
+exactly
+``(stable_authenticated_caller_application_id, put_operation_id)``.  The
+stable caller/application identity is an immutable principal or workload
+identity established independently of the request; it is not a grant ID,
+grant revision, role revision, entitlement revision, credential generation,
+or other mutable authorization state.  Equal UUIDs in different stable caller
+namespaces are unrelated and neither caller can observe the other's binding.
 
 The idempotency binding includes one canonical operation projection.  It is the
 complete semantic immutable-put command after strict validation, represented
@@ -301,12 +316,16 @@ equality is byte-for-byte equality of the canonical projection plus equality
 of the exact payload bytes.  Any changed semantic member is deterministic
 drift even if a transport field or field order differs.
 
-The daemon atomically binds ``put_operation_id`` to the independently
-authenticated caller/application authority, canonical operation projection
-and digest, and exact payload bytes in the same transaction that commits the
-server-owned object identity, version, and acknowledgement state.  The binding
-is retained for at least the complete retained lifecycle of the object and
-tombstone, so deletion cannot make an operation identifier reusable.
+The daemon atomically binds the exact
+``(stable_authenticated_caller_application_id, put_operation_id)`` key to the
+canonical operation projection and digest, exact payload bytes, server-owned
+object identity, version, and acknowledgement state in one transaction.  The
+binding records the authorization revision used for audit, but that mutable
+revision is neither part of the namespace key nor accepted as continuing
+authority.  Every replay still performs both current exact-grant checks
+defined below.  The binding is retained for at least the complete retained
+lifecycle of the object and tombstone, so deletion cannot make an operation
+identifier reusable within that caller namespace.
 
 After strict request validation and before consulting an existing operation
 binding, object identity, catalogue row, or provider placement, the daemon
@@ -325,13 +344,16 @@ unacknowledged and are handled only by the ordinary orphan and recovery rules.
 
 Put is immutable:
 
-* exact replay of one ``put_operation_id`` with the same authenticated
-  authority, byte-identical canonical operation projection, operation digest,
-  and payload bytes returns the same ObjectRef, including after the original
-  response was lost;
-* reuse of ``put_operation_id`` with any changed canonical operation
-  projection, authority binding, operation digest, or payload bytes is
-  ``identity_conflict`` and changes nothing;
+* exact replay of one caller-namespace key with byte-identical canonical
+  operation projection, operation digest, and payload bytes returns the same
+  ObjectRef after both current authorization checks, including after the
+  original response was lost;
+* reuse of ``put_operation_id`` within the same stable caller namespace with
+  any changed canonical operation projection, operation digest, or payload
+  bytes is ``identity_conflict`` and changes nothing;
+* equal ``put_operation_id`` values in different stable caller namespaces are
+  independent operations; authorization and lookup remain namespace-scoped,
+  so neither produces a replay or conflict observable by the other caller;
 * the same immutable object identity with different size, content digest, or
   bytes is also ``identity_conflict`` and changes nothing;
 * equal raw bytes under a different logical identity produce a different
@@ -530,9 +552,14 @@ Issue #31 remains open until at least:
 * immutable-put tests prove canonical operation-projection and digest fixtures,
   byte-identical replay despite JSON member reordering or transport-metadata
   changes, deterministic conflict for every changed semantic member or payload
-  byte, atomic ``put_operation_id`` binding, exact retry after response loss,
-  retained non-reuse after tombstone, and no mutation or existence disclosure
-  for an unauthorized scope or store;
+  byte within one stable caller namespace, independent and non-observable equal
+  UUIDs in different caller namespaces, atomic caller-plus-operation binding,
+  exact retry after response loss, retained non-reuse after tombstone, and no
+  mutation or existence disclosure for an unauthorized scope or store;
+* object-identity fixtures prove that replacement and correction retain one
+  logical ``object_id`` while monotonically advancing ``object_version``, that
+  a different logical object receives a different ``object_id``, and that no
+  deleted identity/version pair is reused;
 * immutable-put authorization tests prove exact-grant denial before operation,
   catalogue, or provider lookup and same-grant re-resolution immediately
   before replay return or new commit, including revocation between both checks
