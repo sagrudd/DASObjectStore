@@ -167,11 +167,15 @@ def expect_rejected(action: Any, label: str) -> None:
 
 def verify() -> None:
     object_raw, object_ref = load_fixture("object-ref-v1.json")
+    max_raw, max_safe_object_ref = load_fixture("object-ref-v1-max-safe-integer.json")
     evidence_raw, evidence_ref = load_fixture("evidence-ref-v1.json")
     validate_object_ref(object_ref)
+    validate_object_ref(max_safe_object_ref)
     validate_evidence_ref(evidence_ref)
     if object_raw != canonical_bytes(object_ref) + b"\n":
         raise AssertionError("ObjectRef fixture is not emitted in canonical JCS form")
+    if max_raw != canonical_bytes(max_safe_object_ref) + b"\n":
+        raise AssertionError("maximum-safe-integer fixture is not emitted in canonical JCS form")
     if evidence_raw != canonical_bytes(evidence_ref) + b"\n":
         raise AssertionError("EvidenceRef fixture is not emitted in canonical JCS form")
 
@@ -201,6 +205,20 @@ def verify() -> None:
     path_value = deepcopy(object_ref)
     path_value["store_id"] = "../../outside"
     expect_rejected(lambda: validate_object_ref(path_value), "path-shaped identifier")
+
+    for number, label in (
+        (9_007_199_254_740_992, "above maximum safe integer"),
+        (9_007_199_254_740_993, "rounded integer"),
+        (9_223_372_036_854_775_807, "signed 64-bit maximum"),
+        (-1, "negative integer"),
+        (0, "zero object version"),
+        (1.0, "fractional number"),
+        (1e1, "exponent number"),
+        ("1", "string-encoded number"),
+    ):
+        numeric_value = deepcopy(object_ref)
+        numeric_value["object_version"] = number
+        expect_rejected(lambda value=numeric_value: validate_object_ref(value), label)
 
     scope_drift = deepcopy(evidence_ref)
     scope_drift["object_ref"]["authority_scope"]["project_id"] = "other-project"

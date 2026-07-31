@@ -4,7 +4,8 @@ ADR-0004 review fixtures
 These JSON files are deterministic, non-secret review vectors for the Proposed
 ``dasobjectstore.object_ref.v1`` and ``dasobjectstore.evidence_ref.v1``
 contracts.  They are not issued object references, do not prove that an object
-exists, and do not grant read or write authority.
+exists, and do not grant read or write authority.  The maximum-safe-integer
+ObjectRef vector exercises ``9007199254740991`` at both integer fields.
 
 Run the dependency-free verifier from the repository root::
 

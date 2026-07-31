@@ -86,6 +86,9 @@ The review branch carries two deterministic, non-secret vectors under
 * ``object-ref-v1.json`` is the positive ``ObjectRefV1`` vector.  Its
   ``domain_digest`` is the SHA-256 value calculated from the exact
   ``DASOBJECTSTORE_OBJECT_REF_V1`` prefix and JCS identity projection.
+* ``object-ref-v1-max-safe-integer.json`` repeats that calculation at
+  ``9007199254740991``, the maximum interoperable integer permitted by the
+  contract.
 * ``evidence-ref-v1.json`` is the corresponding ``EvidenceRefV1`` vector.  It
   reuses the complete, already verified nested object reference and calculates
   the outer digest with the ``DASOBJECTSTORE_EVIDENCE_REF_V1`` prefix.
