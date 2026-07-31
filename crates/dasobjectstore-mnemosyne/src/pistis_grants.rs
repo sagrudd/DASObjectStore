@@ -203,12 +203,22 @@ impl std::error::Error for PistisGrantResolutionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dasobjectstore_core::utc::format_utc_timestamp_seconds;
     use dasobjectstore_core::{
         ids::StoreId,
         store::{StoreClass, StorePolicy},
     };
+    use dasobjectstore_daemon::runtime::{
+        FileBackedRemoteEasyconnectPairedSessionStore, RemoteEasyconnectPairedSessionStore,
+    };
     use dasobjectstore_daemon::{
-        PistisObjectStoreGrantRegistry, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
+        DaemonClient, DaemonClientError, DaemonRequestHandler, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOrchestrator, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceRuntimeError, DaemonServiceStatusRequest,
+        DaemonServiceStatusResponse, FixedDaemonClock, InProcessDaemonTransport,
+        PistisObjectStoreGrantRegistry, RemoteEasyconnectApprovePairingRequest,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
     };
     use dasobjectstore_gui_api::{
         accept_host_authenticated_context, AuthenticatedActorAuthority, HostAuthenticatedContext,
@@ -344,6 +354,86 @@ mod tests {
     }
 
     #[test]
+    fn resolved_grant_drives_durable_create_approve_restart_and_exchange() {
+        let (resolver, actor, verified, root) = fixture(vec![grant()]);
+        let pairing_path = root.join("state/remote/pairings.json");
+        let session_path = root.join("state/remote/sessions.json");
+        let clock = format_utc_timestamp_seconds(NOW);
+        let client = daemon_client(&pairing_path, &session_path, &clock);
+        let created = client
+            .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
+                client_name: "dasobjectstore-remote".to_owned(),
+                callback_url:
+                    "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
+                        .to_owned(),
+                requested_object_store: Some("epic_collection".to_owned()),
+                requested_session_lifetime_seconds: Some(300),
+                client_request_id: Some("client-request-1".to_owned()),
+            })
+            .expect("pairing is created");
+        let approval_context = resolver
+            .resolve(&actor, &verified, "epic_collection")
+            .expect("deployment-owned grant resolves");
+        assert_eq!(
+            approval_context.auth_provider,
+            RemoteEasyconnectAuthProvider::Pistis
+        );
+        assert!(approval_context
+            .audit_identity
+            .starts_with("pistis-grant:7:"));
+        let approved = client
+            .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
+                pairing_id: created.pairing_id.clone(),
+                approval_context,
+            })
+            .expect("pairing is approved");
+        drop(client);
+
+        let restarted = daemon_client(&pairing_path, &session_path, &clock);
+        let exchange_request = RemoteEasyconnectExchangePairingRequest {
+            pairing_id: created.pairing_id.clone(),
+            exchange_code: approved.exchange_code,
+            client_request_id: Some("client-request-2".to_owned()),
+        };
+        let exchanged = restarted
+            .remote_easyconnect_exchange_pairing(exchange_request.clone())
+            .expect("approved pairing survives restart and exchanges");
+        assert_eq!(
+            exchanged.auth_provider,
+            RemoteEasyconnectAuthProvider::Pistis
+        );
+        assert_eq!(exchanged.approved_actor, Uuid::from_u128(2).to_string());
+        assert_eq!(exchanged.object_stores.len(), 1);
+        assert_eq!(exchanged.object_stores[0].object_store, "epic_collection");
+        assert_eq!(exchanged.object_stores[0].bucket, "dos-epic-collection");
+        assert!(exchanged.object_stores[0].can_write);
+        assert!(
+            restarted
+                .remote_easyconnect_exchange_pairing(exchange_request)
+                .is_err(),
+            "exchange code is one-use"
+        );
+
+        let persisted = FileBackedRemoteEasyconnectPairedSessionStore::new(&session_path)
+            .get_by_pairing_id(&created.pairing_id)
+            .expect("session store remains readable")
+            .expect("one session was persisted");
+        assert_eq!(persisted.authority_id, Uuid::from_u128(1).to_string());
+        assert_eq!(persisted.principal_id, Uuid::from_u128(2).to_string());
+        assert_eq!(
+            persisted.originating_authority_expires_at_utc,
+            Some(format_utc_timestamp_seconds(NOW + 600))
+        );
+        let evidence = format!(
+            "{}\n{}",
+            fs::read_to_string(&pairing_path).expect("pairing evidence"),
+            fs::read_to_string(&session_path).expect("session evidence")
+        );
+        assert!(!evidence.contains("stephen@mnemosyne.co.uk"));
+        fs::remove_dir_all(root).expect("remove temporary directory");
+    }
+
+    #[test]
     fn rejects_missing_read_only_ambiguous_and_substituted_grants() {
         for records in [
             vec![],
@@ -383,5 +473,56 @@ mod tests {
             .resolve(&actor, &verified, "epic_collection")
             .is_err());
         fs::remove_dir_all(root).expect("remove temporary directory");
+    }
+
+    fn daemon_client(
+        pairing_path: &std::path::Path,
+        session_path: &std::path::Path,
+        now: &str,
+    ) -> DaemonClient<impl dasobjectstore_daemon::DaemonClientTransport> {
+        let handler = DaemonRequestHandler::new(
+            AcceptanceOrchestrator,
+            FixedDaemonClock::new(now.to_owned()),
+        )
+        .with_remote_easyconnect_pairing_store_path(pairing_path)
+        .with_remote_easyconnect_session_store_path(session_path);
+        DaemonClient::new(InProcessDaemonTransport::new(move |request| {
+            handler
+                .handle(request)
+                .map_err(|error| DaemonClientError::Transport(error.to_string()))
+        }))
+    }
+
+    struct AcceptanceOrchestrator;
+
+    impl DaemonServiceOrchestrator for AcceptanceOrchestrator {
+        fn status(
+            &self,
+            _: DaemonServiceStatusRequest,
+        ) -> Result<DaemonServiceStatusResponse, DaemonServiceRuntimeError> {
+            Err(unsupported("status"))
+        }
+
+        fn lifecycle(
+            &self,
+            _: DaemonServiceLifecycleRequest,
+            _: &str,
+        ) -> Result<DaemonServiceLifecycleResponse, DaemonServiceRuntimeError> {
+            Err(unsupported("lifecycle"))
+        }
+
+        fn provision(
+            &self,
+            _: DaemonServiceProvisionRequest,
+            _: &str,
+        ) -> Result<DaemonServiceProvisionResponse, DaemonServiceRuntimeError> {
+            Err(unsupported("provision"))
+        }
+    }
+
+    fn unsupported(operation: &str) -> DaemonServiceRuntimeError {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("{operation} is outside Pistis grant acceptance"),
+        }
     }
 }
