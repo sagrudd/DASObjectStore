@@ -21,3 +21,9 @@ The vectors remain review material until DASObjectStore issue #31 accepts the
 ADR, owner-side implementation, and resolution/authorization gates.  Consumers
 must not pin these files as a production revision or synthesize references from
 their fields.
+
+The cross-project binding and exact reviewed revisions are recorded in
+`ADR-0005 <../0005-cross-project-reference-reconciliation.rst>`_.  That record
+also keeps the Oikodome foundation settlement port and Phoreus Registry's
+planning-only publication fixture separate from storage authority, transport,
+persistence, and resolution acceptance.

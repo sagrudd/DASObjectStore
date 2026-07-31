@@ -12,3 +12,5 @@ implementation.
    0002-appliance-identity-and-remote-tls-renewal
    0003-credential-free-pistis-easyconnect-approval
    0004-canonical-object-and-evidence-references
+   0005-cross-project-reference-reconciliation
+   fixtures/README
