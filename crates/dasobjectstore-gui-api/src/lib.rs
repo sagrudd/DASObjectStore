@@ -56,12 +56,14 @@ pub use auth_guard::{
 };
 pub use auth_routes::{
     easyconnect_public_router, easyconnect_public_router_with_config,
-    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
-    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    easyconnect_public_router_with_config_and_daemon, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, gui_api_router_for_host_mode,
+    gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
-    pistis_easyconnect_approval_router, standalone_auth_router, standalone_gui_api_router,
-    AssignLocalUserToGroupRequest, AuthRouteError, CreateLocalGroupRequest,
+    pistis_easyconnect_approval_router, pistis_easyconnect_approval_router_with_daemon,
+    standalone_auth_router, standalone_gui_api_router, AssignLocalUserToGroupRequest,
+    AuthRouteError, CreateLocalGroupRequest, EasyconnectDaemonEndpoint,
     EasyconnectS3EndpointConfig, GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest,
     SessionCheckRequest, StandaloneEasyconnectAuthContextResponse,
     StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,

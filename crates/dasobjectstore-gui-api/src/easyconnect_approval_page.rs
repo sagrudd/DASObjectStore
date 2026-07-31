@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) async fn easyconnect_pairing_status(
+    State(state): State<EasyconnectPublicRouteState>,
     Path(pairing_id): Path<String>,
 ) -> Result<Json<RemoteEasyconnectPairingStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
     let request = RemoteEasyconnectPairingStatusRequest { pairing_id };
@@ -14,7 +15,7 @@ pub(crate) async fn easyconnect_pairing_status(
     crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
+                state.daemon_endpoint.socket_path(),
             ))
             .remote_easyconnect_pairing_status(request)
             .map_err(|error| error.to_string())

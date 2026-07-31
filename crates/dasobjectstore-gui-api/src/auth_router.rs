@@ -278,10 +278,28 @@ pub fn easyconnect_public_router_with_config(
     s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     public_base_url: Option<String>,
 ) -> Router {
+    easyconnect_public_router_with_config_and_daemon(
+        s3_endpoint,
+        public_base_url,
+        EasyconnectDaemonEndpoint::default(),
+    )
+}
+
+/// Public Pistis discovery and pairing routes with an explicit trusted local
+/// daemon endpoint.
+///
+/// The endpoint is supplied only by in-process composition and is never
+/// derived from HTTP input.
+pub fn easyconnect_public_router_with_config_and_daemon(
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
+    public_base_url: Option<String>,
+    daemon_endpoint: EasyconnectDaemonEndpoint,
+) -> Router {
     let state = EasyconnectPublicRouteState {
         s3_endpoint,
         public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
         appliance_id: super::auth_identity_routes::system_appliance_id(),
+        daemon_endpoint,
     };
     easyconnect_public_pairing_router()
         .route(
@@ -299,6 +317,7 @@ fn easyconnect_public_pairing_router_with_config(
         s3_endpoint,
         public_base_url: public_base_url.and_then(validated_easyconnect_public_base_url),
         appliance_id: super::auth_identity_routes::system_appliance_id(),
+        daemon_endpoint: EasyconnectDaemonEndpoint::default(),
     };
     easyconnect_public_pairing_router().with_state(state)
 }
@@ -338,6 +357,17 @@ fn validated_easyconnect_public_base_url(public_base_url: String) -> Option<Stri
 /// Pistis approval routes that must be mounted behind a host-verified actor and
 /// a credential-free [`SharedPistisEasyconnectApprovalResolver`] extension.
 pub fn pistis_easyconnect_approval_router(s3_endpoint: EasyconnectS3EndpointConfig) -> Router {
+    pistis_easyconnect_approval_router_with_daemon(
+        s3_endpoint,
+        EasyconnectDaemonEndpoint::default(),
+    )
+}
+
+/// Pistis approval routes with an explicit trusted local daemon endpoint.
+pub fn pistis_easyconnect_approval_router_with_daemon(
+    s3_endpoint: EasyconnectS3EndpointConfig,
+    daemon_endpoint: EasyconnectDaemonEndpoint,
+) -> Router {
     Router::new()
         .route(
             "/api/v1/remote/easyconnect/pairings/approve",
@@ -348,6 +378,7 @@ pub fn pistis_easyconnect_approval_router(s3_endpoint: EasyconnectS3EndpointConf
             get(easyconnect_browser_approval),
         )
         .layer(DefaultBodyLimit::max(64 * 1024))
+        .layer(Extension(daemon_endpoint))
         .layer(Extension(Some(s3_endpoint)))
 }
 
@@ -373,6 +404,7 @@ pub(crate) fn standalone_easyconnect_router_with_state(
             get(easyconnect_browser_approval),
         )
         .layer(Extension(state.auth_store.clone()))
+        .layer(Extension(EasyconnectDaemonEndpoint::default()))
         .layer(Extension(s3_endpoint))
         .with_state(state)
 }

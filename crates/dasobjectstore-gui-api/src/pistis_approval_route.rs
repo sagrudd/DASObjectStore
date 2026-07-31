@@ -4,6 +4,7 @@ pub(crate) async fn pistis_easyconnect_approve_pairing(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
     Extension(resolver): Extension<crate::SharedPistisEasyconnectApprovalResolver>,
+    Extension(daemon_endpoint): Extension<EasyconnectDaemonEndpoint>,
     Extension(s3_endpoint): Extension<Option<EasyconnectS3EndpointConfig>>,
     Json(intent): Json<EasyconnectBrowserApprovalIntent>,
 ) -> Result<Json<RemoteEasyconnectApprovePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
@@ -20,6 +21,7 @@ pub(crate) async fn pistis_easyconnect_approve_pairing(
         actor,
         Extension(verified),
         Extension(approval_context),
+        Extension(daemon_endpoint),
         Extension(s3_endpoint),
         Json(intent),
     )

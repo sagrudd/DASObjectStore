@@ -373,6 +373,11 @@ permissions from the current DAS registry. See the Sphinx
 `Pistis ObjectStore grants` operator page for revoke, backup, rollback, and
 customer-hosted deployment guidance.
 
+The registry implementation is owned by the daemon layer; Monas only resolves
+it read-only. Until the authenticated daemon administration request is
+released, run grant mutations as attended offline maintenance with Monas and
+the DASObjectStore daemon stopped.
+
 On a remote workstation, first enrol appliance TLS trust without supplying a
 DAS password, then start the browser-approved pairing:
 

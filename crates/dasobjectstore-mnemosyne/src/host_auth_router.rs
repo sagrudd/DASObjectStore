@@ -16,8 +16,9 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    easyconnect_public_router, federated_gui_api_router, pistis_easyconnect_approval_router,
-    AuthenticatedGuiActor, EasyconnectS3EndpointConfig, FederatedHostSessionResponse,
+    easyconnect_public_router, federated_gui_api_router,
+    pistis_easyconnect_approval_router_with_daemon, AuthenticatedGuiActor,
+    EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, FederatedHostSessionResponse,
     LocalAuthStore, VerifiedHostAuthenticatedContext,
 };
 use prosopikon_core::ProsopikonAuthStore;
@@ -57,6 +58,23 @@ pub fn preverified_dasobjectstore_router(
     host_product_routes: Router,
     s3_endpoint: Option<EasyconnectS3EndpointConfig>,
 ) -> Router {
+    preverified_dasobjectstore_router_with_daemon(
+        host_product_routes,
+        s3_endpoint,
+        EasyconnectDaemonEndpoint::default(),
+    )
+}
+
+/// Mount host-supplied product routes with an explicit trusted local daemon
+/// endpoint.
+///
+/// This is intended for host composition and hermetic conformance tests. The
+/// endpoint must never be derived from HTTP request data.
+pub fn preverified_dasobjectstore_router_with_daemon(
+    host_product_routes: Router,
+    s3_endpoint: Option<EasyconnectS3EndpointConfig>,
+    daemon_endpoint: EasyconnectDaemonEndpoint,
+) -> Router {
     let router = Router::new()
         .route(
             "/api/v1/host-session",
@@ -68,7 +86,10 @@ pub fn preverified_dasobjectstore_router(
         )
         .merge(host_product_routes);
     let router = match s3_endpoint {
-        Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router(s3_endpoint)),
+        Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router_with_daemon(
+            s3_endpoint,
+            daemon_endpoint,
+        )),
         None => router,
     };
     router.layer(middleware::from_fn(require_preverified_actor))

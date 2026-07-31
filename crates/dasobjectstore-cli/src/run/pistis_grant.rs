@@ -1,7 +1,7 @@
 use super::CliError;
 use crate::cli::{PistisGrantInspectArgs, PistisGrantMutationArgs, PistisGrantRevokeArgs};
 use dasobjectstore_core::store::ExportPolicy;
-use dasobjectstore_mnemosyne::{PistisGrantPolicyStore, PistisObjectStoreGrantRegistry};
+use dasobjectstore_daemon::{PistisGrantPolicyStore, PistisObjectStoreGrantRegistry};
 use dasobjectstore_object_service::read_store_registry;
 use prosopikon_core::{PrincipalStatus, ProsopikonAuthority, SqliteProsopikonAuthority};
 use std::collections::BTreeSet;

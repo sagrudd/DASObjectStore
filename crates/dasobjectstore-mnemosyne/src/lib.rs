@@ -33,6 +33,11 @@ pub use boundary::{
     LocalRootPolicy, LocalRootTemplate, ObjectStorePolicy, RegistrationContract, SqlPolicy,
     SqlRequiredBackend, StateAuthority, HOST_STORAGE_BOUNDARY_SCHEMA_VERSION,
 };
+pub use dasobjectstore_daemon::{
+    PistisGrantAuditEvent, PistisGrantAuditOperation, PistisGrantPolicyError,
+    PistisGrantPolicyStore, PistisObjectStoreGrantRecord, PistisObjectStoreGrantRegistry,
+    PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
+};
 pub use flounder_telemetry::{
     FlounderApplianceTelemetryContract, FlounderTelemetryAudience, FlounderTelemetryAxis,
     FlounderTelemetryBand, FlounderTelemetryChart, FlounderTelemetryChartContract,
@@ -49,8 +54,9 @@ pub use host_auth_adapter::{
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
-    preverified_dasobjectstore_router, synoptikon_federated_router,
-    SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
+    preverified_dasobjectstore_router, preverified_dasobjectstore_router_with_daemon,
+    synoptikon_federated_router, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
+    MONAS_SESSION_COOKIE,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,
@@ -87,11 +93,7 @@ pub use pistis_actor::{
     accept_preverified_pistis_actor, PistisActorBoundary, PistisActorError,
     PistisHostRequestBindings, PISTIS_DASOBJECTSTORE_PRODUCT_ID,
 };
-pub use pistis_grants::{
-    FilePistisEasyconnectApprovalResolver, PistisGrantAuditEvent, PistisGrantAuditOperation,
-    PistisGrantPolicyError, PistisGrantPolicyStore, PistisObjectStoreGrantRecord,
-    PistisObjectStoreGrantRegistry, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
-};
+pub use pistis_grants::FilePistisEasyconnectApprovalResolver;
 pub use policy_templates::{
     ProductPolicyAdapterKind, ProductPolicyTemplateAdapter, ProductPolicyTemplateAdapterError,
     ProductPolicyTemplateEnvelope, PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,

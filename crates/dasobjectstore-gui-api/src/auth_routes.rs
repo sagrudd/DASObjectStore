@@ -39,18 +39,21 @@ pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
 use auth_identity_routes::*;
-pub use auth_identity_routes::{EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor};
+pub use auth_identity_routes::{
+    EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor,
+};
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
     easyconnect_public_router, easyconnect_public_router_with_config,
-    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
-    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    easyconnect_public_router_with_config_and_daemon, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, gui_api_router_for_host_mode,
+    gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
-    pistis_easyconnect_approval_router, standalone_auth_router, standalone_easyconnect_router,
-    standalone_enclosure_admin_router, standalone_gui_api_router, standalone_reporting_router,
-    standalone_users_groups_router,
+    pistis_easyconnect_approval_router, pistis_easyconnect_approval_router_with_daemon,
+    standalone_auth_router, standalone_easyconnect_router, standalone_enclosure_admin_router,
+    standalone_gui_api_router, standalone_reporting_router, standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{
@@ -952,15 +955,17 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        easyconnect_public_router_with_config, gui_api_router_for_host_mode, local_standalone_user,
-        standalone_auth_router_with_state, standalone_dashboard_router_with_state,
-        standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
-        standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
-        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
-        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
+        easyconnect_approve_pairing, easyconnect_public_router_with_config,
+        easyconnect_public_router_with_config_and_daemon, gui_api_router_for_host_mode,
+        local_standalone_user, standalone_auth_router_with_state,
+        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
+        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
+        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
+        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
+        DaemonUpsertEndpointInventoryRequest, EasyconnectBrowserApprovalIntent,
         EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
         EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
         IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
@@ -985,23 +990,37 @@ mod tests {
         LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
-        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectS3EndpointConfig,
-        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
-        LoginResponse, StandaloneS3ConnectionDescriptor, STANDALONE_SESSION_TOKEN_HEADER,
-        STANDALONE_USERNAME_HEADER,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectDaemonEndpoint,
+        EasyconnectS3EndpointConfig, HostAuthenticatedContext, HostAuthenticationAuthority,
+        HostAuthenticationContextVerifier, LocalAuthStore, LocalPasswordAuthError,
+        LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
+        StandaloneS3ConnectionDescriptor, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
+        STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
-    use axum::http::{Request, StatusCode};
+    use axum::http::{header, Request, StatusCode};
+    use axum::routing::get;
+    use axum::{Extension, Json, Router};
+    use axum_server::tls_rustls::RustlsConfig;
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{
         CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass, StorePolicy,
     };
-    use dasobjectstore_daemon::DaemonEndpointBindingReadiness;
+    use dasobjectstore_daemon::api::remote_easyconnect_control_operations;
+    use dasobjectstore_daemon::{
+        DaemonApiRequest, DaemonApiResponse, DaemonEndpointBindingReadiness,
+        RemoteEasyconnectApprovalContext, RemoteEasyconnectApprovePairingResponse,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingResponse,
+        RemoteEasyconnectObjectStoreGrant, UnixSocketDaemonServer,
+    };
     use dasobjectstore_object_service::StoreServiceDefinition;
+    use rcgen::generate_simple_self_signed;
     use serde::de::DeserializeOwned;
     use std::fs;
+    use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::Semaphore;
     use tower::ServiceExt;
@@ -1477,6 +1496,218 @@ mod tests {
             encoded["pairing_exchange_url"],
             "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
         );
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_pairing_uses_explicit_trusted_daemon_endpoint() {
+        // Unix-domain socket paths are limited to 104 bytes on macOS, while
+        // `std::env::temp_dir()` can itself be a long per-user path there.
+        let root = PathBuf::from(format!(
+            "/tmp/das-ec-{}-{}",
+            std::process::id(),
+            unix_now_nanos()
+        ));
+        let socket_path = root.join("runtime/dasobjectstored.sock");
+        fs::create_dir_all(socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server = UnixSocketDaemonServer::new(&socket_path, |request| {
+            let DaemonApiRequest::RemoteEasyconnectCreatePairing(request) = request else {
+                panic!("unexpected daemon request");
+            };
+            assert_eq!(request.requested_object_store.as_deref(), Some("store-1"));
+            Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(
+                RemoteEasyconnectCreatePairingResponse {
+                    pairing_id: "pair-1".to_owned(),
+                    browser_login_url: "/products/dasobjectstore/remote/easyconnect/login"
+                        .to_owned(),
+                    callback_url:
+                        "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
+                            .to_owned(),
+                    expires_at_utc: "2026-07-31T01:00:00Z".to_owned(),
+                    polling_url:
+                        "/products/dasobjectstore/api/v1/remote/easyconnect/pairings/pair-1"
+                            .to_owned(),
+                },
+            ))
+        });
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            server.handle_stream(stream).unwrap();
+        });
+        let app = easyconnect_public_router_with_config_and_daemon(
+            None,
+            Some("https://das.example.test:8448".to_owned()),
+            EasyconnectDaemonEndpoint::new(socket_path.clone()).unwrap(),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/remote/easyconnect/pairings")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"client_name":"dasobjectstore-remote","callback_url":"http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback","requested_object_store":"store-1","requested_session_lifetime_seconds":300,"client_request_id":"request-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["pairing_id"], "pair-1");
+        assert_eq!(
+            body["browser_login_url"],
+            "https://das.example.test:8448/products/dasobjectstore/remote/easyconnect/login?object_store=store-1&expires_at_utc=2026-07-31T01%3A00%3A00Z"
+        );
+        join.join().unwrap();
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn protected_easyconnect_approval_uses_explicit_trusted_daemon_endpoint() {
+        let root = PathBuf::from(format!(
+            "/tmp/das-ap-{}-{}",
+            std::process::id(),
+            unix_now_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let socket_path = root.join("daemon.sock");
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server = UnixSocketDaemonServer::new(&socket_path, |request| {
+            let DaemonApiRequest::RemoteEasyconnectApprovePairing(request) = request else {
+                panic!("unexpected daemon request");
+            };
+            assert_eq!(request.pairing_id, "pair-approval");
+            assert_eq!(request.approval_context.principal_id, "principal-1");
+            assert_eq!(
+                request.approval_context.allowed_object_stores[0].object_store,
+                "store-1"
+            );
+            Ok(DaemonApiResponse::RemoteEasyconnectApprovePairing(
+                RemoteEasyconnectApprovePairingResponse {
+                    pairing_id: request.pairing_id,
+                    exchange_code: "exchange-once".to_owned(),
+                    callback_url:
+                        "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
+                            .to_owned(),
+                    expires_at_utc: "2026-07-31T06:00:00Z".to_owned(),
+                },
+            ))
+        });
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            server.handle_stream(stream).unwrap();
+        });
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certificate = generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
+        let certificate_path = root.join("s3.crt");
+        let private_key_path = root.join("s3.key");
+        fs::write(&certificate_path, certificate.cert.pem()).unwrap();
+        fs::write(&private_key_path, certificate.signing_key.serialize_pem()).unwrap();
+        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
+            .await
+            .unwrap();
+        let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = tcp.local_addr().unwrap();
+        drop(tcp);
+        let s3_server = tokio::spawn(async move {
+            axum_server::bind_rustls(address, tls)
+                .serve(
+                    Router::new()
+                        .route(
+                            "/{*path}",
+                            get(|| async {
+                                (
+                                    StatusCode::FORBIDDEN,
+                                    [(header::CONTENT_TYPE, "application/xml")],
+                                    r#"<?xml version="1.0"?><Error><Code>SignatureDoesNotMatch</Code></Error>"#,
+                                )
+                            }),
+                        )
+                        .into_make_service(),
+                )
+                .await
+        });
+        let accepted_at = 2_000;
+        let context = HostAuthenticatedContext {
+            schema_version: HOST_AUTH_CONTEXT_SCHEMA_VERSION.to_owned(),
+            authority: HostAuthenticationAuthority::MonasStandalone,
+            issuer: "monas".to_owned(),
+            audience: HOST_AUTH_AUDIENCE.to_owned(),
+            subject_id: "principal-1".to_owned(),
+            session_id: "session-1".to_owned(),
+            roles: vec!["storage_operator".to_owned()],
+            issued_at_unix_seconds: 1_900,
+            expires_at_unix_seconds: 2_500,
+            correlation_id: "correlation-1".to_owned(),
+            csrf_binding_sha256: format!("sha256:{}", "a".repeat(64)),
+        };
+        struct LiveVerifier;
+        impl HostAuthenticationContextVerifier for LiveVerifier {
+            fn verify_live_session(&self, _: &HostAuthenticatedContext) -> Result<(), String> {
+                Ok(())
+            }
+        }
+        let verified =
+            crate::accept_host_authenticated_context(context, accepted_at, &LiveVerifier).unwrap();
+        let actor = AuthenticatedGuiActor {
+            subject_id: "principal-1".to_owned(),
+            authority: AuthenticatedActorAuthority::MonasStandalone,
+            roles: vec!["storage_operator".to_owned()],
+            expires_at_unix_seconds: Some(2_500),
+            correlation_id: Some("correlation-1".to_owned()),
+        };
+        let approval_context = RemoteEasyconnectApprovalContext {
+            authority_id: "authority-1".to_owned(),
+            principal_id: "principal-1".to_owned(),
+            session_id: "session-1".to_owned(),
+            auth_provider: RemoteEasyconnectAuthProvider::Pistis,
+            allowed_object_stores: vec![RemoteEasyconnectObjectStoreGrant {
+                object_store: "store-1".to_owned(),
+                bucket: "dos-store-1".to_owned(),
+                can_read: true,
+                can_write: true,
+                writer_group: Some("mnemosyne".to_owned()),
+                object_type: "generated_data".to_owned(),
+                control_operations: remote_easyconnect_control_operations(true),
+                allowed_prefixes: vec!["".to_owned()],
+            }],
+            host_session_expires_at_utc: dasobjectstore_core::utc::format_utc_timestamp_seconds(
+                2_500,
+            ),
+            correlation_id: "correlation-1".to_owned(),
+            audit_identity: "pistis-grant:7:record-1".to_owned(),
+        };
+        let result = easyconnect_approve_pairing(
+            actor,
+            Extension(verified),
+            Extension(approval_context),
+            Extension(EasyconnectDaemonEndpoint::new(socket_path).unwrap()),
+            Extension(Some(EasyconnectS3EndpointConfig {
+                descriptor: StandaloneS3ConnectionDescriptor {
+                    endpoint_url: format!("https://localhost:{}", address.port()),
+                    region: "test-region".to_owned(),
+                    addressing_style: "path".to_owned(),
+                },
+                tls_certificate_path: certificate_path,
+            })),
+            Json(EasyconnectBrowserApprovalIntent {
+                pairing_id: "pair-approval".to_owned(),
+                object_store: "store-1".to_owned(),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(result.exchange_code, "exchange-once");
+        join.join().unwrap();
+        s3_server.abort();
+        cleanup(&root);
+    }
+
+    #[test]
+    fn easyconnect_daemon_endpoint_rejects_relative_paths() {
+        assert!(EasyconnectDaemonEndpoint::new(PathBuf::from("daemon.sock")).is_err());
     }
 
     #[tokio::test]
