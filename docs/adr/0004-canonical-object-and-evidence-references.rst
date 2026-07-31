@@ -54,17 +54,28 @@ DASObjectStore will own two strict JSON contracts:
 ``dasobjectstore.evidence_ref.v1``.  They are immutable, non-secret reference
 values.  Possession proves neither existence nor authorization.
 
-Every decoder must inspect ``schema`` before interpreting any other field,
-reject unknown schemas, reject duplicate JSON member names, and then apply
-strict typed decoding with unknown fields denied.  Version 1 has no extension
-map.
+Every decoder first applies the encoded-size bound and a duplicate-aware
+streaming token pass to the raw JSON.  The pass maintains a separate set of
+decoded member names for every object and rejects a duplicate before any
+generic map or typed decoder can collapse it.  Escaped and literal spellings
+that decode to the same member name are duplicates; for example, ``schema``
+and ``\u0073chema`` conflict.  The same rule applies recursively to
+``authority_scope``, digest objects, and nested ``object_ref`` values.
+
+Only after that pass may a decoder inspect ``schema``.  It does so before
+semantically interpreting any other field, rejects unknown schemas, and then
+applies strict typed decoding with unknown fields denied.  Version 1 has no
+extension map.
 
 Canonical serialization uses UTF-8 JSON in RFC 8785 JSON Canonicalization
 Scheme form.  Producers emit only the member set defined below.  Consumers may
 receive members in any JSON order but equality and hashing use the canonical
-bytes.  Numbers must be JSON integers representable exactly in the signed
-64-bit range; floating-point, exponent, negative-zero, and string-encoded
-number forms are invalid.
+bytes.  Numeric fields are deliberately restricted to the ECMAScript
+interoperable safe-integer range used by RFC 8785/JCS.  Floating-point,
+exponent, negative, negative-zero, and string-encoded number forms are invalid.
+A decoder validates each raw number token against the field's lexical form and
+bound before converting it to a generic JSON number or native integer, so no
+parser may round an out-of-range value into an accepted value.
 
 Common lexical grammar and bounds
 ---------------------------------
@@ -82,9 +93,12 @@ Before semantic resolution, a v1 decoder enforces all of these limits:
 * digest values contain exactly 64 lowercase hexadecimal characters, without
   an algorithm prefix;
 * ``object_version`` and ``evidence_revision`` are integers from 1 through
-  ``9223372036854775807``;
-* ``size_bytes`` is an integer from 0 through ``9223372036854775807`` so the
+  ``9007199254740991``;
+* ``size_bytes`` is an integer from 0 through ``9007199254740991`` so the
   contract preserves true zero-byte objects;
+* before typed decoding, version and revision number tokens match
+  ``^[1-9][0-9]*$``, the size token matches ``^(0|[1-9][0-9]*)$``, and checked
+  decimal accumulation rejects a value above ``9007199254740991``;
 * every required member is present and non-null; and
 * strings containing whitespace, control characters, non-ASCII bytes,
   ``/``, ``\``, ``:``, URL syntax, traversal syntax, or percent-encoding are
@@ -252,12 +266,32 @@ digest, and the durability state required by the ObjectStore's acknowledgement
 policy.  A staged payload, upload reservation, provider key, placement, or
 uncommitted catalogue row cannot produce a reference.
 
+Every immutable-put request carries a canonical lowercase UUID
+``put_operation_id``.  It is a non-secret, caller-scoped idempotency identity,
+not part of ObjectRef identity and not a capability.  The daemon atomically
+binds it to the independently authenticated caller/application authority,
+complete authority scope, exact ObjectStore, requested logical operation,
+size, raw content digest, and exact bytes in the same transaction that commits
+the server-owned object identity, version, and acknowledgement state.  The
+binding is retained for at least the complete retained lifecycle of the object
+and tombstone, so deletion cannot make an operation identifier reusable.
+
+Before consulting an existing operation binding, object identity, or provider
+placement, the daemon re-resolves current authority and requires the exact
+``immutable_object_put`` action for the authenticated scope and ObjectStore.
+An absent, stale, revoked, cross-scope, or cross-store grant returns
+``not_authorized`` without revealing whether the operation identifier or
+object already exists.
+
 Put is immutable:
 
-* exact replay of the same authenticated scope, store, object identity,
-  version, size, content digest, and bytes returns the same ObjectRef;
-* the same immutable identity with different size, content digest, or bytes is
+* exact replay of one ``put_operation_id`` with the same authenticated
+  authority, scope, store, logical operation, size, content digest, and bytes
+  returns the same ObjectRef, including after the original response was lost;
+* reuse of ``put_operation_id`` with any changed binding or bytes is
   ``identity_conflict`` and changes nothing;
+* the same immutable object identity with different size, content digest, or
+  bytes is also ``identity_conflict`` and changes nothing;
 * equal raw bytes under a different logical identity produce a different
   domain digest even when physical storage deduplicates them;
 * replacement creates a new non-zero object version and a new reference; and
@@ -266,8 +300,18 @@ Put is immutable:
 
 EvidenceRef may be issued only after its ObjectRef resolves to the same
 immutable evidence bytes and the registered evidence-kind validator accepts
-the subject binding.  DASObjectStore stores no private signing key, approval
-response, access token, or secret merely because evidence is signed.
+the subject binding.  Immediately before issuance, the daemon independently
+re-resolves authority and requires the exact
+``evidence_ref_issue:<evidence_kind>`` action for the authenticated scope and
+ObjectStore.  Ordinary immutable-put or read authority does not imply evidence
+issuer authority.  The evidence-kind contract defines the permitted issuer
+class and the exact content, subject, signature, and lineage validation needed
+for that kind; where an intrinsic signature is required, successful
+cryptographic verification is part of issuance rather than caller metadata.
+An unauthorized issuer receives ``not_authorized`` before catalogue lookup and
+cannot learn whether matching bytes or an ObjectRef exist.  DASObjectStore
+stores no private signing key, approval response, access token, or secret
+merely because evidence is signed.
 
 Authorized resolution and read-back
 -----------------------------------
@@ -277,7 +321,9 @@ DASObjectStore resolves the current actor or application authority and
 capability at action time, then:
 
 #. strictly decodes and verifies both domain digests;
-#. compares every authority-scope dimension and exact ObjectStore grant;
+#. compares every reference scope dimension with the independently
+   authenticated context and requires the exact ObjectStore read grant,
+   returning ``not_authorized`` on any mismatch before catalogue lookup;
 #. resolves the immutable catalogue identity without exposing a backing path
    or provider locator;
 #. checks tombstone, quarantine, retention, availability, and protection
@@ -288,10 +334,15 @@ capability at action time, then:
 #. for EvidenceRef, also verifies the evidence kind, subject digest, revision,
    nested ObjectRef, and outer domain digest.
 
-An unauthorized caller receives ``not_authorized`` without object-existence,
-tombstone, quarantine, or scope-oracle detail.  Only after authorization may a
-caller receive the narrower lifecycle outcomes below.  A successful read is
-always scoped to the exact immutable version; resolution never follows a
+An unauthorized caller, including one authenticated for a different scope or
+ObjectStore, receives ``not_authorized`` without object-existence, tombstone,
+quarantine, operation-identity, or scope-oracle detail.  Only after exact
+authorization may a caller receive the narrower lifecycle outcomes below.
+``scope_mismatch`` is reserved for an already-authorized diagnostic or for a
+conflict between the decoded reference and an independently authoritative host
+or catalogue binding discovered after authorization; it is never returned for
+a caller/grant mismatch and never precedes authorization.  A successful read
+is always scoped to the exact immutable version; resolution never follows a
 latest-version alias.
 
 Lifecycle and failure semantics
@@ -420,7 +471,19 @@ Issue #31 remains open until at least:
 * security, protocol, persistence, and cross-project reviewers accept or amend
   this ADR;
 * owner-side types and JSON Schemas have strict positive and adversarial
-  fixtures, including duplicate members and every lexical/bounds failure;
+  fixtures, including literal/escaped duplicate names at the root and every
+  nested object, and every lexical/bounds failure;
+* RFC 8785 cross-language fixtures agree on canonical bytes and both domain
+  digests at ``9007199254740991`` and reject ``9007199254740992``,
+  ``9007199254740993``, ``9223372036854775807``, exponent, fractional,
+  negative, negative-zero, leading-zero, and string-encoded forms before
+  generic numeric conversion;
+* immutable-put tests prove atomic ``put_operation_id`` binding, exact retry
+  after response loss, drift conflict, retained non-reuse after tombstone, and
+  no mutation or existence disclosure for an unauthorized scope or store;
+* evidence issuance tests prove an ordinary object writer cannot issue an
+  EvidenceRef, exact evidence-kind issuer authority is rechecked at action
+  time, and required subject/content/signature validation fails closed;
 * immutable put, authorized read-back, cross-scope denial, digest substitution,
   tombstone, unavailable, quarantine, orphan, and manual-recovery behavior are
   implemented and restart-tested;
