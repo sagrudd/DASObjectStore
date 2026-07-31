@@ -77,6 +77,34 @@ A decoder validates each raw number token against the field's lexical form and
 bound before converting it to a generic JSON number or native integer, so no
 parser may round an out-of-range value into an accepted value.
 
+Review fixtures
+---------------
+
+The review branch carries two deterministic, non-secret vectors under
+``docs/adr/fixtures/``:
+
+* ``object-ref-v1.json`` is the positive ``ObjectRefV1`` vector.  Its
+  ``domain_digest`` is the SHA-256 value calculated from the exact
+  ``DASOBJECTSTORE_OBJECT_REF_V1`` prefix and JCS identity projection.
+* ``evidence-ref-v1.json`` is the corresponding ``EvidenceRefV1`` vector.  It
+  reuses the complete, already verified nested object reference and calculates
+  the outer digest with the ``DASOBJECTSTORE_EVIDENCE_REF_V1`` prefix.
+
+The one-line files are emitted as canonical JCS bytes followed by one newline
+for source-control readability.  They contain no storage location, capability,
+credential, token, or customer data.  A dependency-free verifier exercises the
+positive vectors and representative negative boundaries (duplicate members,
+unknown members, uppercase digests, path-shaped identifiers, and scope-digest
+drift)::
+
+   python3 tools/verify-object-reference-fixtures.py
+
+This command verifies review material only.  It is not an owner-side parser,
+does not resolve storage, and does not authorise a production implementation.
+The fixtures become compatibility inputs only after the Proposed ADR and the
+owner-side security, protocol, persistence, and resolution gates in issue #31
+are accepted.
+
 Common lexical grammar and bounds
 ---------------------------------
 
