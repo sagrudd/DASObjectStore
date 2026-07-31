@@ -54,8 +54,9 @@ pub use host_auth_adapter::{
 };
 pub use host_auth_router::{
     monas_dasobjectstore_api_router, monas_dasobjectstore_router, monas_federated_router,
-    preverified_dasobjectstore_router, synoptikon_federated_router,
-    SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER, MONAS_SESSION_COOKIE,
+    preverified_dasobjectstore_router, preverified_dasobjectstore_router_with_daemon,
+    synoptikon_federated_router, SynoptikonHostRequestAuthentication, FEDERATED_CSRF_HEADER,
+    MONAS_SESSION_COOKIE,
 };
 pub use host_boundary::{
     validate_synoptikon_integrated_host_boundary, SynoptikonIntegratedHostBoundary,

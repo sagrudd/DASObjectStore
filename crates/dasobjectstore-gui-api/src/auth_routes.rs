@@ -39,18 +39,21 @@ pub(crate) mod profile_upload;
 use auth_admin_clients::*;
 use auth_clients::*;
 use auth_identity_routes::*;
-pub use auth_identity_routes::{EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor};
+pub use auth_identity_routes::{
+    EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, StandaloneS3ConnectionDescriptor,
+};
 use auth_parsing::*;
 use auth_reporting::*;
 pub use auth_router::{
     easyconnect_public_router, easyconnect_public_router_with_config,
-    easyconnect_public_router_with_s3_descriptor, federated_gui_api_router,
-    gui_api_router_for_host_mode, gui_api_router_for_host_mode_with_application_auth,
+    easyconnect_public_router_with_config_and_daemon, easyconnect_public_router_with_s3_descriptor,
+    federated_gui_api_router, gui_api_router_for_host_mode,
+    gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
-    pistis_easyconnect_approval_router, standalone_auth_router, standalone_easyconnect_router,
-    standalone_enclosure_admin_router, standalone_gui_api_router, standalone_reporting_router,
-    standalone_users_groups_router,
+    pistis_easyconnect_approval_router, pistis_easyconnect_approval_router_with_daemon,
+    standalone_auth_router, standalone_easyconnect_router, standalone_enclosure_admin_router,
+    standalone_gui_api_router, standalone_reporting_router, standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{
@@ -952,24 +955,24 @@ pub(super) fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        easyconnect_public_router_with_config, gui_api_router_for_host_mode, local_standalone_user,
-        standalone_auth_router_with_state, standalone_dashboard_router_with_state,
-        standalone_easyconnect_router_with_state, standalone_enclosure_admin_router_with_state,
-        standalone_live_status_router_with_bridge, standalone_reporting_router_with_state,
-        standalone_users_groups_router_with_state, AssignLocalUserToGroupRequest,
-        CancelAdminJobRequest, CreateLocalGroupRequest, CreateObjectStoreRequest,
-        DaemonCreateObjectStoreRequest, DaemonEndpointBinding, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonIngestControlAction,
-        DaemonUpdateObjectStoreIngestPolicyRequest, DaemonUpsertEndpointInventoryRequest,
-        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
-        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
-        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
-        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
-        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        easyconnect_public_router_with_config, easyconnect_public_router_with_config_and_daemon,
+        gui_api_router_for_host_mode, local_standalone_user, standalone_auth_router_with_state,
+        standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
+        standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
+        standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
+        AssignLocalUserToGroupRequest, CancelAdminJobRequest, CreateLocalGroupRequest,
+        CreateObjectStoreRequest, DaemonCreateObjectStoreRequest, DaemonEndpointBinding,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
+        DaemonUpsertEndpointInventoryRequest, EndpointBindingUpsertRequest,
+        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
+        IngestControlAction, IngestControlRequest, IngestControlResponse,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
+        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
+        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
+        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
+        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
@@ -985,9 +988,10 @@ mod tests {
         LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
-        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectS3EndpointConfig,
-        LocalAuthStore, LocalPasswordAuthError, LocalUserDiscoveryError, LocalUserMetadata,
-        LoginResponse, StandaloneS3ConnectionDescriptor, STANDALONE_SESSION_TOKEN_HEADER,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectDaemonEndpoint,
+        EasyconnectS3EndpointConfig, LocalAuthStore, LocalPasswordAuthError,
+        LocalUserDiscoveryError, LocalUserMetadata, LoginResponse,
+        StandaloneS3ConnectionDescriptor, STANDALONE_SESSION_TOKEN_HEADER,
         STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
@@ -996,12 +1000,17 @@ mod tests {
     use dasobjectstore_core::store::{
         CapacityBehavior, ExportPolicy, RetentionPolicy, StoreClass, StorePolicy,
     };
-    use dasobjectstore_daemon::DaemonEndpointBindingReadiness;
+    use dasobjectstore_daemon::{
+        DaemonApiRequest, DaemonApiResponse, DaemonEndpointBindingReadiness,
+        RemoteEasyconnectCreatePairingResponse, UnixSocketDaemonServer,
+    };
     use dasobjectstore_object_service::StoreServiceDefinition;
     use serde::de::DeserializeOwned;
     use std::fs;
+    use std::os::unix::net::UnixListener;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
+    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::Semaphore;
     use tower::ServiceExt;
@@ -1477,6 +1486,76 @@ mod tests {
             encoded["pairing_exchange_url"],
             "https://das.example.test:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
         );
+    }
+
+    #[tokio::test]
+    async fn public_easyconnect_pairing_uses_explicit_trusted_daemon_endpoint() {
+        // Unix-domain socket paths are limited to 104 bytes on macOS, while
+        // `std::env::temp_dir()` can itself be a long per-user path there.
+        let root = PathBuf::from(format!(
+            "/tmp/das-ec-{}-{}",
+            std::process::id(),
+            unix_now_nanos()
+        ));
+        let socket_path = root.join("runtime/dasobjectstored.sock");
+        fs::create_dir_all(socket_path.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server = UnixSocketDaemonServer::new(&socket_path, |request| {
+            let DaemonApiRequest::RemoteEasyconnectCreatePairing(request) = request else {
+                panic!("unexpected daemon request");
+            };
+            assert_eq!(request.requested_object_store.as_deref(), Some("store-1"));
+            Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(
+                RemoteEasyconnectCreatePairingResponse {
+                    pairing_id: "pair-1".to_owned(),
+                    browser_login_url: "/products/dasobjectstore/remote/easyconnect/login"
+                        .to_owned(),
+                    callback_url:
+                        "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
+                            .to_owned(),
+                    expires_at_utc: "2026-07-31T01:00:00Z".to_owned(),
+                    polling_url:
+                        "/products/dasobjectstore/api/v1/remote/easyconnect/pairings/pair-1"
+                            .to_owned(),
+                },
+            ))
+        });
+        let join = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            server.handle_stream(stream).unwrap();
+        });
+        let app = easyconnect_public_router_with_config_and_daemon(
+            None,
+            Some("https://das.example.test:8448".to_owned()),
+            EasyconnectDaemonEndpoint::new(socket_path.clone()).unwrap(),
+        );
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/remote/easyconnect/pairings")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"client_name":"dasobjectstore-remote","callback_url":"http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback","requested_object_store":"store-1","requested_session_lifetime_seconds":300,"client_request_id":"request-1"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["pairing_id"], "pair-1");
+        assert_eq!(
+            body["browser_login_url"],
+            "https://das.example.test:8448/products/dasobjectstore/remote/easyconnect/login?object_store=store-1&expires_at_utc=2026-07-31T01%3A00%3A00Z"
+        );
+        join.join().unwrap();
+        cleanup(&root);
+    }
+
+    #[test]
+    fn easyconnect_daemon_endpoint_rejects_relative_paths() {
+        assert!(EasyconnectDaemonEndpoint::new(PathBuf::from("daemon.sock")).is_err());
     }
 
     #[tokio::test]

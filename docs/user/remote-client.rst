@@ -146,6 +146,12 @@ origin and persisted appliance identity; missing, non-HTTPS, credential-bearing,
 or path-bearing origin configuration fails closed. The discovery contract
 advertises ``pistis`` as the authentication provider. Pairing approval is not
 part of this public router and remains behind the verified host actor boundary.
+Both the public and protected routers send ceremony transitions to the
+daemon-owned state machine over one trusted local Unix socket. Host composition
+may inject a different absolute socket path for hermetic deployment and
+conformance testing, but it must be supplied in process: HTTP input, headers,
+cookies, and query parameters can never select the daemon endpoint. Normal
+packaged deployments use the daemon's standard socket path.
 
 Inspect the enrolled, non-secret certificate identity before pairing:
 

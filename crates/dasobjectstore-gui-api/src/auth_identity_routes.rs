@@ -36,6 +36,37 @@ pub struct EasyconnectS3EndpointConfig {
     pub tls_certificate_path: PathBuf,
 }
 
+/// Trusted in-process selection of the local daemon socket used by
+/// EasyConnect routes.
+///
+/// Embedders may use a non-default absolute path for hermetic conformance
+/// testing. The path is never accepted from an HTTP request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EasyconnectDaemonEndpoint {
+    socket_path: PathBuf,
+}
+
+impl EasyconnectDaemonEndpoint {
+    pub fn new(socket_path: PathBuf) -> Result<Self, &'static str> {
+        if !socket_path.is_absolute() {
+            return Err("EasyConnect daemon socket path must be absolute");
+        }
+        Ok(Self { socket_path })
+    }
+
+    pub(super) fn socket_path(&self) -> PathBuf {
+        self.socket_path.clone()
+    }
+}
+
+impl Default for EasyconnectDaemonEndpoint {
+    fn default() -> Self {
+        Self {
+            socket_path: DaemonRuntimeConfig::default_packaged().socket_path,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct StandaloneEasyconnectRouteState {
     pub(super) auth_store: LocalAuthStore,
@@ -49,6 +80,7 @@ pub(crate) struct EasyconnectPublicRouteState {
     pub(super) s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     pub(super) public_base_url: Option<String>,
     pub(super) appliance_id: String,
+    pub(super) daemon_endpoint: EasyconnectDaemonEndpoint,
 }
 
 impl StandaloneAuthRouteState {
@@ -731,6 +763,7 @@ pub(super) async fn easyconnect_create_pairing(
             "passwordless EasyConnect requires one exact ObjectStore",
         )
     })?;
+    let daemon_endpoint = state.daemon_endpoint;
     let public_base_url = state.public_base_url.ok_or_else(|| {
         route_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -741,7 +774,7 @@ pub(super) async fn easyconnect_create_pairing(
     let mut response = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
+                daemon_endpoint.socket_path(),
             ))
             .remote_easyconnect_create_pairing(request)
             .map_err(|error| error.to_string())
@@ -777,6 +810,7 @@ pub(super) async fn easyconnect_approve_pairing(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<crate::VerifiedHostAuthenticatedContext>,
     Extension(approval_context): Extension<RemoteEasyconnectApprovalContext>,
+    Extension(daemon_endpoint): Extension<EasyconnectDaemonEndpoint>,
     Extension(s3_endpoint): Extension<Option<EasyconnectS3EndpointConfig>>,
     Json(intent): Json<EasyconnectBrowserApprovalIntent>,
 ) -> Result<Json<RemoteEasyconnectApprovePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
@@ -834,7 +868,7 @@ pub(super) async fn easyconnect_approve_pairing(
     crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
+                daemon_endpoint.socket_path(),
             ))
             .remote_easyconnect_approve_pairing(request)
             .map_err(|error| error.to_string())
@@ -864,6 +898,7 @@ pub(super) async fn easyconnect_exchange_pairing(
             error.to_string(),
         )
     })?;
+    let daemon_endpoint = state.daemon_endpoint.clone();
     let s3_endpoint = state.s3_endpoint.as_ref();
     verify_easyconnect_s3_endpoint(s3_endpoint).await?;
     let s3_descriptor = s3_endpoint
@@ -873,7 +908,7 @@ pub(super) async fn easyconnect_exchange_pairing(
     let exchange = crate::daemon_bridge::DaemonBridge::shared_packaged()
         .call_message(move || {
             DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
+                daemon_endpoint.socket_path(),
             ))
             .remote_easyconnect_exchange_pairing(request)
             .map_err(|error| error.to_string())
