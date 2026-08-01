@@ -33,15 +33,20 @@ The reconciliation is intentionally exact about the revisions reviewed on
      - ``bd0c8d6d9cc395fb74fb72089b5c4775d31159cc``
      - Merged to ``main``; provider-neutral foundation and DAS settlement port.
    * - Oikodome PR #69
-     - ``43c62414dfd34889641b835fff63fc516597a56c``
-     - Draft at review time; receipt replay validation is not a permanent dependency.
+     - ``f0a586c3564a2c6ad5192b49e133aeb1189c4520``
+     - Merged to ``main``; receipt replay validation remains a consumer-side gate.
+   * - Oikodome PR #70
+     - ``8572c972b77fc100bf0589b392ffc9c2ba6bed96``
+     - Merged to ``main``; native local-seed qualification remains planning-only.
    * - Phoreus Registry PR #60
      - ``cb72124595f9ce5270d7bc1773454a337365e3ce``
      - Merged to ``main``; PRG-T10 evidence seam remains planning-only.
 
-If Oikodome #69 is subsequently merged, its merge commit must be recorded in
-the consuming Jenkins qualification evidence.  A draft head, branch name, or
-local checkout is never an acceptable permanent revision.
+Oikodome #69 and #70 are now merged, but their merge commits are only source
+identity. The consuming Jenkins qualification evidence must still record the
+exact permanent DAS/Oikodome/Registry lockset and pass the owner gates below.
+A draft head, branch name, or local checkout is never an acceptable permanent
+revision.
 
 Reference-vector binding
 ------------------------
@@ -191,7 +196,8 @@ ADR-0004 may move beyond Proposed only when the owner records:
 * independent resolution/read-back and Oikodome settlement evidence;
 * Registry/Forge evidence showing the planning-only boundary is preserved; and
 * a Jenkins/Expedition qualification lockset containing permanent merge
-  commits, including a merged Oikodome #69 if that follow-up is adopted.
+  commits, including the merged Oikodome #69 and #70 revisions where their
+  seams are exercised.
 
 Until then, this reconciliation is review material.  It authorizes no runtime
 mutation, production storage authority, object dereference, secret transport,
