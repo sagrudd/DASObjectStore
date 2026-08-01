@@ -2,7 +2,7 @@ ADR 0005: Cross-project ObjectRef and EvidenceRef reconciliation
 =================================================================
 
 :Status: Proposed owner reconciliation
-:Date: 2026-07-31
+:Date: 2026-08-01
 :Deciders: DASObjectStore owner, Oikodome owner, Phoreus Registry owner, security reviewer, protocol reviewer, persistence reviewer
 :Related issue: `DASObjectStore #31 <https://github.com/sagrudd/DASObjectStore/issues/31>`_
 :Related Oikodome issues: `#53 <https://github.com/sagrudd/oikodome/issues/53>`_, `#61 <https://github.com/sagrudd/oikodome/issues/61>`_
@@ -18,7 +18,7 @@ accepted, issue a reference, add a transport, change a Registry schema,
 create a storage authority, or promote a package revision to production.
 
 The reconciliation is intentionally exact about the revisions reviewed on
-2026-07-31:
+2026-08-01:
 
 .. list-table:: Reviewed revisions
    :header-rows: 1
@@ -29,19 +29,34 @@ The reconciliation is intentionally exact about the revisions reviewed on
    * - DASObjectStore PR #32
      - ``4ba3bf5cd3a1e7224709fcb021c1bce5560c4b43``
      - Merged to ``main``; ADR-0004 remains Proposed.
+   * - DASObjectStore PR #43
+     - ``c29725dd46459443a495c1e17dc883685bbb9ae7``
+     - Merged to ``main``; consumer reconciliation remains review evidence.
    * - Oikodome PR #68
      - ``bd0c8d6d9cc395fb74fb72089b5c4775d31159cc``
      - Merged to ``main``; provider-neutral foundation and DAS settlement port.
    * - Oikodome PR #69
-     - ``43c62414dfd34889641b835fff63fc516597a56c``
-     - Draft at review time; receipt replay validation is not a permanent dependency.
+     - ``f0a586c3564a2c6ad5192b49e133aeb1189c4520``
+     - Merged to ``main``; local-seed admission receipt validation remains non-authoritative.
+   * - Oikodome PR #70
+     - ``8572c972b77fc100bf0589b392ffc9c2ba6bed96``
+     - Merged to ``main``; ADR-0014 qualification mapping remains owner-gated.
    * - Phoreus Registry PR #60
      - ``cb72124595f9ce5270d7bc1773454a337365e3ce``
      - Merged to ``main``; PRG-T10 evidence seam remains planning-only.
+   * - Phoreus Registry PR #61/#62
+     - ``2262f12f900db1a9959382849e2bf530199d0e40`` / ``394ff71ac6d5bcf103f23def78211dd302c39246``
+     - Merged to ``main``; reconciliation and Kyberneterion browse fixtures remain planning-only.
+   * - Phoreus Forge PR #51
+     - ``86460a69711497b6d03403225b343a1f7998206c``
+     - Merged to ``main``; owner map remains non-authoritative.
+   * - Jenkins PR #101
+     - ``3e3f5d8b63c79a5537f5f9b4efa28b7a0c51b36``
+     - Merged to ``main``; retained Expedition qualification remains open.
 
-If Oikodome #69 is subsequently merged, its merge commit must be recorded in
-the consuming Jenkins qualification evidence.  A draft head, branch name, or
-local checkout is never an acceptable permanent revision.
+Oikodome #69 and #70 are now merged, but their merge commits must still be
+recorded in consuming Jenkins qualification evidence.  A draft head, branch
+name, or local checkout is never an acceptable permanent revision.
 
 Reference-vector binding
 ------------------------
@@ -68,7 +83,7 @@ used for this reconciliation.  They bind to the consumer seams as follows:
        verify the evidence kind, subject digest, revision, and outer digest.
      - An EvidenceRef is evidence identity, not approval, a signature, or a
        read capability.
-   * - Registry PRG-T10 fixture from PR #60
+   * - Registry PRG-T10 fixture from PR #60, with reconciliations in #61/#62
      - ``object_ref_shape`` and ``evidence_ref_shape`` remain opaque,
        provider-neutral observations until the DAS owner contract is accepted.
        The fixture's settlement/read-back, digest, signature, Pistis, and
@@ -191,7 +206,8 @@ ADR-0004 may move beyond Proposed only when the owner records:
 * independent resolution/read-back and Oikodome settlement evidence;
 * Registry/Forge evidence showing the planning-only boundary is preserved; and
 * a Jenkins/Expedition qualification lockset containing permanent merge
-  commits, including a merged Oikodome #69 if that follow-up is adopted.
+  commits, including merged Oikodome #69/#70 and the latest Registry/Forge/
+  Jenkins evidence revisions.
 
 Until then, this reconciliation is review material.  It authorizes no runtime
 mutation, production storage authority, object dereference, secret transport,

@@ -12,6 +12,9 @@ agreement before landing.
   DASObjectStore, and Pistis share one product-audience-aware authority type.
 - Restore the browser release build by selecting the reviewed JavaScript
   entropy backend for transitive ``getrandom`` 0.3 use on wasm32 only.
+- Refresh ADR-0005 with the merged DAS #43, Oikodome #69/#70, Registry #61/#62,
+  Forge #51, and Jenkins #101 review heads while retaining the proposed
+  ObjectRef/EvidenceRef status and manual, fail-closed owner gates.
 ### Changed
 
 - Align the Prosopikon authority pin with QR-bound Pistis host trust v4 so
