@@ -95,11 +95,9 @@ pub enum ReferenceValidationError {
 impl ObjectRefV1 {
     pub fn decode(raw: &[u8]) -> Result<Self, ReferenceDecodeError> {
         preflight_json(raw)?;
+        require_schema(raw, OBJECT_REF_V1_SCHEMA)?;
         let value: Self =
             serde_json::from_slice(raw).map_err(|_| ReferenceDecodeError::MalformedJson)?;
-        if value.schema != OBJECT_REF_V1_SCHEMA {
-            return Err(ReferenceDecodeError::UnsupportedSchema);
-        }
         value
             .validate()
             .map_err(ReferenceDecodeError::InvalidReference)?;
@@ -142,11 +140,9 @@ impl ObjectRefV1 {
 impl EvidenceRefV1 {
     pub fn decode(raw: &[u8]) -> Result<Self, ReferenceDecodeError> {
         preflight_json(raw)?;
+        require_schema(raw, EVIDENCE_REF_V1_SCHEMA)?;
         let value: Self =
             serde_json::from_slice(raw).map_err(|_| ReferenceDecodeError::MalformedJson)?;
-        if value.schema != EVIDENCE_REF_V1_SCHEMA {
-            return Err(ReferenceDecodeError::UnsupportedSchema);
-        }
         value
             .validate()
             .map_err(ReferenceDecodeError::InvalidReference)?;
@@ -261,6 +257,15 @@ fn canonical_json(value: &serde_json::Value) -> Vec<u8> {
         }
     }
     serde_json::to_vec(&sort(value)).expect("canonical reference serializes")
+}
+
+fn require_schema(raw: &[u8], expected: &str) -> Result<(), ReferenceDecodeError> {
+    let value: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|_| ReferenceDecodeError::MalformedJson)?;
+    if value.get("schema").and_then(serde_json::Value::as_str) != Some(expected) {
+        return Err(ReferenceDecodeError::UnsupportedSchema);
+    }
+    Ok(())
 }
 
 // Reject duplicate decoded names before serde_json can collapse them. The
@@ -437,6 +442,15 @@ mod tests {
                     | ReferenceDecodeError::InvalidReference(ReferenceValidationError::Number))
             ));
         }
+    }
+
+    #[test]
+    fn rejects_unknown_schema_before_v1_shape_validation() {
+        let raw = br#"{"schema":"dasobjectstore.object_ref.v2"}"#;
+        assert_eq!(
+            ObjectRefV1::decode(raw),
+            Err(ReferenceDecodeError::UnsupportedSchema)
+        );
     }
 
     #[test]
