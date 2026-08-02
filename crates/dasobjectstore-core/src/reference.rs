@@ -242,21 +242,37 @@ fn canonical_evidence_identity(value: &EvidenceRefV1) -> Vec<u8> {
 }
 
 // v1 permits only ASCII identifier/digest strings and safe integers. For that
-// deliberately restricted subset, serde_json's sorted compact encoding is RFC
-// 8785/JCS-equivalent; no display strings or arbitrary floats enter identity.
+// deliberately restricted subset this writer is RFC 8785/JCS-equivalent: it
+// orders object keys by Unicode code point and lets serde_json quote the
+// already constrained string values. It intentionally never accepts arbitrary
+// floats, display strings, or arrays into an identity projection.
 fn canonical_json(value: &serde_json::Value) -> Vec<u8> {
-    fn sort(value: &serde_json::Value) -> serde_json::Value {
+    fn write(value: &serde_json::Value, output: &mut Vec<u8>) {
         match value {
-            serde_json::Value::Object(object) => serde_json::Value::Object(
-                object
-                    .iter()
-                    .map(|(key, value)| (key.clone(), sort(value)))
-                    .collect(),
-            ),
-            other => other.clone(),
+            serde_json::Value::Object(object) => {
+                output.push(b'{');
+                let mut keys: Vec<_> = object.keys().collect();
+                keys.sort_unstable();
+                for (index, key) in keys.iter().enumerate() {
+                    if index != 0 {
+                        output.push(b',');
+                    }
+                    output.extend(serde_json::to_vec(key).expect("canonical key serializes"));
+                    output.push(b':');
+                    write(&object[*key], output);
+                }
+                output.push(b'}');
+            }
+            serde_json::Value::String(string) => {
+                output.extend(serde_json::to_vec(string).expect("canonical string serializes"));
+            }
+            serde_json::Value::Number(number) => output.extend(number.to_string().bytes()),
+            _ => unreachable!("typed v1 identity contains only objects, strings, and integers"),
         }
     }
-    serde_json::to_vec(&sort(value)).expect("canonical reference serializes")
+    let mut output = Vec::new();
+    write(value, &mut output);
+    output
 }
 
 fn require_schema(raw: &[u8], expected: &str) -> Result<(), ReferenceDecodeError> {
