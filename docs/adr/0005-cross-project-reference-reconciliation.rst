@@ -12,11 +12,12 @@ Purpose and status
 ------------------
 
 This record reconciles the accepted DASObjectStore ADR-0004 owner contract
-with the first consumer-side seams in Oikodome and Phoreus Registry.  This
-reconciliation remains a documentation and review artifact only.  It does not
-close ADR-0004 implementation gates, issue a reference, add a transport,
-change a Registry schema, create a storage authority, or promote a package
-revision to production.
+with the first consumer-side seams in Oikodome and Phoreus Registry.  Until
+the owner-side decoder is separately qualified, this reconciliation remains a
+documentation and review artifact only.  It does not close the remaining
+ADR-0004 implementation gates, issue a reference, add a transport, change a
+Registry schema, create a storage authority, or promote a package revision to
+production.
 
 The reconciliation is intentionally exact about the revisions reviewed through
 2026-08-02:

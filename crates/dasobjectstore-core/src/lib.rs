@@ -19,6 +19,7 @@ pub mod object_type;
 pub mod placement;
 pub mod policy_template;
 pub mod protection;
+pub mod reference;
 pub mod remote_upload;
 pub mod repair;
 pub mod risk;
@@ -61,6 +62,10 @@ pub use object_catalogue::{
 };
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
+pub use reference::{
+    AuthorityScopeV1, DigestV1, EvidenceRefV1, ObjectRefV1, ReferenceDecodeError,
+    ReferenceValidationError,
+};
 pub use store::LogicalObjectVersionCharge;
 pub use subobject_capacity::{
     ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,

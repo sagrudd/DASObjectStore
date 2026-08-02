@@ -118,6 +118,13 @@ Work is dependency ordered. Only these entries define open release work:
 
 ### Tier 2 — later integrations
 
+- [~] Implement the accepted ADR-0004 reference owner boundary (issue #31).
+  The additive, dependency-free core decoder now validates strict v1 reference
+  grammar and canonical domain digests before any authority or catalogue seam.
+  Atomic issuance/persistence, authenticated transport, action-time scope
+  authorization, read-back, evidence-kind authority, restart recovery, and
+  Jenkins/Expedition qualification remain open and manual/fail-closed.
+
 - [ ] Non-Garage providers, additional architecture parity beyond the approved
   platform tiers, and product-specific or experimental workload acceptance.
   The transient HG002 workflow is explicitly excluded until its owner defines
