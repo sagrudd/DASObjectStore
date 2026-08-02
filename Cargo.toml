@@ -9,6 +9,7 @@ members = [
     "crates/dasobjectstore-mnemosyne",
     "crates/dasobjectstore-object-service",
     "crates/dasobjectstore-platform",
+    "crates/dasobjectstore-reference",
     "crates/dasobjectstore-remote",
     "crates/dasobjectstore-tui",
     "crates/dasobjectstore-workspace-host",
@@ -16,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.154.0"
+version = "0.155.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -38,6 +39,7 @@ dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
 dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
 dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
 dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
+dasobjectstore-reference = { path = "crates/dasobjectstore-reference" }
 dasobjectstore-remote = { path = "crates/dasobjectstore-remote" }
 dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
 dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host" }

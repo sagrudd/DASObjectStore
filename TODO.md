@@ -121,6 +121,9 @@ Work is dependency ordered. Only these entries define open release work:
 - [~] Implement the accepted ADR-0004 reference owner boundary (issue #31).
   The additive, dependency-free core decoder now validates strict v1 reference
   grammar and canonical domain digests before any authority or catalogue seam.
+  It is also source-packageable as the isolated ``dasobjectstore-reference``
+  library with an offline downstream consumer fixture; publication and all
+  authority-bearing follow-on work remain explicitly out of scope.
   Atomic issuance/persistence, authenticated transport, action-time scope
   authorization, read-back, evidence-kind authority, restart recovery, and
   Jenkins/Expedition qualification remain open and manual/fail-closed.
