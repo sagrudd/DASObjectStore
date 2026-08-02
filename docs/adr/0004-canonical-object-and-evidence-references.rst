@@ -1,19 +1,27 @@
 ADR 0004: Canonical non-secret ObjectRef and EvidenceRef
 ========================================================
 
-:Status: Proposed
+:Status: Accepted owner contract; implementation and production qualification gated
 :Date: 2026-07-31
 :Deciders: Project owner, security reviewer, protocol reviewer, persistence reviewer, DASObjectStore and cross-project maintainers
 :Related issue: `DASObjectStore #31 <https://github.com/sagrudd/DASObjectStore/issues/31>`_
 :Related consumer issue: `Oikodome #53 <https://github.com/sagrudd/oikodome/issues/53>`_
 
-Proposal status
----------------
+Acceptance status
+-----------------
 
-This record is owner-contract review material only.  It authorizes no
-production implementation, migration, readiness claim, package activation, or
-consumer revision pin.  Acceptance, implementation, fixtures, security review,
-and exact-revision qualification remain separate gates under issue #31.
+The Project Owner accepted this owner contract in issue #31 on 2026-08-02.
+It establishes DASObjectStore as the exclusive authority for canonical,
+non-secret ``ObjectRefV1`` and ``EvidenceRefV1`` issuance and authorised
+resolution.  Consumers must use this owner contract rather than inventing a
+local grammar.
+
+Acceptance does not itself authorize a production implementation, migration,
+readiness claim, package activation, or consumer revision pin.  Strict
+decoding, issuance/persistence, authenticated transport, action-time scope
+authorisation, resolution/read-back, evidence-kind authority, and
+exact-revision Jenkins/Expedition qualification remain separate fail-closed
+gates under issue #31.
 
 Context
 -------
@@ -104,9 +112,9 @@ drift)::
 
 This command verifies review material only.  It is not an owner-side parser,
 does not resolve storage, and does not authorise a production implementation.
-The fixtures become compatibility inputs only after the Proposed ADR and the
-owner-side security, protocol, persistence, and resolution gates in issue #31
-are accepted.
+The fixtures become compatibility inputs only after the owner-side security,
+protocol, persistence, decoder, and resolution gates in issue #31 are
+implemented and qualified.
 
 Common lexical grammar and bounds
 ---------------------------------
@@ -610,5 +618,6 @@ Issue #31 remains open until at least:
 * Oikodome consumes an exact permanent reviewed revision only after those
   owner gates pass.
 
-This Proposed record must not be cited as production readiness or as a
-candidate permanent revision.
+This accepted owner contract must not be cited as production readiness or as a
+candidate permanent consumer revision until every issue #31 implementation and
+qualification gate is closed.

@@ -11,11 +11,12 @@ ADR 0005: Cross-project ObjectRef and EvidenceRef reconciliation
 Purpose and status
 ------------------
 
-This record reconciles the Proposed DASObjectStore ADR-0004 reference
-contract with the first consumer-side seams in Oikodome and Phoreus Registry.
-It is a documentation and review artifact only.  It does not make ADR-0004
-accepted, issue a reference, add a transport, change a Registry schema,
-create a storage authority, or promote a package revision to production.
+This record reconciles the accepted DASObjectStore ADR-0004 owner contract
+with the first consumer-side seams in Oikodome and Phoreus Registry.  This
+reconciliation remains a documentation and review artifact only.  It does not
+close ADR-0004 implementation gates, issue a reference, add a transport,
+change a Registry schema, create a storage authority, or promote a package
+revision to production.
 
 The reconciliation is intentionally exact about the revisions reviewed on
 2026-07-31:
@@ -28,7 +29,8 @@ The reconciliation is intentionally exact about the revisions reviewed on
      - Review state
    * - DASObjectStore PR #32
      - ``4ba3bf5cd3a1e7224709fcb021c1bce5560c4b43``
-     - Merged to ``main``; ADR-0004 remains Proposed.
+     - Merged to ``main``; ADR-0004 is an accepted owner contract, with all
+       implementation and production-qualification gates still open.
    * - Oikodome PR #68
      - ``bd0c8d6d9cc395fb74fb72089b5c4775d31159cc``
      - Merged to ``main``; provider-neutral foundation and DAS settlement port.
