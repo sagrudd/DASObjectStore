@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "axum",
  "axum-server",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "chrono",
  "serde",
@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "base64",
  "dasobjectstore-core",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "axum",
  "axum-server",
@@ -836,7 +836,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "axum",
  "dasobjectstore-core",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -895,7 +895,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "base64",
  "clap",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -936,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.153.0"
+version = "0.153.1"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -2605,12 +2605,12 @@ dependencies = [
 [[package]]
 name = "pistis-canonical"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=eb7e90daebd64a534d66ed655fa45c4993ebd43a#eb7e90daebd64a534d66ed655fa45c4993ebd43a"
+source = "git+https://github.com/sagrudd/pistis.git?rev=6d52ae2c1551e45eb970124418f18b8b0e84d407#6d52ae2c1551e45eb970124418f18b8b0e84d407"
 
 [[package]]
 name = "pistis-cose"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=eb7e90daebd64a534d66ed655fa45c4993ebd43a#eb7e90daebd64a534d66ed655fa45c4993ebd43a"
+source = "git+https://github.com/sagrudd/pistis.git?rev=6d52ae2c1551e45eb970124418f18b8b0e84d407#6d52ae2c1551e45eb970124418f18b8b0e84d407"
 dependencies = [
  "pistis-canonical",
  "pistis-crypto",
@@ -2622,7 +2622,7 @@ dependencies = [
 [[package]]
 name = "pistis-crypto"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=eb7e90daebd64a534d66ed655fa45c4993ebd43a#eb7e90daebd64a534d66ed655fa45c4993ebd43a"
+source = "git+https://github.com/sagrudd/pistis.git?rev=6d52ae2c1551e45eb970124418f18b8b0e84d407#6d52ae2c1551e45eb970124418f18b8b0e84d407"
 dependencies = [
  "p256",
  "pistis-domain",
@@ -2633,7 +2633,7 @@ dependencies = [
 [[package]]
 name = "pistis-domain"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=eb7e90daebd64a534d66ed655fa45c4993ebd43a#eb7e90daebd64a534d66ed655fa45c4993ebd43a"
+source = "git+https://github.com/sagrudd/pistis.git?rev=6d52ae2c1551e45eb970124418f18b8b0e84d407#6d52ae2c1551e45eb970124418f18b8b0e84d407"
 dependencies = [
  "serde",
 ]
@@ -2641,7 +2641,7 @@ dependencies = [
 [[package]]
 name = "pistis-protocol"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=eb7e90daebd64a534d66ed655fa45c4993ebd43a#eb7e90daebd64a534d66ed655fa45c4993ebd43a"
+source = "git+https://github.com/sagrudd/pistis.git?rev=6d52ae2c1551e45eb970124418f18b8b0e84d407#6d52ae2c1551e45eb970124418f18b8b0e84d407"
 dependencies = [
  "getrandom 0.3.4",
  "pistis-canonical",
@@ -2766,8 +2766,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.16.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=cf065000ba2d6cae99a974512e3d89d77e382e89#cf065000ba2d6cae99a974512e3d89d77e382e89"
+version = "0.16.1"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=c4055d07c3d8715cd01d13775d1a51d529be64e7#c4055d07c3d8715cd01d13775d1a51d529be64e7"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2799,7 +2799,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=cf065000ba2d6cae99a974512e3d89d77e382e89#cf065000ba2d6cae99a974512e3d89d77e382e89"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=c4055d07c3d8715cd01d13775d1a51d529be64e7#c4055d07c3d8715cd01d13775d1a51d529be64e7"
 dependencies = [
  "prosopikon-core",
  "web-sys",
