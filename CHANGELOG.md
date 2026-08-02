@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+- Extract the accepted ADR-0004 reference decoder into the independently
+  packageable ``dasobjectstore-reference`` library. Its source package contains
+  only the non-secret decoder, positive vectors, and an offline downstream
+  consumer fixture; it is not published and has no issuance, resolution,
+  transport, storage, credential, capability, or authority behaviour.
+
 - Add the first owner-side, in-process ``ObjectRefV1`` / ``EvidenceRefV1``
   decoder and canonical domain-digest verifier from accepted ADR-0004. It
   rejects duplicate decoded JSON names (including escaped spellings), arrays,

@@ -417,8 +417,7 @@ mod tests {
     fn fixture(name: &str) -> Vec<u8> {
         std::fs::read(
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../..")
-                .join("docs/adr/fixtures")
+                .join("fixtures")
                 .join(name),
         )
         .expect("fixture")
@@ -434,6 +433,10 @@ mod tests {
             evidence.domain_digest.value,
             evidence.expected_domain_digest()
         );
+        let max_safe = ObjectRefV1::decode(&fixture("object-ref-v1-max-safe-integer.json"))
+            .expect("max-safe-integer object vector");
+        assert_eq!(max_safe.object_version, MAX_SAFE_INTEGER);
+        assert_eq!(max_safe.size_bytes, MAX_SAFE_INTEGER);
     }
 
     #[test]

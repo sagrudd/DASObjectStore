@@ -1,0 +1,20 @@
+[package]
+name = "dasobjectstore-reference"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Strict, non-authorising DASObjectStore ObjectRefV1 and EvidenceRefV1 decoder"
+readme = "README.md"
+keywords = ["dasobjectstore", "reference", "validation"]
+categories = ["data-structures", "encoding"]
+publish = false
+include = ["src/**", "fixtures/**", "README.md", "LICENSE"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

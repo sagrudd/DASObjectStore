@@ -71,6 +71,14 @@ Reference-vector binding
 The dependency-free vectors in ``docs/adr/fixtures/`` remain the only bytes
 used for this reconciliation.  They bind to the consumer seams as follows:
 
+The source-only ``dasobjectstore-reference`` package copies those three bytes
+unchanged into its own package fixtures and its package verifier checks that
+identity before archiving.  The package is a distributable decoder input, not
+a second owner fixture source: consumers continue to pin and review the DAS
+source revision, and must not treat the package, its checksum, or a successful
+decode as issuance, resolution, authorisation, installation, or release
+acceptance.
+
 .. list-table:: Canonical vector consumers
    :header-rows: 1
 
