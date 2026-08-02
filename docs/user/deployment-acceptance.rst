@@ -68,6 +68,27 @@ replace the later live Garage ``head-object`` and shared-SQLite appliance run.
 Physical appliance acceptance
 -----------------------------
 
+Before a non-production appliance exercise, run the credential-free,
+read-only package preflight as a local administrator:
+
+.. code-block:: console
+
+   sudo deploy/acceptance/appliance-readiness-preflight.sh
+
+The preflight creates no ObjectStore, object, credential, token, TLS asset,
+browser session, or service state. It requires the installed Debian or RPM
+package, packaged binaries, current service identity and groups, active daemon
+and Web services, valid daemon/Web configuration, the local-user PAM authority,
+TLS certificate/key presence at the documented package paths with a
+non-world-readable private key, the daemon socket, the managed SSD/HDD layout,
+and a daemon-owned ObjectStore registry containing only non-blank identifiers.
+It exits non-zero when any authority or storage prerequisite is absent,
+malformed, inactive, or unsafe.
+
+This is an appliance readiness gate, not proof of a successful authenticated
+user journey, object ingest, provider operation, or physical acceptance. It is
+intentionally limited to the standalone ``local_user`` package profile.
+
 Use the EPIC C harness for maintenance, device-mapping, staging-accounting, and
 control-plane evidence. Its default inspection is read-only:
 
