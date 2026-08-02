@@ -121,6 +121,23 @@ import sys
 path = pathlib.Path(sys.argv[1])
 value = json.loads(path.read_text())
 value["authentication"]["authority"] = "local_user"
+value["tls"]["certificate_path"] = "/unapproved/tls/server.crt"
+path.write_text(json.dumps(value))
+PY
+if run_preflight >"$TMP/tls-path.out" 2>&1; then
+    printf 'error: preflight accepted an unapproved TLS certificate path\n' >&2
+    exit 1
+fi
+grep -Fq 'FAIL web_config_tls_paths' "$TMP/tls-path.out"
+
+python3 - "$ROOT/opt/dasobjectstore/config.json" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+value = json.loads(path.read_text())
+value["tls"]["certificate_path"] = "/opt/dasobjectstore/tls/server.crt"
 path.write_text(json.dumps(value))
 PY
 printf '[]\n' >"$ROOT/var/lib/dasobjectstore/stores.json"
@@ -129,5 +146,12 @@ if run_preflight >"$TMP/storage.out" 2>&1; then
     exit 1
 fi
 grep -Fq 'FAIL configured_store_registry' "$TMP/storage.out"
+
+printf '[{"store_id":"   "}]\n' >"$ROOT/var/lib/dasobjectstore/stores.json"
+if run_preflight >"$TMP/blank-store-id.out" 2>&1; then
+    printf 'error: preflight accepted a blank ObjectStore identifier\n' >&2
+    exit 1
+fi
+grep -Fq 'FAIL configured_store_registry' "$TMP/blank-store-id.out"
 
 printf 'appliance readiness preflight self-test passed\n'

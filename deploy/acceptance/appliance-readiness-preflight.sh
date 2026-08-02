@@ -156,16 +156,38 @@ if not isinstance(authentication.get("session_ttl_seconds"), int):
     raise SystemExit(1)
 if authentication["session_ttl_seconds"] <= 0:
     raise SystemExit(1)
-tls = value.get("tls")
-if not isinstance(tls, dict):
-    raise SystemExit(1)
-if not all(isinstance(tls.get(name), str) and tls[name].startswith("/") for name in ("certificate_path", "private_key_path")):
-    raise SystemExit(1)
 PY
     then
         pass "authentication_authority"
     else
         fail "authentication_authority" "local-user authority configuration is absent or invalid"
+    fi
+}
+
+check_packaged_tls_paths() {
+    local config="$1"
+    if python3 - "$config" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    value = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+tls = value.get("tls")
+if not isinstance(tls, dict):
+    raise SystemExit(1)
+if tls.get("certificate_path") != "/opt/dasobjectstore/tls/server.crt":
+    raise SystemExit(1)
+if tls.get("private_key_path") != "/opt/dasobjectstore/tls/server.key":
+    raise SystemExit(1)
+PY
+    then
+        pass "web_config_tls_paths"
+    else
+        fail "web_config_tls_paths" "TLS paths must match the documented standalone package paths"
     fi
 }
 
@@ -182,7 +204,12 @@ except (OSError, json.JSONDecodeError):
     raise SystemExit(1)
 if not isinstance(definitions, list) or not definitions:
     raise SystemExit(1)
-if not all(isinstance(definition, dict) for definition in definitions):
+if not all(
+    isinstance(definition, dict)
+    and isinstance(definition.get("store_id"), str)
+    and definition["store_id"].strip()
+    for definition in definitions
+):
     raise SystemExit(1)
 PY
     then
@@ -237,6 +264,7 @@ require_owner_mode "daemon_config_permissions" "$daemon_config" "root:dasobjects
 require_regular_file "web_config" "$web_config"
 require_owner_mode "web_config_permissions" "$web_config" "root:dasobjectstore:640"
 check_authority_config "$web_config"
+check_packaged_tls_paths "$web_config"
 if "$(root_path /usr/bin/dasobjectstored)" --config "$daemon_config" --check-config >/dev/null 2>&1; then
     pass "daemon_config_validation"
 else

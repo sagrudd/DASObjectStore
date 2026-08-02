@@ -79,10 +79,11 @@ The preflight creates no ObjectStore, object, credential, token, TLS asset,
 browser session, or service state. It requires the installed Debian or RPM
 package, packaged binaries, current service identity and groups, active daemon
 and Web services, valid daemon/Web configuration, the local-user PAM authority,
-TLS certificate/key presence with a non-world-readable private key, the daemon
-socket, the managed SSD/HDD layout, and a non-empty daemon-owned ObjectStore
-registry. It exits non-zero when any
-authority or storage prerequisite is absent, malformed, inactive, or unsafe.
+TLS certificate/key presence at the documented package paths with a
+non-world-readable private key, the daemon socket, the managed SSD/HDD layout,
+and a daemon-owned ObjectStore registry containing only non-blank identifiers.
+It exits non-zero when any authority or storage prerequisite is absent,
+malformed, inactive, or unsafe.
 
 This is an appliance readiness gate, not proof of a successful authenticated
 user journey, object ingest, provider operation, or physical acceptance. It is

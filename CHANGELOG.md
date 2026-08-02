@@ -11,7 +11,8 @@ agreement before landing.
 - Added a credential-free, read-only standalone appliance readiness preflight.
   It fails closed when the formal package, local-user authority, daemon/Web
   services, TLS private-key permissions, daemon socket, managed storage layout, or
-  configured ObjectStore registry is absent or unsafe. It creates no runtime
+  configured ObjectStore registry is absent or unsafe. It pins the documented
+  standalone TLS paths and rejects blank ObjectStore identifiers. It creates no runtime
   object, credential, token, session, TLS asset, or service state and remains a
   non-production readiness gate rather than physical acceptance evidence.
 
