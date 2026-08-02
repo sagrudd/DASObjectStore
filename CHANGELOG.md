@@ -30,6 +30,12 @@ agreement before landing.
   Oikodome #69/#70 merge commits. The ObjectRef/EvidenceRef contract remains
   Proposed; this documentation update does not promote a storage authority,
   transport, schema, or runtime dependency.
+
+- Reconcile ADR-0005 with Oikodome 1.0.0's merged legacy-runtime quarantine
+  and Kanon #20's merged draft lifecycle contract.  The retained Oikodome DAS
+  types are non-authorising, in-process validation seams; neither merge adds a
+  DAS transport, object resolution, storage authority, package acceptance, or
+  release evidence.
 ### Changed
 
 - Align the Prosopikon authority pin with QR-bound Pistis host trust v4 so
