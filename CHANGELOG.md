@@ -8,6 +8,15 @@ agreement before landing.
 
 ## Unreleased
 
+- Add the first owner-side, in-process ``ObjectRefV1`` / ``EvidenceRefV1``
+  decoder and canonical domain-digest verifier from accepted ADR-0004. It
+  rejects duplicate decoded JSON names (including escaped spellings), arrays,
+  non-canonical numeric tokens, unknown members, unsupported schemas, invalid
+  scope/identifier/digest values, and digest substitution before any future
+  authority or catalogue seam. This additive core contract has no transport,
+  object issuance, resolution, storage mutation, credential, capability, or
+  release-readiness behaviour.
+
 - Repin the shared Prosopikon authority crates to permanent revision
   ``c4055d07c3d8715cd01d13775d1a51d529be64e7`` and advance the workspace to
   compatible 0.153.1. This consumes Prosopikon's one-source Pistis 6d52
