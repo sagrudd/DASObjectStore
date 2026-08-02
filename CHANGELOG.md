@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+- Repin the shared Prosopikon authority crates to permanent revision
+  ``c4055d07c3d8715cd01d13775d1a51d529be64e7`` and advance the workspace to
+  compatible 0.153.1. This consumes Prosopikon's one-source Pistis 6d52
+  closure without altering storage, authority, protocol, schema, or
+  authentication behaviour.
+
 - Added a credential-free, read-only standalone appliance readiness preflight.
   It fails closed when the formal package, local-user authority, daemon/Web
   services, TLS private-key permissions, daemon socket, managed storage layout, or
