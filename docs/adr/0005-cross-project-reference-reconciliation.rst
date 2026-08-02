@@ -2,10 +2,10 @@ ADR 0005: Cross-project ObjectRef and EvidenceRef reconciliation
 =================================================================
 
 :Status: Proposed owner reconciliation
-:Date: 2026-07-31
+:Date: 2026-08-02
 :Deciders: DASObjectStore owner, Oikodome owner, Phoreus Registry owner, security reviewer, protocol reviewer, persistence reviewer
 :Related issue: `DASObjectStore #31 <https://github.com/sagrudd/DASObjectStore/issues/31>`_
-:Related Oikodome issues: `#53 <https://github.com/sagrudd/oikodome/issues/53>`_, `#61 <https://github.com/sagrudd/oikodome/issues/61>`_
+:Related Oikodome issues: `#53 <https://github.com/sagrudd/oikodome/issues/53>`_, `#61 <https://github.com/sagrudd/oikodome/issues/61>`_, `#85 <https://github.com/sagrudd/oikodome/issues/85>`_
 :Related Registry issue: `Phoreus Registry #27 <https://github.com/sagrudd/phoreus-registry/issues/27>`_
 
 Purpose and status
@@ -18,8 +18,8 @@ close ADR-0004 implementation gates, issue a reference, add a transport,
 change a Registry schema, create a storage authority, or promote a package
 revision to production.
 
-The reconciliation is intentionally exact about the revisions reviewed on
-2026-07-31:
+The reconciliation is intentionally exact about the revisions reviewed through
+2026-08-02:
 
 .. list-table:: Reviewed revisions
    :header-rows: 1
@@ -40,15 +40,29 @@ The reconciliation is intentionally exact about the revisions reviewed on
    * - Oikodome PR #70
      - ``8572c972b77fc100bf0589b392ffc9c2ba6bed96``
      - Merged to ``main``; native local-seed qualification remains planning-only.
+   * - Oikodome PR #92
+     - ``209a5ab``
+     - Merged to ``main`` as Oikodome 1.0.0's legacy-runtime quarantine.  The
+       retained DAS types are provider-neutral, in-process validation seams;
+       no DAS transport, resolution, issuance, or settlement authority ships
+       in that runtime.
+   * - Kanon PR #20
+     - ``3c073a7ed147978e970e29ae77e595f58c116c93``
+     - Merged draft lifecycle contract for the Oikodome 1.0.0 quarantine only;
+       it carries no package artifact, lockset, installation, activation,
+       health, entitlement, or release-acceptance evidence.
    * - Phoreus Registry PR #60
      - ``cb72124595f9ce5270d7bc1773454a337365e3ce``
      - Merged to ``main``; PRG-T10 evidence seam remains planning-only.
 
-Oikodome #69 and #70 are now merged, but their merge commits are only source
-identity. The consuming Jenkins qualification evidence must still record the
-exact permanent DAS/Oikodome/Registry lockset and pass the owner gates below.
-A draft head, branch name, or local checkout is never an acceptable permanent
-revision.
+Oikodome #69, #70, and #92 are merged, but their merge commits are only source
+identity.  In particular, the 1.0.0 quarantine deliberately leaves the
+``DasObjectStorePort`` unimplemented: its typed reference and pure settlement
+checks do not contact DASObjectStore, mutate a queue, or make a storage or
+workflow claim.  The consuming Jenkins qualification evidence must still
+record the exact permanent DAS/Oikodome/Registry lockset and pass the owner
+gates below.  A draft head, branch name, local checkout, or Kanon draft
+lifecycle contract is never an acceptable permanent revision.
 
 Reference-vector binding
 ------------------------
@@ -95,6 +109,12 @@ Required acceptance gates
 No gate below is satisfied merely by the existence of a fixture or a merged
 documentation PR.  Each owner must retain machine-readable evidence against a
 permanent revision.
+
+Oikodome 1.0.0 does not satisfy the adapter-owned gates merely by retaining
+the pure consumer types.  Its legacy direct-control runtime is quarantined and
+the active Monas-local runtime has no DAS transport or storage adapter.  A
+future adapter therefore requires a separately reviewed, authenticated,
+metadata-only boundary before it can perform any operation in this table.
 
 .. list-table:: Owner gates
    :widths: 19 19 42 20
@@ -198,8 +218,9 @@ ADR-0004 may move beyond Proposed only when the owner records:
 * independent resolution/read-back and Oikodome settlement evidence;
 * Registry/Forge evidence showing the planning-only boundary is preserved; and
 * a Jenkins/Expedition qualification lockset containing permanent merge
-  commits, including the merged Oikodome #69 and #70 revisions where their
-  seams are exercised.
+  commits, including Oikodome #69/#70/#92 where their seams are exercised and
+  the latest Registry/Forge/Jenkins evidence revisions.  Kanon #20 may
+  describe the quarantine posture, but is not release or acceptance evidence.
 
 Until then, this reconciliation is review material.  It authorizes no runtime
 mutation, production storage authority, object dereference, secret transport,
