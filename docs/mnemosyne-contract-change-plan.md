@@ -7,6 +7,12 @@ weakening existing governance-domain storage boundaries
 
 ## Summary
 
+For the local synthetic demonstration only,
+[`mnemosyne-synthetic-scoped-readback.md`](mnemosyne-synthetic-scoped-readback.md)
+defines a pure verifier seam. It consumes an externally verified Monas
+capability projection and exact DAS reference metadata, but cannot issue
+authority or perform a storage operation.
+
 DASObjectStore should not be modelled as a generic POSIX backend or as a raw
 NFS mount in Mneion. The cleaner platform shape is to extend Mneion's
 storage-definition and storage-binding contracts with first-class
