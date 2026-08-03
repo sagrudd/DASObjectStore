@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+- Add a credential-free, read-only Monas/Oikodome artifact prerequisite
+  contract. It strictly compares an already decoded `EvidenceRefV1` against a
+  pinned non-secret identity and fails closed on schema, digest, or identity
+  mismatch. It does not resolve an object, establish trust, issue a
+  credential/capability, mutate storage, or advance a workflow.
+
 - Extract the accepted ADR-0004 reference decoder into the independently
   packageable ``dasobjectstore-reference`` library. Its source package contains
   only the non-secret decoder, positive vectors, and an offline downstream

@@ -5,6 +5,7 @@ pub mod application_auth_v2;
 pub mod backend;
 pub mod capacity;
 pub mod config;
+pub mod demo_prerequisite;
 pub mod deployment;
 pub mod enclosure_registry;
 pub mod file_export;
@@ -47,6 +48,10 @@ pub use config::{
 pub use dasobjectstore_reference::{
     AuthorityScopeV1, DigestV1, EvidenceRefV1, ObjectRefV1, ReferenceDecodeError,
     ReferenceValidationError,
+};
+pub use demo_prerequisite::{
+    ArtifactPrerequisiteError, MonasOikodomeArtifactPrerequisiteV1,
+    VerifiedMonasOikodomeArtifactV1, MONAS_OIKODOME_ARTIFACT_PREREQUISITE_V1_SCHEMA,
 };
 pub use deployment::{DeploymentProfile, HostMode};
 pub use enclosure_registry::{
