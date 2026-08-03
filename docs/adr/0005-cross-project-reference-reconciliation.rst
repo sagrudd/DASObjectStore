@@ -112,6 +112,22 @@ reference as an opaque value only after strict owner decoding and authorization
 have succeeded; no consumer may copy the fixture fields into a lookalike
 reference.
 
+Read-only Monas/Oikodome prerequisite seam
+-------------------------------------------
+
+``MonasOikodomeArtifactPrerequisiteV1`` is an additive, credential-free core
+comparison seam for demonstration preparation. It contains one complete,
+strictly validated ``EvidenceRefV1`` and accepts a supplied reference only
+when all canonical identity fields match exactly. The returned value confirms
+only that local comparison; it does not claim object existence, settlement,
+availability, caller authority, or workflow suitability.
+
+The seam deliberately has no reference decoder entry point, object resolver,
+transport, credential, trust establishment, capability, queue transition, or
+storage mutation. It therefore cannot satisfy any owner gate below. A future
+authenticated adapter must still perform the independent scope, read-back,
+and settlement sequence described in this ADR.
+
 Required acceptance gates
 -------------------------
 
