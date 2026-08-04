@@ -13,4 +13,5 @@ implementation.
    0003-credential-free-pistis-easyconnect-approval
    0004-canonical-object-and-evidence-references
    0005-cross-project-reference-reconciliation
+   0006-rustls-transitive-tls12-amendment
    fixtures/README
