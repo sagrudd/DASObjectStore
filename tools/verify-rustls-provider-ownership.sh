@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Jenkins qualification helper for ADR-0001/0006. It is a source/metadata
-# inventory only: it does not build, package, install, deploy, or activate DAS.
+# Jenkins qualification helper for ADR-0001 and its merged transitive TLS 1.2
+# amendment. It is a source/metadata inventory only: it does not build,
+# package, install, deploy, or activate DAS.
 set -euo pipefail
 
 output=${RUSTLS_PROVIDER_OWNERSHIP_OUTPUT:-/tmp/dasobjectstore-rustls-provider-classes.tsv}

@@ -4,8 +4,8 @@ Rustls provider ownership inventory
 Status
 ------
 
-This is qualification evidence for ADR-0001 and Proposed ADR-0006. It is not
-a release, installation, deployment or activation claim.
+This is qualification evidence for ADR-0001 and its merged transitive TLS 1.2
+amendment. It is not a release, installation, deployment or activation claim.
 
 Classification
 --------------
