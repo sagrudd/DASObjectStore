@@ -8,6 +8,10 @@ agreement before landing.
 
 ## Unreleased
 
+- Add Proposed ADR-0007, defining the external, immutable Jenkins-only
+  provider-conflict qualification boundary. It adds no product test seam,
+  dependency, executable, package, runtime hook or release claim.
+
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
   preserving AWS-LC-only/provider-neutral dependencies and requiring explicit
