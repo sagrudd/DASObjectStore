@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+- Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
+  resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
+  preserving AWS-LC-only/provider-neutral dependencies and requiring explicit
+  TLS 1.3-only configuration and qualification. It changes no implementation,
+  package, deployment, installation, activation or release claim.
+
 - Release 0.157.1 with deterministic, external non-secret DEB/RPM package
   provenance sidecars and source-epoch normalization. This is a source-only
   packaging boundary: no signing, publication, installation, activation, or
