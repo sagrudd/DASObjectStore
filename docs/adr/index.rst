@@ -14,4 +14,5 @@ implementation.
    0004-canonical-object-and-evidence-references
    0005-cross-project-reference-reconciliation
    0006-rustls-transitive-tls12-amendment
+   0007-provider-guard-qualification-interface
    fixtures/README
