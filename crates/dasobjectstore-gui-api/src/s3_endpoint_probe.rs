@@ -255,7 +255,7 @@ async fn plaintext_http_responds(host: &str, port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::{header, StatusCode};
+    use axum::http::{header, HeaderMap, StatusCode};
     use axum::routing::get;
     use axum::Router;
     use axum_server::tls_rustls::RustlsConfig;
@@ -263,7 +263,11 @@ mod tests {
         generate_simple_self_signed, BasicConstraints, CertificateParams, CertifiedIssuer, IsCa,
         KeyPair,
     };
+    use std::fs::File;
+    use std::io::BufReader;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     struct TlsS3Fixture {
@@ -305,9 +309,23 @@ mod tests {
         let private_key_path = root.join("server.key");
         std::fs::write(&certificate_path, certificate_pem).expect("write certificate");
         std::fs::write(&private_key_path, private_key_pem).expect("write private key");
-        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
-            .await
-            .expect("load TLS");
+        let certificates = rustls_pemfile::certs(&mut BufReader::new(
+            File::open(&certificate_path).expect("open certificate"),
+        ))
+        .collect::<Result<Vec<_>, _>>()
+        .expect("parse certificate");
+        let private_key = rustls_pemfile::private_key(&mut BufReader::new(
+            File::open(&private_key_path).expect("open private key"),
+        ))
+        .expect("parse private key")
+        .expect("private key is present");
+        let server = rustls::ServerConfig::builder_with_protocol_versions(&[
+            &rustls::version::TLS13,
+        ])
+        .with_no_client_auth()
+        .with_single_cert(certificates, private_key)
+        .expect("construct TLS 1.3 fixture");
+        let tls = RustlsConfig::from_config(Arc::new(server));
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
         let address = listener.local_addr().expect("address");
         drop(listener);
@@ -397,6 +415,43 @@ mod tests {
         assert_eq!(verified.scheme, "https");
         assert_eq!(verified.host, "localhost");
         assert_eq!(verified.port, fixture.address.port());
+    }
+
+    #[tokio::test]
+    async fn tls13_s3_probe_sends_no_credentials_or_application_mutation() {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&requests);
+        let fixture = tls_s3_server(
+            "tls13-no-credentials",
+            Router::new().route(
+                "/{*path}",
+                get(move |headers: HeaderMap| {
+                    let observed = Arc::clone(&observed);
+                    async move {
+                        assert!(
+                            headers.get(header::AUTHORIZATION).is_none(),
+                            "read-only S3 TLS probe must not send credentials"
+                        );
+                        observed.fetch_add(1, Ordering::SeqCst);
+                        (
+                            StatusCode::FORBIDDEN,
+                            [(header::CONTENT_TYPE, "application/xml")],
+                            r#"<?xml version="1.0"?><Error><Code>SignatureDoesNotMatch</Code></Error>"#,
+                        )
+                    }
+                }),
+            ),
+        )
+        .await;
+        let endpoint = format!("https://localhost:{}", fixture.address.port());
+        verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
+            .await
+            .expect("TLS 1.3 read-only S3 probe verifies");
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            1,
+            "probe must make exactly one authenticated-protocol request"
+        );
     }
 
     #[tokio::test]
