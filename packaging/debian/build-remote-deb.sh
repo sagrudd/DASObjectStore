@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 package_name="dasobjectstore-remote"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-remote","version":"\([^"]*\)".*/\1/p')"
@@ -35,6 +36,7 @@ install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
   "$build_root/usr/share/doc/$package_name/remote-s3-uploads.rst"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
+das_package_normalize_tree "$build_root"
 
 cat >"$build_root/DEBIAN/control" <<CONTROL
 Package: $package_name
@@ -52,5 +54,6 @@ Description: remote upload client for DASObjectStore object services
  S3-compatible endpoint without installing the local appliance daemon.
 CONTROL
 
-dpkg-deb --build --root-owner-group "$build_root" "$package_path"
+SOURCE_DATE_EPOCH="$DAS_PACKAGE_SOURCE_EPOCH" dpkg-deb --build --root-owner-group "$build_root" "$package_path"
+das_package_write_provenance "$package_path" remote "$arch"
 printf '%s\n' "$package_path"

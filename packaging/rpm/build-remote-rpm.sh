@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 package_name="dasobjectstore-remote"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-remote","version":"\([^"]*\)".*/\1/p')"
@@ -41,9 +42,10 @@ install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
+das_package_normalize_tree "$payload_root"
 
 install -d "$rpm_root/BUILD" "$rpm_root/RPMS" "$rpm_root/SOURCES" "$rpm_root/SPECS" "$rpm_root/SRPMS"
-tar -C "$staging_root" -czf "$source_path" "$payload_name"
+tar -C "$staging_root" --sort=name --mtime="@$DAS_PACKAGE_SOURCE_EPOCH" --owner=0 --group=0 --numeric-owner -cf - "$payload_name" | gzip -n >"$source_path"
 
 cat >"$spec_path" <<SPEC
 Name:           $package_name
@@ -83,8 +85,11 @@ cp -a . %{buildroot}/
 - Build remote-only RPM package.
 SPEC
 
-rpmbuild \
+SOURCE_DATE_EPOCH="$DAS_PACKAGE_SOURCE_EPOCH" rpmbuild \
   --define "_topdir $rpm_root" \
   -bb "$spec_path"
 
-find "$rpm_root/RPMS" -type f -name "${package_name}-${version}-${release}*.rpm" -print
+find "$rpm_root/RPMS" -type f -name "${package_name}-${version}-${release}*.rpm" -print | while read -r package_path; do
+  das_package_write_provenance "$package_path" remote "$(rpm -qp --qf '%{ARCH}' "$package_path")"
+  printf '%s\n' "$package_path"
+done
