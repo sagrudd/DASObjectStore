@@ -11,6 +11,9 @@ agreement before landing.
 - Begin the 0.158.0 AWS-LC Rustls provider migration under accepted ADR-0001
   and ADR-0006. This source candidate remains unqualified and unreleased until
   the complete Jenkins graph, subprocess, TLS and provenance dossier exists.
+  The local S3 corpus now uses an explicit disposable TLS 1.3 fixture and
+  proves that its read-only probe sends no Authorization credential and exactly
+  one protocol request; this is partial evidence only, not release acceptance.
 
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
