@@ -25,6 +25,7 @@ pub mod repair;
 pub mod risk;
 pub mod store;
 pub mod subobject_capacity;
+pub mod synthetic_scoped_readback;
 pub mod utc;
 pub mod workspace;
 
@@ -75,6 +76,12 @@ pub use subobject_capacity::{
     ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,
     SubObjectCapacityLedgerSnapshot, SubObjectCapacityReservationScope,
     SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
+};
+pub use synthetic_scoped_readback::{
+    verify_synthetic_scoped_readback, MonasScopedReadCapabilityV1,
+    MonasScopedReadCapabilityVerifier, SyntheticReadbackError, SyntheticReadbackInputV1,
+    SyntheticReadbackSettlementV1, DAS_SYNTHETIC_READBACK_SETTLEMENT_V1_SCHEMA,
+    MONAS_SCOPED_READ_CAPABILITY_V1_SCHEMA, SYNTHETIC_SEVEN_DAY_RETENTION_CLASS,
 };
 pub use workspace::{
     plan_workspace_capacity, ComputeClientIdentity, ComputeWorkspace, ComputeWorkspaceState,

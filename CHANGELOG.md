@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+- Add a synthetic, non-production, externally-verifiable Monas scoped
+  read-back seam. It verifies only an already-issued capability through an
+  injected verifier, then checks exact DAS object digest and size before
+  emitting redacted seven-day synthetic observation evidence. It cannot issue
+  authority, evaluate Site Trust, resolve or write storage, persist a receipt,
+  or expose a credential, URL, key, or managed path.
+
 - Add a credential-free, read-only Monas/Oikodome artifact prerequisite
   contract. It strictly compares an already decoded `EvidenceRefV1` against a
   pinned non-secret identity and fails closed on schema, digest, or identity
