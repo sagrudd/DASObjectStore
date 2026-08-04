@@ -17,6 +17,9 @@ agreement before landing.
   certificate from another CA and proves that certificate capture completes no
   application-data exchange; this is partial evidence only, not release
   acceptance.
+  A deterministic source/metadata ownership inventory now classifies every
+  workspace executable, library and integration-test target without adding a
+  runtime provider-selection surface.
 
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while

@@ -29,3 +29,4 @@ They remain source-controlled design documents rather than operator runbooks.
    :caption: Architecture
 
    architecture/managed-compute-workspaces
+   architecture/rustls-provider-ownership
