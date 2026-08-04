@@ -37,6 +37,10 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 fn main() -> ExitCode {
+    if let Err(error) = install_tls_crypto_provider() {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
@@ -44,6 +48,15 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn install_tls_crypto_provider() -> Result<(), &'static str> {
+    if rustls::crypto::CryptoProvider::get_default().is_some() {
+        return Err("DASObjectStore TLS crypto provider is already installed");
+    }
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .map_err(|_| "failed to install the DASObjectStore AWS-LC TLS crypto provider")
 }
 
 fn preserve_pre_logical_identity_metadata(

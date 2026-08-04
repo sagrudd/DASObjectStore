@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.157.2"
+version = "0.158.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -25,7 +25,7 @@ repository = "https://github.com/sagrudd/DASObjectStore"
 [workspace.dependencies]
 argon2 = "0.5.3"
 axum = "0.8.9"
-axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
 base64 = "0.22.1"
 bytes = "1.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
@@ -56,10 +56,10 @@ rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
 regex = "1.12.2"
 libc = "0.2"
-reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-rustls = "0.23.42"
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls-webpki-roots-no-provider"] }
+rustls = { version = "0.23.42", default-features = false, features = ["aws-lc-rs", "prefer-post-quantum", "std"] }
 rustls-pemfile = "2.2.0"
-tokio-rustls = "0.26.4"
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["aws-lc-rs"] }
 rpassword = "7.4.0"
 ring = "0.17.14"
 rusqlite = { version = "0.37", features = ["bundled"] }

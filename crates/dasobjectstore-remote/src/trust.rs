@@ -168,7 +168,7 @@ pub fn probe_certificate(host: &str, port: u16) -> Result<PresentedCertificate, 
     stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
     stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
 
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = installed_tls_provider()?;
     let verifier = Arc::new(CaptureOnlyVerifier {
         provider: Arc::clone(&provider),
     });
@@ -411,7 +411,7 @@ pub fn verify_chain_with_authority(
     })?;
     let verifier = WebPkiServerVerifier::builder_with_provider(
         Arc::new(roots),
-        Arc::new(rustls::crypto::ring::default_provider()),
+        installed_tls_provider()?,
     )
     .build()
     .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
@@ -443,6 +443,16 @@ pub fn verify_chain_with_authority(
             ))
         })?;
     Ok(())
+}
+
+fn installed_tls_provider() -> Result<Arc<rustls::crypto::CryptoProvider>, TrustError> {
+    rustls::crypto::CryptoProvider::get_default()
+        .cloned()
+        .ok_or_else(|| {
+            TrustError::Tls(
+                "DASObjectStore TLS crypto provider is not installed by the executable".to_string(),
+            )
+        })
 }
 
 fn existing_certificate_der(pem: &str) -> Option<Vec<u8>> {

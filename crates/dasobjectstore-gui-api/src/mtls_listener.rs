@@ -347,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn listener_rejects_tls_clients_without_a_certificate() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let root = test_root("client-certificate-required");
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

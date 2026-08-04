@@ -298,7 +298,7 @@ mod tests {
         certificate_pem: String,
         private_key_pem: String,
     ) -> TlsS3Fixture {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let root = test_root(label);
         std::fs::create_dir_all(&root).expect("create test root");
         let certificate_path = root.join("server.crt");

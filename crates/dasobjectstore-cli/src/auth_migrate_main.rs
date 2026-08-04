@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "tls_provider.rs"]
+mod tls_provider;
+
 const CONFIRMATION: &str = "confirm auth migration";
 const MARKER_SCHEMA: &str = "dasobjectstore.auth_migration.v1";
 const MARKER_FILE: &str = "dasobjectstore-auth-migration.json";
@@ -65,6 +68,10 @@ struct MigrationMarker<'a> {
 }
 
 fn main() -> ExitCode {
+    if let Err(error) = tls_provider::install() {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
     let cli = Cli::parse();
     match run(&cli) {
         Ok(report) => {
