@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 package_name="dasobjectstore"
 prosopikon_pam_marker="mnemosyne.prosopikon.native.pam"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
@@ -111,6 +112,7 @@ printf '%s\n' '/opt/dasobjectstore/config.json' >"$build_root/DEBIAN/conffiles"
 printf '%s\n' '/etc/dasobjectstore/workspace-host.json' >>"$build_root/DEBIAN/conffiles"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
+das_package_normalize_tree "$build_root"
 
 cat >"$build_root/DEBIAN/control" <<CONTROL
 Package: $package_name
@@ -130,5 +132,6 @@ Description: SSD-first DAS-backed object store for bioinformatics
  CLI operations may expose embedded terminal views through command flags.
 CONTROL
 
-dpkg-deb --build --root-owner-group "$build_root" "$package_path"
+SOURCE_DATE_EPOCH="$DAS_PACKAGE_SOURCE_EPOCH" dpkg-deb --build --root-owner-group "$build_root" "$package_path"
+das_package_write_provenance "$package_path" appliance "$arch"
 printf '%s\n' "$package_path"

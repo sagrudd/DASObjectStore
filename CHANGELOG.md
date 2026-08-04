@@ -8,6 +8,11 @@ agreement before landing.
 
 ## Unreleased
 
+- Release 0.157.1 with deterministic, external non-secret DEB/RPM package
+  provenance sidecars and source-epoch normalization. This is a source-only
+  packaging boundary: no signing, publication, installation, activation, or
+  readiness claim is made.
+
 - Add a synthetic, non-production, externally-verifiable Monas scoped
   read-back seam. It verifies only an already-issued capability through an
   injected verifier, then checks exact DAS object digest and size before

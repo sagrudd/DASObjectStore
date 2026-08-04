@@ -100,6 +100,9 @@ report-provider:
 package-auth-guard:
 	bash packaging/tests/application-authentication-package-guard.sh
 
+package-provenance-regression:
+	bash packaging/tests/package-provenance-regression.sh
+
 appliance-readiness-preflight:
 	bash deploy/acceptance/appliance-readiness-preflight.sh
 
