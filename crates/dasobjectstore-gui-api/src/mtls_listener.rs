@@ -130,7 +130,7 @@ pub async fn build_application_mtls_listener(
         .map_err(|error| MtlsListenerError::Tls(error.to_string()))?;
     let certificates = read_certificates(&config.tls.certificate_path)?;
     let private_key = read_private_key(&config.tls.private_key_path)?;
-    let mut server = ServerConfig::builder()
+    let mut server = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(verifier)
         .with_single_cert(certificates, private_key)
         .map_err(|error| MtlsListenerError::Tls(error.to_string()))?;
@@ -382,7 +382,7 @@ mod tests {
         roots
             .add(CertificateDer::from(ca_certificate.der().to_vec()))
             .expect("trust CA");
-        let client = ClientConfig::builder()
+        let client = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
             .with_root_certificates(roots)
             .with_no_client_auth();
         let stream = TcpStream::connect(("127.0.0.1", port))

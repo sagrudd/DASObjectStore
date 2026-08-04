@@ -39,6 +39,7 @@ prosopikon-core = { workspace = true, features = ["sqlite"] }
 ratatui.workspace = true
 rand_core.workspace = true
 rustls.workspace = true
+rustls-pemfile.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

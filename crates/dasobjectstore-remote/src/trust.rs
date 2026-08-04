@@ -173,7 +173,7 @@ pub fn probe_certificate(host: &str, port: u16) -> Result<PresentedCertificate, 
         provider: Arc::clone(&provider),
     });
     let config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
+        .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|error| TrustError::Tls(format!("configure TLS probe: {error}")))?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
@@ -409,12 +409,10 @@ pub fn verify_chain_with_authority(
     roots.add(authorities[0].clone()).map_err(|error| {
         TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}"))
     })?;
-    let verifier = WebPkiServerVerifier::builder_with_provider(
-        Arc::new(roots),
-        installed_tls_provider()?,
-    )
-    .build()
-    .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
+    let verifier =
+        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), installed_tls_provider()?)
+            .build()
+            .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
     let server_name = ServerName::try_from(host.to_string())
         .map_err(|_| TrustError::Invalid("host is not a valid TLS server name".to_string()))?;
     let leaf = CertificateDer::from(presented.leaf_der.clone());

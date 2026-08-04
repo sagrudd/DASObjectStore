@@ -13,7 +13,8 @@ use dasobjectstore_gui_api::{
     StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufReader, Write};
 use std::net::SocketAddr;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -56,9 +57,7 @@ async fn start_server(
     ensure_standalone_tls_assets(&config)?;
     let auth_store = LocalAuthStore::default_standalone();
     let revoked_sessions = auth_store.revoke_all_sessions()?;
-    let tls =
-        RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
-            .await?;
+    let tls = tls13_config(&config.tls.certificate_path, &config.tls.private_key_path)?;
     let s3_tls_certificate_path = config.tls.certificate_path.clone();
     let s3_tls = tls.clone();
     writeln!(
@@ -143,6 +142,31 @@ async fn serve_direct_s3_tls(
     axum_server::bind_rustls(address, tls)
         .serve(s3_gateway_router(max_concurrent_uploads).into_make_service())
         .await
+}
+
+/// Builds the standalone public TLS profile without accepting Rustls defaults.
+///
+/// ADR-0001/0006 require TLS 1.3 even though provider-neutral Reqwest carries
+/// unavoidable transitive TLS 1.2 implementation code in its locked graph.
+fn tls13_config(
+    certificate_path: &std::path::Path,
+    private_key_path: &std::path::Path,
+) -> Result<RustlsConfig, ServerRunError> {
+    let certificates = rustls_pemfile::certs(&mut BufReader::new(File::open(certificate_path)?))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let private_key =
+        rustls_pemfile::private_key(&mut BufReader::new(File::open(private_key_path)?))?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "TLS private key is absent")
+            })?;
+    let mut server =
+        rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_no_client_auth()
+            .with_single_cert(certificates, private_key)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    server.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    Ok(RustlsConfig::from_config(Arc::new(server)))
 }
 
 #[cfg(test)]

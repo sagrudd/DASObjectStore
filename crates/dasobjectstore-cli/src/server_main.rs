@@ -30,7 +30,5 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = server_cli::ServerCli::parse();
     let mut stdout = std::io::stdout();
 
-    server_run::run(&cli, &mut stdout)
-        .await
-        .map_err(Into::into)
+    server_run::run(&cli, &mut stdout).await.map_err(Into::into)
 }
