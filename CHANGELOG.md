@@ -8,6 +8,10 @@ agreement before landing.
 
 ## Unreleased
 
+- Begin the 0.158.0 AWS-LC Rustls provider migration under accepted ADR-0001
+  and ADR-0006. This source candidate remains unqualified and unreleased until
+  the complete Jenkins graph, subprocess, TLS and provenance dossier exists.
+
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
   preserving AWS-LC-only/provider-neutral dependencies and requiring explicit
