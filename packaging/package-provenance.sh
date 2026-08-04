@@ -10,7 +10,15 @@ das_package_provenance_init() {
   case "$DAS_PACKAGE_SOURCE_EPOCH" in *[!0-9]*|'') echo "non-negative SOURCE_DATE_EPOCH required" >&2; return 1;; esac
   export DAS_PACKAGE_SOURCE_REVISION DAS_PACKAGE_SOURCE_EPOCH
 }
-das_package_normalize_tree() { find "$1" -exec touch -h -d "@$DAS_PACKAGE_SOURCE_EPOCH" {} +; }
+das_package_normalize_tree() {
+  local stamp
+  if date -u -d "@$DAS_PACKAGE_SOURCE_EPOCH" +%Y%m%d%H%M.%S >/dev/null 2>&1; then
+    stamp="$(date -u -d "@$DAS_PACKAGE_SOURCE_EPOCH" +%Y%m%d%H%M.%S)"
+  else
+    stamp="$(date -u -r "$DAS_PACKAGE_SOURCE_EPOCH" +%Y%m%d%H%M.%S)"
+  fi
+  find "$1" -exec touch -h -t "$stamp" {} +
+}
 das_package_write_provenance() {
   local package_path="$1" profile="$2" arch="$3"
   printf '{"schema":"mnemosyne.dasobjectstore.package-provenance.v1","source_revision":"%s","source_date_epoch":%s,"profile":"%s","architecture":"%s","package_sha256":"%s"}\n' "$DAS_PACKAGE_SOURCE_REVISION" "$DAS_PACKAGE_SOURCE_EPOCH" "$profile" "$arch" "$(sha256sum "$package_path" | awk '{print $1}')" >"$package_path.provenance.json"
