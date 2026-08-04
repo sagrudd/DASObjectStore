@@ -2,10 +2,17 @@ use dasobjectstore_gui_api::PamLocalPasswordAuthenticator;
 use std::io::Read;
 use std::process::ExitCode;
 
+#[path = "tls_provider.rs"]
+mod tls_provider;
+
 const HELPER_BYPASS_ENV: &str = "DASOBJECTSTORE_LOCAL_AUTH_HELPER_BYPASS";
 const PROSOPIKON_HELPER_BYPASS_ENV: &str = "PROSOPIKON_LOCAL_AUTH_HELPER_BYPASS";
 
 fn main() -> ExitCode {
+    if let Err(error) = tls_provider::install() {
+        eprintln!("{error}");
+        return ExitCode::FAILURE;
+    }
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(LocalAuthHelperError::InvalidCredentials) => ExitCode::from(1),

@@ -1,26 +1,34 @@
 mod server_cli;
 mod server_run;
+mod tls_provider;
 
 use clap::Parser;
 use std::process::ExitCode;
 
-#[tokio::main]
-async fn main() -> ExitCode {
-    if rustls::crypto::ring::default_provider()
-        .install_default()
-        .is_err()
-    {
-        eprintln!("unable to install the DASObjectStore TLS crypto provider");
+fn main() -> ExitCode {
+    if let Err(error) = tls_provider::install() {
+        eprintln!("{error}");
         return ExitCode::FAILURE;
     }
-    let cli = server_cli::ServerCli::parse();
-    let mut stdout = std::io::stdout();
-
-    match server_run::run(&cli, &mut stdout).await {
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("could not create DASObjectStore server runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match runtime.block_on(run()) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("{err}");
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let cli = server_cli::ServerCli::parse();
+    let mut stdout = std::io::stdout();
+
+    server_run::run(&cli, &mut stdout).await.map_err(Into::into)
 }

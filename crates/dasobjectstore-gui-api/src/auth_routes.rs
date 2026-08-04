@@ -1598,7 +1598,7 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             server.handle_stream(stream).unwrap();
         });
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let certificate = generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
         let certificate_path = root.join("s3.crt");
         let private_key_path = root.join("s3.key");

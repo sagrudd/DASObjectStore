@@ -130,7 +130,7 @@ pub async fn build_application_mtls_listener(
         .map_err(|error| MtlsListenerError::Tls(error.to_string()))?;
     let certificates = read_certificates(&config.tls.certificate_path)?;
     let private_key = read_private_key(&config.tls.private_key_path)?;
-    let mut server = ServerConfig::builder()
+    let mut server = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_client_cert_verifier(verifier)
         .with_single_cert(certificates, private_key)
         .map_err(|error| MtlsListenerError::Tls(error.to_string()))?;
@@ -335,7 +335,7 @@ mod tests {
     use super::build_application_mtls_listener;
     use crate::StandaloneServerConfig;
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
-    use rustls::pki_types::{CertificateDer, ServerName};
+    use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName};
     use rustls::{ClientConfig, RootCertStore};
     use std::fs;
     use std::path::PathBuf;
@@ -347,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn listener_rejects_tls_clients_without_a_certificate() {
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let root = test_root("client-certificate-required");
         let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -382,7 +382,7 @@ mod tests {
         roots
             .add(CertificateDer::from(ca_certificate.der().to_vec()))
             .expect("trust CA");
-        let client = ClientConfig::builder()
+        let client = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
             .with_root_certificates(roots)
             .with_no_client_auth();
         let stream = TcpStream::connect(("127.0.0.1", port))
@@ -404,6 +404,77 @@ mod tests {
                 assert!(
                     matches!(read, Ok(0) | Err(_)),
                     "mTLS listener served a client without a certificate"
+                );
+            }
+        }
+        task.abort();
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn listener_rejects_tls13_client_certificate_from_another_ca() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let root = test_root("untrusted-client-certificate");
+        let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("CA params");
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let ca_key = KeyPair::generate().expect("CA key");
+        let ca_certificate = ca_params.self_signed(&ca_key).expect("CA certificate");
+        let issuer = Issuer::new(ca_params, ca_key);
+        let server_key = KeyPair::generate().expect("server key");
+        let server_certificate = CertificateParams::new(vec!["localhost".to_string()])
+            .expect("server params")
+            .signed_by(&server_key, &issuer)
+            .expect("server certificate");
+        let ca_path = root.join("client-ca.crt");
+        let certificate_path = root.join("server.crt");
+        let private_key_path = root.join("server.key");
+        fs::write(&ca_path, ca_certificate.pem()).expect("write CA");
+        fs::write(&certificate_path, server_certificate.pem()).expect("write certificate");
+        fs::write(&private_key_path, server_key.serialize_pem()).expect("write key");
+
+        let port = available_port();
+        let mut server = StandaloneServerConfig::default();
+        server.tls.certificate_path = certificate_path;
+        server.tls.private_key_path = private_key_path;
+        server.application_mtls.enabled = true;
+        server.application_mtls.https_port = port;
+        server.application_mtls.client_ca_path = ca_path;
+        let listener = build_application_mtls_listener(&server)
+            .await
+            .expect("listener builds");
+        let task = tokio::spawn(async move { axum::serve(listener, axum::Router::new()).await });
+
+        let rogue = rcgen::generate_simple_self_signed(vec!["rogue-client".to_string()])
+            .expect("generate untrusted client certificate");
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(CertificateDer::from(ca_certificate.der().to_vec()))
+            .expect("trust server CA");
+        let client = ClientConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+            .with_root_certificates(roots)
+            .with_client_auth_cert(
+                vec![CertificateDer::from(rogue.cert.der().to_vec())],
+                PrivatePkcs8KeyDer::from(rogue.signing_key.serialize_der()).into(),
+            )
+            .expect("construct untrusted TLS client");
+        let stream = TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("TCP connects");
+        let result = TlsConnector::from(Arc::new(client))
+            .connect(
+                ServerName::try_from("localhost").expect("server name"),
+                stream,
+            )
+            .await;
+        if let Ok(mut tls) = result {
+            let write = tls
+                .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await;
+            if write.is_ok() {
+                let mut response = [0_u8; 1];
+                assert!(
+                    matches!(tls.read(&mut response).await, Ok(0) | Err(_)),
+                    "mTLS listener served a client certificate from an untrusted CA"
                 );
             }
         }

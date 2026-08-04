@@ -168,12 +168,12 @@ pub fn probe_certificate(host: &str, port: u16) -> Result<PresentedCertificate, 
     stream.set_read_timeout(Some(PROBE_TIMEOUT))?;
     stream.set_write_timeout(Some(PROBE_TIMEOUT))?;
 
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let provider = installed_tls_provider()?;
     let verifier = Arc::new(CaptureOnlyVerifier {
         provider: Arc::clone(&provider),
     });
     let config = ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
+        .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|error| TrustError::Tls(format!("configure TLS probe: {error}")))?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
@@ -409,12 +409,10 @@ pub fn verify_chain_with_authority(
     roots.add(authorities[0].clone()).map_err(|error| {
         TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}"))
     })?;
-    let verifier = WebPkiServerVerifier::builder_with_provider(
-        Arc::new(roots),
-        Arc::new(rustls::crypto::ring::default_provider()),
-    )
-    .build()
-    .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
+    let verifier =
+        WebPkiServerVerifier::builder_with_provider(Arc::new(roots), installed_tls_provider()?)
+            .build()
+            .map_err(|error| TrustError::Tls(format!("build domain-cert verifier: {error}")))?;
     let server_name = ServerName::try_from(host.to_string())
         .map_err(|_| TrustError::Invalid("host is not a valid TLS server name".to_string()))?;
     let leaf = CertificateDer::from(presented.leaf_der.clone());
@@ -443,6 +441,16 @@ pub fn verify_chain_with_authority(
             ))
         })?;
     Ok(())
+}
+
+fn installed_tls_provider() -> Result<Arc<rustls::crypto::CryptoProvider>, TrustError> {
+    rustls::crypto::CryptoProvider::get_default()
+        .cloned()
+        .ok_or_else(|| {
+            TrustError::Tls(
+                "DASObjectStore TLS crypto provider is not installed by the executable".to_string(),
+            )
+        })
 }
 
 fn existing_certificate_der(pem: &str) -> Option<Vec<u8>> {
@@ -948,11 +956,16 @@ mod tests {
     use super::{
         ca_validated_replacement, canonical_fingerprint, expected_fingerprint_matches,
         inspect_certificate_chain, inspect_leaf_certificate, new_trust_record, parse_fingerprint,
-        remove_trust_if_current, replace_trust_if_current,
+        probe_certificate, remove_trust_if_current, replace_trust_if_current,
         replace_verified_identity_trust_if_current,
     };
     use rcgen::{BasicConstraints, CertificateParams, IsCa, Issuer, KeyPair};
     use std::fs;
+    use std::io::{ErrorKind, Read};
+    use std::net::TcpListener;
+    use std::sync::{mpsc, Arc};
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn parses_colon_and_compact_fingerprints() {
@@ -1131,5 +1144,60 @@ mod tests {
             inspect_leaf_certificate("192.168.1.192", generated.cert.der().as_ref()).unwrap();
         assert!(!presented.address_matches_certificate);
         assert_eq!(presented.tls_server_name.as_deref(), Some("localhost"));
+    }
+
+    #[test]
+    fn capture_only_probe_uses_tls13_and_sends_no_application_bytes() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let certificate = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+            .expect("generate TLS fixture certificate");
+        let server =
+            rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(
+                    vec![rustls::pki_types::CertificateDer::from(
+                        certificate.cert.der().to_vec(),
+                    )],
+                    rustls::pki_types::PrivatePkcs8KeyDer::from(
+                        certificate.signing_key.serialize_der(),
+                    )
+                    .into(),
+                )
+                .expect("construct TLS 1.3 server");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind TLS fixture");
+        let port = listener.local_addr().expect("fixture address").port();
+        let (result_sender, result_receiver) = mpsc::channel();
+        let server = Arc::new(server);
+        let server_task = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept TLS probe");
+            stream
+                .set_read_timeout(Some(Duration::from_millis(250)))
+                .expect("set timeout");
+            let mut connection = rustls::ServerConnection::new(server).expect("start TLS");
+            while connection.is_handshaking() {
+                connection
+                    .complete_io(&mut stream)
+                    .expect("complete TLS handshake");
+            }
+            let mut byte = [0_u8; 1];
+            result_sender
+                .send(stream.read(&mut byte))
+                .expect("send application-byte observation");
+        });
+
+        let presented = probe_certificate("127.0.0.1", port).expect("capture-only probe");
+        assert!(presented.address_matches_certificate);
+        let application_read = result_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("fixture observation");
+        assert!(
+            match &application_read {
+                Ok(0) => true,
+                Err(error) => matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut),
+                Ok(_) => false,
+            },
+            "capture-only probe sent TLS application data: {application_read:?}"
+        );
+        server_task.join().expect("TLS fixture joins");
     }
 }
