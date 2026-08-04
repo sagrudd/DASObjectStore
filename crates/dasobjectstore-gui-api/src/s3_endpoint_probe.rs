@@ -319,12 +319,11 @@ mod tests {
         ))
         .expect("parse private key")
         .expect("private key is present");
-        let server = rustls::ServerConfig::builder_with_protocol_versions(&[
-            &rustls::version::TLS13,
-        ])
-        .with_no_client_auth()
-        .with_single_cert(certificates, private_key)
-        .expect("construct TLS 1.3 fixture");
+        let server =
+            rustls::ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                .with_no_client_auth()
+                .with_single_cert(certificates, private_key)
+                .expect("construct TLS 1.3 fixture");
         let tls = RustlsConfig::from_config(Arc::new(server));
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
         let address = listener.local_addr().expect("address");

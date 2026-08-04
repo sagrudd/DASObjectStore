@@ -13,7 +13,10 @@ agreement before landing.
   the complete Jenkins graph, subprocess, TLS and provenance dossier exists.
   The local S3 corpus now uses an explicit disposable TLS 1.3 fixture and
   proves that its read-only probe sends no Authorization credential and exactly
-  one protocol request; this is partial evidence only, not release acceptance.
+  one protocol request. The local corpus also rejects a TLS 1.3 client
+  certificate from another CA and proves that certificate capture completes no
+  application-data exchange; this is partial evidence only, not release
+  acceptance.
 
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
