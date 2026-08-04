@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Jenkins qualification helper for ADR-0001/0006; it performs no deployment.
+# It verifies the locked dependency graph only. Runtime TLS and subprocess
+# ownership evidence remain separate required qualification corpus entries.
 set -euo pipefail
 
 output=${RUSTLS_PROVIDER_GRAPH_OUTPUT:-/tmp/dasobjectstore-rustls-provider-feature-tree.txt}
-tree=$(cargo tree --locked --workspace --all-targets --edges normal,build,dev -e features)
+tree=$(cargo tree --locked --workspace --target all --edges normal,build,dev -e features)
 printf '%s\n' "$tree" > "$output"
 
 for forbidden in 'rustls feature "ring"' 'rustls feature "custom-provider"' 'rustls feature "fips"' 'rustls feature "logging"'; do
