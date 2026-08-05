@@ -654,6 +654,45 @@ fn rpm_post_requires_profile_marker_before_repairing_existing_trees() {
     );
 }
 
+#[test]
+fn package_scripts_never_auto_activate_the_operator_gated_s3_gateway() {
+    for script in [POSTINST, BUILD_RPM] {
+        assert_no_automatic_unit_activation(script, "dasobjectstore-s3-gateway.service");
+    }
+
+    // The guard must detect a future accidental lifecycle activation while
+    // allowing the current legacy-service assertions to remain explicit until
+    // the Monas-only package migration removes them.
+    assert_no_automatic_unit_activation(
+        "systemctl enable --now dasobjectstored.service",
+        "dasobjectstore-s3-gateway.service",
+    );
+    let accidental = "systemctl enable --now dasobjectstore-s3-gateway.service";
+    assert!(unit_activation_is_automatic(
+        accidental,
+        "dasobjectstore-s3-gateway.service"
+    ));
+}
+
+fn assert_no_automatic_unit_activation(script: &str, unit: &str) {
+    assert!(
+        !unit_activation_is_automatic(script, unit),
+        "package lifecycle must not automatically activate operator-gated unit `{unit}`"
+    );
+}
+
+fn unit_activation_is_automatic(script: &str, unit: &str) -> bool {
+    let normalized = script.replace("\\\n", " ");
+    normalized.lines().any(|line| {
+        let line = line.trim();
+        line.contains("systemctl")
+            && line.contains(unit)
+            && ["enable --now", "enable", "start", "restart", "try-restart"]
+                .iter()
+                .any(|operation| line.contains(operation))
+    })
+}
+
 fn assert_contains(haystack: &str, needle: &str) {
     assert!(
         haystack.contains(needle),
