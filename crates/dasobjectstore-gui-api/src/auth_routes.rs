@@ -778,6 +778,33 @@ async fn preverified_host_update_object_store_ingest_policy(
         .map(Json)
 }
 
+/// Test a registered endpoint for a host actor already verified by Pistis.
+///
+/// This state carries only the daemon client and priority bridge. Authority
+/// derives exclusively from the matching verified host subject and closed DAS
+/// role policy, never a local session, password, PAM result, or OS identity.
+async fn preverified_host_test_endpoint_connection(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<EndpointConnectionTestRequest>,
+) -> Result<Json<StandaloneEndpointConnectionTestResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let request = dasobjectstore_daemon::TestEndpointConnectionRequest {
+        endpoint_id: request.endpoint_id,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_endpoint_connection_test",
+            error.to_string(),
+        )
+    })?;
+    submit_preverified_host_endpoint_connection_test_request(&state, request)
+        .await
+        .map(Json)
+}
+
 fn require_preverified_host_administrator(
     actor: &AuthenticatedGuiActor,
     verified: &VerifiedHostAuthenticatedContext,
@@ -831,6 +858,23 @@ async fn submit_preverified_host_ingest_policy_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_policy_update_failed"))
+}
+
+async fn submit_preverified_host_endpoint_connection_test_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::TestEndpointConnectionRequest,
+) -> Result<StandaloneEndpointConnectionTestResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .test_endpoint_connection(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "endpoint_connection_test_failed"))
 }
 
 async fn upsert_endpoint_inventory(
@@ -1078,7 +1122,8 @@ mod tests {
         DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
         DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
         DaemonUpsertEndpointInventoryRequest, EasyconnectBrowserApprovalIntent,
-        EndpointBindingUpsertRequest, EndpointInventoryUpsertRequest,
+        EndpointBindingUpsertRequest, EndpointConnectionTestRequest,
+        EndpointInventoryUpsertRequest,
         EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
         IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
         LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
@@ -1092,6 +1137,7 @@ mod tests {
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
         StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
         StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
+        StandaloneEndpointConnectionTestResponse,
         StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
         StandaloneIngestControlDaemonRequest, StandaloneLocalGroupAdminAcceptedResponse,
         StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
@@ -3419,6 +3465,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_endpoint_test_requires_pistis_administrator_and_uses_daemon_bridge() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/endpoints/test")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EndpointConnectionTestRequest {
+                    endpoint_id: "archive-nfs".to_string(),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.endpoint_connection_test_requests(),
+            vec![dasobjectstore_daemon::TestEndpointConnectionRequest {
+                endpoint_id: "archive-nfs".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_endpoint_test_rejects_non_administrator_before_daemon_call() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/endpoints/test")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EndpointConnectionTestRequest {
+                    endpoint_id: "archive-nfs".to_string(),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.endpoint_connection_test_requests().is_empty());
+    }
+
+    #[tokio::test]
     async fn ingest_control_forwards_authenticated_admin_action() {
         let root = temp_root("objectstore-ingest-control-forward");
         let auth_store = registered_auth_store(&root);
@@ -4421,6 +4536,8 @@ mod tests {
         create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
         ingest_policy_requests: Mutex<Vec<DaemonUpdateObjectStoreIngestPolicyRequest>>,
         endpoint_inventory_requests: Mutex<Vec<DaemonUpsertEndpointInventoryRequest>>,
+        endpoint_connection_test_requests:
+            Mutex<Vec<dasobjectstore_daemon::TestEndpointConnectionRequest>>,
         status_requests: Mutex<Vec<StandaloneAdminJobStatusDaemonRequest>>,
         cancel_requests: Mutex<Vec<StandaloneAdminJobCancelDaemonRequest>>,
         fail_message: Option<String>,
@@ -4449,6 +4566,15 @@ mod tests {
             self.ingest_policy_requests
                 .lock()
                 .expect("ingest policy requests lock")
+                .clone()
+        }
+
+        fn endpoint_connection_test_requests(
+            &self,
+        ) -> Vec<dasobjectstore_daemon::TestEndpointConnectionRequest> {
+            self.endpoint_connection_test_requests
+                .lock()
+                .expect("endpoint connection test requests lock")
                 .clone()
         }
 
@@ -4617,6 +4743,31 @@ mod tests {
             })
         }
 
+        fn test_endpoint_connection(
+            &self,
+            request: dasobjectstore_daemon::TestEndpointConnectionRequest,
+        ) -> Result<StandaloneEndpointConnectionTestResponse, StandaloneEnclosureAdminClientError> {
+            if let Some(message) = &self.fail_message {
+                return Err(StandaloneEnclosureAdminClientError {
+                    message: message.clone(),
+                });
+            }
+            self.endpoint_connection_test_requests
+                .lock()
+                .expect("endpoint connection test requests lock")
+                .push(request.clone());
+            Ok(StandaloneEndpointConnectionTestResponse {
+                schema_version: "dasobjectstore.endpoint-connection-test.v1".to_string(),
+                endpoint_id: request.endpoint_id,
+                kind: "dasobjectstore_nfs".to_string(),
+                state: "reachable".to_string(),
+                checked_at_utc: "2026-08-05T00:00:00Z".to_string(),
+                duration_ms: 1,
+                retryable: false,
+                evidence: Vec::new(),
+            })
+        }
+
         fn job_status(
             &self,
             request: StandaloneAdminJobStatusDaemonRequest,
@@ -4673,6 +4824,7 @@ mod tests {
             create_object_store_requests: Mutex::new(Vec::new()),
             ingest_policy_requests: Mutex::new(Vec::new()),
             endpoint_inventory_requests: Mutex::new(Vec::new()),
+            endpoint_connection_test_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),
             cancel_requests: Mutex::new(Vec::new()),
             fail_message: Some(message.to_string()),
