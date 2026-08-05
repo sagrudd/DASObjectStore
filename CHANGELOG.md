@@ -8,6 +8,13 @@ agreement before landing.
 
 ## Unreleased
 
+- Release 0.157.4 with a packaging-only systemd compatibility correction.
+  Remove the obsolete `CPUAccounting=` directive from both daemon service
+  units; contemporary systemd ignores it and emits a warning. Memory and I/O
+  accounting, service identity, paths, storage policy, authentication, and
+  runtime behaviour are unchanged. This source change does not install a
+  package, restart a service, or alter mounted data.
+
 - Release 0.157.3 adds a pure, fail-closed retained-Jenkins-dossier DAS
   prerequisite verifier. It binds one immutable Jenkins revision, exact
   `EvidenceRefV1`, byte count, and SHA-256 read-back comparison without a

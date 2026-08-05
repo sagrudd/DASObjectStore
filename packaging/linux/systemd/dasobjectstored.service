@@ -8,7 +8,6 @@ Type=simple
 Slice=dasobjectstore-storage.slice
 User=dasobjectstore
 Group=dasobjectstore
-CPUAccounting=true
 MemoryAccounting=true
 IOAccounting=true
 OOMScoreAdjust=100

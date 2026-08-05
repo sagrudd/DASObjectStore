@@ -293,7 +293,7 @@ fn systemd_service_uses_packaged_identity_and_paths() {
     assert_contains(SERVICE, LINUX_DAEMON_LOG_DIR);
     assert_contains(SERVICE, "ProtectHome=read-only");
     assert_contains(SERVICE, "Slice=dasobjectstore-storage.slice");
-    assert_contains(SERVICE, "CPUAccounting=true");
+    assert_not_contains(SERVICE, "CPUAccounting=");
     assert_contains(SERVICE, "MemoryAccounting=true");
     assert_contains(SERVICE, "IOAccounting=true");
 }
@@ -658,5 +658,12 @@ fn assert_contains(haystack: &str, needle: &str) {
     assert!(
         haystack.contains(needle),
         "expected package asset to contain `{needle}`"
+    );
+}
+
+fn assert_not_contains(haystack: &str, needle: &str) {
+    assert!(
+        !haystack.contains(needle),
+        "package asset must not contain `{needle}`"
     );
 }
