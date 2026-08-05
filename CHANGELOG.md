@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.18] - 2026-08-05
+
+### Security
+
+- Migrate the host-composed ObjectStore ingest-policy mutation to the verified
+  Pistis boundary. The route requires a matching verified subject and the
+  closed `storage_administrator` role, records that subject for the daemon,
+  and uses only the bounded priority daemon bridge.
+
 ## [0.157.17] - 2026-08-05
 
 ### Security
