@@ -218,6 +218,17 @@ pub(crate) struct StandaloneEnclosureAdminRouteState {
     priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
+/// Host-composed administrator mutation state.
+///
+/// This deliberately carries only the bounded daemon client and priority
+/// bridge required by the migrated routes.  It has no local session store,
+/// user lookup, password, PAM, group, or sudo authority.
+#[derive(Clone)]
+pub(crate) struct PreverifiedHostAdminRouteState {
+    enclosure_admin_client: Arc<dyn StandaloneEnclosureAdminClient>,
+    priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
+}
+
 #[derive(Clone)]
 pub(crate) struct StandaloneReportingRouteState {
     auth_store: LocalAuthStore,
@@ -234,6 +245,17 @@ impl StandaloneEnclosureAdminRouteState {
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             )),
             daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_packaged(),
+            priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
+        }
+    }
+}
+
+impl PreverifiedHostAdminRouteState {
+    pub(crate) fn packaged() -> Self {
+        Self {
+            enclosure_admin_client: Arc::new(
+                DaemonStandaloneEnclosureAdminClient::default_packaged(),
+            ),
             priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
         }
     }
@@ -730,10 +752,36 @@ async fn control_ingest(
 /// context and the closed DAS administrator role are both required before the
 /// request can reach the priority daemon bridge.
 async fn preverified_host_control_ingest(
+    State(state): State<PreverifiedHostAdminRouteState>,
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
     Json(request): Json<IngestControlRequest>,
 ) -> Result<Json<IngestControlResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let request = validate_ingest_control_request(request)?;
+    submit_preverified_host_ingest_control_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_update_object_store_ingest_policy(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<ObjectStoreIngestPolicyRequest>,
+) -> Result<Json<StandaloneObjectStoreIngestPolicyResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_object_store_ingest_policy_request(request)?;
+    request.administrator_actor = Some(actor.subject_id);
+    submit_preverified_host_ingest_policy_request(&state, request)
+        .await
+        .map(Json)
+}
+
+fn require_preverified_host_administrator(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
     if actor.subject_id != verified.context().subject_id {
         return Err(route_error(
             StatusCode::FORBIDDEN,
@@ -741,24 +789,24 @@ async fn preverified_host_control_ingest(
             "the supplied host actor does not match the verified Pistis context",
         ));
     }
-    if !DasRolePolicy::from_verified(&verified).permits(DasCapability::Administer) {
+    if !DasRolePolicy::from_verified(verified).permits(DasCapability::Administer) {
         return Err(route_error(
             StatusCode::FORBIDDEN,
             "host_administrator_role_required",
-            "a verified DAS storage_administrator role is required for ingest control",
+            "a verified DAS storage_administrator role is required for this operation",
         ));
     }
-    let request = validate_ingest_control_request(request)?;
-    submit_preverified_host_ingest_control_request(request)
-        .await
-        .map(Json)
+    Ok(())
 }
 
 async fn submit_preverified_host_ingest_control_request(
+    state: &PreverifiedHostAdminRouteState,
     request: StandaloneIngestControlDaemonRequest,
 ) -> Result<IngestControlResponse, (StatusCode, Json<AuthRouteError>)> {
-    let client = DaemonStandaloneEnclosureAdminClient::default_packaged();
-    crate::daemon_bridge::DaemonBridge::shared_priority_packaged()
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
         .call_message(move || {
             client
                 .submit_ingest_control(request)
@@ -766,6 +814,23 @@ async fn submit_preverified_host_ingest_control_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
+}
+
+async fn submit_preverified_host_ingest_policy_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: DaemonUpdateObjectStoreIngestPolicyRequest,
+) -> Result<StandaloneObjectStoreIngestPolicyResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_update_object_store_ingest_policy(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_policy_update_failed"))
 }
 
 async fn upsert_endpoint_inventory(
@@ -1017,11 +1082,11 @@ mod tests {
         EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
         IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
         LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, RegisterRequest,
-        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
-        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
-        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
-        StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, PreverifiedHostAdminRouteState,
+        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
+        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
+        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
+        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
@@ -3272,6 +3337,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_ingest_policy_requires_pistis_administrator_and_records_subject() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/object-stores/ingest-policy")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&ObjectStoreIngestPolicyRequest {
+                    store_id: "zymo".to_string(),
+                    ingest_mode: "direct_to_hdd".to_string(),
+                    dry_run: true,
+                    client_request_id: Some("preverified-policy-1".to_string()),
+                    confirmation_marker: Some("confirm direct hdd ingest".to_string()),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.ingest_policy_requests(),
+            vec![DaemonUpdateObjectStoreIngestPolicyRequest {
+                store_id: "zymo".to_string(),
+                ingest_mode: "direct_to_hdd".to_string(),
+                dry_run: true,
+                client_request_id: Some("preverified-policy-1".to_string()),
+                administrator_actor: Some("principal-1".to_string()),
+                confirmation_marker: "confirm direct hdd ingest".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_ingest_policy_rejects_non_administrator_before_daemon_call() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/object-stores/ingest-policy")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&ObjectStoreIngestPolicyRequest {
+                    store_id: "zymo".to_string(),
+                    ingest_mode: "direct_to_hdd".to_string(),
+                    dry_run: true,
+                    client_request_id: Some("preverified-policy-2".to_string()),
+                    confirmation_marker: Some("confirm direct hdd ingest".to_string()),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.ingest_policy_requests().is_empty());
+    }
+
+    #[tokio::test]
     async fn ingest_control_forwards_authenticated_admin_action() {
         let root = temp_root("objectstore-ingest-control-forward");
         let auth_store = registered_auth_store(&root);
@@ -4023,6 +4170,35 @@ mod tests {
             .await
             .expect("body bytes");
         serde_json::from_slice(&bytes).expect("response decodes")
+    }
+
+    fn verified_host_context(role: &str) -> crate::VerifiedHostAuthenticatedContext {
+        struct LiveVerifier;
+
+        impl HostAuthenticationContextVerifier for LiveVerifier {
+            fn verify_live_session(&self, _: &HostAuthenticatedContext) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        crate::accept_host_authenticated_context(
+            HostAuthenticatedContext {
+                schema_version: HOST_AUTH_CONTEXT_SCHEMA_VERSION.to_owned(),
+                authority: HostAuthenticationAuthority::MonasStandalone,
+                issuer: "monas".to_owned(),
+                audience: HOST_AUTH_AUDIENCE.to_owned(),
+                subject_id: "principal-1".to_owned(),
+                session_id: "session-1".to_owned(),
+                roles: vec![role.to_owned()],
+                issued_at_unix_seconds: 1_900,
+                expires_at_unix_seconds: 2_500,
+                correlation_id: "correlation-1".to_owned(),
+                csrf_binding_sha256: format!("sha256:{}", "a".repeat(64)),
+            },
+            2_000,
+            &LiveVerifier,
+        )
+        .expect("context is verified")
     }
 
     fn test_users_groups_state(
