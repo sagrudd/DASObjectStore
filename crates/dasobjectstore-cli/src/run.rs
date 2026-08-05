@@ -4064,9 +4064,7 @@ mod tests {
             "--endpoint-url",
             "https://appliance.local:3900",
             "--auth",
-            "local-password",
-            "--username",
-            "alice",
+            "mneion",
             "--json",
             "--registry-path",
             registry_path.to_str().expect("utf8 registry path"),
@@ -4078,8 +4076,7 @@ mod tests {
 
         let output: serde_json::Value =
             serde_json::from_slice(&output).expect("s3-upload output is json");
-        assert_eq!(output["auth_authority"], "local_password");
-        assert_eq!(output["username"], "alice");
+        assert_eq!(output["auth_authority"], "mneion");
         assert_eq!(output["bucket_name"], "dos-generated-data");
         assert!(output["aws_s3api_put_object_command"]
             .as_str()

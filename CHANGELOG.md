@@ -8,6 +8,9 @@
   administrators can control ingest only through the bounded priority daemon
   bridge. The route accepts no local credential, PAM result, password, POSIX
   user/group, or sudo-derived authority.
+- Retire the remote S3 upload planner's `local-password` authority and
+  `--username` input. The CLI now accepts only the site-authority path and
+  rejects obsolete local-password selections without a fallback.
 
 ## [0.157.14] - 2026-08-05
 

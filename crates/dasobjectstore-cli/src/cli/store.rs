@@ -634,13 +634,11 @@ impl FromStr for StoreContentsTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
 pub(crate) enum StoreS3UploadAuth {
     Mneion,
-    LocalPassword,
 }
 impl From<StoreS3UploadAuth> for RemoteS3AuthAuthority {
     fn from(value: StoreS3UploadAuth) -> Self {
         match value {
             StoreS3UploadAuth::Mneion => Self::Mneion,
-            StoreS3UploadAuth::LocalPassword => Self::LocalPassword,
         }
     }
 }
@@ -664,9 +662,6 @@ pub(crate) struct StoreS3UploadArgs {
     /// Authority that manages remote S3 credential issuance.
     #[arg(long, value_enum, default_value_t = StoreS3UploadAuth::Mneion)]
     auth: StoreS3UploadAuth,
-    /// Local appliance user for --auth local-password.
-    #[arg(long)]
-    username: Option<String>,
     /// Emit the remote upload plan as JSON.
     #[arg(long)]
     json: bool,
@@ -692,9 +687,6 @@ impl StoreS3UploadArgs {
     }
     pub(crate) fn auth(&self) -> StoreS3UploadAuth {
         self.auth
-    }
-    pub(crate) fn username(&self) -> Option<&str> {
-        self.username.as_deref()
     }
     pub(crate) fn json(&self) -> bool {
         self.json
@@ -1597,9 +1589,7 @@ mod tests {
             "--profile",
             "generated",
             "--auth",
-            "local-password",
-            "--username",
-            "alice",
+            "mneion",
             "--json",
         ])
         .expect("store s3-upload parses");
@@ -1613,13 +1603,29 @@ mod tests {
                 assert_eq!(upload.bucket(), None);
                 assert_eq!(upload.region(), "garage");
                 assert_eq!(upload.profile(), Some("generated"));
-                assert_eq!(upload.auth(), StoreS3UploadAuth::LocalPassword);
-                assert_eq!(upload.username(), Some("alice"));
+                assert_eq!(upload.auth(), StoreS3UploadAuth::Mneion);
                 assert!(upload.json());
                 assert_eq!(upload.registry_path(), None);
             }
             _ => panic!("expected s3-upload command"),
         }
+    }
+
+    #[test]
+    fn rejects_local_password_s3_upload_authority() {
+        let error = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "s3-upload",
+            "generated-data",
+            "--endpoint-url",
+            "https://dos.example.test:3900",
+            "--auth",
+            "local-password",
+        ])
+        .expect_err("retired authority must not parse");
+
+        assert!(error.to_string().contains("local-password"));
     }
 
     #[test]
