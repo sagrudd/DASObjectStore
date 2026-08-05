@@ -826,6 +826,45 @@ async fn preverified_host_upsert_endpoint_inventory(
         .map(Json)
 }
 
+/// Read an administrator job for a host actor already verified by Pistis.
+///
+/// Job state is operational data: it is never inferred from a local session,
+/// password, PAM result, POSIX group, or sudo policy.  The matching verified
+/// subject and closed DAS administrator role are required before the daemon
+/// bridge is invoked.
+async fn preverified_host_admin_job_status(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Path(job_id): Path<String>,
+) -> Result<Json<StandaloneAdminJobStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let request = StandaloneAdminJobStatusDaemonRequest {
+        job_id: required_field("job_id", job_id)?,
+    };
+    submit_preverified_host_admin_job_status_request(&state, request)
+        .await
+        .map(Json)
+}
+
+/// Cancel an administrator job for a host actor already verified by Pistis.
+///
+/// Cancellation remains a priority daemon operation, but its authority is
+/// exclusively the verified Pistis administrator context.
+async fn preverified_host_cancel_admin_job(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Path(job_id): Path<String>,
+    Json(request): Json<CancelAdminJobRequest>,
+) -> Result<Json<StandaloneAdminJobCancelResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let request = validate_cancel_admin_job_request(job_id, request)?;
+    submit_preverified_host_admin_job_cancel_request(&state, request)
+        .await
+        .map(Json)
+}
+
 fn require_preverified_host_administrator(
     actor: &AuthenticatedGuiActor,
     verified: &VerifiedHostAuthenticatedContext,
@@ -917,6 +956,32 @@ async fn submit_preverified_host_endpoint_inventory_upsert_request(
         .map_err(|error| {
             admin_daemon_bridge_error_with_code(error, "endpoint_inventory_upsert_failed")
         })
+}
+
+async fn submit_preverified_host_admin_job_status_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: StandaloneAdminJobStatusDaemonRequest,
+) -> Result<StandaloneAdminJobStatusResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.job_status(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "admin_job_status_failed"))
+}
+
+async fn submit_preverified_host_admin_job_cancel_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: StandaloneAdminJobCancelDaemonRequest,
+) -> Result<StandaloneAdminJobCancelResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.cancel_job(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "admin_job_cancel_failed"))
 }
 
 async fn upsert_endpoint_inventory(
@@ -3636,6 +3701,107 @@ mod tests {
             "host_administrator_role_required"
         );
         assert!(client.endpoint_inventory_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_admin_job_status_requires_pistis_administrator_and_uses_daemon_bridge(
+    ) {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .uri("/api/v1/workspaces/admin/jobs/enclosure-prepare-1")
+            .extension(verified_host_context("storage_administrator"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.status_requests(),
+            vec![StandaloneAdminJobStatusDaemonRequest {
+                job_id: "enclosure-prepare-1".to_string(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_admin_job_cancellation_rejects_non_administrator_before_daemon_call()
+    {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CancelAdminJobRequest {
+                    reason: Some("operator requested cancellation".to_string()),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.cancel_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_admin_job_cancellation_uses_pistis_administrator_and_priority_bridge()
+    {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/admin/jobs/enclosure-prepare-1/cancel")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CancelAdminJobRequest {
+                    reason: Some("operator requested cancellation".to_string()),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.cancel_requests(),
+            vec![StandaloneAdminJobCancelDaemonRequest {
+                job_id: "enclosure-prepare-1".to_string(),
+                reason: Some("operator requested cancellation".to_string()),
+            }]
+        );
     }
 
     #[tokio::test]

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.21] - 2026-08-05
+
+### Security
+
+- Migrate host-composed administrator job status and cancellation to the
+  verified Pistis boundary. Both operations require a matching verified
+  subject and closed `storage_administrator` role and use only the bounded
+  priority daemon bridge.
+
 ## [0.157.20] - 2026-08-05
 
 ### Security
