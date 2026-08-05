@@ -4,9 +4,9 @@
 
 ### Fixed
 
-- Make host-provided DAS Web routes the verified product fallback. This keeps
-  the mounted Web root reachable without unsupported root nesting while the
-  explicit DAS API routes retain priority.
+- Provide a separable verified host-Web router so an embedding product can
+  mount the DAS Web surface explicitly while retaining the same preverified
+  actor boundary as the DAS API.
 
 ## [0.157.13] - 2026-08-05
 
