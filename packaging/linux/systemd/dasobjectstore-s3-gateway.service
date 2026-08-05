@@ -1,0 +1,34 @@
+[Unit]
+Description=DASObjectStore authenticated S3 gateway
+Documentation=https://github.com/sagrudd/DASObjectStore
+Requires=dasobjectstored.service
+After=network-online.target dasobjectstored.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Slice=dasobjectstore-storage.slice
+User=dasobjectstore
+Group=dasobjectstore
+RuntimeDirectory=dasobjectstore
+RuntimeDirectoryMode=0750
+StateDirectory=dasobjectstore
+StateDirectoryMode=0750
+LogsDirectory=dasobjectstore
+LogsDirectoryMode=0750
+ConfigurationDirectory=dasobjectstore
+ConfigurationDirectoryMode=0750
+ExecStartPre=/usr/bin/dasobjectstore-s3-gateway --config /etc/dasobjectstore/s3-gateway.json --check-config
+ExecStart=/usr/bin/dasobjectstore-s3-gateway --config /etc/dasobjectstore/s3-gateway.json
+Restart=on-failure
+RestartSec=5s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadOnlyPaths=/opt/dasobjectstore/tls
+ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore
+
+# No install stanza: starting this listener is an explicit, manual
+# maintenance-window handover after the old port owner has been checked.

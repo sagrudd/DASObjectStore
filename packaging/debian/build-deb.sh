@@ -59,6 +59,8 @@ install -d \
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
+install -m 0755 "$repo_root/target/release/dasobjectstore-s3-gateway" \
+  "$build_root/usr/bin/dasobjectstore-s3-gateway"
 install -m 0755 "$repo_root/target/release/dasobjectstore-auth-migrate" \
   "$build_root/usr/bin/dasobjectstore-auth-migrate"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
@@ -78,6 +80,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
+install -m 0640 "$packaging_linux/etc/dasobjectstore/s3-gateway.json" \
+  "$build_root/etc/dasobjectstore/s3-gateway.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
   "$build_root/etc/dasobjectstore/workspace-host.json"
 install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
@@ -88,6 +92,8 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$build_root/lib/systemd/system/dasobjectstored.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
   "$build_root/lib/systemd/system/dasobjectstore-server.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-s3-gateway.service" \
+  "$build_root/lib/systemd/system/dasobjectstore-s3-gateway.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" \
   "$build_root/lib/systemd/system/dasobjectstore-source-access.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
@@ -110,6 +116,7 @@ install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"
 install -m 0755 "$packaging_debian/postrm" "$build_root/DEBIAN/postrm"
 printf '%s\n' '/opt/dasobjectstore/config.json' >"$build_root/DEBIAN/conffiles"
 printf '%s\n' '/etc/dasobjectstore/workspace-host.json' >>"$build_root/DEBIAN/conffiles"
+printf '%s\n' '/etc/dasobjectstore/s3-gateway.json' >>"$build_root/DEBIAN/conffiles"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
 das_package_normalize_tree "$build_root"

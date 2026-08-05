@@ -64,6 +64,8 @@ install -d \
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$payload_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$payload_root/usr/bin/dasobjectstore-server"
+install -m 0755 "$repo_root/target/release/dasobjectstore-s3-gateway" \
+  "$payload_root/usr/bin/dasobjectstore-s3-gateway"
 install -m 0755 "$repo_root/target/release/dasobjectstore-auth-migrate" \
   "$payload_root/usr/bin/dasobjectstore-auth-migrate"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
@@ -84,6 +86,8 @@ install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_nam
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
+install -m 0640 "$packaging_linux/etc/dasobjectstore/s3-gateway.json" \
+  "$payload_root/etc/dasobjectstore/s3-gateway.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
   "$payload_root/etc/dasobjectstore/workspace-host.json"
 install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
@@ -94,6 +98,8 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstored.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-server.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-s3-gateway.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-s3-gateway.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-source-access.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-source-access.path" \
@@ -385,12 +391,14 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
+%config(noreplace) /etc/dasobjectstore/s3-gateway.json
 %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /etc/pam.d/dasobjectstore
 %config(noreplace) /opt/dasobjectstore/config.json
 /opt/dasobjectstore/web
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
+/usr/bin/dasobjectstore-s3-gateway
 /usr/bin/dasobjectstore-auth-migrate
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
@@ -401,6 +409,7 @@ fi
 /usr/libexec/dasobjectstore/configure-external-mount-policy
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
+/usr/lib/systemd/system/dasobjectstore-s3-gateway.service
 /usr/lib/systemd/system/dasobjectstore-source-access.service
 /usr/lib/systemd/system/dasobjectstore-source-access.path
 /usr/lib/systemd/system/dasobjectstore-control.slice

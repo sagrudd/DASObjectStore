@@ -7,6 +7,8 @@ use dasobjectstore_daemon::{
 const SERVICE: &str = include_str!("../../../packaging/linux/systemd/dasobjectstored.service");
 const WEB_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-server.service");
+const S3_GATEWAY_SERVICE: &str =
+    include_str!("../../../packaging/linux/systemd/dasobjectstore-s3-gateway.service");
 const CONTROL_SLICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-control.slice");
 const STORAGE_SLICE: &str =
@@ -14,6 +16,8 @@ const STORAGE_SLICE: &str =
 const SYSUSERS: &str = include_str!("../../../packaging/linux/sysusers.d/dasobjectstore.conf");
 const TMPFILES: &str = include_str!("../../../packaging/linux/tmpfiles.d/dasobjectstore.conf");
 const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobjectstore/daemon.json");
+const S3_GATEWAY_CONFIG: &str =
+    include_str!("../../../packaging/linux/etc/dasobjectstore/s3-gateway.json");
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
 const PAM_SERVICE: &str = include_str!("../../../packaging/linux/pam.d/dasobjectstore");
 const REPORTING_WRAPPER: &str =
@@ -66,6 +70,31 @@ fn packaged_web_config_declares_disabled_production_mtls_listener() {
         mtls["application_key_registry_path"],
         "/var/lib/dasobjectstore/application-keys.json"
     );
+}
+
+#[test]
+fn packaged_s3_gateway_is_manual_and_fail_closed() {
+    let config: serde_json::Value =
+        serde_json::from_str(S3_GATEWAY_CONFIG).expect("S3 gateway config parses");
+    assert_eq!(config["port"], 3900);
+    assert_eq!(
+        config["certificate_path"],
+        "/opt/dasobjectstore/tls/server.crt"
+    );
+    assert_eq!(
+        config["private_key_path"],
+        "/opt/dasobjectstore/tls/server.key"
+    );
+    assert_contains(S3_GATEWAY_SERVICE, "Requires=dasobjectstored.service");
+    assert_contains(S3_GATEWAY_SERVICE, "NoNewPrivileges=true");
+    assert_contains(
+        S3_GATEWAY_SERVICE,
+        "ExecStart=/usr/bin/dasobjectstore-s3-gateway --config /etc/dasobjectstore/s3-gateway.json",
+    );
+    assert_not_contains(S3_GATEWAY_SERVICE, "[Install]");
+    for script in [POSTINST, PRERM, POSTRM, BUILD_RPM] {
+        assert_no_automatic_unit_activation(script, "dasobjectstore-s3-gateway.service");
+    }
 }
 
 #[test]
@@ -459,6 +488,7 @@ fn deb_build_installs_daemon_boundary_assets() {
         "dpkg-deb is required to build the DASObjectStore Debian package.",
     );
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
+    assert_contains(BUILD_DEB, "target/release/dasobjectstore-s3-gateway");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-local-auth-helper");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-auth-migrate");
@@ -474,6 +504,11 @@ fn deb_build_installs_daemon_boundary_assets() {
         BUILD_DEB,
         "lib/systemd/system/dasobjectstore-server.service",
     );
+    assert_contains(
+        BUILD_DEB,
+        "lib/systemd/system/dasobjectstore-s3-gateway.service",
+    );
+    assert_contains(BUILD_DEB, "etc/dasobjectstore/s3-gateway.json");
     assert_contains(BUILD_DEB, "opt/dasobjectstore/config.json");
     assert_contains(BUILD_DEB, "opt/dasobjectstore/web");
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
@@ -493,6 +528,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
+    assert_contains(BUILD_RPM, "target/release/dasobjectstore-s3-gateway");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-local-auth-helper");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-auth-migrate");
@@ -508,6 +544,11 @@ fn rpm_build_installs_daemon_boundary_assets() {
         BUILD_RPM,
         "usr/lib/systemd/system/dasobjectstore-server.service",
     );
+    assert_contains(
+        BUILD_RPM,
+        "usr/lib/systemd/system/dasobjectstore-s3-gateway.service",
+    );
+    assert_contains(BUILD_RPM, "etc/dasobjectstore/s3-gateway.json");
     assert_contains(BUILD_RPM, "opt/dasobjectstore/config.json");
     assert_contains(BUILD_RPM, "opt/dasobjectstore/web");
     assert_contains(BUILD_RPM, "Recommends:      awscli");
