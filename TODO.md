@@ -126,7 +126,10 @@ Work is dependency ordered. Only these entries define open release work:
   authority-bearing follow-on work remain explicitly out of scope.
   Atomic issuance/persistence, authenticated transport, action-time scope
   authorization, read-back, evidence-kind authority, restart recovery, and
-  Jenkins/Expedition qualification remain open and manual/fail-closed.
+  Jenkins/Expedition qualification remain open and manual/fail-closed. A
+  source-only retained-dossier prerequisite now makes a pinned Jenkins
+  revision, exact EvidenceRef, and supplied byte digest/size comparison
+  explicit; it is not a resolver, session, receipt, promotion, or dossier run.
 
 - [ ] Non-Garage providers, additional architecture parity beyond the approved
   platform tiers, and product-specific or experimental workload acceptance.
