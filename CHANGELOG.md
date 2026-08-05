@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.157.6] - 2026-08-05
+
+### Added
+
+- Add `dasobjectstore-s3-gateway`, a fail-closed dedicated TLS entrypoint for
+  the existing authenticated SigV4 data plane on port 3900. It accepts only an
+  explicit configuration and has no browser, user, password, or credential
+  issuance surface.
+
+### Security
+
+- Separate the future S3 service handover from retirement of the legacy Web
+  listener: the data plane remains available while Monas becomes the sole
+  Pistis-verified product UI authority.
+
 ## [0.157.5] - 2026-08-05
 
 ### Security
