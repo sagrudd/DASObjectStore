@@ -805,6 +805,27 @@ async fn preverified_host_test_endpoint_connection(
         .map(Json)
 }
 
+/// Record a validated endpoint inventory entry for a host actor already
+/// verified by Pistis.
+///
+/// The actor subject is recorded only after the verified-context and closed
+/// DAS administrator-role checks succeed.  Like the other host-composed
+/// mutations, this route has no local session, password, PAM, POSIX group, or
+/// sudo-derived authority.
+async fn preverified_host_upsert_endpoint_inventory(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<EndpointInventoryUpsertRequest>,
+) -> Result<Json<StandaloneEndpointInventoryUpsertResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_endpoint_inventory_upsert_request(request)?;
+    request.administrator_actor = Some(actor.subject_id);
+    submit_preverified_host_endpoint_inventory_upsert_request(&state, request)
+        .await
+        .map(Json)
+}
+
 fn require_preverified_host_administrator(
     actor: &AuthenticatedGuiActor,
     verified: &VerifiedHostAuthenticatedContext,
@@ -874,7 +895,28 @@ async fn submit_preverified_host_endpoint_connection_test_request(
                 .map_err(|error| error.message)
         })
         .await
-        .map_err(|error| admin_daemon_bridge_error_with_code(error, "endpoint_connection_test_failed"))
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "endpoint_connection_test_failed")
+        })
+}
+
+async fn submit_preverified_host_endpoint_inventory_upsert_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: DaemonUpsertEndpointInventoryRequest,
+) -> Result<StandaloneEndpointInventoryUpsertResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_endpoint_inventory_upsert(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "endpoint_inventory_upsert_failed")
+        })
 }
 
 async fn upsert_endpoint_inventory(
@@ -1123,29 +1165,29 @@ mod tests {
         DaemonIngestControlAction, DaemonUpdateObjectStoreIngestPolicyRequest,
         DaemonUpsertEndpointInventoryRequest, EasyconnectBrowserApprovalIntent,
         EndpointBindingUpsertRequest, EndpointConnectionTestRequest,
-        EndpointInventoryUpsertRequest,
-        EndpointValidationUpsertRequest, GuiApiHostMode, IngestControlAction, IngestControlRequest,
-        IngestControlResponse, LocalPasswordAuthenticator, LocalUserAuthorityProvider,
-        LoginRequest, LogoutRequest, ObjectStoreIngestPolicyRequest,
-        PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest, PreverifiedHostAdminRouteState,
-        RegisterRequest, RemoteAuthenticateRequest, SessionCheckRequest,
-        StandaloneAdminJobCancelDaemonRequest, StandaloneAdminJobCancelResponse,
-        StandaloneAdminJobProgress, StandaloneAdminJobStatusDaemonRequest,
-        StandaloneAdminJobStatusResponse, StandaloneAdminJobSummary, StandaloneAuthRouteState,
+        EndpointInventoryUpsertRequest, EndpointValidationUpsertRequest, GuiApiHostMode,
+        IngestControlAction, IngestControlRequest, IngestControlResponse,
+        LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
+        ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
+        PreverifiedHostAdminRouteState, RegisterRequest, RemoteAuthenticateRequest,
+        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
+        StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
+        StandaloneAdminJobSummary, StandaloneAuthRouteState,
         StandaloneCreateObjectStoreAcceptedResponse, StandaloneCreateObjectStoreResponse,
         StandaloneDashboardRouteState, StandaloneEasyconnectRouteState,
         StandaloneEnclosureAdminClient, StandaloneEnclosureAdminClientError,
         StandaloneEnclosureAdminRouteState, StandaloneEnclosurePrepareAcceptedResponse,
         StandaloneEnclosurePrepareDaemonRequest, StandaloneEnclosurePrepareResponse,
-        StandaloneEndpointConnectionTestResponse,
-        StandaloneEndpointInventoryAcceptedResponse, StandaloneEndpointInventoryUpsertResponse,
-        StandaloneIngestControlDaemonRequest, StandaloneLocalGroupAdminAcceptedResponse,
-        StandaloneLocalGroupAdminClient, StandaloneLocalGroupAdminClientError,
-        StandaloneLocalGroupAdminDaemonRequest, StandaloneLocalGroupAdminResponse,
-        StandaloneLocalGroupOperation, StandaloneObjectStoreIngestPolicyResponse,
-        StandaloneReportingRouteState, StandaloneUsersGroupsRouteState,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
-        LOCAL_ADMIN_CONFIRMATION_MARKER, OBJECT_STORE_CREATE_CONFIRMATION,
+        StandaloneEndpointConnectionTestResponse, StandaloneEndpointInventoryAcceptedResponse,
+        StandaloneEndpointInventoryUpsertResponse, StandaloneIngestControlDaemonRequest,
+        StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminClient,
+        StandaloneLocalGroupAdminClientError, StandaloneLocalGroupAdminDaemonRequest,
+        StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
+        StandaloneObjectStoreIngestPolicyResponse, StandaloneReportingRouteState,
+        StandaloneUsersGroupsRouteState, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, LOCAL_ADMIN_CONFIRMATION_MARKER,
+        OBJECT_STORE_CREATE_CONFIRMATION,
     };
     use crate::{
         AuthenticatedActorAuthority, AuthenticatedGuiActor, EasyconnectDaemonEndpoint,
@@ -3534,6 +3576,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_endpoint_upsert_requires_pistis_administrator_and_records_subject() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/endpoints/upsert")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&endpoint_inventory_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.endpoint_inventory_requests()[0]
+                .administrator_actor
+                .as_deref(),
+            Some("principal-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_endpoint_upsert_rejects_non_administrator_before_daemon_call() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/endpoints/upsert")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&endpoint_inventory_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.endpoint_inventory_requests().is_empty());
+    }
+
+    #[tokio::test]
     async fn ingest_control_forwards_authenticated_admin_action() {
         let root = temp_root("objectstore-ingest-control-forward");
         let auth_store = registered_auth_store(&root);
@@ -4746,7 +4851,8 @@ mod tests {
         fn test_endpoint_connection(
             &self,
             request: dasobjectstore_daemon::TestEndpointConnectionRequest,
-        ) -> Result<StandaloneEndpointConnectionTestResponse, StandaloneEnclosureAdminClientError> {
+        ) -> Result<StandaloneEndpointConnectionTestResponse, StandaloneEnclosureAdminClientError>
+        {
             if let Some(message) = &self.fail_message {
                 return Err(StandaloneEnclosureAdminClientError {
                     message: message.clone(),

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.20] - 2026-08-05
+
+### Security
+
+- Migrate host-composed endpoint-inventory upsert to the verified Pistis
+  boundary. The operation requires a matching verified subject and the closed
+  `storage_administrator` role, records that subject for the daemon, and uses
+  only the bounded priority bridge.
+
 ## [0.157.19] - 2026-08-05
 
 ### Security
