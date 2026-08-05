@@ -155,6 +155,10 @@ pub(super) fn preverified_host_operational_router_with_state(
             post(preverified_host_update_object_store_ingest_policy),
         )
         .route(
+            "/api/v1/workspaces/object-stores/create",
+            post(preverified_host_create_object_store),
+        )
+        .route(
             "/api/v1/workspaces/endpoints/test",
             post(preverified_host_test_endpoint_connection),
         )

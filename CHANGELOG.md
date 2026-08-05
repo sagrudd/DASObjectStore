@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.22] - 2026-08-05
+
+### Security
+
+- Migrate host-composed ObjectStore creation to the verified Pistis boundary.
+  Creation retains its explicit validation and confirmation marker, requires a
+  matching verified `storage_administrator`, records that subject for the
+  daemon, and uses only the bounded priority bridge.
+
 ## [0.157.21] - 2026-08-05
 
 ### Security
