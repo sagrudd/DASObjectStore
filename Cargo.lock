@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "axum",
  "axum-server",
@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "chrono",
  "dasobjectstore-reference",
@@ -786,7 +786,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "base64",
  "dasobjectstore-core",
@@ -806,7 +806,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "axum",
  "axum-server",
@@ -838,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "axum",
  "dasobjectstore-core",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "base64",
  "clap",
@@ -924,7 +924,6 @@ dependencies = [
  "dasobjectstore-daemon",
  "rcgen",
  "reqwest",
- "rpassword",
  "rustls",
  "rustls-pemfile",
  "serde",
@@ -937,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -947,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.157.16"
+version = "0.157.17"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -3165,27 +3164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rpassword"
-version = "7.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2da316a15f47e3d053de9cb2c439650bd8fa4aaeb9365f2e5f27f492ff73c196"
-dependencies = [
- "libc",
- "rtoolbox",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "rtoolbox"
-version = "0.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50a0e551c1e27e1731aba276dbeaeac73f53c7cd34d1bda485d02bd1e0f36844"
-dependencies = [
- "libc",
- "windows-sys 0.59.0",
-]
-
-[[package]]
 name = "rusqlite"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4361,15 +4339,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets",
 ]

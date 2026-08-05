@@ -2,11 +2,11 @@ use crate::auth::{
     request_s3_credentials, RemoteAuthAuthority, RemoteAuthError, RemoteS3Credentials,
 };
 use crate::authenticate::{
-    authenticate, prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
+    prepare_appliance_trust, RemoteAuthenticateError, RemoteConnectionContext,
 };
 use crate::aws_profile::{
     default_profile_name, install_profile, restore_profile_state, snapshot_profile_state,
-    status as s3_profile_status, AwsProfileAssociation, AwsProfileError,
+    status as s3_profile_status, AwsProfileError,
 };
 use crate::cli::{
     AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
