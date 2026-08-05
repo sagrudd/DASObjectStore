@@ -162,6 +162,14 @@ pub(super) fn preverified_host_operational_router_with_state(
             "/api/v1/workspaces/endpoints/upsert",
             post(preverified_host_upsert_endpoint_inventory),
         )
+        .route(
+            "/api/v1/workspaces/admin/jobs/{job_id}",
+            get(preverified_host_admin_job_status),
+        )
+        .route(
+            "/api/v1/workspaces/admin/jobs/{job_id}/cancel",
+            post(preverified_host_cancel_admin_job),
+        )
         .with_state(state)
 }
 
