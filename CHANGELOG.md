@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.7] - 2026-08-05
+
+### Security
+
+- Add the fail-closed DAS role-policy adapter. It derives the closed storage
+  viewer/operator/administrator hierarchy only from an already verified
+  Monas/Synoptikon host context; POSIX users, groups, sudo, headers, cookies,
+  passwords and local authentication stores grant no role.
+
 ## [0.157.6] - 2026-08-05
 
 ### Added
