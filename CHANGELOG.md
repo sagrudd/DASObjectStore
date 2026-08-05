@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.13] - 2026-08-05
+
+### Fixed
+
+- Restore supported host-route composition. Root-level router nesting is not
+  supported by Axum and must fail closed rather than become a product routing
+  dependency; Monas owns the product-root route correction.
+
 ## [0.157.12] - 2026-08-05
 
 ### Fixed
