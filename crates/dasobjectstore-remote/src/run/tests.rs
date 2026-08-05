@@ -1,11 +1,10 @@
 use super::{
-    authenticated_context_config, completion_object_version, daemon_job_progress_line,
-    parse_rfc3339_utc_seconds, plan_upload_with_credentials, remote_upload_session_expired,
-    resolve_upload_route, run, session_renewal_status, source_inventory,
-    submit_upload_plan_to_daemon, write_daemon_upload_response,
+    completion_object_version, daemon_job_progress_line, parse_rfc3339_utc_seconds,
+    plan_upload_with_credentials, remote_upload_session_expired, resolve_upload_route, run,
+    session_renewal_status, source_inventory, submit_upload_plan_to_daemon,
+    write_daemon_upload_response,
 };
 use crate::auth::RemoteAuthAuthority;
-use crate::authenticate::RemoteConnectionContext;
 use crate::cli::RemoteCli;
 use crate::config::REMOTE_CONFIG_SCHEMA_VERSION;
 use crate::config::{
@@ -46,6 +45,18 @@ fn retired_password_options_fail_before_any_remote_work() {
     .expect("legacy password option remains parseable for explicit remediation");
     let error = run(&cli, &mut Vec::new()).expect_err("retired option must fail closed");
     assert!(error.to_string().contains("--prompt-password is retired"));
+
+    let cli = RemoteCli::try_parse_from([
+        "dasobjectstore-remote",
+        "authenticate",
+        "unreachable.invalid",
+        "example-store",
+    ])
+    .expect("legacy bootstrap command remains parseable for remediation");
+    let error = run(&cli, &mut Vec::new()).expect_err("legacy bootstrap must fail closed");
+    assert!(error
+        .to_string()
+        .contains("password authentication is retired"));
 }
 
 #[test]
@@ -117,47 +128,6 @@ fn config_set_preserves_paired_appliance_storage() {
         config.paired_appliances[0].default_object_store.as_deref(),
         Some("zymo_fecal_2025.05")
     );
-}
-
-#[test]
-fn authentication_retires_obsolete_alias_and_appliance_session_generations() {
-    let mut config = paired_config();
-    let mut alias = config.session_bindings[0].clone();
-    alias.control_base_url = "https://das.local:8448".to_string();
-    alias.appliance_id = "standalone-dasobjectstore@2cb548dc079ab9f55d918bcc".to_string();
-    alias.session.session_id = "OBSOLETESESSION".to_string();
-    config.session_bindings.push(alias.clone());
-    let context = remote_connection_context("NEWSESSION");
-
-    let updated = authenticated_context_config(
-        config,
-        "stephen",
-        &context,
-        8448,
-        None,
-        "new-trust-fingerprint",
-        "new-trust-spki",
-    )
-    .expect("publish new session generation");
-
-    let matching = updated
-        .session_bindings
-        .iter()
-        .filter(|binding| {
-            binding.appliance_id == context.appliance_id && binding.store_id == context.object_store
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(matching.len(), 1);
-    assert_eq!(matching[0].session.session_id, "NEWSESSION");
-    assert_eq!(
-        matching[0].trust_fingerprint_sha256,
-        "new-trust-fingerprint"
-    );
-    assert_eq!(updated.session_bindings.len(), 1);
-    assert!(updated
-        .session_bindings
-        .iter()
-        .all(|binding| binding.appliance_id != alias.appliance_id));
 }
 
 #[test]
@@ -491,28 +461,6 @@ fn paired_config() -> RemoteConfig {
                 session,
             }],
         }
-}
-
-fn remote_connection_context(session_id: &str) -> RemoteConnectionContext {
-    RemoteConnectionContext {
-        schema_version: "dasobjectstore.remote_easyconnect.v1".to_string(),
-        appliance_id: "appliance-1".to_string(),
-        appliance_host: "192.168.1.192".to_string(),
-        endpoint_url: "https://192.168.1.192:3900".to_string(),
-        region: "garage".to_string(),
-        addressing_style: "path".to_string(),
-        object_store: "zymo_fecal_2025.05".to_string(),
-        bucket: "dos-zymo-fecal-2025-05".to_string(),
-        access_key_id: "DOSREMOTEACCESSKEYNEW".to_string(),
-        secret_access_key: "new-secret".to_string(),
-        session_token: Some("new-token".to_string()),
-        session_id: session_id.to_string(),
-        issued_at_utc: "2099-07-10T11:30:00Z".to_string(),
-        expires_at_utc: "2099-07-10T19:30:00Z".to_string(),
-        renew_url: "https://192.168.1.192:8448/renew/NEWSESSION".to_string(),
-        renew_after_utc: "2099-07-10T18:30:00Z".to_string(),
-        renewal_token: "new-renewal-token".to_string(),
-    }
 }
 
 fn daemon_upload_response() -> RemoteEasyconnectSubmitAwsCliUploadResponse {

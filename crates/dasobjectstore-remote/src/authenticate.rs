@@ -1,7 +1,6 @@
-//! HTTPS password authentication and scoped Garage connection context.
+//! Appliance trust and passwordless scoped Garage connection context.
 
 use dasobjectstore_daemon::RemoteEasyconnectDiscoveryResponse;
-use dasobjectstore_daemon::RemoteEasyconnectSession;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -11,54 +10,6 @@ use std::path::Path;
 use std::time::Duration;
 
 pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct RemoteAuthenticateRequest {
-    username: String,
-    password: String,
-    object_store: String,
-    requested_session_lifetime_seconds: Option<u64>,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct RemoteAuthenticateResponse {
-    schema_version: String,
-    appliance_id: String,
-    store_id: String,
-    s3: RemoteAuthenticatedS3Descriptor,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-struct RemoteAuthenticatedS3Descriptor {
-    #[serde(default)]
-    schema_version: String,
-    endpoint_url: String,
-    #[serde(default)]
-    scheme: String,
-    #[serde(default)]
-    host: String,
-    #[serde(default)]
-    port: u16,
-    bucket: String,
-    region: String,
-    addressing_style: String,
-    #[serde(default)]
-    tls: RemoteAuthenticatedS3TlsRequirements,
-    #[serde(default)]
-    credential_expires_at: String,
-    #[serde(default)]
-    capabilities: Vec<String>,
-    #[serde(default)]
-    endpoint_protocol_verified: bool,
-    session: RemoteEasyconnectSession,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-struct RemoteAuthenticatedS3TlsRequirements {
-    required: bool,
-    trust_mode: String,
-    ca_certificate_url: Option<String>,
-}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteConnectionContext {
@@ -321,137 +272,6 @@ where
     })
 }
 
-pub fn authenticate(
-    host: &str,
-    https_port: u16,
-    ca_certificate_pem: Option<&[u8]>,
-    tls_server_name: Option<&str>,
-    username: &str,
-    password: &str,
-    object_store: &str,
-    requested_session_lifetime_seconds: Option<u64>,
-) -> Result<RemoteConnectionContext, RemoteAuthenticateError> {
-    if local_password_authentication_retired() {
-        return Err(RemoteAuthenticateError::RetiredLocalPassword);
-    }
-    let host = normalize_host(host)?;
-    if https_port == 0 {
-        return Err(RemoteAuthenticateError::InvalidHost(
-            "HTTPS port must be greater than zero".to_string(),
-        ));
-    }
-    if username.trim().is_empty() || password.is_empty() || object_store.trim().is_empty() {
-        return Err(RemoteAuthenticateError::InvalidHost(
-            "username, password, and object store must not be blank".to_string(),
-        ));
-    }
-    if requested_session_lifetime_seconds.is_some_and(|seconds| !(60..=86_400).contains(&seconds)) {
-        return Err(RemoteAuthenticateError::InvalidHost(
-            "session lifetime must be between 60 and 86400 seconds".to_string(),
-        ));
-    }
-
-    let mut builder = Client::builder().timeout(Duration::from_secs(20));
-    let request_host = tls_server_name.unwrap_or(&host);
-    if let Some(tls_server_name) = tls_server_name {
-        if tls_server_name.trim().is_empty()
-            || tls_server_name.contains('/')
-            || tls_server_name.contains('@')
-            || tls_server_name.contains(' ')
-        {
-            return Err(RemoteAuthenticateError::InvalidHost(
-                "TLS server name must be a DNS name, not a URL or credential".to_string(),
-            ));
-        }
-        let socket = format!("{host}:{https_port}")
-            .to_socket_addrs()
-            .map_err(|error| {
-                RemoteAuthenticateError::Http(format!("resolve appliance host: {error}"))
-            })?
-            .next()
-            .ok_or_else(|| {
-                RemoteAuthenticateError::Http(
-                    "resolve appliance host returned no address".to_string(),
-                )
-            })?;
-        builder = builder.resolve(tls_server_name, socket);
-    }
-    if let Some(ca_certificate_pem) = ca_certificate_pem {
-        let certificate = reqwest::Certificate::from_pem(ca_certificate_pem).map_err(|error| {
-            RemoteAuthenticateError::Http(format!("read CA certificate: {error}"))
-        })?;
-        builder = builder.add_root_certificate(certificate);
-    }
-    let client = builder
-        .build()
-        .map_err(|error| RemoteAuthenticateError::Http(format!("build HTTPS client: {error}")))?;
-    let url = format!(
-        "https://{request_host}:{https_port}/products/dasobjectstore/api/v1/remote/authenticate"
-    );
-    let response = client
-        .post(url)
-        .json(&RemoteAuthenticateRequest {
-            username: username.to_string(),
-            password: password.to_string(),
-            object_store: object_store.to_string(),
-            requested_session_lifetime_seconds,
-        })
-        .send()
-        .map_err(|error| RemoteAuthenticateError::Http(request_error_message(error)))?;
-    let status = response.status();
-    if !status.is_success() {
-        let message = response
-            .json::<serde_json::Value>()
-            .ok()
-            .and_then(|body| {
-                let message = body.get("message").and_then(|value| value.as_str())?;
-                Some(
-                    body.get("code")
-                        .and_then(|value| value.as_str())
-                        .map(|code| format!("{code}: {message}"))
-                        .unwrap_or_else(|| message.to_string()),
-                )
-            })
-            .unwrap_or_else(|| "the appliance rejected the authentication request".to_string());
-        return Err(RemoteAuthenticateError::Server {
-            status: status.as_u16(),
-            message,
-        });
-    }
-    let response = response
-        .json::<RemoteAuthenticateResponse>()
-        .map_err(|error| {
-            RemoteAuthenticateError::Http(format!(
-                "invalid appliance authentication response: {error}"
-            ))
-        })?;
-    validate_descriptor(&response, object_store)?;
-    let s3 = response.s3;
-    Ok(RemoteConnectionContext {
-        schema_version: response.schema_version,
-        appliance_id: response.appliance_id,
-        appliance_host: host.clone(),
-        endpoint_url: s3.endpoint_url,
-        region: s3.region,
-        addressing_style: s3.addressing_style,
-        object_store: response.store_id,
-        bucket: s3.bucket,
-        access_key_id: s3.session.credentials.access_key_id,
-        secret_access_key: s3.session.credentials.secret_access_key,
-        session_token: s3.session.credentials.session_token,
-        session_id: s3.session.session_id,
-        issued_at_utc: s3.session.issued_at_utc,
-        expires_at_utc: s3.session.expires_at_utc,
-        renew_url: absolute_renew_url(&host, https_port, &s3.session.renewal.renew_url),
-        renew_after_utc: s3.session.renewal.renew_after_utc,
-        renewal_token: s3.session.renewal.renewal_token,
-    })
-}
-
-fn local_password_authentication_retired() -> bool {
-    true
-}
-
 pub fn discover_appliance_descriptor(
     host: &str,
     https_port: u16,
@@ -501,82 +321,6 @@ pub fn discover_appliance_descriptor(
     Ok(discovery)
 }
 
-fn validate_descriptor(
-    response: &RemoteAuthenticateResponse,
-    requested_store: &str,
-) -> Result<(), RemoteAuthenticateError> {
-    if response.appliance_id.trim().is_empty() {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance returned a blank canonical appliance identity".to_string(),
-        ));
-    }
-    if response.store_id != requested_store {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance returned an S3 descriptor for a different ObjectStore".to_string(),
-        ));
-    }
-    let s3 = &response.s3;
-    let endpoint = reqwest::Url::parse(&s3.endpoint_url).map_err(|_| {
-        RemoteAuthenticateError::Http("appliance returned a malformed S3 endpoint URL".to_string())
-    })?;
-    if !matches!(endpoint.scheme(), "http" | "https")
-        || endpoint.host_str().is_none()
-        || !endpoint.username().is_empty()
-        || endpoint.password().is_some()
-        || endpoint.query().is_some()
-        || endpoint.fragment().is_some()
-        || endpoint.path() != "/"
-    {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance S3 endpoint must be an HTTP(S) origin without credentials, path, query, or fragment".to_string(),
-        ));
-    }
-    if response.schema_version == "dasobjectstore.remote_authenticate.v4"
-        && (s3.schema_version != "dasobjectstore.authenticated_s3_endpoint.v1"
-            || s3.scheme != endpoint.scheme()
-            || endpoint.host_str() != Some(s3.host.as_str())
-            || endpoint.port_or_known_default() != Some(s3.port)
-            || !s3.endpoint_protocol_verified
-            || s3.credential_expires_at != s3.session.expires_at_utc
-            || s3.tls.required != (s3.scheme == "https")
-            || !matches!(
-                s3.tls.trust_mode.as_str(),
-                "plaintext" | "appliance_ca" | "system"
-            )
-            || (s3.scheme == "http" && s3.tls.trust_mode != "plaintext")
-            || (s3.scheme == "https"
-                && s3.tls.trust_mode == "appliance_ca"
-                && s3.tls.ca_certificate_url.is_none())
-            || !["list_objects_v2", "head_object"]
-                .iter()
-                .all(|required| s3.capabilities.iter().any(|value| value == required)))
-    {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance returned an inconsistent authoritative S3 endpoint descriptor".to_string(),
-        ));
-    }
-    if s3.bucket.trim().is_empty()
-        || s3.bucket.len() > 63
-        || s3.region.trim().is_empty()
-        || !matches!(s3.addressing_style.as_str(), "path" | "virtual")
-        || s3.session.credentials.access_key_id.trim().is_empty()
-        || s3.session.credentials.secret_access_key.is_empty()
-        || s3
-            .session
-            .credentials
-            .session_token
-            .as_deref()
-            .unwrap_or("")
-            .is_empty()
-        || s3.session.expires_at_utc.trim().is_empty()
-    {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance returned an incomplete or unsupported S3 connection descriptor".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
     let host = value
         .trim()
@@ -612,43 +356,9 @@ fn redact(value: &str) -> String {
     format!("{prefix}...redacted")
 }
 
-fn request_error_message(error: reqwest::Error) -> String {
-    let debug = format!("{error:?}").to_ascii_lowercase();
-    if debug.contains("certificate") || debug.contains("tls") {
-        return "HTTPS authentication failed during certificate verification; pass --ca-cert with the appliance certificate and --tls-server-name matching its certificate (the packaged appliance certificate commonly uses localhost)".to_string();
-    }
-    format!("HTTPS authentication request failed: {error}")
-}
-
-fn absolute_renew_url(host: &str, https_port: u16, path: &str) -> String {
-    if path.starts_with("http://") || path.starts_with("https://") {
-        return path.to_string();
-    }
-    format!("https://{host}:{https_port}/products/dasobjectstore{path}")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{authenticate, normalize_host, RemoteConnectionContext};
-
-    #[test]
-    fn local_password_authentication_is_retired_before_network_or_password_use() {
-        let error = authenticate(
-            "192.168.1.192",
-            8448,
-            None,
-            None,
-            "alice",
-            "not-a-password",
-            "research",
-            None,
-        )
-        .expect_err("the retired local-password transport must fail closed");
-
-        assert!(error
-            .to_string()
-            .contains("password authentication is retired"));
-    }
+    use super::{normalize_host, RemoteConnectionContext};
 
     #[test]
     fn normalizes_safe_hosts_and_rejects_paths() {

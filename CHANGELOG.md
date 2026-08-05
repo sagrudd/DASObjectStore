@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.17] - 2026-08-05
+
+### Security
+
+- Remove the unreachable remote password-bootstrap implementation and its
+  terminal password dependency. Historical authenticate/resync/recovery
+  callers now stop at one fail-closed rejection before network, terminal, or
+  configuration side effects. Remote access must use Pistis EasyConnect or a
+  site-issued passwordless credential helper.
+
 ## [0.157.16] - 2026-08-05
 
 ### Security

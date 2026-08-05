@@ -1936,6 +1936,11 @@ list until every temporary size-budget exception has been removed.
   OBJECTSTORE` over verified HTTPS, with daemon-owned eight-hour scoped Garage
   sessions, redacted default output, explicit JSON connection context, and
   persisted-credential validation.
+- [x] Retire the obsolete remote password bootstrap completely. Version
+  ``0.157.17`` removes its terminal password dependency and implementation;
+  legacy authenticate, resync, and recovery call sites now reject before
+  network, terminal, trust, or configuration side effects. Remote access must
+  use Pistis EasyConnect or a site-issued passwordless credential helper.
 - [x] Make remote authentication return a server-authoritative S3 connection
   descriptor and optionally install it as a locked, atomic, verified standard
   AWS profile. Keep JSON secret-free, retain ObjectStore/bucket associations
