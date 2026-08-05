@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.12] - 2026-08-05
+
+### Fixed
+
+- Preserve a host-provided DAS Web root through nested product composition.
+  The route remains inside the same preverified actor middleware; this changes
+  no session, credential, local-authentication or data-plane behaviour.
+
 ## [0.157.11] - 2026-08-05
 
 ### Security
