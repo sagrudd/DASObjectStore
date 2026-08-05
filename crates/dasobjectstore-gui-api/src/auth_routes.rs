@@ -2,10 +2,10 @@ use crate::groups_registry::{
     default_groups_registry_path, read_storage_groups_for_user, upsert_storage_group,
 };
 use crate::{
-    discover_local_user, AuthenticatedGuiActor, DashboardWarning, LocalAuthStore,
-    LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
+    discover_local_user, AuthenticatedGuiActor, DasCapability, DasRolePolicy, DashboardWarning,
+    LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
     PamLocalPasswordAuthenticator, RegisterResponse, SessionCheckResponse,
-    UsersGroupsWorkspaceView,
+    UsersGroupsWorkspaceView, VerifiedHostAuthenticatedContext,
 };
 
 #[path = "auth_admin_clients.rs"]
@@ -720,6 +720,52 @@ async fn control_ingest(
     submit_ingest_control_request(&state, request)
         .await
         .map(Json)
+}
+
+/// Execute an ingest-control mutation for a host actor that Monas or
+/// Synoptikon has already verified with Pistis.
+///
+/// This route deliberately has no `LocalAuthStore`, local-user provider,
+/// password, PAM, POSIX group, or sudo dependency.  A matching verified
+/// context and the closed DAS administrator role are both required before the
+/// request can reach the priority daemon bridge.
+async fn preverified_host_control_ingest(
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<IngestControlRequest>,
+) -> Result<Json<IngestControlResponse>, (StatusCode, Json<AuthRouteError>)> {
+    if actor.subject_id != verified.context().subject_id {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_actor_subject_mismatch",
+            "the supplied host actor does not match the verified Pistis context",
+        ));
+    }
+    if !DasRolePolicy::from_verified(&verified).permits(DasCapability::Administer) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_administrator_role_required",
+            "a verified DAS storage_administrator role is required for ingest control",
+        ));
+    }
+    let request = validate_ingest_control_request(request)?;
+    submit_preverified_host_ingest_control_request(request)
+        .await
+        .map(Json)
+}
+
+async fn submit_preverified_host_ingest_control_request(
+    request: StandaloneIngestControlDaemonRequest,
+) -> Result<IngestControlResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = DaemonStandaloneEnclosureAdminClient::default_packaged();
+    crate::daemon_bridge::DaemonBridge::shared_priority_packaged()
+        .call_message(move || {
+            client
+                .submit_ingest_control(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
 }
 
 async fn upsert_endpoint_inventory(

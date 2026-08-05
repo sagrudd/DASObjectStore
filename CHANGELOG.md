@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.15] - 2026-08-05
+
+### Security
+
+- Add the first host-composed operational mutation: Pistis-preverified DAS
+  administrators can control ingest only through the bounded priority daemon
+  bridge. The route accepts no local credential, PAM result, password, POSIX
+  user/group, or sudo-derived authority.
+
 ## [0.157.14] - 2026-08-05
 
 ### Fixed
