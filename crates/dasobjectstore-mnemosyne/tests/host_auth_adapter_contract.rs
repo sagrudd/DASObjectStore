@@ -6,8 +6,9 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    AuthenticatedGuiActor, EasyconnectS3EndpointConfig, HostAuthenticationAuthority,
-    StandaloneS3ConnectionDescriptor,
+    accept_host_authenticated_context, AuthenticatedGuiActor, EasyconnectS3EndpointConfig,
+    HostAuthenticatedContext, HostAuthenticationAuthority, HostAuthenticationContextVerifier,
+    StandaloneS3ConnectionDescriptor, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
 };
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
@@ -169,6 +170,66 @@ async fn preverified_router_exposes_host_composed_api_only_with_verified_context
         .expect("response");
     assert_eq!(accepted.status(), StatusCode::OK);
     cleanup(&root);
+}
+
+#[tokio::test]
+async fn preverified_ingest_control_requires_a_verified_das_administrator() {
+    let request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/admin/ingest-control")
+            .header(FEDERATED_CSRF_HEADER, csrf_binding())
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"action":"pause","reason":"controlled test","dry_run":true}"#,
+            ))
+            .expect("request")
+    };
+
+    let denied = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_operator"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    // An administrator reaches contract validation before a daemon bridge is
+    // used. This proves the operational route is composed without touching a
+    // local socket or any local-authentication state.
+    let invalid = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_administrator"])))
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/workspaces/admin/ingest-control")
+                .header(FEDERATED_CSRF_HEADER, csrf_binding())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"action":"pause","reason":" ","dry_run":true}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let legacy_headers = preverified_dasobjectstore_router(Router::new(), None)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/workspaces/admin/ingest-control")
+                .header("x-dasobjectstore-username", "operator")
+                .header("x-dasobjectstore-session-token", "local-secret")
+                .header(FEDERATED_CSRF_HEADER, csrf_binding())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"action":"pause","reason":"controlled test","dry_run":true}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(legacy_headers.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -570,6 +631,37 @@ impl SynoptikonLiveSessionVerifier for LiveSynoptikon {
     ) -> Result<(), String> {
         self.0.then_some(()).ok_or_else(|| "revoked".to_string())
     }
+}
+
+struct LiveHostContext;
+
+impl HostAuthenticationContextVerifier for LiveHostContext {
+    fn verify_live_session(&self, _context: &HostAuthenticatedContext) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+fn verified_host_context(
+    roles: &[&str],
+) -> dasobjectstore_gui_api::VerifiedHostAuthenticatedContext {
+    accept_host_authenticated_context(
+        HostAuthenticatedContext {
+            schema_version: HOST_AUTH_CONTEXT_SCHEMA_VERSION.to_owned(),
+            authority: HostAuthenticationAuthority::MonasStandalone,
+            issuer: "monas".to_owned(),
+            audience: HOST_AUTH_AUDIENCE.to_owned(),
+            subject_id: "pistis-subject-1".to_owned(),
+            session_id: "pistis-session-1".to_owned(),
+            roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+            issued_at_unix_seconds: 1_000,
+            expires_at_unix_seconds: 2_000,
+            correlation_id: "corr-host-ingest-control-1".to_owned(),
+            csrf_binding_sha256: csrf_binding(),
+        },
+        1_500,
+        &LiveHostContext,
+    )
+    .expect("verified host context")
 }
 
 fn synoptikon_issue() -> SynoptikonIntegratedSessionIssue {

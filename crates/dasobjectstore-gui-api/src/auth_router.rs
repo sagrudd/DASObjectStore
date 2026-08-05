@@ -132,6 +132,18 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
 /// router. Calling it directly does not establish an authority boundary.
 pub fn host_composed_gui_api_router() -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
+        .merge(preverified_host_ingest_control_router())
+}
+
+/// The single host-composed operational mutation currently migrated to the
+/// Pistis-preverified boundary.  Its handler derives authority exclusively
+/// from `VerifiedHostAuthenticatedContext` and sends work through the bounded
+/// priority daemon bridge.
+fn preverified_host_ingest_control_router() -> Router {
+    Router::new().route(
+        "/api/v1/workspaces/admin/ingest-control",
+        post(preverified_host_control_ingest),
+    )
 }
 
 async fn federated_host_session(
