@@ -22,6 +22,7 @@ pub mod policy_template;
 pub mod protection;
 pub mod remote_upload;
 pub mod repair;
+pub mod retained_dossier_prerequisite;
 pub mod risk;
 pub mod store;
 pub mod subobject_capacity;
@@ -71,6 +72,10 @@ pub use object_catalogue::{
 };
 pub use policy_template::{StoragePolicyTemplate, StoragePolicyTemplateValidationError};
 pub use protection::ProtectionPolicy;
+pub use retained_dossier_prerequisite::{
+    JenkinsRetainedDossierDasPrerequisiteV1, RetainedDossierPrerequisiteError,
+    VerifiedRetainedDossierDasReadbackV1, JENKINS_RETAINED_DOSSIER_DAS_PREREQUISITE_V1_SCHEMA,
+};
 pub use store::LogicalObjectVersionCharge;
 pub use subobject_capacity::{
     ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,

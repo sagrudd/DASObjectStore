@@ -8,6 +8,12 @@ agreement before landing.
 
 ## Unreleased
 
+- Release 0.157.3 adds a pure, fail-closed retained-Jenkins-dossier DAS
+  prerequisite verifier. It binds one immutable Jenkins revision, exact
+  `EvidenceRefV1`, byte count, and SHA-256 read-back comparison without a
+  storage resolver, session/capability authority, receipt, promotion, or
+  mutation path.
+
 - Release 0.157.2 adds Proposed ADR-0006. It documents the review-only
   resolution for Reqwest's unavoidable transitive Rustls TLS 1.2 code while
   preserving AWS-LC-only/provider-neutral dependencies and requiring explicit
