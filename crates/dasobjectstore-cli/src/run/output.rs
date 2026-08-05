@@ -811,9 +811,6 @@ pub(super) fn write_remote_s3_upload_plan(
         "Credential authority: {}",
         plan.auth_authority.as_str()
     )?;
-    if let Some(username) = &plan.username {
-        writeln!(writer, "Username: {username}")?;
-    }
     writeln!(
         writer,
         "Credential reference: {}",

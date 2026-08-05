@@ -15,8 +15,9 @@ listener ownership; installing a package does not enable direct mode.
 
 For routine remote-computer use, prefer the standalone
 ``dasobjectstore-remote`` client described in :doc:`remote-client`. It wraps the
-same S3 path with remote configuration, secure password prompting for
-credential helpers, object-store listing, and file/folder upload commands.
+same S3 path with remote configuration, ObjectStore discovery, and file/folder
+upload commands. The S3 upload-plan command itself never receives or validates
+a DASObjectStore user password.
 
 Prepare the remote upload plan on the appliance or an administrative host that
 can read the DASObjectStore store registry:
@@ -135,18 +136,12 @@ keeps authentication and S3 credentials as two distinct steps:
   credential issuance for the displayed credential reference. The remote user
   signs in to Mneion and receives or configures the S3 access key and secret key
   that Mneion authorizes for that store.
-* ``--auth local-password`` means the monolithic DASObjectStore appliance
-  authenticates the remote user with the appliance's local user database or OS
-  users and their passwords, then issues or rotates the S3 access key and secret
-  key for that store. Include ``--username`` so the plan records the intended
-  local user:
 
-  .. code-block:: console
-
-     dasobjectstore store s3-upload generated-data \
-       --endpoint-url https://dos-appliance.example:3900 \
-       --auth local-password \
-       --username alice
+``local-password`` is intentionally not an S3 planning or CLI authority. The
+command rejects it rather than falling back to an appliance account, OS user,
+or password store. Credential issuance and rotation remain a site-authority
+operation, mediated through the approved Pistis action and durable grant
+contract.
 
 Only the credential authority should reveal the generated S3 secret. Do not copy
 Garage or provider-internal secret files to remote computers.

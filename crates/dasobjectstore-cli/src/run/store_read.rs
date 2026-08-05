@@ -716,7 +716,6 @@ pub(super) fn run_store_s3_upload(
         profile_name,
         credential_reference,
         auth_authority: args.auth().into(),
-        username: args.username().map(ToOwned::to_owned),
     })?;
 
     if args.json() {

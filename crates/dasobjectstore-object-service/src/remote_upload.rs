@@ -10,14 +10,12 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum RemoteS3AuthAuthority {
     Mneion,
-    LocalPassword,
 }
 
 impl RemoteS3AuthAuthority {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Mneion => "mneion",
-            Self::LocalPassword => "local_password",
         }
     }
 }
@@ -31,8 +29,6 @@ pub struct RemoteS3UploadPlanRequest {
     pub profile_name: String,
     pub credential_reference: String,
     pub auth_authority: RemoteS3AuthAuthority,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -46,8 +42,6 @@ pub struct RemoteS3UploadPlan {
     pub profile_name: String,
     pub credential_reference: String,
     pub auth_authority: RemoteS3AuthAuthority,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
     pub credential_instruction: String,
     pub aws_profile_commands: Vec<String>,
     pub aws_s3api_put_object_command: String,
@@ -70,23 +64,9 @@ pub fn plan_remote_s3_upload(
     let profile_name = require_non_blank("profile_name", request.profile_name)?;
     let credential_reference =
         require_non_blank("credential_reference", request.credential_reference)?;
-    let username = request
-        .username
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if request.auth_authority == RemoteS3AuthAuthority::LocalPassword && username.is_none() {
-        return Err(ObjectServiceError::InvalidConfiguration(
-            "local_password authentication requires username".to_string(),
-        ));
-    }
-
     let credential_instruction = match request.auth_authority {
         RemoteS3AuthAuthority::Mneion => format!(
             "Authenticate to Mneion and request S3 credentials for {credential_reference}; configure the returned access key and secret key in the AWS profile below."
-        ),
-        RemoteS3AuthAuthority::LocalPassword => format!(
-            "Authenticate to the DASObjectStore appliance as local user {} and request or rotate S3 credentials for {credential_reference}; configure the returned access key and secret key in the AWS profile below.",
-            username.as_deref().unwrap_or("<username>")
         ),
     };
 
@@ -107,7 +87,6 @@ pub fn plan_remote_s3_upload(
         profile_name,
         credential_reference,
         auth_authority: request.auth_authority,
-        username,
         credential_instruction,
         aws_profile_commands: vec![
             format!("aws configure set profile.{quoted_profile}.region {quoted_region}"),
@@ -160,8 +139,8 @@ mod tests {
 
     #[test]
     fn renders_mneion_remote_upload_plan() {
-        let plan = plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion, None))
-            .expect("plan renders");
+        let plan =
+            plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion)).expect("plan renders");
 
         assert_eq!(plan.ingress_origin, IngressOrigin::RemoteS3);
         assert_eq!(plan.landing_mode, IngressLandingMode::SsdFirst);
@@ -180,29 +159,9 @@ mod tests {
     }
 
     #[test]
-    fn local_password_requires_username() {
-        let err = plan_remote_s3_upload(request(RemoteS3AuthAuthority::LocalPassword, None))
-            .expect_err("missing username must fail");
-
-        assert!(err
-            .to_string()
-            .contains("local_password authentication requires username"));
-    }
-
-    #[test]
-    fn renders_local_password_remote_upload_plan() {
-        let plan =
-            plan_remote_s3_upload(request(RemoteS3AuthAuthority::LocalPassword, Some("alice")))
-                .expect("plan renders");
-
-        assert_eq!(plan.username.as_deref(), Some("alice"));
-        assert!(plan.credential_instruction.contains("local user alice"));
-    }
-
-    #[test]
     fn remote_upload_plan_serializes_stable_ingress_classification() {
-        let plan = plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion, None))
-            .expect("plan renders");
+        let plan =
+            plan_remote_s3_upload(request(RemoteS3AuthAuthority::Mneion)).expect("plan renders");
         let json = serde_json::to_value(plan).expect("plan serializes");
 
         assert_eq!(json["ingress_origin"], serde_json::json!("remote_s3"));
@@ -210,8 +169,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_serialized_local_password_authority() {
+        let request = serde_json::json!({
+            "store_id": "generated-data",
+            "bucket_name": "dos-generated-data",
+            "endpoint_url": "https://appliance.example:3900",
+            "region": "garage",
+            "profile_name": "dasobjectstore-generated-data",
+            "credential_reference": "secret://dasobjectstore/stores/generated-data/s3",
+            "auth_authority": "local_password",
+            "username": "alice"
+        });
+
+        let error = serde_json::from_value::<RemoteS3UploadPlanRequest>(request)
+            .expect_err("retired authority must not deserialize");
+
+        assert!(error.to_string().contains("local_password"));
+    }
+
+    #[test]
     fn rejects_invalid_explicit_bucket_name() {
-        let mut request = request(RemoteS3AuthAuthority::Mneion, None);
+        let mut request = request(RemoteS3AuthAuthority::Mneion);
         request.bucket_name = "Invalid_Bucket".to_string();
 
         let err = plan_remote_s3_upload(request).expect_err("invalid bucket must fail");
@@ -221,10 +199,7 @@ mod tests {
             .contains("must contain only lowercase letters"));
     }
 
-    fn request(
-        auth_authority: RemoteS3AuthAuthority,
-        username: Option<&str>,
-    ) -> RemoteS3UploadPlanRequest {
+    fn request(auth_authority: RemoteS3AuthAuthority) -> RemoteS3UploadPlanRequest {
         RemoteS3UploadPlanRequest {
             store_id: StoreId::new("generated-data").expect("store id"),
             bucket_name: "dos-generated-data".to_string(),
@@ -233,7 +208,6 @@ mod tests {
             profile_name: "dasobjectstore-generated-data".to_string(),
             credential_reference: "secret://dasobjectstore/stores/generated-data/s3".to_string(),
             auth_authority,
-            username: username.map(ToOwned::to_owned),
         }
     }
 }
