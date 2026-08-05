@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.157.5] - 2026-08-05
+
+### Security
+
+- Expose the DASObjectStore status and dashboard API through the preverified
+  Monas/Synoptikon host router only. These routes now require a verified host
+  actor and do not receive the legacy appliance-local authentication store.
+
+### Changed
+
+- Keep legacy local-authenticated operational routes out of the preverified
+  composition pending their role-policy migration; they are not a valid
+  Pistis/Monas authority path.
+
 All notable DASObjectStore release changes are recorded here.
 
 This project follows semantic versioning. Patch and minor version bumps may be

@@ -81,6 +81,53 @@ async fn preverified_router_accepts_only_inserted_verified_context() {
 }
 
 #[tokio::test]
+async fn preverified_router_exposes_dashboard_only_with_verified_context() {
+    let app = preverified_dasobjectstore_router(Router::new(), None);
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/dashboard/home")
+                .header("x-dasobjectstore-username", "operator")
+                .header("authorization", "Bearer legacy-token")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let root = temp_root("preverified-dashboard");
+    let store = registered_store(&root);
+    let login = store
+        .login_with_session_ttl_seconds("operator", "secret", Some(3_600))
+        .expect("login");
+    let verified = accept_monas_host_session(
+        &store,
+        &MonasHostSessionIssue {
+            username: "operator".to_owned(),
+            session_token: login.session_token,
+            correlation_id: "corr-preverified-dashboard".to_owned(),
+            csrf_binding_sha256: csrf_binding(),
+        },
+        unix_now(),
+    )
+    .expect("verified fixture");
+    let accepted = app
+        .layer(Extension(verified))
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/dashboard/home")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+    cleanup(&root);
+}
+
+#[tokio::test]
 async fn monas_exposes_only_pairing_create_and_exchange_without_a_session() {
     let root = temp_root("monas-easyconnect-public");
     let store = registered_store(&root);

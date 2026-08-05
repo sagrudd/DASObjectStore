@@ -16,7 +16,7 @@ use axum::{
     Router,
 };
 use dasobjectstore_gui_api::{
-    easyconnect_public_router, federated_gui_api_router,
+    easyconnect_public_router, federated_gui_api_router, gui_api_router,
     pistis_easyconnect_approval_router_with_daemon, AuthenticatedGuiActor,
     EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, FederatedHostSessionResponse,
     LocalAuthStore, VerifiedHostAuthenticatedContext,
@@ -84,6 +84,16 @@ pub fn preverified_dasobjectstore_router_with_daemon(
             "/api/v1/remote/host-context",
             axum::routing::get(preverified_host_session),
         )
+        // These are deliberately the daemon-backed status and dashboard
+        // routes only.  They do not accept a local credential or carry a
+        // local authentication store.  The layer below makes a verified
+        // Monas/Synoptikon actor mandatory for every one of them.
+        //
+        // Do not merge `federated_gui_api_router` here: its legacy route
+        // states retain the deprecated appliance-local authentication store.
+        // Role-authorised operational routes are added only as they are
+        // migrated to the verified host actor contract.
+        .merge(gui_api_router())
         .merge(host_product_routes);
     let router = match s3_endpoint {
         Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router_with_daemon(
