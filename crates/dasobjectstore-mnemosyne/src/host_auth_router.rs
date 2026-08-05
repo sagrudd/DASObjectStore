@@ -94,10 +94,7 @@ pub fn preverified_dasobjectstore_router_with_daemon(
         // Role-authorised operational routes are added only as they are
         // migrated to the verified host actor contract.
         .merge(host_composed_gui_api_router())
-        // Host Web routes are the product fallback, not peers of the DAS API
-        // routes. This preserves the stripped product root supplied by an
-        // embedding router without unsupported root-level nesting.
-        .fallback_service(host_product_routes);
+        .merge(host_product_routes);
     let router = match s3_endpoint {
         Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router_with_daemon(
             s3_endpoint,
@@ -106,6 +103,15 @@ pub fn preverified_dasobjectstore_router_with_daemon(
         None => router,
     };
     router.layer(middleware::from_fn(require_preverified_actor))
+}
+
+/// Protect host-owned DAS Web routes with the same verified actor boundary as
+/// the host-composed API, without coupling them to a particular mount path.
+///
+/// The embedding product owns path mounting and must establish the verified
+/// actor extension before forwarding a request to this router.
+pub fn preverified_dasobjectstore_web_router(host_product_routes: Router) -> Router {
+    host_product_routes.layer(middleware::from_fn(require_preverified_actor))
 }
 
 /// Mount host-owned Web routes and the DASObjectStore operational API behind
