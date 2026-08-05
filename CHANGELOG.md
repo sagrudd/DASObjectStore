@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.11] - 2026-08-05
+
+### Security
+
+- Replace the preverified product router's broad dashboard composition with a
+  deliberately host-composed status and planning API. It has no local
+  authentication store and excludes routes that still depend on standalone
+  local identity or password state.
+
 ## [0.157.10] - 2026-08-05
 
 ### Added
