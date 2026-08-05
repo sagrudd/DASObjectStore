@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.8] - 2026-08-05
+
+### Security
+
+- Establish package lifecycle coverage that rejects automatic activation of
+  the dedicated S3 gateway. Its future handover remains operator-gated and
+  manual; an installation or upgrade must not start, restart, or enable it.
+
 ## [0.157.7] - 2026-08-05
 
 ### Security
