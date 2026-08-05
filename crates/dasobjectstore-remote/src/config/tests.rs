@@ -24,7 +24,7 @@ fn overrides_config_without_losing_unset_values() {
                 discovery_url:
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
-                auth_authority: RemoteAuthAuthority::LocalPassword,
+                auth_authority: RemoteAuthAuthority::Pistis,
                 paired_actor: Some("alice".to_string()),
                 default_object_store: Some("generated-data".to_string()),
                 session: None,
@@ -65,6 +65,24 @@ fn reads_legacy_config_without_pairing_fields() {
 }
 
 #[test]
+fn rejects_persisted_local_password_authority_without_fallback() {
+    let config: RemoteConfig = serde_json::from_str(
+        r#"{
+          "endpoint_url": "https://dos.example:3900",
+          "auth_authority": "local-password"
+        }"#,
+    )
+    .expect("legacy config remains readable for remediation");
+
+    let error = config
+        .validate_for_command()
+        .expect_err("legacy local-password configuration must fail closed");
+    assert!(error
+        .to_string()
+        .contains("local-password authority is retired"));
+}
+
+#[test]
 fn redacts_session_credentials_for_display() {
     let config = RemoteConfig {
             schema_version: REMOTE_CONFIG_SCHEMA_VERSION.to_string(),
@@ -72,7 +90,7 @@ fn redacts_session_credentials_for_display() {
             endpoint_url: "https://192.168.1.192:3900".to_string(),
             region: "garage".to_string(),
             profile: "dasobjectstore".to_string(),
-            auth_authority: RemoteAuthAuthority::LocalPassword,
+            auth_authority: RemoteAuthAuthority::Pistis,
             username: Some("stephen".to_string()),
             credential_helper: Some("helper".to_string()),
             default_appliance_id: Some("appliance-1".to_string()),
@@ -83,7 +101,7 @@ fn redacts_session_credentials_for_display() {
                 discovery_url:
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
-                auth_authority: RemoteAuthAuthority::LocalPassword,
+                auth_authority: RemoteAuthAuthority::Pistis,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
                 object_stores: vec![RemoteObjectStoreGrant {

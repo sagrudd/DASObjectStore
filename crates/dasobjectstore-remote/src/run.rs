@@ -46,6 +46,16 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunError> {
+    if cli.prompt_password() {
+        return Err(RemoteRunError::UploadRouting(
+            "--prompt-password is retired; use the browser-approved Pistis EasyConnect ceremony or a site-issued passwordless credential helper".to_string(),
+        ));
+    }
+    if cli.auth().is_some_and(RemoteAuthAuthority::is_retired) {
+        return Err(RemoteRunError::UploadRouting(
+            "local-password authority is retired; use the browser-approved Pistis EasyConnect ceremony or a site-issued passwordless credential helper".to_string(),
+        ));
+    }
     match cli.command() {
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),

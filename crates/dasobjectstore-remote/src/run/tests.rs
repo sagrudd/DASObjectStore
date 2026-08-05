@@ -23,6 +23,32 @@ use std::cell::RefCell;
 use std::time::{Duration, UNIX_EPOCH};
 
 #[test]
+fn retired_password_options_fail_before_any_remote_work() {
+    let cli = RemoteCli::try_parse_from([
+        "dasobjectstore-remote",
+        "--auth",
+        "local-password",
+        "stores",
+        "list",
+    ])
+    .expect("legacy CLI spelling remains parseable for explicit remediation");
+    let error = run(&cli, &mut Vec::new()).expect_err("retired authority must fail closed");
+    assert!(error
+        .to_string()
+        .contains("local-password authority is retired"));
+
+    let cli = RemoteCli::try_parse_from([
+        "dasobjectstore-remote",
+        "--prompt-password",
+        "stores",
+        "list",
+    ])
+    .expect("legacy password option remains parseable for explicit remediation");
+    let error = run(&cli, &mut Vec::new()).expect_err("retired option must fail closed");
+    assert!(error.to_string().contains("--prompt-password is retired"));
+}
+
+#[test]
 fn completion_object_version_preserves_sqlite_integer_range() {
     assert_eq!(completion_object_version(&format!("{:016x}", 42)), 42);
     assert_eq!(
@@ -426,7 +452,7 @@ fn paired_config() -> RemoteConfig {
             endpoint_url: "https://192.168.1.192:3900".to_string(),
             region: "garage".to_string(),
             profile: "dasobjectstore".to_string(),
-            auth_authority: RemoteAuthAuthority::LocalPassword,
+            auth_authority: RemoteAuthAuthority::Pistis,
             username: Some("stephen".to_string()),
             credential_helper: Some("helper".to_string()),
             default_appliance_id: Some("appliance-1".to_string()),
@@ -437,7 +463,7 @@ fn paired_config() -> RemoteConfig {
                 discovery_url:
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
-                auth_authority: RemoteAuthAuthority::LocalPassword,
+                auth_authority: RemoteAuthAuthority::Pistis,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
                 object_stores: vec![RemoteObjectStoreGrant {

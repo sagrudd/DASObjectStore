@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.16] - 2026-08-05
+
+### Security
+
+- Retire the remote client's appliance-local password exchange and password
+  forwarding. Legacy ``local-password`` selections deserialize only so they
+  can be rejected with remediation; they cannot prompt, invoke a credential
+  helper, or issue an authentication request. Remote access must use the
+  browser-approved Pistis EasyConnect ceremony or a site-issued passwordless
+  credential helper.
+
 ## [0.157.15] - 2026-08-05
 
 ### Security

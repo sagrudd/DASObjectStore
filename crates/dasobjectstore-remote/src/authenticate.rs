@@ -124,6 +124,7 @@ pub struct RedactedRemoteConnectionContext {
 
 #[derive(Debug)]
 pub enum RemoteAuthenticateError {
+    RetiredLocalPassword,
     InvalidHost(String),
     Io(std::io::Error),
     Http(String),
@@ -134,6 +135,9 @@ pub enum RemoteAuthenticateError {
 impl fmt::Display for RemoteAuthenticateError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RetiredLocalPassword => formatter.write_str(
+                "password authentication is retired; use the browser-approved Pistis EasyConnect ceremony",
+            ),
             Self::InvalidHost(message) | Self::Http(message) => formatter.write_str(message),
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Server { status, message } => {
@@ -327,6 +331,9 @@ pub fn authenticate(
     object_store: &str,
     requested_session_lifetime_seconds: Option<u64>,
 ) -> Result<RemoteConnectionContext, RemoteAuthenticateError> {
+    if local_password_authentication_retired() {
+        return Err(RemoteAuthenticateError::RetiredLocalPassword);
+    }
     let host = normalize_host(host)?;
     if https_port == 0 {
         return Err(RemoteAuthenticateError::InvalidHost(
@@ -439,6 +446,10 @@ pub fn authenticate(
         renew_after_utc: s3.session.renewal.renew_after_utc,
         renewal_token: s3.session.renewal.renewal_token,
     })
+}
+
+fn local_password_authentication_retired() -> bool {
+    true
 }
 
 pub fn discover_appliance_descriptor(
@@ -618,7 +629,26 @@ fn absolute_renew_url(host: &str, https_port: u16, path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_host, RemoteConnectionContext};
+    use super::{authenticate, normalize_host, RemoteConnectionContext};
+
+    #[test]
+    fn local_password_authentication_is_retired_before_network_or_password_use() {
+        let error = authenticate(
+            "192.168.1.192",
+            8448,
+            None,
+            None,
+            "alice",
+            "not-a-password",
+            "research",
+            None,
+        )
+        .expect_err("the retired local-password transport must fail closed");
+
+        assert!(error
+            .to_string()
+            .contains("password authentication is retired"));
+    }
 
     #[test]
     fn normalizes_safe_hosts_and_rejects_paths() {

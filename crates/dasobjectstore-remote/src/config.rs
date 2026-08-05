@@ -95,11 +95,9 @@ impl RemoteConfig {
                 "AWS profile must not be blank".to_string(),
             ));
         }
-        if self.auth_authority == RemoteAuthAuthority::LocalPassword
-            && self.username.as_deref().unwrap_or("").trim().is_empty()
-        {
+        if self.auth_authority.is_retired() {
             return Err(RemoteConfigError::Invalid(
-                "local-password authentication requires --username or configured username"
+                "local-password authority is retired; remove it from configuration and complete Pistis EasyConnect or use a site-issued passwordless credential helper"
                     .to_string(),
             ));
         }

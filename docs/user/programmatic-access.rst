@@ -276,27 +276,12 @@ names, reuse a provider administrator key, or copy the daemon's managed
 credential registry. A store-specific grant is restricted by the appliance's
 read/write policy and can be rotated without changing application code.
 
-For direct workstation automation, authenticate one store without placing a
-password in shell history or a credentials file:
-
-.. code-block:: console
-
-   dasobjectstore-remote authenticate 192.168.1.192 porkchop \
-     --username stephen --ca-cert /etc/dasobjectstore/appliance-ca.pem \
-     --tls-server-name localhost --json
-
-The command prompts for the password with terminal echo disabled and sends it
-only over verified HTTPS to the standalone appliance API. The response is a
-store-scoped JSON connection context with an eight-hour session, S3
-endpoint/region/path-style settings, derived bucket, temporary credentials,
-expiry, and renewal metadata. The public endpoint is the DASObjectStore S3
-gateway when direct mode is enabled; Garage is then a private legacy/recovery
-provider rather than a separate namespace authority. Native CLI ingest and S3
-ingest are both immediately addressable through the same bucket/key catalogue
-after acknowledgement. Do not log or persist the JSON unless the calling
-process has an explicit secret-storage policy. Read-only grants are not issued
-by this command until read-only credential provisioning is available; this
-prevents a managed read/write key from being escalated.
+For direct workstation automation, complete Pistis EasyConnect and consume the
+resulting short-lived, store-scoped session. The former remote
+``authenticate`` command and ``local-password`` helper profile are retired:
+they fail closed before a password prompt, helper invocation, or HTTPS request.
+The public endpoint remains the DASObjectStore S3 gateway; application code
+must use only credentials issued through the approved site authority.
 
 For a configured AWS CLI profile, the remote client can list stores or render
 an upload plan without exposing secret values:
@@ -309,10 +294,10 @@ an upload plan without exposing secret values:
      --profile dasobjectstore-epic_collection
    dasobjectstore-remote stores list
 
-For Mneion, Synoptikon, or standalone local-password deployments, use the
-site-provided credential helper. The helper is an explicit process boundary;
-it receives the authority, endpoint, username, and (only when prompted)
-password through environment variables and emits one JSON object on stdout:
+For Pistis, Mneion, or Synoptikon managed sites, use the site-provided
+passwordless credential helper. The helper is an explicit process boundary; it
+receives the authority and endpoint, never a password, and emits one JSON
+object on stdout:
 
 .. code-block:: json
 
@@ -333,8 +318,8 @@ Configure a helper without embedding credentials in application arguments:
      --credential-helper /usr/local/bin/site-das-s3-credentials
 
 The helper command is site-owned. Keep its executable path and non-secret
-configuration in the remote client config; keep password prompts and secret
-material inside the helper boundary.
+configuration in the remote client config; it must never request, accept, or
+forward a password.
 
 Provision the ObjectStore before requesting remote access
 ----------------------------------------------------------
@@ -364,28 +349,18 @@ bucket name:
 
 The plan identifies the derived bucket, AWS profile, credential reference, and
 safe command shape. The credential authority named by ``--auth`` supplies the
-actual short-lived grant: use ``mneion`` or ``synoptikon`` site integration
-where available, or ``local-password`` with ``--username`` for standalone
-appliance authentication. Treat the plan as configuration metadata; never
-copy secret values into source files, shell history, or chat.
+actual short-lived grant: use the Pistis, Mneion, or Synoptikon site
+integration. The retired ``local-password`` authority is never a fallback.
+Treat the plan as configuration metadata; never copy secret values into source
+files, shell history, or chat.
 
-Standalone password exchange
------------------------------
+Password retirement
+-------------------
 
-When the appliance is running in standalone local-auth mode, the remote client
-can exchange the same local account used by the Web console for a temporary
-ObjectStore-scoped context:
-
-.. code-block:: console
-
-   dasobjectstore-remote authenticate 192.168.1.192 alleleanchor_mvp \
-     --username stephen
-
-The command prompts for the password without echoing it and prints a redacted
-summary by default. Use ``--json`` only when a trusted process must consume
-the temporary context; redirect it to a mode-0600 local file and never paste
-the output into a terminal transcript, issue, or chat. A browser login alone
-does not copy its session cookie into the remote client.
+Standalone local-password exchange is retired. A remote client cannot exchange
+an appliance account, prompt for a password, or convert a browser cookie into
+an S3 session. Use the browser-approved Pistis ceremony and an exact
+site-authority grant instead.
 
 S3 client settings
 ------------------
