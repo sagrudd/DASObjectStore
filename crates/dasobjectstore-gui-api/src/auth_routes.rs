@@ -51,9 +51,10 @@ pub use auth_router::{
     gui_api_router_for_host_mode_with_application_auth,
     gui_api_router_for_host_mode_with_s3_descriptor,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
-    pistis_easyconnect_approval_router, pistis_easyconnect_approval_router_with_daemon,
-    standalone_auth_router, standalone_easyconnect_router, standalone_enclosure_admin_router,
-    standalone_gui_api_router, standalone_reporting_router, standalone_users_groups_router,
+    host_composed_gui_api_router, pistis_easyconnect_approval_router,
+    pistis_easyconnect_approval_router_with_daemon, standalone_auth_router,
+    standalone_easyconnect_router, standalone_enclosure_admin_router, standalone_gui_api_router,
+    standalone_reporting_router, standalone_users_groups_router,
 };
 #[cfg(test)]
 pub(crate) use auth_router::{

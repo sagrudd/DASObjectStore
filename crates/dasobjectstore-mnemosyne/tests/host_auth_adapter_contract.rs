@@ -81,13 +81,13 @@ async fn preverified_router_accepts_only_inserted_verified_context() {
 }
 
 #[tokio::test]
-async fn preverified_router_exposes_dashboard_only_with_verified_context() {
+async fn preverified_router_exposes_host_composed_api_only_with_verified_context() {
     let app = preverified_dasobjectstore_router(Router::new(), None);
     let denied = app
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/v1/dashboard/home")
+                .uri("/api/v1/health")
                 .header("x-dasobjectstore-username", "operator")
                 .header("authorization", "Bearer legacy-token")
                 .body(Body::empty())
@@ -117,7 +117,7 @@ async fn preverified_router_exposes_dashboard_only_with_verified_context() {
         .layer(Extension(verified))
         .oneshot(
             Request::builder()
-                .uri("/api/v1/dashboard/home")
+                .uri("/api/v1/health")
                 .body(Body::empty())
                 .expect("request"),
         )

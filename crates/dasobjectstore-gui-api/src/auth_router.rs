@@ -123,6 +123,17 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
         .merge(federated_operational_router(auth_store, None, None))
 }
 
+/// Product status and planning routes for a host that has already established
+/// a verified actor. This composition intentionally has no local
+/// authentication store and excludes every route that still depends on an OS
+/// identity, local user/group state, a password, or a standalone session.
+///
+/// The embedding host must apply its preverified actor middleware around this
+/// router. Calling it directly does not establish an authority boundary.
+pub fn host_composed_gui_api_router() -> Router {
+    crate::routes::gui_api_router_without_redesign_dashboards()
+}
+
 async fn federated_host_session(
     actor: AuthenticatedGuiActor,
     Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
