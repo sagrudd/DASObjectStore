@@ -6,6 +6,7 @@ pub mod auth;
 pub mod auth_guard;
 pub mod auth_routes;
 mod daemon_bridge;
+pub mod das_role_policy;
 pub mod dashboard;
 mod enclosures_aggregator;
 pub mod endpoints;
@@ -69,6 +70,7 @@ pub use auth_routes::{
     StandaloneLocalGroupAdminAcceptedResponse, StandaloneLocalGroupAdminResponse,
     StandaloneLocalGroupOperation, StandaloneS3ConnectionDescriptor,
 };
+pub use das_role_policy::{DasCapability, DasRolePolicy};
 pub use dashboard::{
     DashboardActionKind, DashboardActionPriority, DashboardAttentionSourceKind,
     DashboardAttentionSourceView, DashboardAttentionView, DashboardRequiredActionView,
