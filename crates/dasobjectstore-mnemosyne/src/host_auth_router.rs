@@ -94,7 +94,10 @@ pub fn preverified_dasobjectstore_router_with_daemon(
         // Role-authorised operational routes are added only as they are
         // migrated to the verified host actor contract.
         .merge(host_composed_gui_api_router())
-        .merge(host_product_routes);
+        // Host Web routes are the product fallback, not peers of the DAS API
+        // routes. This preserves the stripped product root supplied by an
+        // embedding router without unsupported root-level nesting.
+        .fallback_service(host_product_routes);
     let router = match s3_endpoint {
         Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router_with_daemon(
             s3_endpoint,

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.14] - 2026-08-05
+
+### Fixed
+
+- Make host-provided DAS Web routes the verified product fallback. This keeps
+  the mounted Web root reachable without unsupported root nesting while the
+  explicit DAS API routes retain priority.
+
 ## [0.157.13] - 2026-08-05
 
 ### Fixed
