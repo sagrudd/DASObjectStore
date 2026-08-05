@@ -92,6 +92,15 @@ Work is dependency ordered. Only these entries define open release work:
   prove application registration/rotation/revocation, enforce APT-owned
   install/upgrade/restart, and verify that production packages contain no
   development issuer or secret material.
+  **Pistis-only authority retirement (ADR-0007):** the retired remote
+  ``local-password`` path is now fail-closed, and the first verified
+  administrator ingest-control route is delivered.  The remaining work is
+  dependency-ordered: migrate each operational route to the preverified host
+  router; remove the raw Monas-cookie/local-store adapters; delete the
+  standalone PAM/password/session/OS-policy authority; then remove the helper,
+  migration binary and all PAM payload/build/documentation.  Do not treat a
+  package-only omission as completion: every former authority input must be
+  proven unable to reach daemon mutation.
 - [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
   acceptance on the available x86_64 DASServer before any representative
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,
