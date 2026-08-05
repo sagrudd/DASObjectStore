@@ -778,6 +778,26 @@ async fn preverified_host_update_object_store_ingest_policy(
         .map(Json)
 }
 
+/// Create an ObjectStore for a host actor already verified by Pistis.
+///
+/// Creation retains the existing explicit policy validation and confirmation
+/// marker, but authority is derived only from the matching verified host
+/// subject and closed DAS administrator role. No local session, password,
+/// PAM, POSIX group, or sudo lookup participates in this route.
+async fn preverified_host_create_object_store(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<CreateObjectStoreRequest>,
+) -> Result<Json<StandaloneCreateObjectStoreResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_create_object_store_request(request)?;
+    request.administrator_actor = Some(actor.subject_id);
+    submit_preverified_host_create_object_store_request(&state, request)
+        .await
+        .map(Json)
+}
+
 /// Test a registered endpoint for a host actor already verified by Pistis.
 ///
 /// This state carries only the daemon client and priority bridge. Authority
@@ -918,6 +938,23 @@ async fn submit_preverified_host_ingest_policy_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_policy_update_failed"))
+}
+
+async fn submit_preverified_host_create_object_store_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: DaemonCreateObjectStoreRequest,
+) -> Result<StandaloneCreateObjectStoreResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_create_object_store(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "objectstore_create_failed"))
 }
 
 async fn submit_preverified_host_endpoint_connection_test_request(
@@ -3569,6 +3606,70 @@ mod tests {
             "host_administrator_role_required"
         );
         assert!(client.ingest_policy_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_object_store_create_requires_pistis_administrator_and_records_subject(
+    ) {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/object-stores/create")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&create_object_store_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.create_object_store_requests()[0]
+                .administrator_actor
+                .as_deref(),
+            Some("principal-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_object_store_create_rejects_non_administrator_before_daemon_call() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/object-stores/create")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&create_object_store_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.create_object_store_requests().is_empty());
     }
 
     #[tokio::test]
