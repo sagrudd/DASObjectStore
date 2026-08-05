@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.14] - 2026-08-05
+
+### Fixed
+
+- Provide a separable verified host-Web router so an embedding product can
+  mount the DAS Web surface explicitly while retaining the same preverified
+  actor boundary as the DAS API.
+
 ## [0.157.13] - 2026-08-05
 
 ### Fixed

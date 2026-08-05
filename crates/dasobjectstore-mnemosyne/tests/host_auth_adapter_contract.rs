@@ -11,12 +11,12 @@ use dasobjectstore_gui_api::{
 };
 use dasobjectstore_mnemosyne::{
     accept_monas_host_session, accept_synoptikon_host_session, monas_dasobjectstore_api_router,
-    monas_federated_router, preverified_dasobjectstore_router, synoptikon_federated_router,
-    HostSessionAdapterError, MonasHostSessionIssue, StorageAuthority,
-    SynoptikonHostRequestAuthentication, SynoptikonIntegratedAcceptedSession,
-    SynoptikonIntegratedHostBoundaryContext, SynoptikonIntegratedSessionIssue,
-    SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID, FEDERATED_CSRF_HEADER,
-    REQUEST_CONTEXT_SCHEMA_VERSION,
+    monas_federated_router, preverified_dasobjectstore_router,
+    preverified_dasobjectstore_web_router, synoptikon_federated_router, HostSessionAdapterError,
+    MonasHostSessionIssue, StorageAuthority, SynoptikonHostRequestAuthentication,
+    SynoptikonIntegratedAcceptedSession, SynoptikonIntegratedHostBoundaryContext,
+    SynoptikonIntegratedSessionIssue, SynoptikonLiveSessionVerifier, DASOBJECTSTORE_PRODUCT_ID,
+    FEDERATED_CSRF_HEADER, REQUEST_CONTEXT_SCHEMA_VERSION,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -78,6 +78,50 @@ async fn preverified_router_accepts_only_inserted_verified_context() {
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn preverified_web_router_requires_the_verified_host_context() {
+    let host_routes = Router::new().route("/", get(|| async { "verified DAS shell" }));
+    let denied = preverified_dasobjectstore_web_router(host_routes.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let root = temp_root("preverified-web");
+    let store = registered_store(&root);
+    let login = store
+        .login_with_session_ttl_seconds("operator", "secret", Some(3_600))
+        .expect("login");
+    let verified = accept_monas_host_session(
+        &store,
+        &MonasHostSessionIssue {
+            username: "operator".to_owned(),
+            session_token: login.session_token,
+            correlation_id: "corr-preverified-web".to_owned(),
+            csrf_binding_sha256: csrf_binding(),
+        },
+        unix_now(),
+    )
+    .expect("verified fixture");
+    let accepted = preverified_dasobjectstore_web_router(host_routes)
+        .layer(Extension(verified))
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(accepted.status(), StatusCode::OK);
+    cleanup(&root);
 }
 
 #[tokio::test]

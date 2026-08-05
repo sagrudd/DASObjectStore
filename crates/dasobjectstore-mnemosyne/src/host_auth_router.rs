@@ -105,6 +105,15 @@ pub fn preverified_dasobjectstore_router_with_daemon(
     router.layer(middleware::from_fn(require_preverified_actor))
 }
 
+/// Protect host-owned DAS Web routes with the same verified actor boundary as
+/// the host-composed API, without coupling them to a particular mount path.
+///
+/// The embedding product owns path mounting and must establish the verified
+/// actor extension before forwarding a request to this router.
+pub fn preverified_dasobjectstore_web_router(host_product_routes: Router) -> Router {
+    host_product_routes.layer(middleware::from_fn(require_preverified_actor))
+}
+
 /// Mount host-owned Web routes and the DASObjectStore operational API behind
 /// one Monas session boundary.
 pub fn monas_dasobjectstore_router(
