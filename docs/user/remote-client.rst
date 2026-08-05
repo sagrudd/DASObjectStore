@@ -64,14 +64,12 @@ The remote computer must have one of the following credential paths:
 * an AWS CLI profile containing S3 access key credentials authorized for the
   object stores;
 * a configured DASObjectStore credential helper that obtains temporary S3
-  credentials from Mneion, Synoptikon, or the standalone appliance's local
-  password authority.
+  credentials from the site authority without receiving a password.
 
-Passwords are never written to the terminal by ``dasobjectstore-remote``. When
-``--prompt-password`` or a non-profile credential helper flow is used, the
-password prompt disables terminal echo and passes the password only to the
-credential helper through the ``DASOBJECTSTORE_REMOTE_PASSWORD`` environment
-variable for that child process.
+The remote client does not accept, prompt for, retain, or forward an appliance
+password. ``local-password`` and ``--prompt-password`` are retired and fail
+closed. Establish a browser-approved Pistis EasyConnect session, or use a
+site-issued passwordless credential helper.
 
 Easyconnect Contract
 --------------------
@@ -171,58 +169,12 @@ design; activation remains gated by the immutable principal-to-ObjectStore
 resolver, reviewed liveness adapter, negative and crash/replay tests, and
 evidence through the real Monas/Pistis route.
 
-For non-browser automation, use the password-authenticated ObjectStore
-connection command. It prompts without echo, uses the appliance HTTPS API, and
-returns a single-store, eight-hour Garage context:
-
-.. code-block:: console
-
-   dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
-     --username stephen \
-     --set-s3-config
-
-The command establishes trust before asking for the password. On first contact
-it performs a TLS handshake without sending an HTTP request, username,
-password, session token, or S3 credential. It displays the leaf certificate
-subject, issuer, SANs, validity, address match, SHA-256 fingerprint and any
-appliance identity subsequently obtained through the approved pinned channel.
-An interactive user must answer the default-deny prompt:
-
-.. code-block:: text
-
-   Trust this DASObjectStore appliance certificate? [y/N]
-
-The accepted certificate, stable appliance identity, endpoint binding, and any
-configured domain-cert CA are stored as private, locked, atomic trust state below
-``~/.config/dasobjectstore/trusted-appliances`` (or
-``$XDG_CONFIG_HOME/dasobjectstore/trusted-appliances``). Subsequent
-authentication verifies the presented certificate before prompting for a
-password. For a domain-cert CA-backed appliance it validates the complete
-chain, server EKU, validity and requested DNS/IP SAN. A renewed leaf is accepted
-automatically only when that validation succeeds and the authenticated API
-returns the already-enrolled appliance ID. The new leaf and SPKI binding are
-then committed with the new session generation. Reinstalling the package does
-not change the appliance ID because it is retained independently below
-``/var/lib/dasobjectstore``.
-
-For non-interactive enrollment, compare a fingerprint obtained through an
-independent trusted channel:
-
-.. code-block:: console
-
-   dasobjectstore-remote authenticate 192.168.1.192 epic_collection \
-     --username stephen \
-     --trust-fingerprint \
-     C9:9C:C8:A3:18:4A:70:3B:9C:9B:5A:7E:4A:DF:FB:8A:2D:6F:CF:45:EB:E4:D6:B5:02:8E:A6:82:B8:2D:F8:C5 \
-     --set-s3-config
-
-The comparison is constant-time and a mismatch stops before password input.
-Unknown certificates are rejected when stdin is non-interactive unless this
-option is supplied. Certificates correctly issued to the appliance DNS name or
-IP use ordinary name validation. Older appliance certificates that contain
-only ``localhost`` are supported solely after explicit fingerprint approval;
-the resulting endpoint record is marked as a legacy fingerprint-pinned
-connection. ``localhost`` is never guessed for another appliance.
+For non-browser automation, consume only short-lived credentials issued by the
+site authority through a passwordless credential helper. The former
+``authenticate`` command is a retired local-password transport and fails
+closed; it cannot establish trust, prompt for a password, issue an HTTP
+request, or write a remote session. Enrol or inspect TLS identity separately,
+then complete EasyConnect with an approved Pistis session.
 
 Inspect and deliberately maintain enrolled trust with:
 
@@ -509,18 +461,7 @@ session records. Pairings are removed only by future explicit pairing/session
 management commands; they are not silently discarded by normal endpoint
 configuration changes.
 
-For a standalone appliance local-password flow, configure the username and the
-credential helper supplied by the site:
-
-.. code-block:: console
-
-   dasobjectstore-remote config set \
-     --endpoint-url https://dos-appliance.example:3900 \
-     --auth local-password \
-     --username alice \
-     --credential-helper dasobjectstore-local-s3-credentials
-
-For Mneion or Synoptikon managed sites, use the site-provided helper:
+For a Pistis-managed site, use the site-provided passwordless helper:
 
 .. code-block:: console
 
@@ -808,12 +749,14 @@ A credential helper is an executable command configured with
 ``--credential-helper``. DASObjectStore runs it with the following environment
 variables:
 
-* ``DASOBJECTSTORE_REMOTE_AUTHORITY``: ``local-password``, ``mneion``, or
+* ``DASOBJECTSTORE_REMOTE_AUTHORITY``: ``pistis``, ``mneion``, or
   ``synoptikon``;
 * ``DASOBJECTSTORE_REMOTE_ENDPOINT_URL``: the configured appliance endpoint;
-* ``DASOBJECTSTORE_REMOTE_USERNAME``: the configured username when present;
-* ``DASOBJECTSTORE_REMOTE_PASSWORD``: the password captured without terminal
-  echo for this invocation.
+* ``DASOBJECTSTORE_REMOTE_USERNAME``: the configured username when present.
+
+``DASOBJECTSTORE_REMOTE_PASSWORD`` is never set or forwarded. A helper that
+requires a password is not compatible with the remote client and must fail
+closed.
 
 The helper must print JSON to stdout:
 

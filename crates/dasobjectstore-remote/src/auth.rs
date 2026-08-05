@@ -14,6 +14,12 @@ pub enum RemoteAuthAuthority {
 }
 
 impl RemoteAuthAuthority {
+    /// `local-password` is retained only so persisted legacy configuration can
+    /// be diagnosed and rejected without being silently reinterpreted.
+    pub fn is_retired(self) -> bool {
+        matches!(self, Self::LocalPassword)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AwsProfile => "aws-profile",
@@ -77,15 +83,16 @@ pub fn request_s3_credentials(
     authority: RemoteAuthAuthority,
     endpoint_url: &str,
     username: Option<&str>,
-    password: Option<&str>,
 ) -> Result<RemoteS3Credentials, RemoteAuthError> {
+    if authority.is_retired() {
+        return Err(RemoteAuthError::RetiredAuthority);
+    }
     let output = Command::new("sh")
         .arg("-c")
         .arg(helper)
         .env("DASOBJECTSTORE_REMOTE_AUTHORITY", authority.as_str())
         .env("DASOBJECTSTORE_REMOTE_ENDPOINT_URL", endpoint_url)
         .env("DASOBJECTSTORE_REMOTE_USERNAME", username.unwrap_or(""))
-        .env("DASOBJECTSTORE_REMOTE_PASSWORD", password.unwrap_or(""))
         .output()?;
     if !output.status.success() {
         return Err(RemoteAuthError::HelperFailed(
@@ -99,6 +106,7 @@ pub fn request_s3_credentials(
 
 #[derive(Debug)]
 pub enum RemoteAuthError {
+    RetiredAuthority,
     Io(std::io::Error),
     Json(serde_json::Error),
     HelperFailed(String),
@@ -108,6 +116,9 @@ pub enum RemoteAuthError {
 impl fmt::Display for RemoteAuthError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RetiredAuthority => formatter.write_str(
+                "local-password authority is retired; use the browser-approved Pistis EasyConnect ceremony or a site-issued credential helper without a password",
+            ),
             Self::Io(error) => write!(formatter, "{error}"),
             Self::Json(error) => write!(formatter, "{error}"),
             Self::HelperFailed(message) if message.is_empty() => {
@@ -147,6 +158,21 @@ mod tests {
             "synoptikon".parse::<RemoteAuthAuthority>().unwrap(),
             RemoteAuthAuthority::Synoptikon
         );
+    }
+
+    #[test]
+    fn rejects_legacy_local_password_helper_before_starting_a_shell() {
+        let error = super::request_s3_credentials(
+            "exit 0",
+            RemoteAuthAuthority::LocalPassword,
+            "https://dos.example:3900",
+            Some("alice"),
+        )
+        .expect_err("retired authority must fail before invoking the helper");
+
+        assert!(error
+            .to_string()
+            .contains("local-password authority is retired"));
     }
 
     #[test]

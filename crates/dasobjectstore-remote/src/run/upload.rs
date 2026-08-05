@@ -530,23 +530,16 @@ pub(super) fn config_path(cli: &RemoteCli) -> Result<PathBuf, RemoteRunError> {
 }
 
 pub(super) fn resolve_credentials(
-    cli: &RemoteCli,
+    _cli: &RemoteCli,
     config: &RemoteConfig,
 ) -> Result<Option<RemoteS3Credentials>, RemoteRunError> {
     let Some(helper) = &config.credential_helper else {
         return Ok(None);
     };
-    let password =
-        if cli.prompt_password() || config.auth_authority != RemoteAuthAuthority::AwsProfile {
-            Some(rpassword::prompt_password("DASObjectStore password: ")?)
-        } else {
-            None
-        };
     Ok(Some(request_s3_credentials(
         helper,
         config.auth_authority,
         &config.endpoint_url,
         config.username.as_deref(),
-        password.as_deref(),
     )?))
 }

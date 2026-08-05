@@ -14,6 +14,9 @@ pub(super) fn run_authenticate_with_identity_policy(
     writer: &mut impl Write,
     allow_confirmed_identity_replacement: bool,
 ) -> Result<(), RemoteRunError> {
+    if legacy_password_transport_is_retired() {
+        return Err(RemoteAuthenticateError::RetiredLocalPassword.into());
+    }
     let initial_trust = crate::trust::load_trust(args.host_or_ip(), args.https_port())?;
     let username = args
         .username()
@@ -291,6 +294,10 @@ pub(super) fn run_authenticate_with_identity_policy(
     serde_json::to_writer_pretty(&mut *writer, &safe)?;
     writer.write_all(b"\n")?;
     Ok(())
+}
+
+fn legacy_password_transport_is_retired() -> bool {
+    true
 }
 
 fn restore_initial_trust(
