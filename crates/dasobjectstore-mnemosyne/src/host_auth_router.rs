@@ -94,7 +94,9 @@ pub fn preverified_dasobjectstore_router_with_daemon(
         // Role-authorised operational routes are added only as they are
         // migrated to the verified host actor contract.
         .merge(host_composed_gui_api_router())
-        .merge(host_product_routes);
+        // Nest, rather than merge, host Web routes so the mounted root is
+        // preserved when Monas mounts this router below a product prefix.
+        .nest("/", host_product_routes);
     let router = match s3_endpoint {
         Some(s3_endpoint) => router.merge(pistis_easyconnect_approval_router_with_daemon(
             s3_endpoint,
