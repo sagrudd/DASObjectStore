@@ -158,6 +158,10 @@ pub(super) fn preverified_host_operational_router_with_state(
             "/api/v1/workspaces/endpoints/test",
             post(preverified_host_test_endpoint_connection),
         )
+        .route(
+            "/api/v1/workspaces/endpoints/upsert",
+            post(preverified_host_upsert_endpoint_inventory),
+        )
         .with_state(state)
 }
 
