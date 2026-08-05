@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.19] - 2026-08-05
+
+### Security
+
+- Migrate host-composed registered endpoint testing to the verified Pistis
+  boundary. The operation requires a matching verified subject and the closed
+  `storage_administrator` role, and reaches the daemon only through the
+  bounded priority bridge.
+
 ## [0.157.18] - 2026-08-05
 
 ### Security
