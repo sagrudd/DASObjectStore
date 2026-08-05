@@ -1,0 +1,7 @@
+{
+  "bind_address": "0.0.0.0",
+  "port": 3900,
+  "certificate_path": "/opt/dasobjectstore/tls/server.crt",
+  "private_key_path": "/opt/dasobjectstore/tls/server.key",
+  "max_concurrent_uploads": 32
+}

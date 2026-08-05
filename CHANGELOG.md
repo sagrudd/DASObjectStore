@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.10] - 2026-08-05
+
+### Added
+
+- Ship the dedicated port-3900 S3 gateway binary, hardened systemd unit and
+  explicit TLS configuration in Debian and RPM payloads. The unit has no
+  install target and package scripts cannot activate it; handover remains
+  manual and fails closed if the old listener still owns the port.
+
 ## [0.157.9] - 2026-08-05
 
 ### Security
