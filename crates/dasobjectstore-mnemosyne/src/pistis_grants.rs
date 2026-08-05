@@ -7,8 +7,8 @@ use dasobjectstore_daemon::{
     RemoteEasyconnectObjectStoreGrant,
 };
 use dasobjectstore_gui_api::{
-    AuthenticatedGuiActor, PistisApprovalResolutionError, PistisEasyconnectApprovalResolver,
-    VerifiedHostAuthenticatedContext,
+    AuthenticatedGuiActor, DasCapability, DasRolePolicy, PistisApprovalResolutionError,
+    PistisEasyconnectApprovalResolver, VerifiedHostAuthenticatedContext,
 };
 use dasobjectstore_object_service::{bucket_name_for_definition, read_store_registry};
 use std::path::PathBuf;
@@ -124,13 +124,10 @@ impl PistisEasyconnectApprovalResolver for FilePistisEasyconnectApprovalResolver
         if actor.subject_id != self.principal_id.to_string()
             || context.subject_id != actor.subject_id
             || context.session_id != self.session_id.to_string()
-            || !actor
-                .roles
-                .iter()
-                .any(|role| matches!(role.as_str(), "storage_operator" | "storage_administrator"))
+            || !DasRolePolicy::from_verified(verified).permits(DasCapability::Operate)
         {
             return Err(PistisApprovalResolutionError::new(
-                "verified actor is not bound to the configured Pistis grant subject",
+                "verified actor lacks the configured Pistis storage-operator grant",
             ));
         }
         let (record, grant) = self

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.9] - 2026-08-05
+
+### Security
+
+- Require the verified DAS role policy, rather than a route actor's copied
+  role list, before Pistis EasyConnect can resolve an operating grant.
+
 ## [0.157.8] - 2026-08-05
 
 ### Security
