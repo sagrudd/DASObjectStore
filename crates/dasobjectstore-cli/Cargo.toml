@@ -14,6 +14,10 @@ name = "dasobjectstore-server"
 path = "src/server_main.rs"
 
 [[bin]]
+name = "dasobjectstore-s3-gateway"
+path = "src/s3_gateway_main.rs"
+
+[[bin]]
 name = "dasobjectstore-local-auth-helper"
 path = "src/local_auth_helper_main.rs"
 
