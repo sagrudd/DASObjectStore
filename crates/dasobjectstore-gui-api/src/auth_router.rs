@@ -134,6 +134,7 @@ pub fn host_composed_gui_api_router() -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(preverified_host_operational_router())
         .merge(preverified_host_reporting_router())
+        .merge(preverified_host_profile_catalogue_router())
 }
 
 /// Host-composed operational mutations that derive authority exclusively from
@@ -200,6 +201,26 @@ pub(super) fn preverified_host_reporting_router_with_state(
         .route(
             "/api/v1/workspaces/activity/reporting/performance-report",
             post(preverified_host_rebuild_performance_report),
+        )
+        .with_state(state)
+}
+
+/// Host-composed portable catalogue import is an administrator mutation. It
+/// is separated from read-only profile routes because it commits daemon-owned
+/// metadata and must use the priority daemon bridge.
+fn preverified_host_profile_catalogue_router() -> Router {
+    preverified_host_profile_catalogue_router_with_state(
+        PreverifiedHostProfileCatalogueRouteState::packaged(),
+    )
+}
+
+pub(super) fn preverified_host_profile_catalogue_router_with_state(
+    state: PreverifiedHostProfileCatalogueRouteState,
+) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/profile-catalogue/stores/{store_id}/import",
+            post(preverified_host_profile_catalogue_import),
         )
         .with_state(state)
 }
