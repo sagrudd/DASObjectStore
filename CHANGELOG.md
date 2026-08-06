@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.47] - 2026-08-06
+
+### Security
+
+- Require profile binding and profile migration mutations to arrive through the
+  fixed DAS GUI/API service peer with a versioned verified Pistis subject.
+  Direct CLI, root, sudo, and local administrative-group authority fail closed.
+
 ## [0.157.46] - 2026-08-06
 
 ### Security
