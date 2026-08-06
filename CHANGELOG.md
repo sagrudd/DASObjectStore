@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.26] - 2026-08-06
+
+### Security
+
+- Migrate host-composed profile-object deletion to the verified Pistis
+  boundary. The daemon-owned deletion accepts only a matching verified
+  `storage_operator`; it does not consult a local session, password, PAM,
+  POSIX group, or sudo-derived identity.
+
 ## [0.157.25] - 2026-08-06
 
 ### Security
@@ -7,15 +16,6 @@
 - Migrate host-composed portable profile-catalogue import to the verified
   Pistis administrator boundary and bounded priority daemon bridge. The route
   has no local session, password, PAM, OS-user, group, or sudo fallback.
-
-## [0.157.24] - 2026-08-06
-
-### Security
-
-- Migrate host-composed performance-report rebuilding to the verified Pistis
-  boundary. The bounded renderer accepts only a matching verified
-  `storage_administrator`; it does not consult a local session, password, PAM,
-  POSIX group, or sudo-derived identity.
 
 ## [0.157.23] - 2026-08-06
 
