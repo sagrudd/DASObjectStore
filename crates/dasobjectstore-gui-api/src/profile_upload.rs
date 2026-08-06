@@ -6,11 +6,12 @@
 //! performs authorization, reservation, verification, and catalogue commit.
 
 use super::{
-    admin_daemon_bridge_error_with_code, route_error, AuthRouteError, AuthenticatedGuiActor,
+    admin_daemon_bridge_error_with_code, require_preverified_host_operator, route_error,
+    AuthRouteError, AuthenticatedGuiActor, VerifiedHostAuthenticatedContext,
 };
 use axum::{
     body::Body,
-    extract::{Path, Query},
+    extract::{Extension, Path, Query},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -29,7 +30,7 @@ const UPLOAD_CHANNEL_CAPACITY: usize = 2;
 const UPLOAD_DAEMON_DEADLINE: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct ProfileUploadQuery {
+pub(crate) struct ProfileUploadQuery {
     pub version: Option<u64>,
 }
 
@@ -38,6 +39,35 @@ pub(super) async fn standalone_profile_s3_put(
     Query(query): Query<ProfileUploadQuery>,
     headers: HeaderMap,
     _actor: AuthenticatedGuiActor,
+    body: Body,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    profile_s3_put(store_id, object_id, query, headers, body).await
+}
+
+/// Upload a profile object for an actor that Monas or Synoptikon has already
+/// verified with Pistis.
+///
+/// The host-composed route accepts only a matching verified subject with the
+/// closed DAS `storage_operator` role. It does not consult a local session,
+/// password, PAM result, POSIX user/group, or sudo-derived authority; the
+/// daemon remains the sole writer of managed storage.
+pub(crate) async fn preverified_host_profile_s3_put(
+    Path((store_id, object_id)): Path<(String, String)>,
+    Query(query): Query<ProfileUploadQuery>,
+    headers: HeaderMap,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    body: Body,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_operator(&actor, &verified)?;
+    profile_s3_put(store_id, object_id, query, headers, body).await
+}
+
+async fn profile_s3_put(
+    store_id: String,
+    object_id: String,
+    query: ProfileUploadQuery,
+    headers: HeaderMap,
     body: Body,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let store_id = store_id
