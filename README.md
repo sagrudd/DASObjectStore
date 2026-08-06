@@ -239,24 +239,18 @@ opportunistically if capacity exists.
 Explicit disk retirement is a first-class workflow:
 
 ```bash
-dasobjectstore disk retire <disk-id> \
-  --live-sqlite-path <live.sqlite> \
-  --recorded-at-utc <timestamp>
 dasobjectstore disk drain <disk-id> \
   --live-sqlite-path <live.sqlite>
 dasobjectstore disk replace <old-disk-id> \
   --with <new-disk-id> \
   --live-sqlite-path <live.sqlite>
-dasobjectstore disk force-retire <disk-id> \
-  --live-sqlite-path <live.sqlite> \
-  --recorded-at-utc <timestamp> \
-  --allow-force-retire \
-  --confirm "confirm force retire"
 ```
 
-`disk retire` and `disk drain` are planning and state-transition workflows for
-safe removal. They do not make a disk safe to pull until protected stores have
-policy-satisfying verified copies elsewhere. `disk force-retire` bypasses that
+`disk retire` and `disk force-retire` are authorized from Monas after a Pistis
+approval; the direct CLI rejects them, including when run by root or a local
+administrator group. `disk drain` remains a planning workflow for safe removal.
+Retirement does not make a disk safe to pull until protected stores have
+policy-satisfying verified copies elsewhere. Force retirement bypasses that
 safe drain requirement and can leave data unavailable unless it is already
 protected or reproducible, so it requires both policy allowance and action-time
 confirmation.

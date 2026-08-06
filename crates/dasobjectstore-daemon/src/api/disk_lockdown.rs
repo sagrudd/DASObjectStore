@@ -1,4 +1,7 @@
-use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
+use crate::api::{
+    DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind, PreverifiedHostSubject,
+    PreverifiedHostSubjectValidationError,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use std::path::PathBuf;
@@ -13,6 +16,10 @@ pub struct DiskLockdownRequest {
     pub create_service_user: bool,
     pub dry_run: bool,
     pub confirmation_marker: String,
+    /// Required at execution time: a versioned Pistis-verified subject from
+    /// the fixed host GUI/API service peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<PreverifiedHostSubject>,
 }
 
 impl DiskLockdownRequest {
@@ -26,6 +33,11 @@ impl DiskLockdownRequest {
         validate_name(&self.service_group, "service_group")?;
         if !self.dry_run && self.confirmation_marker != DISK_LOCKDOWN_CONFIRMATION {
             return Err(DiskLockdownValidationError::ConfirmationMismatch);
+        }
+        if let Some(subject) = &self.verified_subject {
+            subject
+                .validate()
+                .map_err(DiskLockdownValidationError::InvalidVerifiedSubject)?;
         }
         Ok(())
     }
@@ -82,6 +94,7 @@ pub enum DiskLockdownValidationError {
     RelativePath { path: PathBuf },
     UnsafeName { field: &'static str },
     ConfirmationMismatch,
+    InvalidVerifiedSubject(PreverifiedHostSubjectValidationError),
 }
 
 impl Display for DiskLockdownValidationError {
@@ -94,6 +107,7 @@ impl Display for DiskLockdownValidationError {
             Self::ConfirmationMismatch => {
                 formatter.write_str("disk lockdown confirmation marker does not match")
             }
+            Self::InvalidVerifiedSubject(error) => error.fmt(formatter),
         }
     }
 }
@@ -113,6 +127,7 @@ mod tests {
             create_service_user: true,
             dry_run: false,
             confirmation_marker: DISK_LOCKDOWN_CONFIRMATION.to_string(),
+            verified_subject: None,
         }
     }
 

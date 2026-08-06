@@ -117,9 +117,8 @@ use self::ingest_source_access::prepare_source_access_for_packaged_daemon;
 use self::ingest_source_access::{plan_source_acl_actions, SourceAclAction, SourceAclPermission};
 use self::managed_roots::*;
 use self::output::{
-    write_disk_drain_plan, write_disk_force_retirement_report, write_disk_replacement_plan,
-    write_disk_retirement_report, write_health_json, write_health_summary, write_health_verbose,
-    write_host_connection_status, write_ingest_status, write_lockdown_das_report,
+    write_disk_drain_plan, write_disk_replacement_plan, write_health_json, write_health_summary,
+    write_health_verbose, write_host_connection_status, write_ingest_status,
     write_nas_nfs_endpoint_validation_report, write_object_export_report,
     write_object_inspect_summary, write_object_put_report, write_pool_import_report,
     write_pool_inspect_summary, write_pool_repair_dry_run, write_prepare_das_report,
@@ -180,9 +179,7 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, CapacityStatusRequest, CreateObjectStoreRequest,
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
     DaemonIngestControlAction, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
-    DaemonRuntimeConfig, DiskForceRetireRequest as DaemonDiskForceRetireRequest,
-    DiskLockdownRequest as DaemonDiskLockdownRequest, DiskRetireRequest as DaemonDiskRetireRequest,
-    IngestControlRequest as DaemonIngestControlRequest,
+    DaemonRuntimeConfig, IngestControlRequest as DaemonIngestControlRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
@@ -197,8 +194,7 @@ use dasobjectstore_daemon::{
     StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport,
     UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreIngestPolicyRequest,
-    DEFAULT_DAEMON_STATE_DIR, DISK_LOCKDOWN_CONFIRMATION as LOCKDOWN_CONFIRMATION,
-    OBJECT_STORE_CREATE_CONFIRMATION,
+    DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -1018,6 +1014,23 @@ mod tests {
         assert!(output.contains("Commands:"));
         assert!(output.contains("disk"));
         assert!(output.contains("health"));
+    }
+
+    #[test]
+    fn disk_retirement_cli_is_denied_before_a_direct_daemon_request() {
+        let cli = Cli::try_parse_from(["dasobjectstore", "disk", "retire", "disk-a"])
+            .expect("disk retire parses");
+        let mut output = Vec::new();
+
+        let error = run(&cli, &mut output).expect_err("direct CLI must be denied");
+
+        assert!(matches!(
+            error,
+            CliError::CommandFailed(message)
+                if message.contains("verified Pistis subject")
+                    && message.contains("Direct CLI")
+        ));
+        assert!(output.is_empty());
     }
 
     #[test]

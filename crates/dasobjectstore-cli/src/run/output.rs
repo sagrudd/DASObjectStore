@@ -2,13 +2,12 @@ use super::connection_status::HostConnectionStatus;
 use super::health::{DiskHealthSummary, HealthReport};
 use super::{CliError, StoreDeleteCommandReport};
 use dasobjectstore_core::lifecycle::{HealthState, PoolState};
-use dasobjectstore_daemon::DiskLockdownResponse;
 use dasobjectstore_daemon::PrepareEnclosureResponse;
 use dasobjectstore_metadata::{
     DestagePriorityPolicy, DiskDrainAction, DiskDrainObjectSummary, DiskDrainPlanSummary,
-    DiskReplacementPlanSummary, DiskRetirementReport, ObjectExportReport, ObjectInspectSummary,
-    ObjectPutReport, PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity, SsdCapacityPolicy,
-    SsdPressure, StoreDrainReport,
+    DiskReplacementPlanSummary, ObjectExportReport, ObjectInspectSummary, ObjectPutReport,
+    PoolInspectSummary, ReadOnlyAttachReport, SsdCapacity, SsdCapacityPolicy, SsdPressure,
+    StoreDrainReport,
 };
 use dasobjectstore_mnemosyne::{
     MneionDasObjectStoreEndpointLocation, ValidatedNasNfsEndpointDefinition,
@@ -352,21 +351,6 @@ fn connection_warning_count(report: &HostConnectionStatus) -> usize {
             .sum::<usize>()
 }
 
-pub(super) fn write_disk_retirement_report(
-    report: &DiskRetirementReport,
-    writer: &mut impl Write,
-) -> Result<(), io::Error> {
-    writeln!(writer, "Disk retirement requested: {}", report.disk_id)?;
-    writeln!(writer, "Previous state: {}", report.previous_state)?;
-    writeln!(writer, "Next state: {:?}", report.next_state)?;
-    writeln!(writer, "Updated: {}", report.updated_at_utc)?;
-    writeln!(
-        writer,
-        "Live metadata: {}",
-        report.live_sqlite_path.to_string_lossy()
-    )
-}
-
 pub(super) fn write_prepare_das_report(
     report: &PrepareEnclosureResponse,
     writer: &mut impl Write,
@@ -410,50 +394,6 @@ pub(super) fn write_prepare_das_report(
     }
 
     Ok(())
-}
-
-pub(super) fn write_lockdown_das_report(
-    report: &DiskLockdownResponse,
-    writer: &mut impl Write,
-) -> Result<(), io::Error> {
-    if report.accepted.dry_run {
-        writeln!(writer, "DAS lockdown dry run")?;
-    } else {
-        writeln!(writer, "DAS lockdown complete")?;
-    }
-    writeln!(
-        writer,
-        "Mount root: {}",
-        report.mount_root.to_string_lossy()
-    )?;
-    writeln!(writer, "Service user: {}", report.service_user)?;
-    writeln!(writer, "Service group: {}", report.service_group)?;
-    writeln!(writer, "Protected roots: {}", report.protected_roots.len())?;
-    for root in &report.protected_roots {
-        writeln!(writer, "- {}", root.to_string_lossy())?;
-    }
-    if report.accepted.dry_run {
-        for command in &report.planned_commands {
-            writeln!(writer, "$ {command}")?;
-        }
-    }
-
-    Ok(())
-}
-
-pub(super) fn write_disk_force_retirement_report(
-    report: &DiskRetirementReport,
-    writer: &mut impl Write,
-) -> Result<(), io::Error> {
-    writeln!(writer, "Disk force-retired: {}", report.disk_id)?;
-    writeln!(writer, "Previous state: {}", report.previous_state)?;
-    writeln!(writer, "Next state: {:?}", report.next_state)?;
-    writeln!(writer, "Updated: {}", report.updated_at_utc)?;
-    writeln!(
-        writer,
-        "Live metadata: {}",
-        report.live_sqlite_path.to_string_lossy()
-    )
 }
 
 pub(super) fn write_disk_drain_plan(

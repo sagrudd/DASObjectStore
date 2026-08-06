@@ -472,20 +472,17 @@ where
         }
         DaemonApiRequest::DiskLockdown(mut request) => {
             request.confirmation_marker = request.confirmation_marker.trim().to_string();
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "disk lockdown requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "disk lockdown requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "disk lockdown",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
+            let verified_subject_id = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone());
             let now = handler.clock.now_utc();
             let response = handler
                 .service_orchestrator
@@ -498,7 +495,7 @@ where
                 progress: DaemonJobProgress::default(),
                 submitted_at_utc: response.accepted.accepted_at_utc.clone(),
                 updated_at_utc: response.accepted.accepted_at_utc.clone(),
-                actor: actor.map(DaemonLocalActor::display_name),
+                actor: verified_subject_id,
                 failure_message: None,
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
