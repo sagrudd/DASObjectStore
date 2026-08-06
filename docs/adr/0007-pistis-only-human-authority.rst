@@ -85,6 +85,75 @@ them for recovery rolls back through the documented APT/RPM procedure.  The
 new package only becomes usable after the explicit Monas/Pistis configuration
 and custody gates pass.
 
+Implementation ledger (2026-08-06)
+------------------------------------
+
+This ledger is deliberately route-level.  It prevents a package-only PAM
+removal or an apparently harmless read route from being mistaken for the
+authority cutover.
+
+Delivered host-composed routes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``host_composed_gui_api_router`` is mounted only beneath the verified host
+middleware.  Its status and planning routes have no local authority input.
+The following operational routes are separately migrated and re-derive
+``DasRolePolicy`` from the matching ``VerifiedHostAuthenticatedContext``:
+
+* administrator: ingest control, ingest-policy update, ObjectStore creation,
+  enclosure preparation, endpoint upsert and connection test, job status and
+  cancellation, portable catalogue import, and performance-report rebuild;
+* operator: profile-object ``PUT`` and ``DELETE``.
+
+Each uses the bounded daemon bridge (the priority bridge for mutations).  A
+legacy local session, password, PAM result, POSIX group, sudo state, or raw
+cookie cannot supply authority to these host routes.
+
+Remaining route families and safe order
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#. Migrate the profile read and multipart family from
+   ``StandaloneDashboardRouteState``: store capacity; S3 list, HEAD, GET,
+   verify, diagnostics and health; profile readiness/capabilities/catalogue
+   export; then multipart part, status and completion.  The first group needs
+   an exact verified ``storage_viewer`` store scope.  Multipart mutations need
+   a verified ``storage_operator`` store scope, subject-bound daemon requests,
+   and replay/idempotency coverage before they are exposed by the host router.
+#. Replace the detailed enclosure, ObjectStore and remote-upload dashboards.
+   Their current aggregators resolve ``LocalUserAuthorityProvider`` and
+   sudo/group state.  They must consume the verified subject and closed DAS
+   role policy instead; copying an OS-derived role into the host context is not
+   an acceptable bridge.
+#. Migrate the object browser, object download and folder-download routes.
+   ``StandaloneObjectBrowserRouteState`` currently translates a browser actor
+   through ``discover_local_user`` into a daemon delegated actor.  Define a
+   path-free verified-subject delegation DTO and validate store/prefix scope
+   in the daemon before removing that lookup.  Downloads must retain their
+   existing no-store, bounded archive-worker and provider-stream protections.
+#. Remove, rather than rehost, the users/groups workspace and local-group
+   mutation routes.  Their only purpose is OS account/group administration;
+   Monas/Pistis and product roles replace that responsibility.
+#. Keep remote control and application/S3 capability routes distinct from
+   human browser authority.  They are service-capability contracts and must
+   remain independently scoped, replay-protected and passwordless; they must
+   not be made callable by a host browser session merely to simplify routing.
+#. Once every required host route has a verified counterpart, remove the raw
+   Monas-cookie/``ProsopikonAuthStore`` adapter and all
+   ``federated_gui_api_router(LocalAuthStore)`` production composition.  Then
+   delete the local GUI authority, CLI helper/migration binary and package PAM
+   assets in the order above.
+
+Daemon boundary caveat
+~~~~~~~~~~~~~~~~~~~~~
+
+The daemon may keep a dedicated service account and Unix-socket peer checks
+for its non-human boundary.  It must not retain root, ``sudo`` or
+``dasobjectstore-admin`` membership as an alternative human authorizer for a
+shipped operation.  Before deleting the local GUI stack, qualify every direct
+daemon/CLI administrative entrypoint so it either carries the verified host
+authority through the trusted bridge or fails closed.  This is separate from
+the S3 SigV4 data plane and does not change the 3900 gateway contract.
+
 Acceptance criteria
 -------------------
 
