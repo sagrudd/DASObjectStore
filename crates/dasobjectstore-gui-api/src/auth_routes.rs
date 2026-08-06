@@ -5305,6 +5305,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn host_composed_router_keeps_local_users_groups_routes_unreachable() {
+        let app = host_composed_gui_api_router();
+
+        for (method, path) in [
+            ("GET", "/api/v1/workspaces/users-groups"),
+            ("POST", "/api/v1/workspaces/users-groups/local-groups"),
+            (
+                "POST",
+                "/api/v1/workspaces/users-groups/local-groups/members",
+            ),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        // A verified host context is intentionally not a
+                        // substitute for local-user/group management.
+                        .extension(verified_host_context("storage_administrator"))
+                        .body(Body::empty())
+                        .expect("request builds"),
+                )
+                .await
+                .expect("request completes");
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
     async fn synoptikon_integrated_host_mode_omits_standalone_easyconnect_routes() {
         let root = temp_root("integrated-easyconnect");
         let auth_store = LocalAuthStore::new(&root);

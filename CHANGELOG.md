@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.39] - 2026-08-06
+
+### Security
+
+- Make the host-composed boundary explicit: the standalone local Users &
+  Groups workspace and its OS group mutation routes are unreachable even when
+  a verified Pistis context is present. Monas and Synoptikon navigation omit
+  Local Access; human identity and role management remain owned by Pistis and
+  Prosopikon.
+
 ## [0.157.38] - 2026-08-06
 
 ### Security
