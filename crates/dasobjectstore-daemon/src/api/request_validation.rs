@@ -355,6 +355,12 @@ pub(super) fn disk_lockdown_validation_error(
                 expected: DISK_LOCKDOWN_CONFIRMATION,
             }
         }
+        DiskLockdownValidationError::InvalidVerifiedSubject(error) => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "verified_subject",
+                value: error.to_string(),
+            }
+        }
     }
 }
 
@@ -438,6 +444,12 @@ pub(super) fn disk_retire_validation_error(
         DiskRetireValidationError::ConfirmationMismatch => {
             DaemonRequestValidationError::ConfirmationMismatch {
                 expected: FORCE_DISK_RETIRE_CONFIRMATION,
+            }
+        }
+        DiskRetireValidationError::InvalidVerifiedSubject(error) => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "verified_subject",
+                value: error.to_string(),
             }
         }
     }

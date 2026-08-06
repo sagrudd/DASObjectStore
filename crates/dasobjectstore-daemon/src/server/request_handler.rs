@@ -19,16 +19,16 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
-    ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileLifecycleState, ProfileMigrationResponse, ProfileReadinessResponse,
-    ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    PreverifiedHostSubject, ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry,
+    ProfileBrowserResponse, ProfileDiagnosticsResponse, ProfileInspectionResponse,
+    ProfileInspectionRootState, ProfileLifecycleState, ProfileMigrationResponse,
+    ProfileReadinessResponse, ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
+    ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -506,6 +506,42 @@ where
     }
 }
 
+/// Accepts a human administrative mutation only from the fixed packaged host
+/// service peer carrying a versioned Pistis-verified subject. Unix root, sudo,
+/// and DAS administrator groups identify neither a human nor their authority.
+pub(super) fn require_verified_pistis_host_authority(
+    actor: Option<&DaemonLocalActor>,
+    verified_subject: Option<&PreverifiedHostSubject>,
+    operation: &str,
+) -> Result<(), DaemonApiErrorResponse> {
+    let Some(actor) = actor else {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!("{operation} require the fixed preverified host service peer"),
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!(
+                "{operation} reject direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+            ),
+        ));
+    }
+    let Some(verified_subject) = verified_subject else {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_subject_required",
+            format!("{operation} require a verified Pistis subject"),
+        ));
+    };
+    verified_subject.validate().map_err(|error| {
+        DaemonApiErrorResponse::new(
+            "preverified_host_subject_invalid",
+            format!("{operation} reject invalid verified Pistis subject: {error}"),
+        )
+    })
+}
+
 impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
@@ -939,8 +975,8 @@ fn default_live_sqlite_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonClock, DaemonRequestHandler, DaemonServiceOrchestrator, FixedDaemonClock,
-        SystemDaemonClock,
+        require_verified_pistis_host_authority, DaemonClock, DaemonRequestHandler,
+        DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock,
     };
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
@@ -964,10 +1000,10 @@ mod tests {
         ObjectBrowserVerifiedSubject, ObjectDownloadRequest, ObjectFolderDownloadRequest,
         ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
-        ProfileDiagnosticsRequest, ProfileInspectionRequest, ProfileInspectionRootState,
-        ProfileMigrationRequest, ProfileReadinessRequest, ProviderStreamChunkHeader,
-        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        PreverifiedHostSubject, ProfileBindingOperation, ProfileBindingRequest,
+        ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileInspectionRequest,
+        ProfileInspectionRootState, ProfileMigrationRequest, ProfileReadinessRequest,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
@@ -983,7 +1019,8 @@ mod tests {
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_BROWSER_GUI_API_PEER_IDENTITY, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
-        OBJECT_STORE_CREATE_CONFIRMATION, PROFILE_BINDING_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+        PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION, PROFILE_BINDING_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
@@ -3711,13 +3748,55 @@ mod tests {
         let response = handler
             .handle(DaemonApiRequest::DiskRetire(DiskRetireRequest {
                 disk_id: "disk-a".to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
+        ));
+    }
+
+    #[test]
+    fn disk_retirement_rejects_root_even_when_a_pistis_subject_is_present() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let root = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::DiskRetire(DiskRetireRequest {
+                    disk_id: "disk-a".to_string(),
+                    verified_subject: Some(verified_pistis_subject()),
+                }),
+                Some(&root),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_authority_required"
+        ));
+    }
+
+    #[test]
+    fn disk_authority_requires_fixed_peer_and_versioned_pistis_subject() {
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
+
+        assert!(require_verified_pistis_host_authority(
+            Some(&service_peer),
+            Some(&verified_pistis_subject()),
+            "disk retirement",
+        )
+        .is_ok());
+        assert!(matches!(
+            require_verified_pistis_host_authority(Some(&service_peer), None, "disk retirement"),
+            Err(error) if error.code == "preverified_host_subject_required"
         ));
     }
 
@@ -5196,6 +5275,16 @@ mod tests {
                 allowed_prefixes: Vec::new(),
             }],
             revoked_at_utc: None,
+        }
+    }
+
+    fn verified_pistis_subject() -> PreverifiedHostSubject {
+        PreverifiedHostSubject {
+            schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: PREVERIFIED_HOST_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis:operator-1".to_string(),
+            session_id: "session-1".to_string(),
+            correlation_id: "request-1".to_string(),
         }
     }
 

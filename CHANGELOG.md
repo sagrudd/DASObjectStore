@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.45] - 2026-08-06
+
+### Security
+
+- Retire direct disk lockdown, retirement, and force-retirement authority.
+  These mutations now require a versioned, non-secret Pistis subject from the
+  fixed DAS GUI/API service peer; direct CLI, root, sudo, and local
+  ``dasobjectstore-admin`` authority fail closed. The audited subject records
+  only opaque subject/session/correlation identifiers and no local OS identity
+  or credential material.
+
 ## [0.157.44] - 2026-08-06
 
 ### Security

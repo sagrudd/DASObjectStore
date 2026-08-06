@@ -286,6 +286,7 @@ mod tests {
             } else {
                 crate::api::DISK_LOCKDOWN_CONFIRMATION.to_string()
             },
+            verified_subject: None,
         }
     }
 

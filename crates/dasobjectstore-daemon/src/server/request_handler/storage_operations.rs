@@ -675,15 +675,14 @@ where
     ) -> Result<DiskRetireResponse, (&'static str, String)> {
         let Some(actor) = actor else {
             return Err((
-                "administrator_authentication_required",
-                "disk retirement requires an authenticated local administrator".to_string(),
+                "preverified_host_authority_required",
+                "disk retirement requires the fixed preverified host service peer".to_string(),
             ));
         };
-        if !actor.is_administrator() {
+        if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Err((
-                "administrator_authorization_required",
-                "disk retirement requires root, sudo, or dasobjectstore-admin membership"
-                    .to_string(),
+                "preverified_host_authority_required",
+                "disk retirement rejects OS-derived human authority".to_string(),
             ));
         }
         let disk_id = dasobjectstore_core::ids::DiskId::new(request.disk_id.clone())
@@ -704,15 +703,15 @@ where
     ) -> Result<DiskRetireResponse, (&'static str, String)> {
         let Some(actor) = actor else {
             return Err((
-                "administrator_authentication_required",
-                "disk force-retirement requires an authenticated local administrator".to_string(),
+                "preverified_host_authority_required",
+                "disk force-retirement requires the fixed preverified host service peer"
+                    .to_string(),
             ));
         };
-        if !actor.is_administrator() {
+        if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Err((
-                "administrator_authorization_required",
-                "disk force-retirement requires root, sudo, or dasobjectstore-admin membership"
-                    .to_string(),
+                "preverified_host_authority_required",
+                "disk force-retirement rejects OS-derived human authority".to_string(),
             ));
         }
         if !request.allow_force_retire {

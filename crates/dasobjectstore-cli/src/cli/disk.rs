@@ -18,15 +18,15 @@ impl DiskArgs {
 pub(crate) enum DiskCommand {
     /// Plan drain work for a disk without copying or deleting data.
     Drain(DiskDrainArgs),
-    /// Force a disk into retired state after explicit risk confirmation.
+    /// Retired through Monas after Pistis approval; direct CLI is rejected.
     ForceRetire(DiskForceRetireArgs),
-    /// Lock mounted DAS roots so only the service account can access them.
+    /// Lock down mounted DAS roots through Monas; direct CLI is rejected.
     LockdownDas(DiskLockdownDasArgs),
     /// Repartition, format, and mount DAS devices for DASObjectStore.
     PrepareDas(DiskPrepareDasArgs),
     /// Plan replacement work from an old disk onto a named new disk.
     Replace(DiskReplaceArgs),
-    /// Request retirement by moving a disk into draining state.
+    /// Request retirement through Monas after Pistis approval; direct CLI is rejected.
     Retire(DiskRetireArgs),
 }
 
@@ -68,20 +68,6 @@ pub(crate) struct DiskForceRetireArgs {
     confirm: String,
 }
 
-impl DiskForceRetireArgs {
-    pub(crate) fn disk_id(&self) -> &DiskId {
-        &self.disk_id
-    }
-
-    pub(crate) fn allow_force_retire(&self) -> bool {
-        self.allow_force_retire
-    }
-
-    pub(crate) fn confirm(&self) -> &str {
-        &self.confirm
-    }
-}
-
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct DiskLockdownDasArgs {
     /// Root containing prepared SSD and HDD mountpoints.
@@ -102,32 +88,6 @@ pub(crate) struct DiskLockdownDasArgs {
     /// Action-time confirmation phrase: "confirm lockdown das".
     #[arg(long, default_value = "")]
     confirm: String,
-}
-
-impl DiskLockdownDasArgs {
-    pub(crate) fn mount_root(&self) -> &Path {
-        &self.mount_root
-    }
-
-    pub(crate) fn service_user(&self) -> &str {
-        &self.service_user
-    }
-
-    pub(crate) fn service_group(&self) -> &str {
-        &self.service_group
-    }
-
-    pub(crate) fn create_service_user(&self) -> bool {
-        self.create_service_user
-    }
-
-    pub(crate) fn dry_run(&self) -> bool {
-        self.dry_run
-    }
-
-    pub(crate) fn confirm(&self) -> &str {
-        &self.confirm
-    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -251,12 +211,6 @@ pub(crate) struct DiskRetireArgs {
     disk_id: DiskId,
 }
 
-impl DiskRetireArgs {
-    pub(crate) fn disk_id(&self) -> &DiskId {
-        &self.disk_id
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{DiskCommand, DiskPrepareFilesystem};
@@ -306,7 +260,7 @@ mod tests {
             }
             DiskCommand::Replace(_) => panic!("expected retire command"),
             DiskCommand::Retire(retire) => {
-                assert_eq!(retire.disk_id().as_str(), "disk-a");
+                assert_eq!(retire.disk_id.as_str(), "disk-a");
             }
         }
     }
@@ -329,9 +283,9 @@ mod tests {
         };
         match args.command() {
             DiskCommand::ForceRetire(force_retire) => {
-                assert_eq!(force_retire.disk_id().as_str(), "disk-a");
-                assert!(force_retire.allow_force_retire());
-                assert_eq!(force_retire.confirm(), "confirm force retire");
+                assert_eq!(force_retire.disk_id.as_str(), "disk-a");
+                assert!(force_retire.allow_force_retire);
+                assert_eq!(force_retire.confirm, "confirm force retire");
             }
             _ => panic!("expected force-retire command"),
         }
@@ -361,12 +315,12 @@ mod tests {
         };
         match args.command() {
             DiskCommand::LockdownDas(lockdown) => {
-                assert_eq!(lockdown.mount_root(), Path::new("/srv/dasobjectstore"));
-                assert_eq!(lockdown.service_user(), "dasobjectstore");
-                assert_eq!(lockdown.service_group(), "dasobjectstore");
-                assert!(lockdown.create_service_user());
-                assert!(lockdown.dry_run());
-                assert_eq!(lockdown.confirm(), "confirm lockdown das");
+                assert_eq!(lockdown.mount_root, Path::new("/srv/dasobjectstore"));
+                assert_eq!(lockdown.service_user, "dasobjectstore");
+                assert_eq!(lockdown.service_group, "dasobjectstore");
+                assert!(lockdown.create_service_user);
+                assert!(lockdown.dry_run);
+                assert_eq!(lockdown.confirm, "confirm lockdown das");
             }
             _ => panic!("expected lockdown-das command"),
         }

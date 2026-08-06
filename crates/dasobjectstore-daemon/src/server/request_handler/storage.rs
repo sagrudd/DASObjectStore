@@ -28,6 +28,13 @@ where
 {
     match request {
         DaemonApiRequest::DiskRetire(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "disk retirement",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
             match handler.disk_retire_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::DiskRetire(response)),
                 Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -36,6 +43,13 @@ where
             }
         }
         DaemonApiRequest::DiskForceRetire(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "disk force-retirement",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
             match handler.disk_force_retire_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::DiskForceRetire(response)),
                 Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

@@ -66,22 +66,13 @@ selected media may already contain data that will be destroyed by preparation.
 Lock Down Managed Media
 -----------------------
 
-After preparation, lock down the managed roots so ordinary users do not write
-files directly onto member disks:
-
-.. code-block:: console
-
-   sudo dasobjectstore disk lockdown-das \
-     --mount-root /srv/dasobjectstore \
-     --service-user dasobjectstore \
-     --service-group dasobjectstore \
-   --create-service-user \
-   --confirm "confirm lockdown das"
-
-The CLI sends this request over the daemon Unix socket. The daemon performs
-protected-root discovery, account setup planning, authorization, confirmation,
-and command execution; the CLI only renders the returned plan or completion
-report. A dry run may omit the confirmation marker and never executes commands.
+After preparation, lock down the managed roots through the Monas DASObjectStore
+page so ordinary users do not write files directly onto member disks. Monas
+requires a Pistis-authenticated approval and forwards the versioned verified
+subject through its fixed DAS GUI/API service peer. The direct
+``dasobjectstore disk lockdown-das`` CLI command is intentionally rejected,
+including dry runs; root, sudo, and local group membership are not a substitute
+for a human Pistis approval.
 
 Direct writes to individual disks bypass object metadata and can corrupt the
 store contract. Users should interact through DASObjectStore commands and, later,
