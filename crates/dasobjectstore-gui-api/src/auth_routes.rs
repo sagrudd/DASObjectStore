@@ -144,7 +144,10 @@ use dasobjectstore_daemon::{
     ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use easyconnect_discovery::*;
-use profile_catalogue::{standalone_profile_catalogue_export, standalone_profile_catalogue_import};
+use profile_catalogue::{
+    preverified_host_profile_catalogue_import, standalone_profile_catalogue_export,
+    standalone_profile_catalogue_import,
+};
 use profile_delete::standalone_profile_s3_delete;
 pub(crate) use profile_download::provider_stream_download;
 use profile_download::standalone_profile_s3_get;
@@ -229,6 +232,16 @@ pub(crate) struct PreverifiedHostAdminRouteState {
     priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
+/// Host-composed portable catalogue import state.
+///
+/// A catalogue import commits daemon-owned metadata and is therefore a
+/// priority operational mutation. The state deliberately contains no local
+/// authentication, OS-user, group, sudo, PAM, or password dependency.
+#[derive(Clone)]
+pub(crate) struct PreverifiedHostProfileCatalogueRouteState {
+    priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
+}
+
 /// Host-composed report rebuilding state.
 ///
 /// Report rendering does not issue a daemon mutation, so it carries only the
@@ -266,6 +279,14 @@ impl PreverifiedHostAdminRouteState {
             enclosure_admin_client: Arc::new(
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             ),
+            priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
+        }
+    }
+}
+
+impl PreverifiedHostProfileCatalogueRouteState {
+    pub(crate) fn packaged() -> Self {
+        Self {
             priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
         }
     }
@@ -923,7 +944,7 @@ async fn preverified_host_cancel_admin_job(
         .map(Json)
 }
 
-fn require_preverified_host_administrator(
+pub(super) fn require_preverified_host_administrator(
     actor: &AuthenticatedGuiActor,
     verified: &VerifiedHostAuthenticatedContext,
 ) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
@@ -1362,8 +1383,9 @@ mod tests {
         IngestControlAction, IngestControlRequest, IngestControlResponse,
         LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
         ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
-        PreverifiedHostAdminRouteState, PreverifiedHostReportingRouteState, RegisterRequest,
-        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        PreverifiedHostAdminRouteState, PreverifiedHostProfileCatalogueRouteState,
+        PreverifiedHostReportingRouteState, RegisterRequest, RemoteAuthenticateRequest,
+        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
         StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
         StandaloneAdminJobSummary, StandaloneAuthRouteState,
@@ -4422,6 +4444,44 @@ mod tests {
             .extension(verified_host_context("storage_operator"))
             .header("content-type", "application/json")
             .body(Body::from(r#"{"schema":"wrong"}"#))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_profile_catalogue_import_requires_pistis_administrator() {
+        let app = super::auth_router::preverified_host_profile_catalogue_router_with_state(
+            PreverifiedHostProfileCatalogueRouteState {
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let body = serde_json::json!({
+            "store_id": "ignored-by-path",
+            "transaction_id": "profile-import-1",
+            "profile_namespace": "project:generated-data",
+            "catalogue": {
+                "schema_version": 1,
+                "store_id": "generated-data",
+                "objects": []
+            }
+        });
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/profile-catalogue/stores/generated-data/import")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&body).expect("request serializes"),
+            ))
             .expect("request builds");
 
         let response = app.oneshot(request).await.expect("request completes");
