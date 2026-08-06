@@ -19,6 +19,12 @@ pub struct IngestControlRequest {
     pub reason: String,
     pub dry_run: bool,
     pub confirmation_marker: String,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator. Direct CLI peers cannot supply
+    /// authority through this field because the daemon also binds the Unix
+    /// peer to the dedicated service identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 impl IngestControlRequest {
@@ -137,6 +143,7 @@ mod tests {
             reason: "operator incident".to_string(),
             dry_run: false,
             confirmation_marker: String::new(),
+            verified_subject: None,
         };
         assert_eq!(
             request.validate(),
