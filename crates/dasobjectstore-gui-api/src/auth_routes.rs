@@ -5,7 +5,7 @@ use crate::{
     discover_local_user, AuthenticatedGuiActor, DasCapability, DasRolePolicy, DashboardWarning,
     LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
     PamLocalPasswordAuthenticator, RegisterResponse, SessionCheckResponse,
-    UsersGroupsWorkspaceView, VerifiedHostAuthenticatedContext,
+    UsersGroupsWorkspaceView, VerifiedHostAuthenticatedContext, VerifiedHostStoreScope,
 };
 
 #[path = "auth_admin_clients.rs"]
@@ -165,14 +165,14 @@ use tokio::sync::Semaphore;
 const MAX_PERFORMANCE_REPORT_WORKERS: usize = 2;
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct ProfileS3ListQuery {
+pub(super) struct ProfileS3ListQuery {
     prefix: Option<String>,
     offset: Option<u64>,
     limit: Option<u16>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-struct ProfileS3HeadQuery {
+pub(super) struct ProfileS3HeadQuery {
     key: Option<String>,
     version: Option<u64>,
 }
@@ -364,6 +364,103 @@ async fn standalone_cached_home_dashboard(
                 message,
             )
         })
+}
+
+/// Read-only profile routes for a host that has already established Pistis
+/// authority.  These wrappers retain the existing daemon adapters but reject
+/// before they are invoked unless the actor has both the verified viewer role
+/// and an exact store scope bound to that same host session.
+pub(super) async fn preverified_host_profile_s3_list(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3ListQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileS3ListResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_s3_list(Path(store_id), Query(query), actor).await
+}
+
+pub(super) async fn preverified_host_profile_s3_head(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3HeadQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileS3HeadResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_s3_head(Path(store_id), Query(query), actor).await
+}
+
+pub(super) async fn preverified_host_profile_s3_verify(
+    Path(store_id): Path<String>,
+    Query(query): Query<ProfileS3HeadQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileS3VerifyResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_s3_verify(Path(store_id), Query(query), actor).await
+}
+
+pub(super) async fn preverified_host_profile_s3_health(
+    Path(store_id): Path<String>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileS3HealthResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_s3_health(Path(store_id), actor).await
+}
+
+pub(super) async fn preverified_host_profile_readiness(
+    Path(store_id): Path<String>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileReadinessResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_readiness(Path(store_id), actor).await
+}
+
+pub(super) async fn preverified_host_profile_s3_diagnostics(
+    Path(store_id): Path<String>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+) -> Result<Json<DaemonProfileDiagnosticsResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+    )?;
+    standalone_profile_s3_diagnostics(Path(store_id), actor).await
 }
 
 async fn standalone_store_capacity(
@@ -949,6 +1046,34 @@ pub(crate) fn require_preverified_host_operator(
     verified: &VerifiedHostAuthenticatedContext,
 ) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
     require_preverified_host_capability(actor, verified, DasCapability::Operate, "operator")
+}
+
+/// Require the closed DAS viewer role and an exact ObjectStore scope that is
+/// bound to the same verified Pistis session.  A broad host role, local
+/// browser session, cookie, OS user, or guessed store identifier is never a
+/// substitute for the scope extension supplied by the embedding host.
+pub(crate) fn require_preverified_host_viewer_for_store(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+    scope: Option<&VerifiedHostStoreScope>,
+    store_id: &str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_capability(actor, verified, DasCapability::View, "viewer")?;
+    let Some(scope) = scope else {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_store_scope_required",
+            "an exact verified ObjectStore scope is required for this operation",
+        ));
+    };
+    if !scope.permits(verified, store_id) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_store_scope_denied",
+            "the verified host session is not authorised for this ObjectStore",
+        ));
+    }
+    Ok(())
 }
 
 pub(super) fn require_preverified_host_administrator(
@@ -4206,6 +4331,49 @@ mod tests {
         assert_eq!(
             response_json(response).await["code"],
             "profile_s3_invalid_store_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_profile_read_requires_an_exact_verified_store_scope() {
+        let app = super::auth_router::preverified_host_profile_read_router();
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data")
+            .extension(verified_host_context("storage_viewer"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_store_scope_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_profile_read_rejects_a_scope_for_a_different_store() {
+        let app = super::auth_router::preverified_host_profile_read_router();
+        let verified = verified_host_context("storage_viewer");
+        let scope = crate::VerifiedHostStoreScope::for_verified_context(
+            &verified,
+            vec!["other-store".to_string()],
+        )
+        .expect("scope builds");
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data")
+            .extension(verified)
+            .extension(scope)
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_store_scope_denied"
         );
     }
 

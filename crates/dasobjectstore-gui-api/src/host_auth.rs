@@ -105,6 +105,55 @@ impl VerifiedHostAuthenticatedContext {
     }
 }
 
+/// A store allow-list that the embedding host derived while it verified the
+/// same live Pistis session as [`VerifiedHostAuthenticatedContext`].
+///
+/// Store membership is deliberately separate from the product-wide DAS role:
+/// a `storage_viewer` does not imply access to every ObjectStore.  This value
+/// is an in-process, trusted-host extension rather than a browser header or a
+/// DAS-issued session.  The adapter must construct it from the verified host
+/// authority and attach it together with the verified context.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedHostStoreScope {
+    subject_id: String,
+    session_id: String,
+    correlation_id: String,
+    store_ids: Vec<String>,
+}
+
+impl VerifiedHostStoreScope {
+    /// Bind the exact allowed stores to an already verified host session.
+    /// Empty scopes are valid and deny every store.
+    pub fn for_verified_context(
+        context: &VerifiedHostAuthenticatedContext,
+        mut store_ids: Vec<String>,
+    ) -> Result<Self, HostAuthContextError> {
+        for store_id in &store_ids {
+            validate_id("store_ids", store_id)?;
+        }
+        store_ids.sort();
+        store_ids.dedup();
+        Ok(Self {
+            subject_id: context.context().subject_id.clone(),
+            session_id: context.context().session_id.clone(),
+            correlation_id: context.context().correlation_id.clone(),
+            store_ids,
+        })
+    }
+
+    /// Return true only when this scope was made for the same verified
+    /// session and explicitly lists the requested ObjectStore.
+    pub fn permits(&self, context: &VerifiedHostAuthenticatedContext, store_id: &str) -> bool {
+        self.subject_id == context.context().subject_id
+            && self.session_id == context.context().session_id
+            && self.correlation_id == context.context().correlation_id
+            && self
+                .store_ids
+                .binary_search_by(|candidate| candidate.as_str().cmp(store_id))
+                .is_ok()
+    }
+}
+
 pub fn accept_host_authenticated_context(
     context: HostAuthenticatedContext,
     accepted_at_unix_seconds: i64,
@@ -249,5 +298,29 @@ mod tests {
                 .expect("serialize");
         encoded["storage_write_authorized"] = serde_json::json!(true);
         assert!(serde_json::from_value::<HostAuthenticatedContext>(encoded).is_err());
+    }
+
+    #[test]
+    fn store_scope_is_exact_and_bound_to_the_verified_session() {
+        let verified = accept_host_authenticated_context(
+            context(HostAuthenticationAuthority::MonasStandalone),
+            1_500,
+            &LiveVerifier(true),
+        )
+        .expect("live context");
+        let scope = VerifiedHostStoreScope::for_verified_context(
+            &verified,
+            vec!["generated-data".to_string(), "generated-data".to_string()],
+        )
+        .expect("scope builds");
+
+        assert!(scope.permits(&verified, "generated-data"));
+        assert!(!scope.permits(&verified, "other-store"));
+
+        let mut other = context(HostAuthenticationAuthority::MonasStandalone);
+        other.session_id = "session-2".to_string();
+        let other = accept_host_authenticated_context(other, 1_500, &LiveVerifier(true))
+            .expect("other context is live");
+        assert!(!scope.permits(&other, "generated-data"));
     }
 }

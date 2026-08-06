@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.28] - 2026-08-06
+
+### Security
+
+- Add host-composed profile inspection routes that require both a matching
+  verified Pistis `storage_viewer` role and an exact ObjectStore scope bound
+  to the same verified session. Missing, substituted, and out-of-scope
+  extensions fail closed before any daemon work; local sessions, passwords,
+  PAM, POSIX groups, and sudo policy do not participate.
+
 ## [0.157.27] - 2026-08-06
 
 ### Security

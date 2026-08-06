@@ -109,6 +109,14 @@ Each uses the bounded daemon bridge (the priority bridge for mutations).  A
 legacy local session, password, PAM result, POSIX group, sudo state, or raw
 cookie cannot supply authority to these host routes.
 
+The first profile-inspection tranche is also host-composed: profile S3 LIST,
+HEAD, verify, diagnostics and health, together with profile readiness.  These
+routes require a matching verified ``storage_viewer`` role *and* an exact
+ObjectStore scope bound to the same verified subject, session and correlation
+identifier.  A product-wide viewer role alone is insufficient.  The scope is
+an in-process trusted-host extension, never a browser header, cookie or DAS
+session; its absence, substitution or store mismatch fails before daemon work.
+
 Remaining route families and safe order
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
