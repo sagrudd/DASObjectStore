@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.25] - 2026-08-06
+
+### Security
+
+- Migrate host-composed portable profile-catalogue import to the verified
+  Pistis administrator boundary and bounded priority daemon bridge. The route
+  has no local session, password, PAM, OS-user, group, or sudo fallback.
+
 ## [0.157.24] - 2026-08-06
 
 ### Security
