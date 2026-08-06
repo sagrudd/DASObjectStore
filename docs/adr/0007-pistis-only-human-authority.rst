@@ -204,6 +204,15 @@ registry or administrative-job ledger is touched.  The service peer is a
 transport boundary, not an authorizer; Monas/Pistis verification remains a
 required precondition in the host route.
 
+Ingest control has the same preverified host-route counterpart. Its daemon
+request now carries an optional verified subject, but the field is authority
+only when the Unix peer is the fixed packaged host service identity. A
+non-dry-run request from root, ``sudo`` or ``dasobjectstore-admin`` is denied,
+as is a service-peer request without the verified subject. This preserves
+machine-to-daemon transport while making the packaged CLI unable to pause,
+throttle or resume ingest as a human-authority fallback. Dry-run planning
+remains non-mutating compatibility output.
+
 The direct request families that remain to be migrated are the daemon
 administrative service, disk, store, workspace and local-group operations,
 together with CLI commands that submit them.  The migration must be organised

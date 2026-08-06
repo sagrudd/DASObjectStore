@@ -1,25 +1,22 @@
 # Changelog
 
-## [0.157.39] - 2026-08-06
+## [0.157.40] - 2026-08-06
 
 ### Security
 
-- Migrate the remaining host-composed read-only dashboard family (Home
-  telemetry, cached status, and ObjectStore capacity) to the verified Pistis
-  viewer boundary. These routes carry no local session, password, PAM, POSIX
-  user/group, or sudo-derived identity; capacity remains daemon-bridged and
-  fails closed when its packaged peer is unavailable.
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for daemon
+  ingest-control mutation. The daemon request now carries a verified host
+  subject only from the fixed packaged host service peer; direct CLI and
+  local-authority paths fail closed before the global ingest state changes.
 
 ## [0.157.38] - 2026-08-06
 
 ### Security
 
-- Add a host-composed provider-stream read route that requires a matching
-  verified Pistis viewer plus a session-bound ObjectStore/canonical-prefix
-  scope. The provider-stream daemon request carries the fixed-peer
-  `ObjectBrowserVerifiedSubject` and rejects any coexistence with delegated
-  OS authority or an application capability. The standalone S3 token path is
-  unchanged.
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for daemon
+  ingest-control mutation. The daemon request now carries a verified host
+  subject only from the fixed packaged host service peer; direct CLI and
+  local-authority paths fail closed before the global ingest state changes.
 
 ## [0.157.37] - 2026-08-06
 

@@ -2966,7 +2966,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_store_ingest_policy_update_for_non_admin_actor() {
+    fn rejects_store_ingest_policy_update_for_non_service_peer() {
         let root = temp_root("update-ingest-policy-non-admin");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
@@ -2999,7 +2999,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -3565,6 +3565,7 @@ mod tests {
                     reason: "operator incident".to_string(),
                     dry_run: false,
                     confirmation_marker: crate::api::INGEST_CONTROL_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 },
             ))
             .expect("request handled");

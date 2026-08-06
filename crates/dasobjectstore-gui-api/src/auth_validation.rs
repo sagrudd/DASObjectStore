@@ -252,6 +252,7 @@ pub(super) fn validate_ingest_control_request(
         reason,
         dry_run: request.dry_run,
         confirmation_marker,
+        verified_subject: None,
     };
     daemon_request.validate().map_err(|error| {
         route_error(
@@ -265,6 +266,7 @@ pub(super) fn validate_ingest_control_request(
         reason: daemon_request.reason,
         dry_run: daemon_request.dry_run,
         confirmation_marker: daemon_request.confirmation_marker,
+        verified_subject: None,
     })
 }
 
