@@ -6,11 +6,13 @@
 //! catalogue record.
 
 use super::{
-    admin_daemon_bridge_error_with_code, route_error, AuthRouteError, AuthenticatedGuiActor,
+    admin_daemon_bridge_error_with_code, require_preverified_host_operator_for_object_prefix,
+    route_error, AuthRouteError, AuthenticatedGuiActor, VerifiedHostAuthenticatedContext,
+    VerifiedHostObjectPrefixScope,
 };
 use axum::{
     body::Body,
-    extract::{Path, Query},
+    extract::{Extension, Path, Query},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -102,6 +104,43 @@ pub(super) async fn standalone_profile_s3_multipart_part(
     stream_profile_s3_multipart_part(request, body).await
 }
 
+/// Stream one multipart part only after the embedding host has supplied a
+/// matching verified Pistis operator and a session-bound ObjectStore/prefix
+/// grant.  The multipart adapter sends no delegated OS actor or provider
+/// credential to the daemon.
+pub(super) async fn preverified_host_profile_s3_multipart_part(
+    Path((store_id, reservation_id, part_number)): Path<(String, String, u32)>,
+    Query(query): Query<ProfileS3MultipartPartQuery>,
+    headers: HeaderMap,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostObjectPrefixScope>>,
+    body: Body,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let object_id = query.key.as_deref().ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_key",
+            "multipart part upload requires a key query parameter",
+        )
+    })?;
+    require_preverified_host_operator_for_object_prefix(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+        object_id,
+    )?;
+    standalone_profile_s3_multipart_part(
+        Path((store_id, reservation_id, part_number)),
+        Query(query),
+        headers,
+        actor,
+        body,
+    )
+    .await
+}
+
 pub(super) async fn standalone_profile_s3_multipart_status(
     Path((store_id, reservation_id)): Path<(String, String)>,
     Query(query): Query<ProfileS3MultipartPartQuery>,
@@ -147,6 +186,34 @@ pub(super) async fn standalone_profile_s3_multipart_status(
         .await
         .map(Json)
         .map_err(multipart_completion_bridge_error)
+}
+
+/// Read multipart status only in the exact verified ObjectStore/prefix
+/// envelope.  Status can expose object identity and is therefore not a
+/// host-wide viewer operation.
+pub(super) async fn preverified_host_profile_s3_multipart_status(
+    Path((store_id, reservation_id)): Path<(String, String)>,
+    Query(query): Query<ProfileS3MultipartPartQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostObjectPrefixScope>>,
+) -> Result<Json<ProfileS3MultipartStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let object_id = query.key.as_deref().ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "profile_s3_invalid_key",
+            "multipart status requires a key query parameter",
+        )
+    })?;
+    require_preverified_host_operator_for_object_prefix(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+        object_id,
+    )?;
+    standalone_profile_s3_multipart_status(Path((store_id, reservation_id)), Query(query), actor)
+        .await
 }
 
 pub(crate) async fn stream_profile_s3_multipart_part(
@@ -374,6 +441,30 @@ pub(super) async fn standalone_profile_s3_multipart_complete(
     })?;
 
     complete_profile_s3_multipart(request).await
+}
+
+/// Complete a multipart reservation only in the exact verified
+/// subject/session/ObjectStore/prefix envelope.  Completion is a daemon-owned
+/// commit; no local or provider authority is accepted by this host route.
+pub(super) async fn preverified_host_profile_s3_multipart_complete(
+    Path((store_id, reservation_id)): Path<(String, String)>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostObjectPrefixScope>>,
+    Json(body): Json<ProfileS3MultipartCompleteBody>,
+) -> Result<
+    axum::Json<ProfileS3MultipartCompletionResponse>,
+    (StatusCode, axum::Json<AuthRouteError>),
+> {
+    require_preverified_host_operator_for_object_prefix(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+        &body.key.object_id,
+    )?;
+    standalone_profile_s3_multipart_complete(Path((store_id, reservation_id)), actor, Json(body))
+        .await
 }
 
 pub(crate) async fn complete_profile_s3_multipart(

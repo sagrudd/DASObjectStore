@@ -137,6 +137,7 @@ pub fn host_composed_gui_api_router() -> Router {
         .merge(preverified_host_reporting_router())
         .merge(preverified_host_profile_catalogue_router())
         .merge(preverified_host_profile_read_router())
+        .merge(preverified_host_profile_multipart_router())
         .merge(crate::object_browser_routes::preverified_host_object_browser_router())
 }
 
@@ -254,6 +255,25 @@ pub(super) fn preverified_host_profile_read_router() -> Router {
         .route(
             "/api/v1/profile-readiness/stores/{store_id}",
             get(crate::auth_routes::preverified_host_profile_readiness),
+        )
+}
+
+/// Multipart writes for a host with an already verified Pistis session.
+/// These routes are separate from the standalone router because they require
+/// a bound subject/session/store/prefix extension before any daemon work.
+pub(super) fn preverified_host_profile_multipart_router() -> Router {
+    Router::new()
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/complete",
+            post(crate::auth_routes::profile_multipart::preverified_host_profile_s3_multipart_complete),
+        )
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}/multipart/{reservation_id}/status",
+            get(crate::auth_routes::profile_multipart::preverified_host_profile_s3_multipart_status),
+        )
+        .route(
+            PROFILE_S3_MULTIPART_PART_ROUTE,
+            post(crate::auth_routes::profile_multipart::preverified_host_profile_s3_multipart_part),
         )
 }
 
