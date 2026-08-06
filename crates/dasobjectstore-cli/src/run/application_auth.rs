@@ -7,9 +7,7 @@
 use super::{CliError, DaemonClient, DaemonRuntimeConfig, UnixSocketDaemonTransport};
 use crate::cli::{ApplicationAuthArgs, ApplicationAuthCommand};
 use dasobjectstore_daemon::api::{
-    ApplicationAccessTokenExchangeRequest, ApplicationCredentialRevocationRequest,
-    ApplicationIdentityRegistrationRequest, ApplicationKeyRegistrationRequest,
-    GovernedBindingAuthorityAdmissionRequest,
+    ApplicationAccessTokenExchangeRequest, GovernedBindingAuthorityAdmissionRequest,
 };
 use std::fs::File;
 use std::io::Write;
@@ -40,54 +38,14 @@ pub(super) fn run_application_auth(
             }
             Ok(())
         }
-        ApplicationAuthCommand::RegisterIdentity(request) => {
-            let json = request.json();
-            let request: ApplicationIdentityRegistrationRequest = read_request(request.request())?;
-            let response = client().register_application_identity(request)?;
-            if json {
-                serde_json::to_writer_pretty(&mut *writer, &response)?;
-                writer.write_all(b"\n")?;
-            } else {
-                writeln!(writer, "Application identity registration accepted")?;
-                writeln!(writer, "Application: {}", response.identity.application_id)?;
-                writeln!(writer, "Replaced: {}", response.replaced)?;
-                writeln!(writer, "Job: {}", response.accepted.job_id)?;
-            }
-            Ok(())
+        ApplicationAuthCommand::RegisterIdentity(_) => {
+            reject_direct_human_authority("application identity registration")
         }
-        ApplicationAuthCommand::RegisterKey(request) => {
-            let json = request.json();
-            let request: ApplicationKeyRegistrationRequest = read_request(request.request())?;
-            let response = client().register_application_key(request)?;
-            if json {
-                serde_json::to_writer_pretty(&mut *writer, &response)?;
-                writer.write_all(b"\n")?;
-            } else {
-                writeln!(writer, "Application key registration accepted")?;
-                writeln!(writer, "Application: {}", response.key.application_id)?;
-                writeln!(writer, "Key: {}", response.key.key_id)?;
-                writeln!(writer, "Replaced: {}", response.replaced)?;
-                writeln!(writer, "Job: {}", response.accepted.job_id)?;
-            }
-            Ok(())
+        ApplicationAuthCommand::RegisterKey(_) => {
+            reject_direct_human_authority("application key registration")
         }
-        ApplicationAuthCommand::Revoke(request) => {
-            let json = request.json();
-            let request: ApplicationCredentialRevocationRequest = read_request(request.request())?;
-            let response = client().revoke_application_credential(request)?;
-            if json {
-                serde_json::to_writer_pretty(&mut *writer, &response)?;
-                writer.write_all(b"\n")?;
-            } else {
-                writeln!(writer, "Application credential revocation accepted")?;
-                writeln!(writer, "Application: {}", response.application_id)?;
-                if let Some(key_id) = response.key_id {
-                    writeln!(writer, "Key: {key_id}")?;
-                }
-                writeln!(writer, "Revoked: {}", response.revoked)?;
-                writeln!(writer, "Job: {}", response.accepted.job_id)?;
-            }
-            Ok(())
+        ApplicationAuthCommand::Revoke(_) => {
+            reject_direct_human_authority("application credential revocation")
         }
         ApplicationAuthCommand::TrustBinding(request) => {
             let json = request.json();
@@ -106,6 +64,12 @@ pub(super) fn run_application_auth(
             Ok(())
         }
     }
+}
+
+fn reject_direct_human_authority(operation: &str) -> Result<(), CliError> {
+    Err(CliError::CommandFailed(format!(
+        "{operation} must be submitted through Monas using the fixed DAS service peer and a verified Pistis subject"
+    )))
 }
 
 fn client() -> DaemonClient<UnixSocketDaemonTransport> {
@@ -153,13 +117,25 @@ fn reject_secret_fields(value: &serde_json::Value) -> Result<(), CliError> {
 
 #[cfg(test)]
 mod tests {
-    use super::reject_secret_fields;
+    use super::{reject_direct_human_authority, reject_secret_fields};
 
     #[test]
     fn request_guard_rejects_private_and_bearer_material() {
         for field in ["private_key", "secret_access_key", "bearer_token"] {
             let value = serde_json::json!({"nested": {field: "redacted"}});
             assert!(reject_secret_fields(&value).is_err(), "field {field}");
+        }
+    }
+
+    #[test]
+    fn direct_human_authority_operations_fail_closed() {
+        for operation in [
+            "application identity registration",
+            "application key registration",
+            "application credential revocation",
+        ] {
+            let error = reject_direct_human_authority(operation).expect_err("direct CLI rejected");
+            assert!(error.to_string().contains("verified Pistis subject"));
         }
     }
 }
