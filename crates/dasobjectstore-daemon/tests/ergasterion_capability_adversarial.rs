@@ -293,6 +293,7 @@ fn provider_stream_rejects_mixed_application_and_delegated_authority() {
             primary_gid: Some(1_000),
             groups: vec!["mnemosyne".to_string()],
         }),
+        verified_subject: None,
         application_capability: Some(
             OpaqueApplicationCapability::new(TOKEN_PROBE).expect("capability"),
         ),

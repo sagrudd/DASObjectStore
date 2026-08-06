@@ -241,6 +241,10 @@ pub(super) fn preverified_host_profile_read_router() -> Router {
                 .head(crate::auth_routes::preverified_host_profile_s3_head),
         )
         .route(
+            "/api/v1/profile-s3/stores/{store_id}/objects/{*object_id}",
+            get(crate::auth_routes::profile_download::preverified_host_profile_s3_get),
+        )
+        .route(
             "/api/v1/profile-s3/stores/{store_id}/verify",
             get(crate::auth_routes::preverified_host_profile_s3_verify),
         )

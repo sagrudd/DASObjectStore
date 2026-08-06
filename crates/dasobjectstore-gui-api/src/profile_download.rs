@@ -5,14 +5,18 @@
 //! frames through a bounded channel so a slow HTTP client applies backpressure
 //! to the Unix-socket reader.
 
-use super::{route_error, AuthRouteError, AuthenticatedGuiActor};
+use super::{
+    require_preverified_host_viewer_for_object_prefix, route_error, AuthRouteError,
+    AuthenticatedGuiActor, VerifiedHostAuthenticatedContext, VerifiedHostObjectPrefixScope,
+};
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, Query},
+    extract::{Extension, Path, Query},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::Response,
     Json,
 };
+use dasobjectstore_daemon::api::ObjectBrowserVerifiedSubject;
 use dasobjectstore_daemon::{
     DaemonClientError, DaemonRuntimeConfig, ObjectBrowserDelegatedActor, ProviderStreamCondition,
     ProviderStreamOpenRequest, ProviderStreamRange, UnixSocketDaemonTransport,
@@ -67,6 +71,54 @@ pub(super) async fn standalone_profile_s3_get(
     .await
 }
 
+/// Open a provider-backed profile object only with a verified Pistis viewer
+/// and a session-bound ObjectStore/prefix grant. The resulting daemon request
+/// carries the fixed-peer `ObjectBrowserVerifiedSubject`; it never falls back
+/// to delegated OS identity, a local browser session, or a provider token.
+pub(super) async fn preverified_host_profile_s3_get(
+    Path((store_id, object_id)): Path<(String, String)>,
+    Query(query): Query<ProfileDownloadQuery>,
+    headers: HeaderMap,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostObjectPrefixScope>>,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer_for_object_prefix(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &store_id,
+        &object_id,
+    )?;
+    let store_id = store_id
+        .parse::<dasobjectstore_core::ids::StoreId>()
+        .map_err(|error| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "profile_s3_invalid_store_id",
+                error.to_string(),
+            )
+        })?;
+    let verified_subject =
+        crate::object_browser_routes::verified_object_browser_subject_for_prefix_scope(
+            &verified,
+            &scope.expect("checked above").0,
+            store_id.clone(),
+            &object_id,
+        )?;
+    provider_stream_download_authorized(
+        store_id,
+        object_id,
+        query.version.unwrap_or(1),
+        None,
+        Some(verified_subject),
+        None,
+        headers,
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    )
+    .await
+}
+
 pub(crate) async fn provider_stream_download(
     store_id: dasobjectstore_core::ids::StoreId,
     object_id: String,
@@ -80,6 +132,7 @@ pub(crate) async fn provider_stream_download(
         object_id,
         version,
         delegated_actor,
+        None,
         None,
         headers,
         socket_path,
@@ -100,6 +153,7 @@ pub(crate) async fn application_provider_stream_download(
         object_id,
         version,
         None,
+        None,
         Some(application_capability),
         headers,
         socket_path,
@@ -112,6 +166,7 @@ async fn provider_stream_download_authorized(
     object_id: String,
     version: u64,
     delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    verified_subject: Option<ObjectBrowserVerifiedSubject>,
     application_capability: Option<dasobjectstore_daemon::api::OpaqueApplicationCapability>,
     headers: HeaderMap,
     socket_path: PathBuf,
@@ -124,6 +179,7 @@ async fn provider_stream_download_authorized(
         store_id,
         object: dasobjectstore_core::backend::BackendObjectKey { object_id, version },
         delegated_actor,
+        verified_subject,
         application_capability,
         range,
         condition,

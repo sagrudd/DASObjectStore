@@ -5,7 +5,7 @@
 //! payload bytes travel in length-prefixed frames and never as base64 or
 //! backend paths.
 
-use super::ObjectBrowserDelegatedActor;
+use super::{ObjectBrowserDelegatedActor, ObjectBrowserVerifiedSubject};
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,12 @@ pub struct ProviderStreamOpenRequest {
     pub object: BackendObjectKey,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    /// A peer-bound verified Pistis browser subject for host-composed reads.
+    /// This remains mutually exclusive with the legacy delegated POSIX actor
+    /// and with an application capability: each form has a distinct authority
+    /// lifecycle and must not be combined in one provider-stream request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<ObjectBrowserVerifiedSubject>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_capability: Option<super::OpaqueApplicationCapability>,
     #[serde(default)]
@@ -235,10 +241,24 @@ impl ProviderStreamOpenRequest {
                 ProviderStreamValidationError::InvalidDelegatedActor(error.to_string())
             })?;
         }
-        if self.delegated_actor.is_some() && self.application_capability.is_some() {
+        if let Some(subject) = &self.verified_subject {
+            subject
+                .validate_for_endpoint(&self.store_id, Some(&self.object.object_id))
+                .map_err(|error| {
+                    ProviderStreamValidationError::InvalidVerifiedSubject(error.to_string())
+                })?;
+        }
+        let authority_forms = [
+            self.delegated_actor.is_some(),
+            self.verified_subject.is_some(),
+            self.application_capability.is_some(),
+        ]
+        .into_iter()
+        .filter(|present| *present)
+        .count();
+        if authority_forms > 1 {
             return Err(ProviderStreamValidationError::InvalidDelegatedActor(
-                "application capability and delegated user authority are mutually exclusive"
-                    .to_string(),
+                "delegated user authority, verified Pistis authority, and application capability are mutually exclusive".to_string(),
             ));
         }
         if self.chunk_size_bytes == 0 || self.chunk_size_bytes > PROVIDER_STREAM_MAX_CHUNK_BYTES {
@@ -655,6 +675,7 @@ pub enum ProviderStreamValidationError {
     },
     InvalidObjectKey,
     InvalidDelegatedActor(String),
+    InvalidVerifiedSubject(String),
     InvalidMultipartPartNumber,
     InvalidMultipartPartSize,
     InvalidRange {
@@ -688,6 +709,12 @@ impl Display for ProviderStreamValidationError {
                 write!(
                     formatter,
                     "provider stream delegated actor is invalid: {error}"
+                )
+            }
+            Self::InvalidVerifiedSubject(error) => {
+                write!(
+                    formatter,
+                    "provider stream verified subject is invalid: {error}"
                 )
             }
             Self::InvalidMultipartPartNumber => {
@@ -772,6 +799,7 @@ mod tests {
                 version: 1,
             },
             delegated_actor: None,
+            verified_subject: None,
             application_capability: None,
             range: Some(ProviderStreamRange {
                 start: 0,
@@ -821,6 +849,27 @@ mod tests {
         assert!(matches!(
             invalid_actor.validate(),
             Err(ProviderStreamValidationError::InvalidDelegatedActor(_))
+        ));
+    }
+
+    #[test]
+    fn open_request_accepts_a_peer_bound_verified_subject_only_on_its_scope() {
+        let mut request = request();
+        request.verified_subject = Some(ObjectBrowserVerifiedSubject {
+            schema_version: crate::api::OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: crate::api::OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis:stephen".to_string(),
+            session_id: "session-1".to_string(),
+            correlation_id: "correlation-1".to_string(),
+            store_id: StoreId::new("store-1").expect("store"),
+            canonical_prefix: "folder".to_string(),
+        });
+        request.validate().expect("verified request validates");
+
+        request.object.object_id = "other/file.bin".to_string();
+        assert!(matches!(
+            request.validate(),
+            Err(ProviderStreamValidationError::InvalidVerifiedSubject(_))
         ));
     }
 

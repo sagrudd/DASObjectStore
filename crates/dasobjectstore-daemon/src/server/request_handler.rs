@@ -1291,6 +1291,7 @@ mod tests {
                 primary_gid: None,
                 groups: vec!["readers".to_string()],
             }),
+            verified_subject: None,
             application_capability: None,
             range: None,
             condition: Default::default(),
@@ -1444,6 +1445,7 @@ mod tests {
             store_id: StoreId::new("allele-anchor").expect("store id"),
             object: key,
             delegated_actor: None,
+            verified_subject: None,
             application_capability: None,
             range: Some(crate::api::ProviderStreamRange {
                 start: 10,

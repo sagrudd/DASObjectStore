@@ -559,6 +559,19 @@ where
         )?;
         return Ok(request.store_id.clone());
     }
+    if let Some(store_id) = handler
+        .authorize_verified_object_browser_subject(
+            actor,
+            request.verified_subject.as_ref(),
+            &request.store_id,
+            Some(&request.object.object_id),
+        )
+        .map_err(|error| {
+            DaemonApiResponse::Error(DaemonApiErrorResponse::new(error.code(), error.to_string()))
+        })?
+    {
+        return Ok(store_id);
+    }
     let delegated = handler
         .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
         .map_err(|error| {

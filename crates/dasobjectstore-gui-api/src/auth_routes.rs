@@ -1123,6 +1123,34 @@ pub(crate) fn require_preverified_host_operator_for_object_prefix(
     Ok(())
 }
 
+/// Require a viewer role plus the exact in-process ObjectStore/prefix grant
+/// bound to this verified Pistis session. Provider-stream reads use this
+/// narrower rule rather than inheriting a standalone S3 or POSIX identity.
+pub(crate) fn require_preverified_host_viewer_for_object_prefix(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+    scope: Option<&VerifiedHostObjectPrefixScope>,
+    store_id: &str,
+    object_id: &str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_capability(actor, verified, DasCapability::View, "viewer")?;
+    let Some(scope) = scope else {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_object_prefix_scope_required",
+            "an exact verified ObjectStore prefix scope is required for provider-stream reads",
+        ));
+    };
+    if !scope.permits(verified, store_id, object_id) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_object_prefix_scope_denied",
+            "the verified host session is not authorised for this ObjectStore object prefix",
+        ));
+    }
+    Ok(())
+}
+
 /// Require the closed DAS viewer role for host-wide read-only views. This
 /// admits only a matching verified Pistis context; local browser sessions,
 /// passwords, PAM, POSIX users/groups, and sudo policy never participate.
@@ -4492,6 +4520,50 @@ mod tests {
         assert_eq!(
             response_json(response).await["code"],
             "host_store_scope_denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_provider_stream_read_requires_a_verified_object_prefix_scope() {
+        let app = super::auth_router::preverified_host_profile_read_router();
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data/objects/reads/sample.fastq")
+            .extension(verified_host_context("storage_viewer"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_object_prefix_scope_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_provider_stream_read_rejects_a_key_outside_the_verified_prefix() {
+        let app = super::auth_router::preverified_host_profile_read_router();
+        let verified = verified_host_context("storage_viewer");
+        let scope = crate::VerifiedHostObjectPrefixScope::for_verified_context(
+            &verified,
+            "generated-data",
+            "reads/approved",
+        )
+        .expect("scope builds");
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data/objects/reads/unapproved/sample.fastq")
+            .extension(verified)
+            .extension(scope)
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_object_prefix_scope_denied"
         );
     }
 
