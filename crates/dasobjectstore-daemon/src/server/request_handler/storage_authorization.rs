@@ -91,9 +91,11 @@ where
             return Ok(None);
         };
         let peer_actor = peer_actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
-        if peer_actor.uid != 0
-            && peer_actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER)
-        {
+        // A Unix UID is transport provenance, not human authority. In
+        // particular, root must not manufacture a delegated POSIX actor with
+        // storage groups. The legacy envelope remains only for the fixed
+        // packaged adapter while its verified-Pistis successor is rolled out.
+        if peer_actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
                 peer_actor: peer_actor.display_name(),
             });
@@ -130,8 +132,8 @@ where
         // The packaged Web/S3 process is a trusted local adapter: the Unix
         // peer credential proves this dedicated service identity, while the
         // adapter has already bound the request to one authenticated bucket
-        // credential. It is also the only non-root peer permitted to delegate
-        // end-user actors, so this does not introduce a new trust principal.
+        // credential. It is the only peer permitted to delegate end-user
+        // actors, so this does not introduce a new trust principal.
         if actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Ok(store_id);
         }

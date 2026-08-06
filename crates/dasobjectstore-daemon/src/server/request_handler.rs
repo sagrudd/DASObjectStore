@@ -1244,14 +1244,14 @@ mod tests {
         .with_registry_paths(&store_registry, &subobject_registry)
         .with_profile_binding_registry_path(&profile_registry)
         .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let administrator_peer = DaemonLocalActor::new(0).with_username("root");
         let mut binding_request =
             profile_binding_request_for_auth_test("stream-store", backend_root.clone());
         binding_request.store_definition = Some(store_definitions[0].clone());
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
-                Some(&actor),
+                Some(&administrator_peer),
                 |_| Ok(()),
             )
             .expect("profile binding");
@@ -1276,6 +1276,9 @@ mod tests {
             .commit_batch(std::slice::from_ref(&finalized))
             .expect("catalogue commit");
 
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups(["dasobjectstore"]);
         let request = ProviderStreamOpenRequest {
             schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
             request_id: "open-test".to_string(),
@@ -1293,7 +1296,7 @@ mod tests {
             chunk_size_bytes: 1024,
         };
         let mut source = handler
-            .open_provider_stream(&request, Some(&actor))
+            .open_provider_stream(&request, Some(&service_peer))
             .expect("provider stream source");
         assert_eq!(source.expected_size_bytes, 5);
         assert_eq!(
@@ -1317,7 +1320,7 @@ mod tests {
             "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(),
         );
         let mut ranged_source = handler
-            .open_provider_stream(&ranged_request, Some(&actor))
+            .open_provider_stream(&ranged_request, Some(&service_peer))
             .expect("ranged provider stream source");
         assert_eq!(ranged_source.expected_size_bytes, 3);
         assert!(ranged_source.expected_checksum.is_none());
@@ -3805,6 +3808,45 @@ mod tests {
             response,
             DaemonApiResponse::Error(error) if error.code == "permission_denied"
                 && error.message.contains("not authorized to delegate")
+        ));
+
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_rejects_root_peer_delegation() {
+        let root = temp_root("browser-root-delegation-denied");
+        let (store_registry, subobject_registry) =
+            write_test_store_registry(&root, "ena", Some("mnemosyne"));
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let root_peer = DaemonLocalActor::new(0)
+            .with_username("root")
+            .with_groups(["sudo", "dasobjectstore-admin"]);
+        let mut request = object_browser_request("ena");
+        request.delegated_actor = Some(ObjectBrowserDelegatedActor {
+            username: "spoofed-operator".to_string(),
+            uid: Some(1000),
+            primary_gid: Some(1000),
+            groups: vec!["mnemosyne".to_string()],
+        });
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(request),
+                Some(&root_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("root is not authorized to delegate")
         ));
 
         cleanup(&root);

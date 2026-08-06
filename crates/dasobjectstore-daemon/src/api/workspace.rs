@@ -42,8 +42,8 @@ pub enum WorkspaceControlAction {
 pub struct WorkspaceControlRequest {
     pub action: WorkspaceControlAction,
     /// Audience-bound actor asserted by the trusted local Web/API adapter.
-    /// The daemon accepts delegation only from root or its dedicated service
-    /// account; normal Unix peers cannot select another actor.
+    /// The daemon accepts delegation only from its dedicated service account;
+    /// normal Unix peers, including root, cannot select another actor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
 }

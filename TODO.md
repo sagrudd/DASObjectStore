@@ -96,7 +96,9 @@ Work is dependency ordered. Only these entries define open release work:
   ``local-password`` path is now fail-closed, and the first verified
   administrator ingest-control route is delivered.  The remaining work is
   dependency-ordered: migrate each operational route to the preverified host
-  router; remove the raw Monas-cookie/local-store adapters; delete the
+  router; qualify each direct daemon/CLI administrative entrypoint against a
+  versioned peer-bound verified-host bridge or fail-closed denial; remove the
+  raw Monas-cookie/local-store adapters; delete the
   standalone PAM/password/session/OS-policy authority; then remove the helper,
   migration binary and all PAM payload/build/documentation.  Do not treat a
   package-only omission as completion: every former authority input must be
