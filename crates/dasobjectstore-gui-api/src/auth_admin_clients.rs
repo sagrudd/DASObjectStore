@@ -116,6 +116,7 @@ pub(super) struct StandaloneIngestControlDaemonRequest {
     pub(super) reason: String,
     pub(super) dry_run: bool,
     pub(super) confirmation_marker: String,
+    pub(super) verified_subject: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,6 +276,7 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
                 reason: request.reason,
                 dry_run: request.dry_run,
                 confirmation_marker: request.confirmation_marker,
+                verified_subject: request.verified_subject,
             })
             .map(ingest_control_response_from_daemon)
             .map_err(standalone_enclosure_admin_client_error)

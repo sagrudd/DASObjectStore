@@ -105,7 +105,9 @@ Work is dependency ordered. Only these entries define open release work:
   proven unable to reach daemon mutation. Direct ObjectStore ingest and
   acknowledgement-policy updates now accept only the fixed preverified host
   service peer with a verified subject; direct CLI/root/sudo/admin peers are
-  denied before mutation or job recording.
+  denied before mutation or job recording. Ingest-control mutation now uses
+  the same fixed-peer verified-subject boundary; the packaged CLI retains only
+  a dry-run compatibility path and cannot pause, throttle, or resume ingest.
 - [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
   acceptance on the available x86_64 DASServer before any representative
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,

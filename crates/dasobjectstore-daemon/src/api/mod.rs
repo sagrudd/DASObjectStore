@@ -855,6 +855,7 @@ mod tests {
             reason: "protect Web availability".to_string(),
             dry_run: false,
             confirmation_marker: INGEST_CONTROL_CONFIRMATION.to_string(),
+            verified_subject: None,
         });
         request.validate().expect("control request validates");
         let encoded = serde_json::to_value(request).expect("request serializes");
