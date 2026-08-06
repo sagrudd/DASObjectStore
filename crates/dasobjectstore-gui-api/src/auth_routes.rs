@@ -229,6 +229,16 @@ pub(crate) struct PreverifiedHostAdminRouteState {
     priority_daemon_bridge: Arc<crate::daemon_bridge::DaemonBridge>,
 }
 
+/// Host-composed report rebuilding state.
+///
+/// Report rendering does not issue a daemon mutation, so it carries only the
+/// bounded worker capacity. Human authority is supplied exclusively by the
+/// verified Pistis context at the route boundary.
+#[derive(Clone)]
+pub(crate) struct PreverifiedHostReportingRouteState {
+    performance_report_workers: Arc<Semaphore>,
+}
+
 #[derive(Clone)]
 pub(crate) struct StandaloneReportingRouteState {
     auth_store: LocalAuthStore,
@@ -257,6 +267,14 @@ impl PreverifiedHostAdminRouteState {
                 DaemonStandaloneEnclosureAdminClient::default_packaged(),
             ),
             priority_daemon_bridge: crate::daemon_bridge::DaemonBridge::shared_priority_packaged(),
+        }
+    }
+}
+
+impl PreverifiedHostReportingRouteState {
+    pub(crate) fn packaged() -> Self {
+        Self {
+            performance_report_workers: Arc::new(Semaphore::new(MAX_PERFORMANCE_REPORT_WORKERS)),
         }
     }
 }
@@ -1121,14 +1139,48 @@ async fn rebuild_performance_report(
     body: Bytes,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let current_user = require_local_administrator(state.local_user_provider.as_ref(), &actor)?;
+    rebuild_performance_report_for_actor(
+        state.performance_report_workers,
+        current_user.username,
+        headers,
+        body,
+    )
+    .await
+}
+
+/// Rebuild a report for an already verified Pistis host administrator.
+///
+/// The report renderer is local compute rather than a storage daemon mutation,
+/// but access is still a human operational action. No local session, password,
+/// PAM, POSIX group, or sudo-derived authority is consulted.
+async fn preverified_host_rebuild_performance_report(
+    State(state): State<PreverifiedHostReportingRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    rebuild_performance_report_for_actor(
+        state.performance_report_workers,
+        actor.subject_id,
+        headers,
+        body,
+    )
+    .await
+}
+
+async fn rebuild_performance_report_for_actor(
+    performance_report_workers: Arc<Semaphore>,
+    operator: String,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let uploaded_filename = headers
         .get("x-dasobjectstore-filename")
         .and_then(|value| value.to_str().ok());
     let uploaded_filename = uploaded_filename.map(str::to_owned);
-    let username = current_user.username;
-    let permit = state
-        .performance_report_workers
-        .clone()
+    let permit = performance_report_workers
         .try_acquire_owned()
         .map_err(|_| {
             route_error(
@@ -1142,7 +1194,7 @@ async fn rebuild_performance_report(
         crate::reporting::rebuild_performance_report_pdf_from_upload(
             &body,
             uploaded_filename.as_deref(),
-            &username,
+            &operator,
         )
     })
     .await
@@ -1330,8 +1382,8 @@ mod tests {
         IngestControlAction, IngestControlRequest, IngestControlResponse,
         LocalPasswordAuthenticator, LocalUserAuthorityProvider, LoginRequest, LogoutRequest,
         ObjectStoreIngestPolicyRequest, PrepareEnclosureHddDeviceRequest, PrepareEnclosureRequest,
-        PreverifiedHostAdminRouteState, RegisterRequest, RemoteAuthenticateRequest,
-        SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
+        PreverifiedHostAdminRouteState, PreverifiedHostReportingRouteState, RegisterRequest,
+        RemoteAuthenticateRequest, SessionCheckRequest, StandaloneAdminJobCancelDaemonRequest,
         StandaloneAdminJobCancelResponse, StandaloneAdminJobProgress,
         StandaloneAdminJobStatusDaemonRequest, StandaloneAdminJobStatusResponse,
         StandaloneAdminJobSummary, StandaloneAuthRouteState,
@@ -4408,6 +4460,52 @@ mod tests {
             .contains("unsupported benchmark JSON schema"));
 
         cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn preverified_host_performance_report_rebuild_requires_pistis_administrator() {
+        let app = super::auth_router::preverified_host_reporting_router_with_state(
+            PreverifiedHostReportingRouteState {
+                performance_report_workers: Arc::new(Semaphore::new(
+                    super::MAX_PERFORMANCE_REPORT_WORKERS,
+                )),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/activity/reporting/performance-report")
+            .extension(verified_host_context("storage_administrator"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"schema":"wrong"}"#))
+            .expect("request builds");
+
+        let response = app
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response_json(response).await["code"],
+            "performance_report_rebuild_failed"
+        );
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/activity/reporting/performance-report")
+            .extension(verified_host_context("storage_operator"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"schema":"wrong"}"#))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
     }
 
     #[tokio::test]
