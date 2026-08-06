@@ -4156,6 +4156,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_profile_upload_requires_verified_pistis_operator() {
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: recording_enclosure_client(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/profile-s3/stores/zymo/objects/reads.fastq")
+            .extension(verified_host_context("storage_viewer"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_operator_role_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_profile_upload_admits_pistis_operator_before_daemon_work() {
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: recording_enclosure_client(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/profile-s3/stores/%20/objects/reads.fastq")
+            .extension(verified_host_context("storage_operator"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        // The request reaches the daemon-owned upload adapter after verified
+        // Pistis authorization and fails only on StoreId validation.
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response_json(response).await["code"],
+            "profile_s3_invalid_store_id"
+        );
+    }
+
+    #[tokio::test]
     async fn ingest_control_forwards_authenticated_admin_action() {
         let root = temp_root("objectstore-ingest-control-forward");
         let auth_store = registered_auth_store(&root);

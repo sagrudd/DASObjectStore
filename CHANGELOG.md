@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.27] - 2026-08-06
+
+### Security
+
+- Migrate host-composed profile-object upload to the verified Pistis boundary.
+  The daemon-owned write accepts only a matching verified `storage_operator`;
+  it does not consult a local session, password, PAM, POSIX group, or
+  sudo-derived identity.
+
 ## [0.157.26] - 2026-08-06
 
 ### Security

@@ -5,7 +5,7 @@ use crate::{FederatedHostSessionResponse, VerifiedHostAuthenticatedContext};
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, post},
+    routing::{get, post, put},
     Extension, Router,
 };
 use dasobjectstore_daemon::api::{
@@ -182,7 +182,8 @@ pub(super) fn preverified_host_operational_router_with_state(
         )
         .route(
             "/api/v1/profile-s3/stores/{store_id}/objects/{*object_id}",
-            delete(crate::auth_routes::profile_delete::preverified_host_profile_s3_delete),
+            put(crate::auth_routes::profile_upload::preverified_host_profile_s3_put)
+                .delete(crate::auth_routes::profile_delete::preverified_host_profile_s3_delete),
         )
         .with_state(state)
 }
