@@ -976,9 +976,10 @@ mod tests {
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
         RemoteEasyconnectUploadCompletion, StoreDeleteRequest, StoreDrainRequest,
         StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreIngestPolicyRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, WorkspaceControlAction,
-        WorkspaceControlRequest, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
+        SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
+        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
+        UpsertEndpointInventoryResponse, WorkspaceControlAction, WorkspaceControlRequest,
+        ACKNOWLEDGEMENT_POLICY_CONFIRMATION, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_BROWSER_GUI_API_PEER_IDENTITY, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
@@ -2794,7 +2795,7 @@ mod tests {
     }
 
     #[test]
-    fn updates_only_store_ingest_mode_with_direct_hdd_confirmation() {
+    fn updates_only_store_ingest_mode_for_preverified_host_service_peer() {
         let root = temp_root("update-ingest-policy");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
@@ -2804,7 +2805,9 @@ mod tests {
         )
         .with_registry_paths(&store_registry_path, &subobject_registry_path);
 
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups(["dasobjectstore"]);
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::UpdateObjectStoreIngestPolicy(
@@ -2813,7 +2816,7 @@ mod tests {
                         ingest_mode: "direct_to_hdd".to_string(),
                         dry_run: false,
                         client_request_id: Some("policy-1".to_string()),
-                        administrator_actor: Some("operator".to_string()),
+                        administrator_actor: Some("pistis:administrator".to_string()),
                         confirmation_marker: DIRECT_TO_HDD_POLICY_CONFIRMATION.to_string(),
                     },
                 ),
@@ -2832,6 +2835,99 @@ mod tests {
         let definitions = read_store_registry(&store_registry_path).expect("registry readable");
         assert_eq!(definitions[0].policy.ingest_mode, IngestMode::DirectToHdd);
         assert_eq!(definitions[0].policy.copies, 1);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_direct_privileged_peers_for_store_ingest_policy_updates() {
+        let root = temp_root("update-ingest-policy-direct-privileged-peer");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        let direct_peers = [
+            DaemonLocalActor::new(0).with_username("root"),
+            DaemonLocalActor::new(1000)
+                .with_username("sudo-user")
+                .with_groups(["sudo"]),
+            DaemonLocalActor::new(1001)
+                .with_username("store-admin")
+                .with_groups(["dasobjectstore-admin"]),
+        ];
+
+        for actor in direct_peers {
+            let response = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::UpdateObjectStoreIngestPolicy(
+                        UpdateObjectStoreIngestPolicyRequest {
+                            store_id: "zymo".to_string(),
+                            ingest_mode: "direct_to_hdd".to_string(),
+                            dry_run: false,
+                            client_request_id: Some("direct-privileged-peer".to_string()),
+                            administrator_actor: Some("spoofed-subject".to_string()),
+                            confirmation_marker: DIRECT_TO_HDD_POLICY_CONFIRMATION.to_string(),
+                        },
+                    ),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("policy request handled");
+
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
+        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        assert_eq!(definitions[0].policy.ingest_mode, IngestMode::SsdFirst);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn rejects_direct_privileged_peer_for_acknowledgement_policy_updates() {
+        let root = temp_root("update-acknowledgement-policy-direct-root-peer");
+        let (store_registry_path, subobject_registry_path) =
+            write_test_store_registry(&root, "zymo", Some("bioinformatics"));
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        )
+        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        let root_peer = DaemonLocalActor::new(0)
+            .with_username("root")
+            .with_groups(["sudo", "dasobjectstore-admin"]);
+
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(
+                    UpdateObjectStoreAcknowledgementPolicyRequest {
+                        store_id: "zymo".to_string(),
+                        acknowledgement_policy: "after_hdd_placement".to_string(),
+                        dry_run: false,
+                        client_request_id: Some("direct-root-peer".to_string()),
+                        administrator_actor: Some("spoofed-subject".to_string()),
+                        confirmation_marker: ACKNOWLEDGEMENT_POLICY_CONFIRMATION.to_string(),
+                    },
+                ),
+                Some(&root_peer),
+                |_| Ok(()),
+            )
+            .expect("policy request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_authority_required"
+        ));
+        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        assert_eq!(
+            definitions[0].policy.acknowledgement_policy,
+            dasobjectstore_core::store::AcknowledgementPolicy::AfterSsdIngest
+        );
         cleanup(&root);
     }
 

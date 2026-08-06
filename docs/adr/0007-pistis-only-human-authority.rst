@@ -195,6 +195,15 @@ existing package service boundary.  It does **not** make the legacy envelope a
 Pistis bridge: all legacy delegation must still be removed after the verified
 successor covers the corresponding route family.
 
+The ObjectStore ingest-policy and acknowledgement-policy mutation families
+have their preverified host-route counterparts and therefore no longer retain
+the compatibility exception: they accept only the fixed packaged host service
+peer and a non-blank verified subject.  Direct root, ``sudo`` and
+``dasobjectstore-admin`` CLI/socket peers are rejected before the policy
+registry or administrative-job ledger is touched.  The service peer is a
+transport boundary, not an authorizer; Monas/Pistis verification remains a
+required precondition in the host route.
+
 The direct request families that remain to be migrated are the daemon
 administrative service, disk, store, workspace and local-group operations,
 together with CLI commands that submit them.  The migration must be organised
