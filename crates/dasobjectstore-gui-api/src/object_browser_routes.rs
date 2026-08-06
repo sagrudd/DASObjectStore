@@ -92,6 +92,27 @@ pub fn standalone_object_browser_router(auth_store: LocalAuthStore) -> Router {
     ))
 }
 
+/// Host-composed Object Browser routes.  Unlike the appliance-only router,
+/// these routes receive the already verified Pistis actor and exact store
+/// scope from Monas.  They never resolve a POSIX user or emit a legacy
+/// delegated actor to the daemon.
+pub(super) fn preverified_host_object_browser_router() -> Router {
+    preverified_host_object_browser_router_with_state(
+        PreverifiedHostObjectBrowserRouteState::packaged(),
+    )
+}
+
+pub(crate) fn preverified_host_object_browser_router_with_state(
+    state: PreverifiedHostObjectBrowserRouteState,
+) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/object-stores/{endpoint}/browser",
+            get(preverified_host_object_store_browser),
+        )
+        .with_state(state)
+}
+
 pub(crate) fn standalone_object_browser_router_with_state(
     state: StandaloneObjectBrowserRouteState,
 ) -> Router {
@@ -131,6 +152,21 @@ impl StandaloneObjectBrowserRouteState {
             local_user_provider: Arc::new(SystemObjectBrowserLocalUserProvider),
             daemon_bridge: Arc::new(DaemonBridge::packaged()),
             provider_stream_socket_path: DaemonRuntimeConfig::default_packaged().socket_path,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct PreverifiedHostObjectBrowserRouteState {
+    object_browser_client: Arc<dyn StandaloneObjectBrowserClient>,
+    daemon_bridge: Arc<DaemonBridge>,
+}
+
+impl PreverifiedHostObjectBrowserRouteState {
+    fn packaged() -> Self {
+        Self {
+            object_browser_client: Arc::new(DaemonStandaloneObjectBrowserClient::default_packaged()),
+            daemon_bridge: Arc::new(DaemonBridge::packaged()),
         }
     }
 }
@@ -267,6 +303,69 @@ async fn object_store_browser(
         )
     })?;
     let client = Arc::clone(client);
+    state
+        .daemon_bridge
+        .call(move || client.object_browser(request))
+        .await
+        .map(Json)
+        .map_err(daemon_bridge_route_error)
+}
+
+/// List an ObjectStore only after the embedding Monas route has supplied a
+/// matching verified Pistis subject and exact store scope.  The verified
+/// envelope is deliberately scoped to the requested canonical prefix, so a
+/// daemon request cannot widen the browser view after this boundary.
+async fn preverified_host_object_store_browser(
+    State(state): State<PreverifiedHostObjectBrowserRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+    Path(endpoint): Path<String>,
+    Query(query): Query<ObjectBrowserQuery>,
+) -> Result<Json<ObjectBrowserResponse>, (StatusCode, Json<AuthRouteError>)> {
+    crate::auth_routes::require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &endpoint,
+    )?;
+    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_browser_request",
+            err.to_string(),
+        )
+    })?;
+    let canonical_prefix = query.prefix.clone().unwrap_or_default();
+    let verified_subject = verified_object_browser_subject(
+        &verified,
+        &scope.expect("checked above").0,
+        endpoint.clone(),
+        canonical_prefix,
+    )?;
+    let request = ObjectBrowserRequest {
+        endpoint,
+        prefix: query.prefix,
+        search: query.search,
+        sort: parse_object_browser_sort(query.sort.as_deref())?,
+        page: ObjectBrowserPageRequest {
+            cursor: query.cursor,
+            limit: query
+                .limit
+                .unwrap_or_else(|| ObjectBrowserPageRequest::default().limit),
+        },
+        include_placement: query.include_placement.unwrap_or(false),
+        delegated_actor: None,
+        verified_subject: Some(verified_subject),
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_browser_request",
+            err.to_string(),
+        )
+    })?;
+    let client = Arc::clone(&state.object_browser_client);
     state
         .daemon_bridge
         .call(move || client.object_browser(request))
@@ -774,18 +873,22 @@ fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
+        preverified_host_object_browser_router_with_state,
         standalone_object_browser_router_with_state, verified_object_browser_subject,
-        write_folder_archive, ObjectBrowserLocalUserProvider, StandaloneObjectBrowserClient,
+        write_folder_archive, ObjectBrowserLocalUserProvider,
+        PreverifiedHostObjectBrowserRouteState, StandaloneObjectBrowserClient,
         StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
     };
     use crate::{
-        accept_host_authenticated_context, daemon_bridge::DaemonBridge, HostAuthenticatedContext,
+        accept_host_authenticated_context, daemon_bridge::DaemonBridge,
+        AuthenticatedActorAuthority, AuthenticatedGuiActor, HostAuthenticatedContext,
         HostAuthenticationAuthority, HostAuthenticationContextVerifier, LocalAuthStore,
         LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostStoreScope,
         STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
+    use axum::Extension;
     use dasobjectstore_core::ids::{ObjectId, StoreId};
     use dasobjectstore_core::lifecycle::ObjectState;
     use dasobjectstore_core::object_type::ObjectType;
@@ -851,6 +954,16 @@ mod tests {
         .expect("verified host context")
     }
 
+    fn verified_host_actor() -> AuthenticatedGuiActor {
+        AuthenticatedGuiActor {
+            subject_id: "pistis:stephen".to_string(),
+            authority: AuthenticatedActorAuthority::MonasStandalone,
+            roles: vec!["storage_viewer".to_string()],
+            expires_at_unix_seconds: Some(2_000),
+            correlation_id: Some("correlation-1".to_string()),
+        }
+    }
+
     #[test]
     fn maps_verified_host_scope_to_the_versioned_daemon_subject_without_os_identity() {
         let verified = verified_host_context();
@@ -892,6 +1005,84 @@ mod tests {
 
         assert_eq!(error.0, StatusCode::FORBIDDEN);
         assert_eq!(error.1 .0.code, "host_store_scope_denied");
+    }
+
+    #[tokio::test]
+    async fn preverified_host_browser_forwards_only_the_verified_subject() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/browser?prefix=ENA%2FXeno")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let requests = client.requests();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].delegated_actor.is_none());
+        let subject = requests[0]
+            .verified_subject
+            .as_ref()
+            .expect("verified subject forwards");
+        assert_eq!(subject.subject_id, "pistis:stephen");
+        assert_eq!(subject.canonical_prefix, "ENA/Xeno");
+    }
+
+    #[tokio::test]
+    async fn preverified_host_browser_rejects_an_out_of_scope_store_before_daemon() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/other/browser")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(client.requests().is_empty());
     }
 
     #[tokio::test]

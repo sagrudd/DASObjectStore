@@ -137,6 +137,7 @@ pub fn host_composed_gui_api_router() -> Router {
         .merge(preverified_host_reporting_router())
         .merge(preverified_host_profile_catalogue_router())
         .merge(preverified_host_profile_read_router())
+        .merge(crate::object_browser_routes::preverified_host_object_browser_router())
 }
 
 /// Host-composed dashboard routes derive their visibility and administrator
