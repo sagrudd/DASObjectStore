@@ -132,10 +132,22 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
 /// router. Calling it directly does not establish an authority boundary.
 pub fn host_composed_gui_api_router() -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
+        .merge(preverified_host_dashboard_router())
         .merge(preverified_host_operational_router())
         .merge(preverified_host_reporting_router())
         .merge(preverified_host_profile_catalogue_router())
         .merge(preverified_host_profile_read_router())
+}
+
+/// Host-composed dashboard routes derive their visibility and administrator
+/// affordances solely from the verified Pistis role policy. They deliberately
+/// do not mount the standalone dashboard, which consults appliance-local
+/// users and sudo state.
+fn preverified_host_dashboard_router() -> Router {
+    Router::new().route(
+        "/api/v1/dashboard/enclosures",
+        get(preverified_host_enclosures_dashboard),
+    )
 }
 
 /// Host-composed operational mutations that derive authority exclusively from
