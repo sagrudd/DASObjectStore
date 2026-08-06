@@ -108,6 +108,9 @@ Work is dependency ordered. Only these entries define open release work:
   denied before mutation or job recording. Ingest-control mutation now uses
   the same fixed-peer verified-subject boundary; the packaged CLI retains only
   a dry-run compatibility path and cannot pause, throttle, or resume ingest.
+  Non-dry ObjectStore creation and destructive enclosure preparation now use
+  that same fixed-peer verified-subject boundary; direct local peers are
+  denied before provisioning or formatting begins.
 - [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
   acceptance on the available x86_64 DASServer before any representative
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,

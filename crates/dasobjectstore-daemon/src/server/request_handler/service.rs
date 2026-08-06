@@ -429,6 +429,33 @@ where
             Ok(DaemonApiResponse::RevokeApplicationCredential(response))
         }
         DaemonApiRequest::PrepareEnclosure(request) => {
+            // Destructive enclosure preparation is authorised only by the
+            // verified Pistis subject forwarded through the fixed packaged
+            // service peer.  A privileged local peer is not a human authority.
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "enclosure preparation requires the preverified host service peer",
+                    )));
+                };
+                if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "preverified_host_authority_required",
+                        "enclosure preparation requires the fixed preverified host service peer",
+                    )));
+                }
+                if request
+                    .administrator_actor
+                    .as_deref()
+                    .is_none_or(|subject| subject.trim().is_empty())
+                {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "preverified_host_subject_required",
+                        "enclosure preparation requires a verified Pistis subject from the preverified host service",
+                    )));
+                }
+            }
             let now = handler.clock.now_utc();
             let response = handler
                 .service_orchestrator
@@ -470,24 +497,33 @@ where
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
         }
-        DaemonApiRequest::CreateObjectStore(mut request) => {
+        DaemonApiRequest::CreateObjectStore(request) => {
             // Creation mutates daemon-owned capacity and registry authority.
-            // The actor carried by the request is untrusted display metadata;
-            // replace it with the peer-credential-derived actor.
-            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
+            // Human authority is established by the verified Pistis host
+            // route, which supplies its subject only through the fixed
+            // packaged service peer.  Root, sudo, and local group membership
+            // are deliberately not authority sources for this operation.
             if !request.dry_run {
                 let Some(actor) = actor else {
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "administrator_authentication_required",
-                        "ObjectStore creation requires an authenticated local administrator",
+                        "ObjectStore creation requires the preverified host service peer",
                     )));
                 };
-                let trusted_web_peer =
-                    actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER);
-                if !actor.is_administrator() && !trusted_web_peer {
+                if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
                     return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "ObjectStore creation requires root, sudo, dasobjectstore-admin membership, or the trusted authenticated Web service peer",
+                        "preverified_host_authority_required",
+                        "ObjectStore creation requires the fixed preverified host service peer",
+                    )));
+                }
+                if request
+                    .administrator_actor
+                    .as_deref()
+                    .is_none_or(|subject| subject.trim().is_empty())
+                {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "preverified_host_subject_required",
+                        "ObjectStore creation requires a verified Pistis subject from the preverified host service",
                     )));
                 }
             }
