@@ -989,6 +989,79 @@ async fn preverified_host_control_ingest(
         .map(Json)
 }
 
+/// Submit store-maintenance work only from a matching verified Pistis
+/// administrator. The subject is copied into the daemon DTO exclusively here
+/// before the bounded priority bridge reaches its fixed Unix peer.
+async fn preverified_host_store_drain(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDrainRequest>,
+) -> Result<Json<HostStoreDrainResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_drain_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_drain_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_delete(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDeleteRequest>,
+) -> Result<Json<HostStoreDeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_delete_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_delete_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_repair(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreRepairRequest>,
+) -> Result<Json<HostStoreRepairResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_repair_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_repair_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_deduplicate(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDeduplicateRequest>,
+) -> Result<Json<HostStoreDeduplicateResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_deduplicate_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_deduplicate_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_ingest_queue_drain(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostIngestQueueDrainRequest>,
+) -> Result<Json<HostIngestQueueDrainResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_ingest_queue_drain_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_ingest_queue_drain_request(&state, request)
+        .await
+        .map(Json)
+}
+
 async fn preverified_host_update_object_store_ingest_policy(
     State(state): State<PreverifiedHostAdminRouteState>,
     actor: AuthenticatedGuiActor,
@@ -1280,6 +1353,79 @@ async fn submit_preverified_host_ingest_control_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
+}
+
+async fn submit_preverified_host_store_drain_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDrainRequest,
+) -> Result<HostStoreDrainResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_drain(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_drain_failed"))
+}
+
+async fn submit_preverified_host_store_delete_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDeleteRequest,
+) -> Result<HostStoreDeleteResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_delete(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_delete_failed"))
+}
+
+async fn submit_preverified_host_store_repair_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreRepairRequest,
+) -> Result<HostStoreRepairResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_repair(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_repair_failed"))
+}
+
+async fn submit_preverified_host_store_deduplicate_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDeduplicateRequest,
+) -> Result<HostStoreDeduplicateResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .store_deduplicate(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_deduplicate_failed"))
+}
+
+async fn submit_preverified_host_ingest_queue_drain_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::IngestQueueDrainRequest,
+) -> Result<HostIngestQueueDrainResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .ingest_queue_drain(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_queue_drain_failed"))
 }
 
 async fn submit_preverified_host_ingest_policy_request(
@@ -4083,6 +4229,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_maintenance_forwards_only_verified_pistis_subject_for_all_operations()
+    {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let requests = [
+            (
+                "/api/v1/workspaces/maintenance/stores/drain",
+                serde_json::json!({
+                    "store_id": "archive", "dry_run": true,
+                    "allow_store_drain": true, "confirmation_marker": ""
+                }),
+            ),
+            (
+                "/api/v1/workspaces/maintenance/stores/delete",
+                serde_json::json!({
+                    "store_id": "archive", "dry_run": true,
+                    "allow_store_delete": true, "confirmation_marker": ""
+                }),
+            ),
+            (
+                "/api/v1/workspaces/maintenance/stores/repair",
+                serde_json::json!({ "store_id": "archive", "dry_run": true, "confirmation": "" }),
+            ),
+            (
+                "/api/v1/workspaces/maintenance/stores/deduplicate",
+                serde_json::json!({ "store_id": "archive", "dry_run": true, "confirmation": "" }),
+            ),
+            (
+                "/api/v1/workspaces/maintenance/ingest-queue/drain",
+                serde_json::json!({
+                    "store_id": "archive", "reason": "verified maintenance rehearsal",
+                    "dry_run": true, "allow_ingest_queue_drain": true, "confirmation_marker": ""
+                }),
+            ),
+        ];
+
+        for (uri, body) in requests {
+            let request = Request::builder()
+                .method("POST")
+                .uri(uri)
+                .extension(verified_host_context("storage_administrator"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&body).expect("request serializes"),
+                ))
+                .expect("request builds");
+            let response = app
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("request completes");
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        }
+
+        assert_eq!(
+            client.store_drain_requests()[0].verified_subject.as_deref(),
+            Some("principal-1")
+        );
+        assert_eq!(
+            client.store_delete_requests()[0]
+                .verified_subject
+                .as_deref(),
+            Some("principal-1")
+        );
+        assert_eq!(
+            client.store_repair_requests()[0]
+                .verified_subject
+                .as_deref(),
+            Some("principal-1")
+        );
+        assert_eq!(
+            client.store_deduplicate_requests()[0]
+                .verified_subject
+                .as_deref(),
+            Some("principal-1")
+        );
+        assert_eq!(
+            client.ingest_queue_drain_requests()[0]
+                .verified_subject
+                .as_deref(),
+            Some("principal-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_maintenance_rejects_operator_before_all_daemon_calls() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/maintenance/stores/drain")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({
+                    "store_id": "archive", "dry_run": true,
+                    "allow_store_drain": true, "confirmation_marker": ""
+                }))
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.store_drain_requests().is_empty());
+    }
+
+    #[tokio::test]
     async fn preverified_host_object_store_create_requires_pistis_administrator_and_records_subject(
     ) {
         let client = recording_enclosure_client();
@@ -5838,6 +6111,11 @@ mod tests {
         create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
         ingest_policy_requests: Mutex<Vec<DaemonUpdateObjectStoreIngestPolicyRequest>>,
         ingest_control_requests: Mutex<Vec<StandaloneIngestControlDaemonRequest>>,
+        store_drain_requests: Mutex<Vec<dasobjectstore_daemon::StoreDrainRequest>>,
+        store_delete_requests: Mutex<Vec<dasobjectstore_daemon::StoreDeleteRequest>>,
+        store_repair_requests: Mutex<Vec<dasobjectstore_daemon::StoreRepairRequest>>,
+        store_deduplicate_requests: Mutex<Vec<dasobjectstore_daemon::StoreDeduplicateRequest>>,
+        ingest_queue_drain_requests: Mutex<Vec<dasobjectstore_daemon::IngestQueueDrainRequest>>,
         endpoint_inventory_requests: Mutex<Vec<DaemonUpsertEndpointInventoryRequest>>,
         endpoint_connection_test_requests:
             Mutex<Vec<dasobjectstore_daemon::TestEndpointConnectionRequest>>,
@@ -5876,6 +6154,45 @@ mod tests {
             self.ingest_control_requests
                 .lock()
                 .expect("ingest control requests lock")
+                .clone()
+        }
+
+        fn store_drain_requests(&self) -> Vec<dasobjectstore_daemon::StoreDrainRequest> {
+            self.store_drain_requests
+                .lock()
+                .expect("store drain requests lock")
+                .clone()
+        }
+
+        fn store_delete_requests(&self) -> Vec<dasobjectstore_daemon::StoreDeleteRequest> {
+            self.store_delete_requests
+                .lock()
+                .expect("store delete requests lock")
+                .clone()
+        }
+
+        fn store_repair_requests(&self) -> Vec<dasobjectstore_daemon::StoreRepairRequest> {
+            self.store_repair_requests
+                .lock()
+                .expect("store repair requests lock")
+                .clone()
+        }
+
+        fn store_deduplicate_requests(
+            &self,
+        ) -> Vec<dasobjectstore_daemon::StoreDeduplicateRequest> {
+            self.store_deduplicate_requests
+                .lock()
+                .expect("store deduplicate requests lock")
+                .clone()
+        }
+
+        fn ingest_queue_drain_requests(
+            &self,
+        ) -> Vec<dasobjectstore_daemon::IngestQueueDrainRequest> {
+            self.ingest_queue_drain_requests
+                .lock()
+                .expect("ingest queue drain requests lock")
                 .clone()
         }
 
@@ -6057,6 +6374,126 @@ mod tests {
             })
         }
 
+        fn store_drain(
+            &self,
+            request: dasobjectstore_daemon::StoreDrainRequest,
+        ) -> Result<dasobjectstore_daemon::StoreDrainResponse, StandaloneEnclosureAdminClientError>
+        {
+            self.store_drain_requests
+                .lock()
+                .expect("store drain requests lock")
+                .push(request.clone());
+            Ok(dasobjectstore_daemon::StoreDrainResponse {
+                report: dasobjectstore_metadata::StoreDrainReport {
+                    live_sqlite_path: PathBuf::from("/var/lib/dasobjectstore/live.sqlite"),
+                    store_id: StoreId::new(request.store_id).expect("validated store id"),
+                    dry_run: request.dry_run,
+                    objects_removed: 0,
+                    placements_removed: 0,
+                    ingest_jobs_removed: 0,
+                    payload_files_removed: 0,
+                    missing_payload_files: 0,
+                    affected_payloads: Vec::new(),
+                },
+            })
+        }
+
+        fn store_delete(
+            &self,
+            request: dasobjectstore_daemon::StoreDeleteRequest,
+        ) -> Result<dasobjectstore_daemon::StoreDeleteResponse, StandaloneEnclosureAdminClientError>
+        {
+            self.store_delete_requests
+                .lock()
+                .expect("store delete requests lock")
+                .push(request);
+            Ok(dasobjectstore_daemon::StoreDeleteResponse {
+                report: dasobjectstore_daemon::StoreDeleteCommandReport {
+                    profile_retirement: None,
+                    metadata: None,
+                    host_registry: None,
+                    portable_registry: None,
+                    host_subobjects: None,
+                    portable_subobjects: None,
+                },
+            })
+        }
+
+        fn store_repair(
+            &self,
+            request: dasobjectstore_daemon::StoreRepairRequest,
+        ) -> Result<dasobjectstore_daemon::StoreRepairResponse, StandaloneEnclosureAdminClientError>
+        {
+            self.store_repair_requests
+                .lock()
+                .expect("store repair requests lock")
+                .push(request.clone());
+            Ok(dasobjectstore_daemon::StoreRepairResponse {
+                report: dasobjectstore_daemon::StoreRepairReport {
+                    metadata_path: "/var/lib/dasobjectstore/live.sqlite".to_string(),
+                    backup_path: None,
+                    dry_run: request.dry_run,
+                    stores_scanned: 0,
+                    payload_files: 0,
+                    objects_recovered: 0,
+                    placements_recovered: 0,
+                    payload_bytes: 0,
+                    partial_duplicates_omitted: 0,
+                    hashes_verified: true,
+                    warning: "recording client".to_string(),
+                },
+                s3_reconciliation: None,
+            })
+        }
+
+        fn store_deduplicate(
+            &self,
+            request: dasobjectstore_daemon::StoreDeduplicateRequest,
+        ) -> Result<
+            dasobjectstore_daemon::StoreDeduplicateResponse,
+            StandaloneEnclosureAdminClientError,
+        > {
+            self.store_deduplicate_requests
+                .lock()
+                .expect("store deduplicate requests lock")
+                .push(request.clone());
+            Ok(dasobjectstore_daemon::StoreDeduplicateResponse {
+                report: dasobjectstore_daemon::StoreDeduplicateReport {
+                    metadata_path: "/var/lib/dasobjectstore/live.sqlite".to_string(),
+                    dry_run: request.dry_run,
+                    payloads_hashed: 0,
+                    hash_errors: 0,
+                    duplicate_content_groups: 0,
+                    duplicate_placement_rows: 0,
+                    metadata_rows_removed: 0,
+                    hashes_recorded: 0,
+                    warning: "recording client".to_string(),
+                },
+            })
+        }
+
+        fn ingest_queue_drain(
+            &self,
+            request: dasobjectstore_daemon::IngestQueueDrainRequest,
+        ) -> Result<
+            dasobjectstore_daemon::IngestQueueDrainResponse,
+            StandaloneEnclosureAdminClientError,
+        > {
+            self.ingest_queue_drain_requests
+                .lock()
+                .expect("ingest queue drain requests lock")
+                .push(request.clone());
+            Ok(dasobjectstore_daemon::IngestQueueDrainResponse {
+                report: dasobjectstore_metadata::IngestQueueDrainReport {
+                    live_sqlite_path: PathBuf::from("/var/lib/dasobjectstore/live.sqlite"),
+                    store_id: StoreId::new(request.store_id).expect("validated store id"),
+                    dry_run: request.dry_run,
+                    jobs_cancelled: 0,
+                    cancelled_job_ids: Vec::new(),
+                },
+            })
+        }
+
         fn test_endpoint_connection(
             &self,
             request: dasobjectstore_daemon::TestEndpointConnectionRequest,
@@ -6139,6 +6576,11 @@ mod tests {
             create_object_store_requests: Mutex::new(Vec::new()),
             ingest_policy_requests: Mutex::new(Vec::new()),
             ingest_control_requests: Mutex::new(Vec::new()),
+            store_drain_requests: Mutex::new(Vec::new()),
+            store_delete_requests: Mutex::new(Vec::new()),
+            store_repair_requests: Mutex::new(Vec::new()),
+            store_deduplicate_requests: Mutex::new(Vec::new()),
+            ingest_queue_drain_requests: Mutex::new(Vec::new()),
             endpoint_inventory_requests: Mutex::new(Vec::new()),
             endpoint_connection_test_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),

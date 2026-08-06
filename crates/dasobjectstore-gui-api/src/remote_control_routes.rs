@@ -265,6 +265,10 @@ async fn reconcile_s3(
             expected_sha256: body.expected_sha256.to_ascii_lowercase(),
         }),
         idempotency_key: Some(body.idempotency_key),
+        // Remote S3 reconciliation is not a host-maintenance authority path.
+        // The daemon rejects non-dry repair unless the fixed Pistis bridge
+        // provides its verified subject.
+        verified_subject: None,
     };
     request
         .validate()

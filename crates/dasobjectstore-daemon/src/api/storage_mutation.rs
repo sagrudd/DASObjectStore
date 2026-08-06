@@ -13,6 +13,11 @@ pub struct StoreDrainRequest {
     pub dry_run: bool,
     pub allow_store_drain: bool,
     pub confirmation_marker: String,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator. The daemon accepts this only
+    /// from that peer for non-dry maintenance work.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 impl StoreDrainRequest {
@@ -38,6 +43,10 @@ pub struct StoreDeleteRequest {
     pub dry_run: bool,
     pub allow_store_delete: bool,
     pub confirmation_marker: String,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 impl StoreDeleteRequest {
@@ -137,6 +146,7 @@ mod tests {
             dry_run: false,
             allow_store_drain: true,
             confirmation_marker: STORE_DRAIN_CONFIRMATION.to_string(),
+            verified_subject: None,
         }
     }
 
@@ -167,6 +177,7 @@ mod tests {
             dry_run: false,
             allow_store_delete: true,
             confirmation_marker: String::new(),
+            verified_subject: None,
         };
 
         assert_eq!(
@@ -182,6 +193,7 @@ mod tests {
             dry_run: true,
             allow_store_delete: false,
             confirmation_marker: String::new(),
+            verified_subject: None,
         };
 
         assert_eq!(request.validate(), Ok(()));

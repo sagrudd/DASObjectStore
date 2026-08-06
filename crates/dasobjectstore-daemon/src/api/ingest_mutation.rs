@@ -10,6 +10,10 @@ pub struct IngestQueueDrainRequest {
     pub dry_run: bool,
     pub allow_ingest_queue_drain: bool,
     pub confirmation_marker: String,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 impl IngestQueueDrainRequest {
@@ -65,6 +69,7 @@ mod tests {
             dry_run: false,
             allow_ingest_queue_drain: true,
             confirmation_marker: INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+            verified_subject: None,
         }
     }
 

@@ -48,6 +48,31 @@ pub(super) trait StandaloneEnclosureAdminClient: Send + Sync {
         request: StandaloneIngestControlDaemonRequest,
     ) -> Result<IngestControlResponse, StandaloneEnclosureAdminClientError>;
 
+    fn store_drain(
+        &self,
+        request: dasobjectstore_daemon::StoreDrainRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDrainResponse, StandaloneEnclosureAdminClientError>;
+
+    fn store_delete(
+        &self,
+        request: dasobjectstore_daemon::StoreDeleteRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDeleteResponse, StandaloneEnclosureAdminClientError>;
+
+    fn store_repair(
+        &self,
+        request: dasobjectstore_daemon::StoreRepairRequest,
+    ) -> Result<dasobjectstore_daemon::StoreRepairResponse, StandaloneEnclosureAdminClientError>;
+
+    fn store_deduplicate(
+        &self,
+        request: dasobjectstore_daemon::StoreDeduplicateRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDeduplicateResponse, StandaloneEnclosureAdminClientError>;
+
+    fn ingest_queue_drain(
+        &self,
+        request: dasobjectstore_daemon::IngestQueueDrainRequest,
+    ) -> Result<dasobjectstore_daemon::IngestQueueDrainResponse, StandaloneEnclosureAdminClientError>;
+
     fn submit_endpoint_inventory_upsert(
         &self,
         request: DaemonUpsertEndpointInventoryRequest,
@@ -279,6 +304,56 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
                 verified_subject: request.verified_subject,
             })
             .map(ingest_control_response_from_daemon)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn store_drain(
+        &self,
+        request: dasobjectstore_daemon::StoreDrainRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDrainResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .store_drain(request)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn store_delete(
+        &self,
+        request: dasobjectstore_daemon::StoreDeleteRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDeleteResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .store_delete(request)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn store_repair(
+        &self,
+        request: dasobjectstore_daemon::StoreRepairRequest,
+    ) -> Result<dasobjectstore_daemon::StoreRepairResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .store_repair(request)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn store_deduplicate(
+        &self,
+        request: dasobjectstore_daemon::StoreDeduplicateRequest,
+    ) -> Result<dasobjectstore_daemon::StoreDeduplicateResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .store_deduplicate(request)
+            .map_err(standalone_enclosure_admin_client_error)
+    }
+
+    fn ingest_queue_drain(
+        &self,
+        request: dasobjectstore_daemon::IngestQueueDrainRequest,
+    ) -> Result<dasobjectstore_daemon::IngestQueueDrainResponse, StandaloneEnclosureAdminClientError>
+    {
+        self.client
+            .ingest_queue_drain(request)
             .map_err(standalone_enclosure_admin_client_error)
     }
 
