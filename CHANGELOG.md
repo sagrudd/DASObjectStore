@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.43] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for
+  non-dry ObjectStore creation and destructive enclosure preparation. Both
+  operations now require the fixed packaged host service peer and a non-blank
+  verified Pistis subject; direct local peers fail closed before provisioning
+  or formatting work is dispatched.
+
 ## [0.157.42] - 2026-08-06
 
 ### Security
