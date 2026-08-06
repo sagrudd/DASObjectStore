@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.29] - 2026-08-06
+
+### Fixed
+
+- Resolve the verified-Pistis Enclosures dashboard rebase without duplicating
+  its host route. The host-composed endpoint remains available only through
+  the matching verified Pistis viewer/administrator role boundary.
+
 ## [0.157.28] - 2026-08-06
 
 ### Security
@@ -9,6 +17,12 @@
   to the same verified session. Missing, substituted, and out-of-scope
   extensions fail closed before any daemon work; local sessions, passwords,
   PAM, POSIX groups, and sudo policy do not participate.
+
+- Migrate the host-composed Enclosures dashboard to the verified Pistis
+  boundary. Dashboard visibility requires a matching verified
+  `storage_viewer` role and the administrator affordance requires only the
+  closed `storage_administrator` role; this route does not consult a local
+  session, password, PAM, POSIX user/group, or sudo-derived identity.
 
 ## [0.157.27] - 2026-08-06
 
