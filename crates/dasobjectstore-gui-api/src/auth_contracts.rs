@@ -1,5 +1,12 @@
 use dasobjectstore_daemon::RemoteEasyconnectAuthProvider;
 use dasobjectstore_daemon::RemoteEasyconnectSession;
+use dasobjectstore_daemon::{
+    IngestQueueDrainResponse as DaemonIngestQueueDrainResponse,
+    StoreDeduplicateResponse as DaemonStoreDeduplicateResponse,
+    StoreDeleteResponse as DaemonStoreDeleteResponse,
+    StoreDrainResponse as DaemonStoreDrainResponse,
+    StoreRepairResponse as DaemonStoreRepairResponse,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -207,6 +214,65 @@ pub struct IngestControlResponse {
     pub dry_run: bool,
     pub reason: String,
 }
+
+/// Host-composed maintenance request for a single ObjectStore drain.
+/// The human subject is deliberately absent: verified Pistis context is the
+/// sole source of that value at the route boundary.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostStoreDrainRequest {
+    pub store_id: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub allow_store_drain: bool,
+    pub confirmation_marker: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostStoreDeleteRequest {
+    pub store_id: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub allow_store_delete: bool,
+    pub confirmation_marker: String,
+}
+
+/// Host-composed repair intentionally excludes remote S3 reconciliation
+/// fields: a browser maintenance action cannot promote itself to data-plane
+/// reconciliation authority.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostStoreRepairRequest {
+    pub store_id: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub confirmation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostStoreDeduplicateRequest {
+    pub store_id: Option<String>,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub confirmation: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct HostIngestQueueDrainRequest {
+    pub store_id: String,
+    pub reason: String,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub allow_ingest_queue_drain: bool,
+    pub confirmation_marker: String,
+}
+
+pub type HostStoreDrainResponse = DaemonStoreDrainResponse;
+pub type HostStoreDeleteResponse = DaemonStoreDeleteResponse;
+pub type HostStoreRepairResponse = DaemonStoreRepairResponse;
+pub type HostStoreDeduplicateResponse = DaemonStoreDeduplicateResponse;
+pub type HostIngestQueueDrainResponse = DaemonIngestQueueDrainResponse;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct StandaloneObjectStoreIngestPolicyResponse {

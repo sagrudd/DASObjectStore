@@ -113,6 +113,9 @@ Work is dependency ordered. Only these entries define open release work:
   denied before provisioning or formatting begins.
   Non-dry endpoint-inventory changes now use the same boundary and reject
   direct local peers before endpoint state or an administrative job is stored.
+  Store drain, delete, repair, deduplicate, and ingest-queue drain now use
+  the same complete fixed-peer verified-subject boundary; direct local peers
+  are denied before any non-dry maintenance work begins.
 - [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
   acceptance on the available x86_64 DASServer before any representative
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,

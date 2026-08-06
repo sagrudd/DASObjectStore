@@ -9,6 +9,10 @@ pub struct StoreDeduplicateRequest {
     pub store_id: Option<StoreId>,
     pub dry_run: bool,
     pub confirmation: String,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 impl StoreDeduplicateRequest {
@@ -68,6 +72,7 @@ mod tests {
             store_id: None,
             dry_run: false,
             confirmation: String::new(),
+            verified_subject: None,
         };
         assert_eq!(
             request.validate(),
@@ -77,6 +82,7 @@ mod tests {
             store_id: None,
             dry_run: false,
             confirmation: STORE_DEDUPLICATE_CONFIRMATION.to_string(),
+            verified_subject: None,
         };
         assert!(request.validate().is_ok());
     }

@@ -23,6 +23,11 @@ pub struct StoreRepairRequest {
     /// creating another reconciliation operation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
+    /// Subject copied only by the fixed host service after Pistis has
+    /// authenticated the human administrator. Remote reconciliation and
+    /// direct local peers cannot substitute this for the fixed service peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -225,6 +230,7 @@ mod tests {
             s3_prefix: None,
             s3_expectation: None,
             idempotency_key: None,
+            verified_subject: None,
         };
         assert_eq!(
             request.validate(),
@@ -238,6 +244,7 @@ mod tests {
             s3_prefix: None,
             s3_expectation: None,
             idempotency_key: None,
+            verified_subject: None,
         };
         assert!(request.validate().is_ok());
     }
@@ -257,6 +264,7 @@ mod tests {
                     .to_string(),
             }),
             idempotency_key: Some("epic-GSE224365-v1".to_string()),
+            verified_subject: None,
         };
         request.validate().expect("valid remote reconciliation");
         let first = request

@@ -1010,8 +1010,8 @@ mod tests {
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
         RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        RemoteEasyconnectUploadCompletion, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        RemoteEasyconnectUploadCompletion, StoreDeduplicateRequest, StoreDeleteRequest,
+        StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
         SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
         UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
         UpsertEndpointInventoryResponse, WorkspaceControlAction, WorkspaceControlRequest,
@@ -1717,6 +1717,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
+                        verified_subject: None,
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -1774,6 +1775,7 @@ mod tests {
                     dry_run: true,
                     allow_store_drain: false,
                     confirmation_marker: String::new(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1791,6 +1793,7 @@ mod tests {
                     dry_run: true,
                     allow_store_delete: false,
                     confirmation_marker: String::new(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1816,6 +1819,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1856,6 +1860,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1928,6 +1933,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
+                        verified_subject: None,
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -1965,6 +1971,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -3394,6 +3401,7 @@ mod tests {
                     s3_prefix: Some("incoming".to_string()),
                     s3_expectation: None,
                     idempotency_key: None,
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |event| {
@@ -3647,6 +3655,7 @@ mod tests {
                 dry_run: false,
                 allow_store_drain: true,
                 confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
@@ -3667,6 +3676,7 @@ mod tests {
                 dry_run: false,
                 allow_store_delete: true,
                 confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
@@ -3710,6 +3720,7 @@ mod tests {
                     dry_run: false,
                     allow_ingest_queue_drain: true,
                     confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 },
             ))
             .expect("request handled");
@@ -3719,6 +3730,64 @@ mod tests {
             DaemonApiResponse::Error(error)
                 if error.code == "administrator_authentication_required"
         ));
+    }
+
+    #[test]
+    fn maintenance_operations_reject_direct_os_authority_even_with_spoofed_subject() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let root = DaemonLocalActor::new(0).with_username("root");
+        let requests = vec![
+            DaemonApiRequest::StoreDrain(StoreDrainRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_drain: true,
+                confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_delete: true,
+                confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreRepair(StoreRepairRequest {
+                store_id: None,
+                dry_run: false,
+                confirmation: crate::api::STORE_REPAIR_CONFIRMATION.to_string(),
+                reconcile_s3: false,
+                s3_prefix: None,
+                s3_expectation: None,
+                idempotency_key: None,
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreDeduplicate(StoreDeduplicateRequest {
+                store_id: None,
+                dry_run: false,
+                confirmation: crate::api::STORE_DEDUPLICATE_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::IngestQueueDrain(IngestQueueDrainRequest {
+                store_id: "archive".to_string(),
+                reason: "authority regression".to_string(),
+                dry_run: false,
+                allow_ingest_queue_drain: true,
+                confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+        ];
+
+        for request in requests {
+            let response = handler
+                .handle_with_progress_for_actor(request, Some(&root), |_| Ok(()))
+                .expect("request handled");
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
     }
 
     #[test]

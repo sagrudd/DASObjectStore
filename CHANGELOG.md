@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.157.48] - 2026-08-06
+
+### Security
+
+- Add the complete host-composed maintenance authority bridge for ObjectStore
+  drain, delete, repair, deduplicate, and ingest-queue drain. Each operation
+  requires a matching verified Pistis `storage_administrator`, forwards that
+  subject only through the fixed packaged peer, and rejects direct root, sudo,
+  and `dasobjectstore-admin` socket authority before non-dry maintenance.
+- Add typed GUI maintenance DTOs, bounded-priority daemon client methods, and
+  recording-route coverage for the complete five-operation set.
+
 ## [0.157.47] - 2026-08-06
 
 ### Security

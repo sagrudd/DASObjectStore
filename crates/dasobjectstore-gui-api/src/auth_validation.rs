@@ -212,6 +212,135 @@ pub(super) fn validate_create_object_store_request(
     Ok(request)
 }
 
+pub(super) fn validate_host_store_drain_request(
+    request: HostStoreDrainRequest,
+) -> Result<dasobjectstore_daemon::StoreDrainRequest, (StatusCode, Json<AuthRouteError>)> {
+    let request = dasobjectstore_daemon::StoreDrainRequest {
+        store_id: required_field("store_id", request.store_id)?,
+        dry_run: request.dry_run,
+        allow_store_drain: request.allow_store_drain,
+        confirmation_marker: request.confirmation_marker,
+        verified_subject: None,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_store_drain",
+            error.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
+pub(super) fn validate_host_store_delete_request(
+    request: HostStoreDeleteRequest,
+) -> Result<dasobjectstore_daemon::StoreDeleteRequest, (StatusCode, Json<AuthRouteError>)> {
+    let request = dasobjectstore_daemon::StoreDeleteRequest {
+        store_id: required_field("store_id", request.store_id)?,
+        dry_run: request.dry_run,
+        allow_store_delete: request.allow_store_delete,
+        confirmation_marker: request.confirmation_marker,
+        verified_subject: None,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_store_delete",
+            error.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
+pub(super) fn validate_host_store_repair_request(
+    request: HostStoreRepairRequest,
+) -> Result<dasobjectstore_daemon::StoreRepairRequest, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = request
+        .store_id
+        .map(|store_id| required_field("store_id", store_id))
+        .transpose()?
+        .map(StoreId::new)
+        .transpose()
+        .map_err(|error| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_store_id",
+                error.to_string(),
+            )
+        })?;
+    let request = dasobjectstore_daemon::StoreRepairRequest {
+        store_id,
+        dry_run: request.dry_run,
+        confirmation: request.confirmation,
+        reconcile_s3: false,
+        s3_prefix: None,
+        s3_expectation: None,
+        idempotency_key: None,
+        verified_subject: None,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_store_repair",
+            error.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
+pub(super) fn validate_host_store_deduplicate_request(
+    request: HostStoreDeduplicateRequest,
+) -> Result<dasobjectstore_daemon::StoreDeduplicateRequest, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = request
+        .store_id
+        .map(|store_id| required_field("store_id", store_id))
+        .transpose()?
+        .map(StoreId::new)
+        .transpose()
+        .map_err(|error| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_store_id",
+                error.to_string(),
+            )
+        })?;
+    let request = dasobjectstore_daemon::StoreDeduplicateRequest {
+        store_id,
+        dry_run: request.dry_run,
+        confirmation: request.confirmation,
+        verified_subject: None,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_store_deduplicate",
+            error.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
+pub(super) fn validate_host_ingest_queue_drain_request(
+    request: HostIngestQueueDrainRequest,
+) -> Result<dasobjectstore_daemon::IngestQueueDrainRequest, (StatusCode, Json<AuthRouteError>)> {
+    let request = dasobjectstore_daemon::IngestQueueDrainRequest {
+        store_id: required_field("store_id", request.store_id)?,
+        reason: required_field("reason", request.reason)?,
+        dry_run: request.dry_run,
+        allow_ingest_queue_drain: request.allow_ingest_queue_drain,
+        confirmation_marker: request.confirmation_marker,
+        verified_subject: None,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_ingest_queue_drain",
+            error.to_string(),
+        )
+    })?;
+    Ok(request)
+}
+
 pub(super) fn validate_object_store_ingest_policy_request(
     request: ObjectStoreIngestPolicyRequest,
 ) -> Result<DaemonUpdateObjectStoreIngestPolicyRequest, (StatusCode, Json<AuthRouteError>)> {
