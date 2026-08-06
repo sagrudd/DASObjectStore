@@ -719,6 +719,24 @@ async fn preverified_host_enclosures_dashboard(
     ))
 }
 
+/// Render the ObjectStores dashboard for a host actor already verified by
+/// Pistis.  This route intentionally does not inspect a local user, POSIX
+/// group, sudo state, or local session.  A closed verified DAS viewer role
+/// admits visibility; the administrator role controls only the create-store
+/// affordance. Legacy writer-group membership is deliberately not inferred.
+async fn preverified_host_object_stores_dashboard(
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<crate::dashboard::ObjectStoresPageView>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer(&actor, &verified)?;
+    let administrator = DasRolePolicy::from_verified(&verified).permits(DasCapability::Administer);
+    Ok(Json(
+        crate::object_stores_aggregator::live_object_stores_dashboard_for_verified_pistis(
+            administrator,
+        ),
+    ))
+}
+
 async fn standalone_object_stores_dashboard(
     State(state): State<StandaloneDashboardRouteState>,
     actor: AuthenticatedGuiActor,
