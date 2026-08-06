@@ -220,6 +220,12 @@ subject. Direct root, ``sudo`` and ``dasobjectstore-admin`` peers are rejected
 before store provisioning, catalogue publication, or device preparation is
 dispatched. Dry-run validation remains non-mutating compatibility output.
 
+Endpoint-inventory mutation also has a preverified host-route counterpart. Its
+non-dry daemon operation now accepts only the fixed packaged host service peer
+with a non-blank verified Pistis subject. Direct root, ``sudo`` and
+``dasobjectstore-admin`` peers are rejected before endpoint integration state
+or its administrative job is recorded.
+
 The direct request families that remain to be migrated are the daemon
 administrative service, disk, remaining store, workspace and local-group operations,
 together with CLI commands that submit them.  The migration must be organised

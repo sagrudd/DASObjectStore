@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.44] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for
+  non-dry endpoint-inventory changes. The daemon now requires the fixed
+  packaged host service peer and a non-blank verified Pistis subject before
+  recording endpoint integration state.
+
 ## [0.157.43] - 2026-08-06
 
 ### Security
