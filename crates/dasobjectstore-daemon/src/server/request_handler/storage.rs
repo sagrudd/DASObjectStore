@@ -155,26 +155,13 @@ where
                 ))),
             }
         }
-        DaemonApiRequest::UpdateObjectStoreIngestPolicy(mut request) => {
-            let Some(actor) = actor else {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "administrator_authentication_required",
-                    "object-store ingest policy updates require an authenticated local administrator",
-                )));
-            };
-            let trusted_web_peer = actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER)
-                && request
-                    .administrator_actor
-                    .as_deref()
-                    .is_some_and(|value| !value.trim().is_empty());
-            if !actor.is_administrator() && !trusted_web_peer {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "administrator_authorization_required",
-                    "object-store ingest policy updates require root, sudo, dasobjectstore-admin membership, or the trusted authenticated Web service peer",
-                )));
-            }
-            if actor.is_administrator() {
-                request.administrator_actor = Some(actor.display_name());
+        DaemonApiRequest::UpdateObjectStoreIngestPolicy(request) => {
+            if let Err(error) = require_preverified_host_service_peer(
+                actor,
+                request.administrator_actor.as_deref(),
+                "object-store ingest policy updates",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
             let now = handler.clock.now_utc();
             let response = match handler.update_object_store_ingest_policy(request, &now) {
@@ -191,20 +178,13 @@ where
             ))?;
             Ok(DaemonApiResponse::UpdateObjectStoreIngestPolicy(response))
         }
-        DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(mut request) => {
-            let Some(actor) = actor else {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new("administrator_authentication_required", "object-store acknowledgement policy updates require an authenticated local administrator")));
-            };
-            let trusted_web_peer = actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER)
-                && request
-                    .administrator_actor
-                    .as_deref()
-                    .is_some_and(|value| !value.trim().is_empty());
-            if !actor.is_administrator() && !trusted_web_peer {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new("administrator_authorization_required", "object-store acknowledgement policy updates require administrator authorization")));
-            }
-            if actor.is_administrator() {
-                request.administrator_actor = Some(actor.display_name());
+        DaemonApiRequest::UpdateObjectStoreAcknowledgementPolicy(request) => {
+            if let Err(error) = require_preverified_host_service_peer(
+                actor,
+                request.administrator_actor.as_deref(),
+                "object-store acknowledgement policy updates",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
             let now = handler.clock.now_utc();
             let response = match handler.update_object_store_acknowledgement_policy(request, &now) {
@@ -448,6 +428,34 @@ where
         }
         profile_request => storage_profile_requests::request(handler, profile_request, actor),
     }
+}
+
+fn require_preverified_host_service_peer(
+    actor: Option<&DaemonLocalActor>,
+    verified_subject: Option<&str>,
+    operation: &str,
+) -> Result<(), DaemonApiErrorResponse> {
+    let Some(actor) = actor else {
+        return Err(DaemonApiErrorResponse::new(
+            "administrator_authentication_required",
+            format!("{operation} require a preverified host service peer"),
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!(
+                "{operation} reject direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+            ),
+        ));
+    }
+    if !verified_subject.is_some_and(|value| !value.trim().is_empty()) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_subject_required",
+            format!("{operation} require a verified host subject"),
+        ));
+    }
+    Ok(())
 }
 fn advertise_provider_stream_downloads<S, C>(
     handler: &DaemonRequestHandler<S, C>,
