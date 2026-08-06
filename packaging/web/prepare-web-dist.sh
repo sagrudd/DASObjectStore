@@ -24,11 +24,10 @@ ERROR
     return 1
   fi
 
-  if ! grep -Eq '^[[:space:]]*auth[[:space:]]*=' "$prosopikon_core_root/Cargo.toml" \
-    || ! grep -Eq '^[[:space:]]*pam[[:space:]]*=' "$prosopikon_core_root/Cargo.toml"; then
+  if ! grep -Eq '^[[:space:]]*auth[[:space:]]*=' "$prosopikon_core_root/Cargo.toml"; then
     cat >&2 <<ERROR
 The Prosopikon checkout at $repo_root/../prosopikon is too old for DASObjectStore.
-prosopikon-core must expose the auth and pam features used by the Web/API package.
+prosopikon-core must expose the auth feature used by the Web/API package.
 
 Run: make pull
 or update sagrudd/prosopikon beside DASObjectStore before running make web, make deb, or make rpm.

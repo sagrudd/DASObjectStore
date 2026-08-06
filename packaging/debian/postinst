@@ -237,11 +237,6 @@ fi
 ensure_workspace_aggregate_config
 ensure_workspace_nfs_config
 ensure_workspace_metadata_config
-if [[ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]]; then
-  chown root:"$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
-  chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
-fi
-
 reject_user_owned_managed_root "$managed_root"
 ensure_profile_layout "$managed_root"
 install -d -o root -g root -m 0755 "$workspace_aggregate_root"

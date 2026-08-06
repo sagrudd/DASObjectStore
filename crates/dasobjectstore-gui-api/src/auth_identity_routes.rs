@@ -13,14 +13,6 @@ pub(super) use easyconnect_approval_page::{
 };
 pub(super) use pistis_approval_route::pistis_easyconnect_approve_pairing;
 
-#[derive(Clone)]
-pub(crate) struct StandaloneAuthRouteState {
-    pub(super) auth_store: LocalAuthStore,
-    pub(super) local_password_authenticator: Arc<dyn LocalPasswordAuthenticator>,
-    pub(super) s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
-    pub(super) s3_tls_certificate_path: PathBuf,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StandaloneS3ConnectionDescriptor {
     pub endpoint_url: String,
@@ -67,44 +59,12 @@ impl Default for EasyconnectDaemonEndpoint {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct StandaloneEasyconnectRouteState {
-    pub(super) auth_store: LocalAuthStore,
-    pub(super) public_base_url: String,
-    pub(super) appliance_id: String,
-    pub(super) s3_endpoint: Option<EasyconnectS3EndpointConfig>,
-}
-
 #[derive(Clone, Default)]
 pub(crate) struct EasyconnectPublicRouteState {
     pub(super) s3_endpoint: Option<EasyconnectS3EndpointConfig>,
     pub(super) public_base_url: Option<String>,
     pub(super) appliance_id: String,
     pub(super) daemon_endpoint: EasyconnectDaemonEndpoint,
-}
-
-impl StandaloneAuthRouteState {
-    pub(super) fn system(auth_store: LocalAuthStore) -> Self {
-        Self {
-            auth_store,
-            local_password_authenticator: Arc::new(SystemLocalPasswordAuthenticator::default()),
-            s3_descriptor: None,
-            s3_tls_certificate_path: crate::StandaloneServerConfig::default_localhost()
-                .tls
-                .certificate_path,
-        }
-    }
-}
-
-impl StandaloneEasyconnectRouteState {
-    pub(super) fn system(auth_store: LocalAuthStore) -> Self {
-        Self {
-            auth_store,
-            public_base_url: crate::DEFAULT_STANDALONE_PUBLIC_BASE_URL.to_string(),
-            appliance_id: system_appliance_id(),
-            s3_endpoint: None,
-        }
-    }
 }
 
 #[cfg(not(test))]
@@ -124,47 +84,6 @@ pub(super) fn system_appliance_id() -> String {
 #[cfg(test)]
 pub(super) fn system_appliance_id() -> String {
     "das-appliance-test".to_string()
-}
-
-pub(super) trait LocalPasswordAuthenticator: Send + Sync {
-    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError>;
-}
-
-#[derive(Default)]
-pub(super) struct SystemLocalPasswordAuthenticator {
-    pam: PamLocalPasswordAuthenticator,
-}
-
-impl LocalPasswordAuthenticator for SystemLocalPasswordAuthenticator {
-    fn authenticate(&self, username: &str, password: &str) -> Result<(), LocalPasswordAuthError> {
-        self.pam.authenticate(username, password)
-    }
-}
-
-pub(super) async fn register(
-    State(state): State<StandaloneAuthRouteState>,
-    Json(request): Json<RegisterRequest>,
-) -> Result<Json<RegisterResponse>, (StatusCode, Json<AuthRouteError>)> {
-    state
-        .auth_store
-        .register_with_token(&request.username, &request.token, &request.password)
-        .map(Json)
-        .map_err(auth_route_error)
-}
-
-pub(super) async fn login(
-    State(state): State<StandaloneAuthRouteState>,
-    Json(request): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, (StatusCode, Json<AuthRouteError>)> {
-    state
-        .local_password_authenticator
-        .authenticate(&request.username, &request.password)
-        .map_err(local_password_auth_route_error)?;
-    state
-        .auth_store
-        .create_session_for_authenticated_local_user(&request.username, request.session_ttl_seconds)
-        .map(Json)
-        .map_err(auth_route_error)
 }
 
 /// Exchange an application's signed proof for a daemon-owned short-lived
@@ -446,228 +365,6 @@ pub(super) async fn complete_application_upload(
         })
 }
 
-/// Authenticate a remote user and issue one daemon-owned, store-scoped S3
-/// session. The password is used only for this request and never crosses the
-/// daemon boundary or gets persisted in the remote-client configuration.
-pub(super) async fn remote_authenticate(
-    State(state): State<StandaloneAuthRouteState>,
-    Json(request): Json<RemoteAuthenticateRequest>,
-) -> Result<Json<RemoteAuthenticateResponse>, (StatusCode, Json<AuthRouteError>)> {
-    validate_remote_authenticate_request(&request)?;
-    state
-        .local_password_authenticator
-        .authenticate(&request.username, &request.password)
-        .map_err(local_password_auth_route_error)?;
-
-    let current_user = discover_local_user(&request.username).map_err(|error| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "local_user_discovery_failed",
-            error.to_string(),
-        )
-    })?;
-    let workspace = crate::remote_upload_aggregator::live_remote_upload_workspace_for_user(
-        current_user.username.clone(),
-        current_user.groups.clone(),
-        current_user.sudo_administrator,
-    );
-    let store = workspace
-        .stores
-        .iter()
-        .find(|store| store.store_id == request.object_store)
-        .ok_or_else(|| {
-            route_error(
-                StatusCode::FORBIDDEN,
-                "object_store_not_authorized",
-                "the authenticated user has no remote access to the requested ObjectStore",
-            )
-        })?;
-    if !store.upload_allowed {
-        return Err(route_error(
-            StatusCode::FORBIDDEN,
-            "object_store_write_authorization_required",
-            "remote S3 sessions currently require a writable ObjectStore grant",
-        ));
-    }
-    let s3_descriptor = state.s3_descriptor.as_ref().ok_or_else(|| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "s3_connection_descriptor_unavailable",
-            "the appliance has not configured an authoritative public S3 endpoint, region, and addressing style",
-        )
-    })?;
-    let verified_endpoint = crate::s3_endpoint_probe::verify_public_s3_endpoint(
-        &s3_descriptor.endpoint_url,
-        &state.s3_tls_certificate_path,
-    )
-    .await
-    .map_err(|error| {
-        route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            error.code(),
-            error.to_string(),
-        )
-    })?;
-
-    let grant = RemoteEasyconnectObjectStoreGrant {
-        object_store: store.store_id.clone(),
-        bucket: store.bucket.clone(),
-        can_read: true,
-        can_write: true,
-        writer_group: store.writer_group.clone(),
-        object_type: store.object_type.clone(),
-        control_operations: dasobjectstore_daemon::api::remote_easyconnect_control_operations(true),
-        allowed_prefixes: vec![
-            dasobjectstore_daemon::api::REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string(),
-        ],
-    };
-    let requested_object_store = request.object_store.clone();
-    let requested_lifetime = request.requested_session_lifetime_seconds;
-    let session = crate::daemon_bridge::DaemonBridge::shared_packaged()
-        .call_message(move || {
-            let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
-            ));
-            let created = client
-                .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
-                    client_name: "dasobjectstore-remote authenticate".to_string(),
-                    callback_url: "https://127.0.0.1/api/v1/remote/authenticate/callback"
-                        .to_string(),
-                    requested_object_store: Some(requested_object_store),
-                    requested_session_lifetime_seconds: requested_lifetime,
-                    client_request_id: None,
-                })
-                .map_err(|error| error.to_string())?;
-            let approved = client
-                .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
-                    pairing_id: created.pairing_id.clone(),
-                    approval_context: RemoteEasyconnectApprovalContext {
-                        authority_id: "dasobjectstore-local-os".to_string(),
-                        principal_id: current_user.username.clone(),
-                        session_id: format!("local-password:{}", created.pairing_id),
-                        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-                        allowed_object_stores: vec![grant],
-                        host_session_expires_at_utc: created.expires_at_utc,
-                        correlation_id: format!("remote-authenticate:{}", created.pairing_id),
-                        audit_identity: format!("local-os:{}", current_user.username),
-                    },
-                })
-                .map_err(|error| error.to_string())?;
-            let exchanged = client
-                .remote_easyconnect_exchange_pairing(RemoteEasyconnectExchangePairingRequest {
-                    pairing_id: approved.pairing_id,
-                    exchange_code: approved.exchange_code,
-                    client_request_id: None,
-                })
-                .map_err(|error| error.to_string())?;
-            Ok(exchanged.session)
-        })
-        .await
-        .map_err(remote_auth_bridge_error)?;
-
-    let endpoint_port = verified_endpoint.port;
-    Ok(Json(RemoteAuthenticateResponse {
-        schema_version: "dasobjectstore.remote_authenticate.v4".to_string(),
-        appliance_id: system_appliance_id(),
-        store_id: request.object_store.clone(),
-        s3: RemoteAuthenticatedS3Descriptor {
-            schema_version: "dasobjectstore.authenticated_s3_endpoint.v1".to_string(),
-            endpoint_url: s3_descriptor.endpoint_url.clone(),
-            scheme: verified_endpoint.scheme.clone(),
-            host: verified_endpoint.host,
-            port: verified_endpoint.port,
-            region: s3_descriptor.region.clone(),
-            addressing_style: s3_descriptor.addressing_style.clone(),
-            bucket: store.bucket.clone(),
-            tls: RemoteAuthenticatedS3TlsRequirements {
-                required: verified_endpoint.scheme == "https",
-                trust_mode: if verified_endpoint.scheme == "https" {
-                    "appliance_ca".to_string()
-                } else {
-                    "plaintext".to_string()
-                },
-                ca_certificate_url: None,
-            },
-            credential_expires_at: session.expires_at_utc.clone(),
-            capabilities: vec![
-                "list_objects_v2".to_string(),
-                "head_object".to_string(),
-                "put_object".to_string(),
-                "multipart_upload".to_string(),
-                "path_style_addressing".to_string(),
-            ],
-            endpoint_protocol_verified: true,
-            session: session.clone(),
-        },
-        endpoint_port,
-        region: s3_descriptor.region.clone(),
-        addressing_style: s3_descriptor.addressing_style.clone(),
-        object_store: request.object_store,
-        bucket: store.bucket.clone(),
-        session,
-    }))
-}
-
-pub(super) async fn remote_easyconnect_renew(
-    Path(session_id): Path<String>,
-    Json(request): Json<RemoteEasyconnectRenewSessionRequest>,
-) -> Result<Json<RemoteEasyconnectRenewSessionResponse>, (StatusCode, Json<AuthRouteError>)> {
-    if session_id != request.session_id {
-        return Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "remote_session_identity_mismatch",
-            "session identity in the route and renewal request must match",
-        ));
-    }
-    request.validate().map_err(|error| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_remote_session_renewal",
-            error.to_string(),
-        )
-    })?;
-    crate::daemon_bridge::DaemonBridge::shared_packaged()
-        .call_message(move || {
-            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
-            ))
-            .remote_easyconnect_renew_session(request)
-            .map_err(|error| error.to_string())
-        })
-        .await
-        .map(Json)
-        .map_err(remote_auth_bridge_error)
-}
-
-fn validate_remote_authenticate_request(
-    request: &RemoteAuthenticateRequest,
-) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
-    for (field, value) in [
-        ("username", request.username.as_str()),
-        ("password", request.password.as_str()),
-        ("object_store", request.object_store.as_str()),
-    ] {
-        if value.trim().is_empty() {
-            return Err(route_error(
-                StatusCode::BAD_REQUEST,
-                "invalid_remote_authenticate_request",
-                format!("{field} must not be blank"),
-            ));
-        }
-    }
-    if request
-        .requested_session_lifetime_seconds
-        .is_some_and(|seconds| !(60..=86_400).contains(&seconds))
-    {
-        return Err(route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_remote_authenticate_request",
-            "requested session lifetime must be between 60 and 86400 seconds",
-        ));
-    }
-    Ok(())
-}
-
 fn remote_auth_bridge_error(
     error: crate::daemon_bridge::DaemonBridgeError,
 ) -> (StatusCode, Json<AuthRouteError>) {
@@ -696,28 +393,6 @@ fn remote_auth_bridge_error(
             message,
         ),
     }
-}
-
-pub(super) async fn logout(
-    State(state): State<StandaloneAuthRouteState>,
-    Json(request): Json<LogoutRequest>,
-) -> Result<Json<LogoutResponse>, (StatusCode, Json<AuthRouteError>)> {
-    state
-        .auth_store
-        .logout(&request.username, &request.session_token)
-        .map(Json)
-        .map_err(auth_route_error)
-}
-
-pub(super) async fn session(
-    State(state): State<StandaloneAuthRouteState>,
-    Json(request): Json<SessionCheckRequest>,
-) -> Result<Json<SessionCheckResponse>, (StatusCode, Json<AuthRouteError>)> {
-    state
-        .auth_store
-        .verify_session(&request.username, &request.session_token)
-        .map(Json)
-        .map_err(auth_route_error)
 }
 
 pub(super) async fn easyconnect_auth_context(
@@ -977,26 +652,6 @@ fn validate_loopback_callback(
         ));
     }
     Ok(())
-}
-
-fn local_password_auth_route_error(
-    err: LocalPasswordAuthError,
-) -> (StatusCode, Json<AuthRouteError>) {
-    match err {
-        LocalPasswordAuthError::UsernameRequired | LocalPasswordAuthError::PasswordRequired => {
-            route_error(StatusCode::BAD_REQUEST, "invalid_request", err.to_string())
-        }
-        LocalPasswordAuthError::InvalidCredentials => route_error(
-            StatusCode::UNAUTHORIZED,
-            "invalid_credentials",
-            err.to_string(),
-        ),
-        LocalPasswordAuthError::BackendUnavailable { .. } => route_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "local_auth_unavailable",
-            err.to_string(),
-        ),
-    }
 }
 
 #[cfg(test)]

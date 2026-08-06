@@ -4,7 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 package_name="dasobjectstore"
-prosopikon_pam_marker="mnemosyne.prosopikon.native.pam"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
 version="${version:-0.4.2}"
@@ -19,8 +18,8 @@ fi
 
 if ! command -v clang >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -Eq 'libclang(-[0-9]+)?\.so'; then
   cat >&2 <<ERROR
-Native DASObjectStore package builds require clang, libclang, and PAM headers.
-On Ubuntu/Debian: sudo apt-get install clang libclang-dev libpam0g-dev
+Native DASObjectStore package builds require clang and libclang.
+On Ubuntu/Debian: sudo apt-get install clang libclang-dev
 ERROR
   exit 1
 fi
@@ -47,7 +46,6 @@ rm -rf "$build_root"
 install -d \
   "$build_root/DEBIAN" \
   "$build_root/etc/dasobjectstore" \
-  "$build_root/etc/pam.d" \
   "$build_root/lib/systemd/system" \
   "$build_root/opt/dasobjectstore" \
   "$build_root/opt/dasobjectstore/web" \
@@ -61,14 +59,10 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
 install -m 0755 "$repo_root/target/release/dasobjectstore-s3-gateway" \
   "$build_root/usr/bin/dasobjectstore-s3-gateway"
-install -m 0755 "$repo_root/target/release/dasobjectstore-auth-migrate" \
-  "$build_root/usr/bin/dasobjectstore-auth-migrate"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
 install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
-install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
-  "$build_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
   "$build_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
@@ -84,8 +78,6 @@ install -m 0640 "$packaging_linux/etc/dasobjectstore/s3-gateway.json" \
   "$build_root/etc/dasobjectstore/s3-gateway.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
   "$build_root/etc/dasobjectstore/workspace-host.json"
-install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
-  "$build_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
   "$build_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
@@ -128,10 +120,9 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin
 Recommends: awscli
-X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx
-X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker
+X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, dpkg, docker-buildx
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: SSD-first DAS-backed object store for bioinformatics
  DASObjectStore provides CLI and service binaries for staging objects on SSD

@@ -4,7 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 package_name="dasobjectstore"
-prosopikon_pam_marker="mnemosyne.prosopikon.native.pam"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
 version="${version:-0.4.2}"
@@ -21,8 +20,8 @@ fi
 
 if ! command -v clang >/dev/null 2>&1 || ! ldconfig -p 2>/dev/null | grep -Eq 'libclang(-[0-9]+)?\.so'; then
   cat >&2 <<ERROR
-Native DASObjectStore package builds require clang, libclang, and PAM headers.
-On AlmaLinux/RHEL: sudo dnf install cargo rust clang clang-devel pam-devel
+Native DASObjectStore package builds require clang and libclang.
+On AlmaLinux/RHEL: sudo dnf install cargo rust clang clang-devel
 ERROR
   exit 1
 fi
@@ -51,7 +50,6 @@ source_path="$rpm_root/SOURCES/${payload_name}.tar.gz"
 rm -rf "$payload_root"
 install -d \
   "$payload_root/etc/dasobjectstore" \
-  "$payload_root/etc/pam.d" \
   "$payload_root/opt/dasobjectstore" \
   "$payload_root/opt/dasobjectstore/web" \
   "$payload_root/usr/bin" \
@@ -66,14 +64,10 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$payload_root/usr/bin/dasobjectstore-server"
 install -m 0755 "$repo_root/target/release/dasobjectstore-s3-gateway" \
   "$payload_root/usr/bin/dasobjectstore-s3-gateway"
-install -m 0755 "$repo_root/target/release/dasobjectstore-auth-migrate" \
-  "$payload_root/usr/bin/dasobjectstore-auth-migrate"
 install -m 0755 "$repo_root/target/release/dasobjectstored" \
   "$payload_root/usr/bin/dasobjectstored"
 install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
-install -m 0750 "$repo_root/target/release/dasobjectstore-local-auth-helper" \
-  "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
@@ -90,8 +84,6 @@ install -m 0640 "$packaging_linux/etc/dasobjectstore/s3-gateway.json" \
   "$payload_root/etc/dasobjectstore/s3-gateway.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
   "$payload_root/etc/dasobjectstore/workspace-host.json"
-install -m 0644 "$packaging_linux/pam.d/dasobjectstore" \
-  "$payload_root/etc/pam.d/dasobjectstore"
 install -m 0644 "$packaging_product/config.json" \
   "$payload_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
@@ -138,20 +130,16 @@ Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  cargo
 BuildRequires:  clang
 BuildRequires:  clang-devel
-BuildRequires:  pam-devel
 BuildRequires:  rust
 # WebAssembly packaging also requires Trunk and the wasm32-unknown-unknown Rust
 # target; those are usually installed through rustup/cargo rather than RPM.
-Provides:       prosopikon-native(pam)
 Requires:       acl
 Requires:       ca-certificates
 Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
-Requires:       pam
 Requires:       mergerfs
 Requires:       nfs-utils
 Requires:       quota
-# Prosopikon native dependency marker: $prosopikon_pam_marker
 Requires:       systemd
 Requires:       udisks2
 Requires(post): coreutils
@@ -263,10 +251,6 @@ if [ -f /etc/dasobjectstore/workspace-host.json ]; then
       printf >&2 'DASObjectStore retained workspace broker config without nfs_clients; add the root-owned registry explicitly before NFS attachment.\n'
     fi
   fi
-fi
-if [ -f /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper ]; then
-  chown root:"\$service_group" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
-  chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
 fi
 
 repair_managed_tree() {
@@ -393,16 +377,13 @@ fi
 %config(noreplace) /etc/dasobjectstore/daemon.json
 %config(noreplace) /etc/dasobjectstore/s3-gateway.json
 %config(noreplace) /etc/dasobjectstore/workspace-host.json
-%config(noreplace) /etc/pam.d/dasobjectstore
 %config(noreplace) /opt/dasobjectstore/config.json
 /opt/dasobjectstore/web
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
 /usr/bin/dasobjectstore-s3-gateway
-/usr/bin/dasobjectstore-auth-migrate
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
-/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper
 /usr/libexec/dasobjectstore/dasobjectstore-workspace-host
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal

@@ -17,7 +17,7 @@ dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true
 flate2.workspace = true
 libc.workspace = true
-prosopikon-core = { workspace = true, features = ["auth", "pam"] }
+prosopikon-core = { workspace = true, features = ["auth"] }
 rcgen.workspace = true
 reqwest.workspace = true
 rustls.workspace = true

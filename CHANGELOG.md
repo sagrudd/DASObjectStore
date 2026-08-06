@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.158.0] - 2026-08-06
+
+### Security
+
+- Remove standalone local-human authority from the packaged product. DAS now
+  accepts human authority only from a verified Pistis/Monas host context; it
+  no longer installs PAM policy, setuid helpers, local-auth migration tooling,
+  browser login/session routes, or a locally rooted session store. Public
+  Pistis discovery/pairing and signed machine-token exchange remain explicit,
+  regression-tested boundaries.
+
 ## [0.157.45] - 2026-08-06
 
 ### Security

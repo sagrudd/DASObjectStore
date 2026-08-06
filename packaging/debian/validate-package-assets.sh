@@ -19,7 +19,6 @@ daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
 s3_gateway_config="$repo_root/packaging/linux/etc/dasobjectstore/s3-gateway.json"
 workspace_host_config="$repo_root/packaging/linux/etc/dasobjectstore/workspace-host.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
-pam_service="$repo_root/packaging/linux/pam.d/dasobjectstore"
 reporting_wrapper="$repo_root/packaging/reporting/gnostikon-workflow-control"
 postinst="$repo_root/packaging/debian/postinst"
 prerm="$repo_root/packaging/debian/prerm"
@@ -74,7 +73,6 @@ require_file "$daemon_config"
 require_file "$s3_gateway_config"
 require_file "$workspace_host_config"
 require_file "$web_config"
-require_file "$pam_service"
 require_file "$reporting_wrapper"
 require_file "$postinst"
 require_file "$prerm"
@@ -145,8 +143,6 @@ require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjects
 require_text "$daemon_config" "\"telemetry\": {"
 require_text "$daemon_config" "\"cadence_seconds\": 30"
 require_text "$s3_gateway_config" "\"port\": 3900"
-require_text "$pam_service" "auth required pam_unix.so"
-require_text "$pam_service" "account required pam_unix.so"
 
 require_text "$postinst" "service_user=\"dasobjectstore\""
 require_text "$postinst" "managed_root=\"/srv/dasobjectstore\""
@@ -166,8 +162,6 @@ require_text "$postinst" 'restart dasobjectstore-server.service'
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
-require_text "$postinst" "chown root:\"\$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
-require_text "$postinst" "chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper"
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
 require_text "$postinst" 'repair_marked_managed_tree()'
 require_text "$postinst" 'profile'
@@ -195,8 +189,6 @@ require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
 require_text "$build_deb" 'target/release/dasobjectstore-remote'
-require_text "$build_deb" 'target/release/dasobjectstore-local-auth-helper'
-require_text "$build_deb" 'target/release/dasobjectstore-auth-migrate'
 require_text "$build_deb" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstored.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-server.service'
@@ -206,7 +198,6 @@ require_text "$build_deb" 'lib/systemd/system/dasobjectstore-control.slice'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-storage.slice'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
 require_text "$build_deb" 'opt/dasobjectstore/web'
-require_text "$build_deb" 'etc/pam.d/dasobjectstore'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control'
@@ -216,7 +207,7 @@ require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
-require_text "$build_deb" 'Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
 require_text "$workspace_host_config" '"aggregate_root": "/srv/dasobjectstore/workspaces"'
 require_text "$workspace_host_config" '"live_metadata_path": "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"'
 require_text "$workspace_host_config" '"nfs_clients": {}'
@@ -233,9 +224,8 @@ require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage.slice'
 require_text "$build_rpm" '%preun'
 require_text "$build_rpm" '%postun'
 require_text "$build_rpm" 'RPM removal never authorizes data'
-require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, libpam0g-dev, dpkg, docker-buildx'
-require_text "$build_deb" 'X-Prosopikon-Native-Dependency-Markers: $prosopikon_pam_marker'
-require_text "$build_deb" 'sudo apt-get install clang libclang-dev libpam0g-dev'
+require_text "$build_deb" 'X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, dpkg, docker-buildx'
+require_text "$build_deb" 'sudo apt-get install clang libclang-dev'
 require_text "$repo_root/Makefile" 'gnostikon'
 require_text "$repo_root/Makefile" 'report-provider'
 require_text "$repo_root/Makefile" 'grammateus_report_provider'
@@ -257,11 +247,8 @@ require_text "$build_rpm" 'Requires:       nfs-utils'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-workspace-host.socket'
 require_text "$build_rpm" 'target/release/dasobjectstored'
 require_text "$build_rpm" 'target/release/dasobjectstore-remote'
-require_text "$build_rpm" 'target/release/dasobjectstore-local-auth-helper'
-require_text "$build_rpm" 'target/release/dasobjectstore-auth-migrate'
 require_text "$build_rpm" 'packaging/web/prepare-web-dist.sh'
 require_text "$build_rpm" 'usr/lib/systemd/system/dasobjectstored.service'
-require_text "$build_rpm" 'etc/pam.d/dasobjectstore'
 require_text "$build_rpm" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_rpm" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_rpm" 'systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf'
@@ -269,7 +256,6 @@ require_text "$build_rpm" 'systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobje
 require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild'
 require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectstore/object-service'
 require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry'
-require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_rpm" 'prewarm-report-provider'
 require_text "$build_rpm" 'grammateus_report_provider install --image grammateus/report:0.8.1'
@@ -282,16 +268,13 @@ require_text "$build_rpm" 'repair_marked_managed_tree "\$managed_root/ssd"'
 require_text "$build_rpm" '%global debug_package %{nil}'
 require_text "$build_rpm" 'BuildRequires:  clang'
 require_text "$build_rpm" 'BuildRequires:  clang-devel'
-require_text "$build_rpm" 'BuildRequires:  pam-devel'
-require_text "$build_rpm" 'Provides:       prosopikon-native(pam)'
-require_text "$build_rpm" 'Requires:       pam'
 require_text "$build_rpm" 'usermod -aG docker "\$service_user"'
 require_text "$build_rpm" 'admin_group="dasobjectstore-admin"'
 require_text "$build_rpm" 'usermod -aG "\$admin_group" "\$service_user"'
 require_text "$build_rpm" 'Requires:       /usr/bin/docker'
 require_text "$build_rpm" 'Requires:       docker-buildx-plugin'
 require_text "$build_rpm" 'Recommends:      awscli'
-require_text "$build_rpm" 'sudo dnf install cargo rust clang clang-devel pam-devel'
+require_text "$build_rpm" 'sudo dnf install cargo rust clang clang-devel'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."
@@ -316,7 +299,17 @@ require_text "$prepare_web_dist" "DASOBJECTSTORE_PREBUILT_WEB_DIST"
 require_text "$prepare_web_dist" "must be an absolute path"
 require_text "$prepare_web_dist" "wasm32-unknown-unknown"
 require_text "$prepare_web_dist" "validate_prosopikon_checkout"
-require_text "$prepare_web_dist" "prosopikon-core must expose the auth and pam features"
+require_text "$prepare_web_dist" "prosopikon-core must expose the auth feature"
+
+require_absent "$build_deb" 'dasobjectstore-local-auth-helper'
+require_absent "$build_deb" 'dasobjectstore-auth-migrate'
+require_absent "$build_deb" 'pam.d/dasobjectstore'
+require_absent "$build_deb" 'libpam0g'
+require_absent "$build_rpm" 'dasobjectstore-local-auth-helper'
+require_absent "$build_rpm" 'dasobjectstore-auth-migrate'
+require_absent "$build_rpm" 'pam.d/dasobjectstore'
+require_absent "$build_rpm" 'pam-devel'
+require_absent "$postinst" 'dasobjectstore-local-auth-helper'
 require_text "$prepare_web_dist" "*.wasm"
 require_text "$prepare_web_dist" "--allow-fallback"
 require_text "$prepare_web_dist" "target/web-fallback/dist"

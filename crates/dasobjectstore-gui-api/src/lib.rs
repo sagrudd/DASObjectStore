@@ -40,20 +40,13 @@ pub use actions::{
 };
 pub use auth::{
     discover_current_local_user, discover_local_user, AuthRegistry, AuthTokenResetReport,
-    AuthenticatedUser, LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError,
-    LocalUserDiscoveryError, LocalUserMetadata, LoginResponse, LogoutResponse,
-    PamLocalPasswordAuthenticator, RegisterResponse, RegistrationTokenRecord, SessionCheckResponse,
-    SessionTokenRecord, UserSummary, SUDO_ADMIN_GROUPS,
-};
-#[cfg(target_os = "linux")]
-pub use auth::{
-    DEFAULT_DASOBJECTSTORE_LOCAL_AUTH_HELPER_PATH, DEFAULT_PROSOPIKON_LOCAL_AUTH_HELPER_PATH,
-    PROSOPIKON_LOCAL_AUTH_HELPER_BYPASS_ENV, PROSOPIKON_LOCAL_AUTH_HELPER_ENV,
+    AuthenticatedUser, LocalAuthStore, LocalAuthStoreError, LocalUserDiscoveryError,
+    LocalUserMetadata, LoginResponse, LogoutResponse, RegisterResponse, RegistrationTokenRecord,
+    SessionCheckResponse, SessionTokenRecord, UserSummary, SUDO_ADMIN_GROUPS,
 };
 pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
-    AuthenticatedLocalPolicySubject, FederatedHostSessionResponse, STANDALONE_SESSION_TOKEN_HEADER,
-    STANDALONE_USERNAME_HEADER,
+    FederatedHostSessionResponse,
 };
 pub use auth_routes::{
     easyconnect_public_router, easyconnect_public_router_with_config,
@@ -64,12 +57,8 @@ pub use auth_routes::{
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
     host_composed_gui_api_router, pistis_easyconnect_approval_router,
     pistis_easyconnect_approval_router_with_daemon, standalone_auth_router,
-    standalone_gui_api_router, AssignLocalUserToGroupRequest, AuthRouteError,
-    CreateLocalGroupRequest, EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig,
-    GuiApiHostMode, LoginRequest, LogoutRequest, RegisterRequest, SessionCheckRequest,
-    StandaloneEasyconnectAuthContextResponse, StandaloneLocalGroupAdminAcceptedResponse,
-    StandaloneLocalGroupAdminResponse, StandaloneLocalGroupOperation,
-    StandaloneS3ConnectionDescriptor,
+    standalone_gui_api_router, AuthRouteError, EasyconnectDaemonEndpoint,
+    EasyconnectS3EndpointConfig, GuiApiHostMode, StandaloneS3ConnectionDescriptor,
 };
 pub use das_role_policy::{DasCapability, DasRolePolicy};
 pub use dashboard::{
