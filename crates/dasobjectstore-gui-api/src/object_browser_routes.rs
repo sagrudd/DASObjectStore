@@ -110,6 +110,10 @@ pub(crate) fn preverified_host_object_browser_router_with_state(
             "/api/v1/object-stores/{endpoint}/browser",
             get(preverified_host_object_store_browser),
         )
+        .route(
+            "/api/v1/object-stores/{endpoint}/objects/download/{*object_id}",
+            get(preverified_host_object_store_object_download),
+        )
         .with_state(state)
 }
 
@@ -447,6 +451,80 @@ async fn object_store_object_download(
         })?;
     let body = Body::from_stream(ReaderStream::new(file));
     let mut response = Response::new(body);
+    *response.headers_mut() = object_download_headers(&download)?;
+    Ok(response)
+}
+
+/// Download one object only through the verified Pistis subject envelope.
+/// The host route deliberately has no provider-stream fallback: that legacy
+/// fallback carries the transitional delegated-OS actor contract and must not
+/// be reachable from a host-composed authority boundary.
+async fn preverified_host_object_store_object_download(
+    State(state): State<PreverifiedHostObjectBrowserRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+    Path((endpoint, object_id)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    crate::auth_routes::require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &endpoint,
+    )?;
+    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    let object_id = ObjectId::new(required_field(
+        "object_id",
+        object_id.trim_start_matches('/').to_string(),
+    )?)
+    .map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    let verified_subject = verified_object_browser_subject(
+        &verified,
+        &scope.expect("checked above").0,
+        endpoint.clone(),
+        object_id.as_str().to_string(),
+    )?;
+    let request = ObjectDownloadRequest {
+        endpoint,
+        object_id,
+        delegated_actor: None,
+        verified_subject: Some(verified_subject),
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_download_request",
+            err.to_string(),
+        )
+    })?;
+    let client = Arc::clone(&state.object_browser_client);
+    let download = state
+        .daemon_bridge
+        .call(move || client.object_download(request))
+        .await
+        .map_err(daemon_bridge_route_error)?;
+    let file = tokio::fs::File::open(&download.source_path)
+        .await
+        .map_err(|err| {
+            route_error(
+                StatusCode::CONFLICT,
+                "object_download_unavailable",
+                format!("object download source could not be opened: {err}"),
+            )
+        })?;
+    let mut response = Response::new(Body::from_stream(ReaderStream::new(file)));
     *response.headers_mut() = object_download_headers(&download)?;
     Ok(response)
 }
@@ -1083,6 +1161,112 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert!(client.requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_object_download_forwards_only_a_scoped_verified_subject() {
+        let root = temp_root("preverified-host-object-download");
+        let source_path = write_test_file(&root, "metadata.tsv", b"verified payload");
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        client.set_download(ObjectDownloadResponse {
+            endpoint: StoreId::new("ena").expect("endpoint"),
+            store_id: StoreId::new("ena").expect("store"),
+            object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object"),
+            file_name: "metadata.tsv".to_string(),
+            source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-one").expect("disk"),
+            source_path: source_path.clone(),
+            size_bytes: b"verified payload".len() as u64,
+        });
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.download_requests(),
+            vec![ObjectDownloadRequest {
+                endpoint: StoreId::new("ena").expect("endpoint"),
+                object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object"),
+                delegated_actor: None,
+                verified_subject: Some(
+                    verified_object_browser_subject(
+                        &verified_host_context(),
+                        &VerifiedHostStoreScope::for_verified_context(
+                            &verified_host_context(),
+                            vec!["ena".to_string()],
+                        )
+                        .expect("scope"),
+                        StoreId::new("ena").expect("endpoint"),
+                        "ENA/Xeno/metadata.tsv".to_string(),
+                    )
+                    .expect("subject"),
+                ),
+            }]
+        );
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("body bytes");
+        assert_eq!(&body[..], b"verified payload");
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn preverified_host_object_download_rejects_an_out_of_scope_store_before_daemon() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/other/objects/download/ENA/Xeno/metadata.tsv")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(client.download_requests().is_empty());
     }
 
     #[tokio::test]

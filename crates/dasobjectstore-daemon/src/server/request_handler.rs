@@ -961,8 +961,8 @@ mod tests {
         LiveStatusRequest, ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource,
         ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
         ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
-        ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
+        ObjectBrowserVerifiedSubject, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+        ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
         ProfileDiagnosticsRequest, ProfileInspectionRequest, ProfileInspectionRootState,
@@ -981,6 +981,7 @@ mod tests {
         WorkspaceControlRequest, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
+        OBJECT_BROWSER_GUI_API_PEER_IDENTITY, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
         OBJECT_STORE_CREATE_CONFIRMATION, PROFILE_BINDING_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
@@ -3849,6 +3850,55 @@ mod tests {
                 && error.message.contains("root is not authorized to delegate")
         ));
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn daemon_object_browser_accepts_verified_subject_only_from_the_fixed_service_peer() {
+        let root = temp_root("browser-verified-peer-bound");
+        let (store_registry, subobject_registry) = write_test_store_registry(&root, "ena", None);
+        let live_sqlite = create_live_sqlite(&root, "ena");
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry)
+                .with_live_sqlite_path(live_sqlite);
+        let mut request = object_browser_request("ena");
+        request.prefix = Some("ENA/Xeno".to_string());
+        request.verified_subject = Some(ObjectBrowserVerifiedSubject {
+            schema_version: OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis:stephen".to_string(),
+            session_id: "session-1".to_string(),
+            correlation_id: "correlation-1".to_string(),
+            store_id: StoreId::new("ena").expect("store"),
+            canonical_prefix: "ENA/Xeno".to_string(),
+        });
+
+        let root_peer = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(request.clone()),
+                Some(&root_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "permission_denied"
+                && error.message.contains("not authorized to delegate")
+        ));
+
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::ObjectBrowser(request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(response, DaemonApiResponse::ObjectBrowser(_)));
         cleanup(&root);
     }
 

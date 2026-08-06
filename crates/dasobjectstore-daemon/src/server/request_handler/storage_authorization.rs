@@ -216,6 +216,14 @@ where
         actor: Option<&DaemonLocalActor>,
         request: &ObjectDownloadRequest,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        if let Some(store_id) = self.authorize_verified_object_browser_subject(
+            actor,
+            request.verified_subject.as_ref(),
+            &request.endpoint,
+            Some(request.object_id.as_str()),
+        )? {
+            return Ok(store_id);
+        }
         self.authorize_endpoint_read(actor, &request.endpoint)
     }
 
@@ -224,7 +232,50 @@ where
         actor: Option<&DaemonLocalActor>,
         request: &ObjectFolderDownloadRequest,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        if let Some(store_id) = self.authorize_verified_object_browser_subject(
+            actor,
+            request.verified_subject.as_ref(),
+            &request.endpoint,
+            Some(&request.prefix),
+        )? {
+            return Ok(store_id);
+        }
         self.authorize_endpoint_read(actor, &request.endpoint)
+    }
+
+    /// A verified browser subject is authority only when it arrived from the
+    /// fixed packaged GUI/API peer.  The serialized `peer_identity` field is
+    /// intentionally not sufficient on its own: the Unix peer credentials are
+    /// the non-forgeable half of this boundary.  Legacy POSIX delegation stays
+    /// separate and cannot coexist with this request shape.
+    pub(super) fn authorize_verified_object_browser_subject(
+        &self,
+        peer_actor: Option<&DaemonLocalActor>,
+        verified_subject: Option<&crate::api::ObjectBrowserVerifiedSubject>,
+        endpoint: &StoreId,
+        requested_path: Option<&str>,
+    ) -> Result<Option<StoreId>, ObjectBrowserAccessFailure> {
+        let Some(verified_subject) = verified_subject else {
+            return Ok(None);
+        };
+        let peer_actor = peer_actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        if peer_actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+            return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
+                peer_actor: peer_actor.display_name(),
+            });
+        }
+        verified_subject
+            .validate_for_endpoint(endpoint, requested_path)
+            .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: error.to_string(),
+            })?;
+        let store_id = resolve_authorization_store_id(
+            endpoint,
+            &self.store_registry_path,
+            &self.subobject_registry_path,
+        )
+        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        Ok(Some(store_id))
     }
 }
 
