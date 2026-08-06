@@ -15,8 +15,7 @@ case "${1:-}" in
       dasobjectstored.service || true
     ;;
   upgrade|failed-upgrade)
-    systemctl stop dasobjectstore-workspace-host.socket \
-      dasobjectstore-workspace-host.service \
-      dasobjectstore-server.service dasobjectstored.service || true
+    # Upgrades are file-only.  A running daemon keeps its existing executable
+    # until an explicitly attended service transition is authorised.
     ;;
 esac

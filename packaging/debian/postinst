@@ -255,14 +255,9 @@ if [[ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
+  # Package installation must not alter a live storage data plane.  Runtime
+  # activation is a separately attended, Pistis-authorised operator action.
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service dasobjectstore-server.service \
-    dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
-  systemctl start dasobjectstore-source-access.service || true
-  systemctl restart dasobjectstored.service dasobjectstore-server.service || true
-  # dasobjectstored and the socket share /run/dasobjectstore. Recreate the
-  # pathname after any daemon runtime-directory lifecycle transition.
-  systemctl restart dasobjectstore-workspace-host.socket || true
 fi
 
 ensure_report_provider

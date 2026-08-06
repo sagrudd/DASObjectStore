@@ -19,7 +19,6 @@ const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobject
 const S3_GATEWAY_CONFIG: &str =
     include_str!("../../../packaging/linux/etc/dasobjectstore/s3-gateway.json");
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
-const PAM_SERVICE: &str = include_str!("../../../packaging/linux/pam.d/dasobjectstore");
 const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
@@ -38,7 +37,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, libpam0g, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin";
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -418,32 +417,26 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 }
 
 #[test]
-fn package_installs_named_pam_service_for_local_web_login() {
-    assert_contains(PAM_SERVICE, "auth required pam_unix.so");
-    assert_contains(PAM_SERVICE, "account required pam_unix.so");
-    assert_contains(BUILD_DEB, "etc/pam.d");
-    assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
+fn package_excludes_retired_local_human_authority() {
+    assert_not_contains(BUILD_DEB, "etc/pam.d");
+    assert_not_contains(BUILD_DEB, "dasobjectstore-local-auth-helper");
+    assert_not_contains(BUILD_DEB, "dasobjectstore-auth-migrate");
     assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
     assert_contains(BUILD_DEB, "Recommends: awscli");
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
     assert_contains(BUILD_DEB, "docker-buildx");
-    assert_contains(
-        BUILD_DEB,
-        "sudo apt-get install clang libclang-dev libpam0g-dev",
-    );
-    assert_contains(BUILD_RPM, "etc/pam.d");
-    assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
+    assert_contains(BUILD_DEB, "sudo apt-get install clang libclang-dev");
+    assert_not_contains(BUILD_RPM, "etc/pam.d");
+    assert_not_contains(BUILD_RPM, "dasobjectstore-local-auth-helper");
+    assert_not_contains(BUILD_RPM, "dasobjectstore-auth-migrate");
     assert_contains(BUILD_RPM, "%global debug_package %{nil}");
     assert_contains(BUILD_RPM, "BuildRequires:  clang");
     assert_contains(BUILD_RPM, "BuildRequires:  clang-devel");
-    assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
-    assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_not_contains(BUILD_RPM, "pam-devel");
+    assert_not_contains(BUILD_RPM, "Requires:       pam");
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
-    assert_contains(
-        BUILD_RPM,
-        "sudo dnf install cargo rust clang clang-devel pam-devel",
-    );
+    assert_contains(BUILD_RPM, "sudo dnf install cargo rust clang clang-devel");
 }
 
 #[test]
@@ -490,15 +483,8 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "target/release/dasobjectstored");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-s3-gateway");
     assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
-    assert_contains(BUILD_DEB, "target/release/dasobjectstore-local-auth-helper");
-    assert_contains(BUILD_DEB, "target/release/dasobjectstore-auth-migrate");
     assert_contains(BUILD_DEB, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
-    assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-auth-migrate");
-    assert_contains(
-        BUILD_DEB,
-        "usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
-    );
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
     assert_contains(
         BUILD_DEB,
@@ -513,7 +499,7 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "opt/dasobjectstore/web");
     assert_contains(BUILD_DEB, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_DEB, "usr/lib/tmpfiles.d/dasobjectstore.conf");
-    assert_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
+    assert_not_contains(BUILD_DEB, "etc/pam.d/dasobjectstore");
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
@@ -530,15 +516,8 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "target/release/dasobjectstored");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-s3-gateway");
     assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
-    assert_contains(BUILD_RPM, "target/release/dasobjectstore-local-auth-helper");
-    assert_contains(BUILD_RPM, "target/release/dasobjectstore-auth-migrate");
     assert_contains(BUILD_RPM, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
-    assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-auth-migrate");
-    assert_contains(
-        BUILD_RPM,
-        "/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
-    );
     assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
     assert_contains(
         BUILD_RPM,
@@ -554,7 +533,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "Recommends:      awscli");
     assert_contains(BUILD_RPM, "usr/lib/sysusers.d/dasobjectstore.conf");
     assert_contains(BUILD_RPM, "usr/lib/tmpfiles.d/dasobjectstore.conf");
-    assert_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
+    assert_not_contains(BUILD_RPM, "etc/pam.d/dasobjectstore");
     assert_contains(
         BUILD_RPM,
         "systemd-sysusers /usr/lib/sysusers.d/dasobjectstore.conf",
@@ -565,7 +544,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_RPM, "Requires:       ca-certificates");
     assert_contains(BUILD_RPM, "Requires:       acl");
-    assert_contains(BUILD_RPM, "Requires:       pam");
+    assert_not_contains(BUILD_RPM, "Requires:       pam");
     assert_contains(BUILD_RPM, "usermod -aG docker \"\\$service_user\"");
     assert_contains(
         BUILD_RPM,
@@ -577,7 +556,7 @@ fn rpm_build_installs_daemon_boundary_assets() {
     );
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
-    assert_contains(BUILD_RPM, "BuildRequires:  pam-devel");
+    assert_not_contains(BUILD_RPM, "BuildRequires:  pam-devel");
 }
 
 #[test]
@@ -632,15 +611,8 @@ fn deb_postinst_rejects_user_owned_managed_root() {
         "grammateus_report_provider install --image grammateus/report:0.8.1",
     );
     assert_contains(POSTINST, "usermod -aG docker \"$service_user\"");
-    assert_contains(POSTINST, "restart dasobjectstore-server.service");
-    assert_contains(
-        POSTINST,
-        "chown root:\"$service_group\" /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
-    );
-    assert_contains(
-        POSTINST,
-        "chmod 4750 /usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper",
-    );
+    assert_not_contains(POSTINST, "dasobjectstore-local-auth-helper");
+    assert_not_contains(POSTINST, "systemctl restart");
     assert_contains(POSTINST, "reject_user_owned_managed_root \"$managed_root\"");
     assert_contains(
         POSTINST,
@@ -672,14 +644,10 @@ fn deb_postinst_repairs_existing_managed_member_roots() {
     assert_contains(POSTINST, "repair_marked_managed_tree \"$managed_root/ssd\"");
     assert_contains(POSTINST, "for root in \"$managed_root\"/hdd/*; do");
     assert_contains(POSTINST, "repair_marked_managed_tree \"$root\"");
-    assert_contains(
-        POSTINST,
-        "systemctl enable --now dasobjectstored.service dasobjectstore-server.service",
-    );
-    assert_contains(
-        POSTINST,
-        "systemctl restart dasobjectstored.service dasobjectstore-server.service",
-    );
+    assert_not_contains(POSTINST, "systemctl enable");
+    assert_not_contains(POSTINST, "systemctl start");
+    assert_not_contains(POSTINST, "systemctl restart");
+    assert_not_contains(POSTINST, "systemctl stop");
 }
 
 #[test]

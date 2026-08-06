@@ -153,12 +153,9 @@ require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/telemetry 075
 require_text "$postinst" 'ensure_container_runtime_access'
 require_text "$postinst" 'admin_group="dasobjectstore-admin"'
 require_text "$postinst" 'ensure_web_admin_peer_membership'
-require_text "$postinst" 'dasobjectstore-source-access.path'
-require_text "$postinst" 'start dasobjectstore-source-access.service'
 require_text "$postinst" 'configure-external-mount-policy'
 require_text "$postinst" 'usermod -aG "$admin_group" "$service_user"'
 require_text "$postinst" 'usermod -aG docker "$service_user"'
-require_text "$postinst" 'restart dasobjectstore-server.service'
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
@@ -172,11 +169,14 @@ require_text "$postinst" 'ensure_owned_dir "$root/ssd" 0750'
 require_text "$postinst" 'install -d -o root -g root -m 0755 "$root/hdd"'
 require_text "$postinst" 'repair_marked_managed_tree "$managed_root/ssd"'
 require_text "$postinst" 'repair_marked_managed_tree "$root"'
-require_text "$postinst" "systemctl enable --now dasobjectstored.service dasobjectstore-server.service"
 require_text "$postinst" 'store_registry_state=/var/lib/dasobjectstore/stores.json'
 require_text "$postinst" 'store_registry_config=/etc/dasobjectstore/stores.json'
-require_text "$postinst" "systemctl restart dasobjectstored.service dasobjectstore-server.service"
-require_text "$postinst" "systemctl restart dasobjectstore-workspace-host.socket"
+require_text "$postinst" 'Package installation must not alter a live storage data plane'
+require_absent "$postinst" 'systemctl enable'
+require_absent "$postinst" 'systemctl start'
+require_absent "$postinst" 'systemctl restart'
+require_absent "$postinst" 'systemctl stop'
+require_absent "$prerm" 'systemctl stop'
 require_text "$postinst" 'Managed DAS roots must be owned by $service_user:$service_group'
 require_text "$prerm" 'remove|deconfigure'
 require_text "$prerm" 'upgrade|failed-upgrade'

@@ -24,4 +24,20 @@ if bash "$guard" "$fixture_root" >/dev/null 2>&1; then
   exit 1
 fi
 
+rm -rf "$fixture_root/etc"
+mkdir -p "$fixture_root/etc/pam.d"
+touch "$fixture_root/etc/pam.d/dasobjectstore"
+if bash "$guard" "$fixture_root" >/dev/null 2>&1; then
+  printf 'package auth guard failed to reject a PAM payload\n' >&2
+  exit 1
+fi
+
+rm -rf "$fixture_root/etc"
+mkdir -p "$fixture_root/DEBIAN"
+printf '%s\n' 'systemctl restart dasobjectstored.service' >"$fixture_root/DEBIAN/postinst"
+if bash "$guard" "$fixture_root" >/dev/null 2>&1; then
+  printf 'package auth guard failed to reject automatic service lifecycle\n' >&2
+  exit 1
+fi
+
 printf 'package auth guard regression tests passed\n'
