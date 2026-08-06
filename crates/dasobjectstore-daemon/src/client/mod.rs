@@ -1903,6 +1903,7 @@ mod tests {
                 page: ObjectBrowserPageRequest::default(),
                 include_placement: true,
                 delegated_actor: None,
+                verified_subject: None,
             })
             .expect("object browser response");
 
@@ -1942,6 +1943,7 @@ mod tests {
                 object_id: dasobjectstore_core::ids::ObjectId::new("ena/raw/metadata.tsv")
                     .expect("object id"),
                 delegated_actor: None,
+                verified_subject: None,
             })
             .expect("object download response");
 
@@ -1985,6 +1987,7 @@ mod tests {
                 endpoint: StoreId::new("ena").expect("store id"),
                 prefix: "ena/raw".to_string(),
                 delegated_actor: None,
+                verified_subject: None,
             })
             .expect("folder download response");
 

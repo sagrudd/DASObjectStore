@@ -104,6 +104,7 @@ pub use mtls_listener::{
     application_mtls_router, build_application_mtls_listener, MtlsApplicationConnectInfo,
     MtlsApplicationListener, MtlsListenerError,
 };
+pub use object_browser_routes::verified_object_browser_subject;
 pub use pistis_approval::{
     PistisApprovalResolutionError, PistisEasyconnectApprovalResolver,
     SharedPistisEasyconnectApprovalResolver,

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.157.30] - 2026-08-06
+
+### Security
+
+- Define the versioned `ObjectBrowserVerifiedSubject` GUI-to-daemon envelope:
+  a fixed GUI peer identity plus verified Pistis subject, session,
+  correlation, ObjectStore, and canonical-prefix scope. The contract rejects
+  out-of-scope paths and coexistence with the legacy delegated POSIX actor.
+  This release supplies only the typed contract and host-side mapping; route
+  migration and daemon transport-peer enforcement remain explicit follow-on
+  work.
+
 ## [0.157.29] - 2026-08-06
 
 ### Fixed

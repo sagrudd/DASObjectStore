@@ -719,6 +719,7 @@ where
                             endpoint: store_id.clone(),
                             object_id: object.object_id,
                             delegated_actor: None,
+                            verified_subject: None,
                         },
                     ) {
                         return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(

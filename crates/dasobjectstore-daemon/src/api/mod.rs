@@ -180,9 +180,10 @@ pub use object_browser::{
     ObjectBrowserDownloadSource, ObjectBrowserFileNode, ObjectBrowserFolderNode,
     ObjectBrowserPageRequest, ObjectBrowserPlacement, ObjectBrowserPlacementLocation,
     ObjectBrowserPlacementState, ObjectBrowserReadinessState, ObjectBrowserRequest,
-    ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse,
-    ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
-    OBJECT_BROWSER_MAX_PAGE_LIMIT,
+    ObjectBrowserResponse, ObjectBrowserSort, ObjectBrowserVerifiedSubject, ObjectDownloadRequest,
+    ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
+    ObjectFolderDownloadResponse, OBJECT_BROWSER_GUI_API_PEER_IDENTITY,
+    OBJECT_BROWSER_MAX_PAGE_LIMIT, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
 };
 pub use object_mutation::{ObjectPutRequest, ObjectPutResponse, ObjectPutValidationError};
 pub use object_store::{
@@ -1037,6 +1038,7 @@ mod tests {
             page: ObjectBrowserPageRequest::default(),
             include_placement: true,
             delegated_actor: None,
+            verified_subject: None,
         });
 
         request.validate().expect("request validates");
@@ -1122,6 +1124,7 @@ mod tests {
             endpoint: StoreId::new("ena").expect("store id"),
             object_id: ObjectId::new("ena/raw/metadata.tsv").expect("object id"),
             delegated_actor: None,
+            verified_subject: None,
         });
 
         request.validate().expect("request validates");
@@ -1137,6 +1140,7 @@ mod tests {
             endpoint: StoreId::new("ena").expect("store id"),
             prefix: "ena/raw".to_string(),
             delegated_actor: None,
+            verified_subject: None,
         });
 
         request.validate().expect("request validates");

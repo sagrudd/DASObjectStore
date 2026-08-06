@@ -6,6 +6,19 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const OBJECT_BROWSER_MAX_PAGE_LIMIT: u16 = 500;
+/// Stable envelope used when a host-authenticated Object Browser request
+/// crosses the GUI-to-daemon boundary.
+///
+/// The daemon must bind `peer_identity` to the authenticated Unix peer before
+/// treating this value as authority.  Validation of this serialised envelope
+/// alone is deliberately not an authority decision.
+pub const OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION: &str =
+    "dasobjectstore.object_browser_verified_subject.v1";
+
+/// Identity asserted by the DAS GUI/API adapter when it forwards a verified
+/// Pistis subject to the daemon.  A future trusted adapter requires a distinct
+/// reviewed identity; callers must not substitute an arbitrary process name.
+pub const OBJECT_BROWSER_GUI_API_PEER_IDENTITY: &str = "dasobjectstore-gui-api";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObjectBrowserRequest {
@@ -17,6 +30,10 @@ pub struct ObjectBrowserRequest {
     pub include_placement: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    /// Versioned host-verified subject and exact ObjectStore prefix scope.
+    /// This is mutually exclusive with the legacy POSIX delegated actor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<ObjectBrowserVerifiedSubject>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -25,6 +42,8 @@ pub struct ObjectDownloadRequest {
     pub object_id: ObjectId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<ObjectBrowserVerifiedSubject>,
 }
 
 impl ObjectDownloadRequest {
@@ -35,7 +54,12 @@ impl ObjectDownloadRequest {
         if self.object_id.as_str().trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "object_id" });
         }
-        validate_delegated_actor(self.delegated_actor.as_ref())?;
+        validate_object_browser_authority(
+            self.delegated_actor.as_ref(),
+            self.verified_subject.as_ref(),
+            &self.endpoint,
+            Some(self.object_id.as_str()),
+        )?;
         Ok(())
     }
 }
@@ -57,6 +81,8 @@ pub struct ObjectFolderDownloadRequest {
     pub prefix: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegated_actor: Option<ObjectBrowserDelegatedActor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<ObjectBrowserVerifiedSubject>,
 }
 
 impl ObjectFolderDownloadRequest {
@@ -67,7 +93,12 @@ impl ObjectFolderDownloadRequest {
         if self.prefix.trim().is_empty() {
             return Err(DaemonRequestValidationError::BlankField { field: "prefix" });
         }
-        validate_delegated_actor(self.delegated_actor.as_ref())?;
+        validate_object_browser_authority(
+            self.delegated_actor.as_ref(),
+            self.verified_subject.as_ref(),
+            &self.endpoint,
+            Some(&self.prefix),
+        )?;
         Ok(())
     }
 }
@@ -97,7 +128,12 @@ impl ObjectBrowserRequest {
         reject_blank_optional("prefix", self.prefix.as_deref())?;
         reject_blank_optional("search", self.search.as_deref())?;
         reject_blank_optional("cursor", self.page.cursor.as_deref())?;
-        validate_delegated_actor(self.delegated_actor.as_ref())?;
+        validate_object_browser_authority(
+            self.delegated_actor.as_ref(),
+            self.verified_subject.as_ref(),
+            &self.endpoint,
+            self.prefix.as_deref(),
+        )?;
         if self.page.limit == 0 || self.page.limit > OBJECT_BROWSER_MAX_PAGE_LIMIT {
             return Err(DaemonRequestValidationError::UnsupportedFieldValue {
                 field: "limit",
@@ -126,6 +162,72 @@ impl ObjectBrowserDelegatedActor {
         for group in &self.groups {
             reject_blank_required("delegated_actor.groups", group)?;
             reject_unsafe_local_name("delegated_actor.groups", group)?;
+        }
+        Ok(())
+    }
+}
+
+/// A peer-bound subject envelope for one Object Browser request family.
+///
+/// `canonical_prefix` is relative to `store_id`; the empty string scopes the
+/// whole store.  Request paths must be canonical and at or below this prefix.
+/// It intentionally carries no raw session token, local username, UID, GID,
+/// group, password, or sudo assertion.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ObjectBrowserVerifiedSubject {
+    pub schema_version: String,
+    pub peer_identity: String,
+    pub subject_id: String,
+    pub session_id: String,
+    pub correlation_id: String,
+    pub store_id: StoreId,
+    pub canonical_prefix: String,
+}
+
+impl ObjectBrowserVerifiedSubject {
+    pub fn validate_for_endpoint(
+        &self,
+        endpoint: &StoreId,
+        requested_path: Option<&str>,
+    ) -> Result<(), DaemonRequestValidationError> {
+        if self.schema_version != OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "verified_subject.schema_version",
+                value: self.schema_version.clone(),
+            });
+        }
+        if self.peer_identity != OBJECT_BROWSER_GUI_API_PEER_IDENTITY {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "verified_subject.peer_identity",
+                value: self.peer_identity.clone(),
+            });
+        }
+        validate_verified_id("verified_subject.subject_id", &self.subject_id)?;
+        validate_verified_id("verified_subject.session_id", &self.session_id)?;
+        validate_verified_id("verified_subject.correlation_id", &self.correlation_id)?;
+        if &self.store_id != endpoint {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "verified_subject.store_id",
+                value: self.store_id.as_str().to_string(),
+            });
+        }
+        let scope =
+            canonical_relative_prefix("verified_subject.canonical_prefix", &self.canonical_prefix)?;
+        if let Some(path) = requested_path {
+            let requested = canonical_relative_prefix("request_path", path)?;
+            if !path_is_within_scope(&scope, &requested) {
+                return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                    field: "request_path",
+                    value: path.to_string(),
+                });
+            }
+        } else if !scope.is_empty() {
+            // An omitted browser prefix would widen a non-root scope.
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "prefix",
+                value: "missing for a non-root verified subject scope".to_string(),
+            });
         }
         Ok(())
     }
@@ -290,13 +392,71 @@ fn reject_unsafe_local_name(
     Ok(())
 }
 
-fn validate_delegated_actor(
-    actor: Option<&ObjectBrowserDelegatedActor>,
+fn validate_object_browser_authority(
+    delegated_actor: Option<&ObjectBrowserDelegatedActor>,
+    verified_subject: Option<&ObjectBrowserVerifiedSubject>,
+    endpoint: &StoreId,
+    requested_path: Option<&str>,
 ) -> Result<(), DaemonRequestValidationError> {
-    if let Some(actor) = actor {
+    if delegated_actor.is_some() && verified_subject.is_some() {
+        return Err(DaemonRequestValidationError::InvalidPolicy {
+            message: "verified Object Browser subject and legacy delegated OS actor are mutually exclusive".to_string(),
+        });
+    }
+    if let Some(actor) = delegated_actor {
         actor.validate()?;
     }
+    if let Some(subject) = verified_subject {
+        subject.validate_for_endpoint(endpoint, requested_path)?;
+    }
     Ok(())
+}
+
+fn validate_verified_id(
+    field: &'static str,
+    value: &str,
+) -> Result<(), DaemonRequestValidationError> {
+    let valid = !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':' | b'/')
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(DaemonRequestValidationError::UnsupportedFieldValue {
+            field,
+            value: value.to_string(),
+        })
+    }
+}
+
+fn canonical_relative_prefix(
+    field: &'static str,
+    value: &str,
+) -> Result<String, DaemonRequestValidationError> {
+    if value.is_empty() {
+        return Ok(String::new());
+    }
+    if value.starts_with('/') || value.ends_with('/') || value.contains("//") {
+        return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+            field,
+            value: value.to_string(),
+        });
+    }
+    for segment in value.split('/') {
+        if segment.is_empty() || matches!(segment, "." | "..") {
+            return Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field,
+                value: value.to_string(),
+            });
+        }
+    }
+    Ok(value.to_string())
+}
+
+fn path_is_within_scope(scope: &str, requested: &str) -> bool {
+    scope.is_empty() || requested == scope || requested.starts_with(&format!("{scope}/"))
 }
 
 #[cfg(test)]
@@ -306,8 +466,10 @@ mod tests {
         ObjectBrowserFileNode, ObjectBrowserFolderNode, ObjectBrowserPageRequest,
         ObjectBrowserPlacement, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
         ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
-        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, OBJECT_BROWSER_MAX_PAGE_LIMIT,
+        ObjectBrowserSort, ObjectBrowserVerifiedSubject, ObjectDownloadRequest,
+        ObjectDownloadResponse, ObjectFolderArchiveEntry, ObjectFolderDownloadRequest,
+        ObjectFolderDownloadResponse, OBJECT_BROWSER_GUI_API_PEER_IDENTITY,
+        OBJECT_BROWSER_MAX_PAGE_LIMIT, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
     };
     use crate::api::DaemonRequestValidationError;
     use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
@@ -327,6 +489,7 @@ mod tests {
             },
             include_placement: true,
             delegated_actor: None,
+            verified_subject: None,
         };
 
         request.validate().expect("request is valid");
@@ -343,6 +506,7 @@ mod tests {
             endpoint: StoreId::new("ena").expect("store id"),
             object_id: ObjectId::new("ENA/Xenognostikon/metadata.tsv").expect("object id"),
             delegated_actor: None,
+            verified_subject: None,
         };
 
         request.validate().expect("request is valid");
@@ -372,6 +536,7 @@ mod tests {
             endpoint: StoreId::new("ena").expect("store id"),
             prefix: "ENA/Xenognostikon".to_string(),
             delegated_actor: None,
+            verified_subject: None,
         };
 
         request.validate().expect("request is valid");
@@ -471,6 +636,7 @@ mod tests {
             },
             include_placement: false,
             delegated_actor: None,
+            verified_subject: None,
         };
 
         let err = request.validate().expect_err("oversized page rejected");
@@ -494,11 +660,85 @@ mod tests {
             page: ObjectBrowserPageRequest::default(),
             include_placement: false,
             delegated_actor: None,
+            verified_subject: None,
         };
 
         assert!(matches!(
             request.validate(),
             Err(DaemonRequestValidationError::BlankField { field: "prefix" })
+        ));
+    }
+
+    fn verified_subject(store_id: &str, prefix: &str) -> ObjectBrowserVerifiedSubject {
+        ObjectBrowserVerifiedSubject {
+            schema_version: OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis:stephen".to_string(),
+            session_id: "session-1".to_string(),
+            correlation_id: "correlation-1".to_string(),
+            store_id: StoreId::new(store_id).expect("store id"),
+            canonical_prefix: prefix.to_string(),
+        }
+    }
+
+    #[test]
+    fn verified_subject_is_versioned_peer_bound_and_scoped_to_one_store_prefix() {
+        let subject = verified_subject("ena", "ENA/Xenognostikon");
+        let request = ObjectBrowserRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            prefix: Some("ENA/Xenognostikon/reads".to_string()),
+            search: None,
+            sort: ObjectBrowserSort::NameAsc,
+            page: ObjectBrowserPageRequest::default(),
+            include_placement: false,
+            delegated_actor: None,
+            verified_subject: Some(subject),
+        };
+
+        request
+            .validate()
+            .expect("scoped verified request validates");
+        let encoded = serde_json::to_value(&request).expect("request serializes");
+        assert_eq!(
+            encoded["verified_subject"]["schema_version"],
+            OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            encoded["verified_subject"]["peer_identity"],
+            OBJECT_BROWSER_GUI_API_PEER_IDENTITY
+        );
+    }
+
+    #[test]
+    fn verified_subject_rejects_legacy_os_delegation_and_scope_widening() {
+        let mut request = ObjectBrowserRequest {
+            endpoint: StoreId::new("ena").expect("store id"),
+            prefix: Some("other".to_string()),
+            search: None,
+            sort: ObjectBrowserSort::NameAsc,
+            page: ObjectBrowserPageRequest::default(),
+            include_placement: false,
+            delegated_actor: None,
+            verified_subject: Some(verified_subject("ena", "ENA/Xenognostikon")),
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "request_path",
+                ..
+            })
+        ));
+
+        request.prefix = Some("ENA/Xenognostikon".to_string());
+        request.delegated_actor = Some(super::ObjectBrowserDelegatedActor {
+            username: "stephen".to_string(),
+            uid: Some(1000),
+            primary_gid: Some(1000),
+            groups: vec!["research".to_string()],
+        });
+        assert!(matches!(
+            request.validate(),
+            Err(DaemonRequestValidationError::InvalidPolicy { .. })
         ));
     }
 }

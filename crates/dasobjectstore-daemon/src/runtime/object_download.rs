@@ -65,6 +65,7 @@ pub(crate) fn resolve_object_folder_download_with_hdd_root(
                 endpoint: request.endpoint.clone(),
                 object_id: metadata.object_id,
                 delegated_actor: request.delegated_actor.clone(),
+                verified_subject: request.verified_subject.clone(),
             },
         )?;
         total_source_bytes = total_source_bytes.saturating_add(download.size_bytes);
@@ -485,6 +486,7 @@ mod tests {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
                 delegated_actor: None,
+                verified_subject: None,
             },
         )
         .expect("download resolves");
@@ -512,6 +514,7 @@ mod tests {
             endpoint: store_id(),
             object_id: object_id("ena/raw/metadata.tsv"),
             delegated_actor: None,
+            verified_subject: None,
         };
         let resolved = resolve_one_object_download_with_roots(
             &live_sqlite_path,
@@ -578,6 +581,7 @@ mod tests {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
                 delegated_actor: None,
+                verified_subject: None,
             },
         )
         .expect("download resolves from managed verified copy");
@@ -606,6 +610,7 @@ mod tests {
                 endpoint: store_id(),
                 object_id: object_id("ena/raw/metadata.tsv"),
                 delegated_actor: None,
+                verified_subject: None,
             },
         )
         .expect_err("unverified object is rejected");
@@ -659,6 +664,7 @@ mod tests {
                 endpoint: store_id(),
                 prefix: "/ena/raw/Xeno/".to_string(),
                 delegated_actor: None,
+                verified_subject: None,
             },
         )
         .expect("folder download resolves");
@@ -703,6 +709,7 @@ mod tests {
                 endpoint: store_id(),
                 prefix: "ena/raw/Xeno".to_string(),
                 delegated_actor: None,
+                verified_subject: None,
             },
         )
         .expect_err("folder download rejects unverified object");

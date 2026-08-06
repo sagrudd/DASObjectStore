@@ -611,6 +611,7 @@ mod tests {
             page: ObjectBrowserPageRequest::default(),
             include_placement: false,
             delegated_actor: None,
+            verified_subject: None,
         };
 
         let response = query_object_browser_metadata(&request, &entries).expect("root succeeds");
@@ -743,6 +744,7 @@ mod tests {
             },
             include_placement: false,
             delegated_actor: None,
+            verified_subject: None,
         }
     }
 

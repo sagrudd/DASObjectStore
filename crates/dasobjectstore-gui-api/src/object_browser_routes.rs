@@ -1,7 +1,8 @@
 use crate::{
     daemon_bridge::{DaemonBridge, DaemonBridgeError},
     discover_local_user, AuthRouteError, AuthenticatedGuiActor, LocalAuthStore,
-    LocalUserDiscoveryError, LocalUserMetadata,
+    LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostAuthenticatedContext,
+    VerifiedHostStoreScope,
 };
 use axum::{
     body::Body,
@@ -16,6 +17,10 @@ use axum::{
 };
 use bytes::Bytes;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
+use dasobjectstore_daemon::api::{
+    ObjectBrowserVerifiedSubject, OBJECT_BROWSER_GUI_API_PEER_IDENTITY,
+    OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
+};
 use dasobjectstore_daemon::{
     DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserDelegatedActor,
     ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
@@ -32,6 +37,49 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
 
 const MAX_ARCHIVE_WORKERS: usize = 2;
+
+/// Map an already verified host session into the explicit Object Browser
+/// daemon envelope.  This is intentionally only a mapping/validation
+/// boundary: no host-composed route consumes it until the daemon's transport
+/// peer binding and authorization migration land together.
+///
+/// The supplied scope must have been derived from the same verified host
+/// session.  This helper emits no local username, UID, GID, group, password,
+/// PAM, or sudo assertion and therefore cannot coexist with the legacy
+/// `ObjectBrowserDelegatedActor` path.
+pub fn verified_object_browser_subject(
+    verified: &VerifiedHostAuthenticatedContext,
+    scope: &VerifiedHostStoreScope,
+    store_id: StoreId,
+    canonical_prefix: String,
+) -> Result<ObjectBrowserVerifiedSubject, (StatusCode, Json<AuthRouteError>)> {
+    if !scope.permits(verified, store_id.as_str()) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_store_scope_denied",
+            "the verified host session is not authorised for this ObjectStore",
+        ));
+    }
+    let subject = ObjectBrowserVerifiedSubject {
+        schema_version: OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+        peer_identity: OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+        subject_id: verified.context().subject_id.clone(),
+        session_id: verified.context().session_id.clone(),
+        correlation_id: verified.context().correlation_id.clone(),
+        store_id: store_id.clone(),
+        canonical_prefix,
+    };
+    subject
+        .validate_for_endpoint(&store_id, Some(&subject.canonical_prefix))
+        .map_err(|error| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_verified_object_browser_subject",
+                error.to_string(),
+            )
+        })?;
+    Ok(subject)
+}
 
 fn archive_worker_semaphore() -> &'static Arc<Semaphore> {
     static ARCHIVE_WORKERS: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -406,6 +454,7 @@ fn object_browser_request(
         },
         include_placement: query.include_placement.unwrap_or(false),
         delegated_actor,
+        verified_subject: None,
     })
 }
 
@@ -436,6 +485,7 @@ fn object_download_request(
         endpoint,
         object_id,
         delegated_actor,
+        verified_subject: None,
     })
 }
 
@@ -455,6 +505,7 @@ fn object_folder_download_request(
         endpoint,
         prefix: required_field("prefix", prefix.trim_start_matches('/').to_string())?,
         delegated_actor,
+        verified_subject: None,
     })
 }
 
@@ -723,12 +774,14 @@ fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        standalone_object_browser_router_with_state, write_folder_archive,
-        ObjectBrowserLocalUserProvider, StandaloneObjectBrowserClient,
+        standalone_object_browser_router_with_state, verified_object_browser_subject,
+        write_folder_archive, ObjectBrowserLocalUserProvider, StandaloneObjectBrowserClient,
         StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
     };
     use crate::{
-        daemon_bridge::DaemonBridge, LocalAuthStore, LocalUserDiscoveryError, LocalUserMetadata,
+        accept_host_authenticated_context, daemon_bridge::DaemonBridge, HostAuthenticatedContext,
+        HostAuthenticationAuthority, HostAuthenticationContextVerifier, LocalAuthStore,
+        LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostStoreScope,
         STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
@@ -765,6 +818,80 @@ mod tests {
         assert!(workers.try_acquire().is_err());
         drop(permit);
         assert!(workers.try_acquire().is_ok());
+    }
+
+    struct AcceptingHostVerifier;
+
+    impl HostAuthenticationContextVerifier for AcceptingHostVerifier {
+        fn verify_live_session(&self, _context: &HostAuthenticatedContext) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn verified_host_context() -> crate::VerifiedHostAuthenticatedContext {
+        accept_host_authenticated_context(
+            HostAuthenticatedContext {
+                schema_version: crate::HOST_AUTH_CONTEXT_SCHEMA_VERSION.to_string(),
+                authority: HostAuthenticationAuthority::MonasStandalone,
+                issuer: "monas".to_string(),
+                audience: crate::HOST_AUTH_AUDIENCE.to_string(),
+                subject_id: "pistis:stephen".to_string(),
+                session_id: "session-1".to_string(),
+                roles: vec!["storage_viewer".to_string()],
+                issued_at_unix_seconds: 1_000,
+                expires_at_unix_seconds: 2_000,
+                correlation_id: "correlation-1".to_string(),
+                csrf_binding_sha256:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+            },
+            1_500,
+            &AcceptingHostVerifier,
+        )
+        .expect("verified host context")
+    }
+
+    #[test]
+    fn maps_verified_host_scope_to_the_versioned_daemon_subject_without_os_identity() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let subject = verified_object_browser_subject(
+            &verified,
+            &scope,
+            StoreId::new("ena").expect("store"),
+            "ENA/Xeno".to_string(),
+        )
+        .expect("subject maps");
+
+        assert_eq!(subject.subject_id, "pistis:stephen");
+        assert_eq!(subject.session_id, "session-1");
+        assert_eq!(subject.correlation_id, "correlation-1");
+        assert_eq!(subject.store_id.as_str(), "ena");
+        assert_eq!(subject.canonical_prefix, "ENA/Xeno");
+        assert!(serde_json::to_value(subject)
+            .expect("serializes")
+            .get("uid")
+            .is_none());
+    }
+
+    #[test]
+    fn verified_subject_mapping_rejects_a_store_outside_the_host_scope() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let error = verified_object_browser_subject(
+            &verified,
+            &scope,
+            StoreId::new("other").expect("store"),
+            String::new(),
+        )
+        .expect_err("out-of-scope store rejects");
+
+        assert_eq!(error.0, StatusCode::FORBIDDEN);
+        assert_eq!(error.1 .0.code, "host_store_scope_denied");
     }
 
     #[tokio::test]
@@ -827,6 +954,7 @@ mod tests {
                 },
                 include_placement: true,
                 delegated_actor: Some(expected_delegated_actor("admin")),
+                verified_subject: None,
             }]
         );
 
@@ -994,6 +1122,7 @@ mod tests {
                 endpoint: StoreId::new("ena").expect("store id"),
                 object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
                 delegated_actor: Some(expected_delegated_actor("admin")),
+                verified_subject: None,
             }]
         );
         let body = to_bytes(response.into_body(), 64 * 1024)
@@ -1213,6 +1342,7 @@ mod tests {
                 endpoint: StoreId::new("ena").expect("store id"),
                 prefix: "ENA/Xeno".to_string(),
                 delegated_actor: Some(expected_delegated_actor("admin")),
+                verified_subject: None,
             }]
         );
         let body = to_bytes(response.into_body(), 1024 * 1024)

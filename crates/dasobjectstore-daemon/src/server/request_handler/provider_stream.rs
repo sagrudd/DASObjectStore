@@ -682,6 +682,7 @@ where
                     endpoint: store_id.clone(),
                     object_id: native.object_id,
                     delegated_actor: request.delegated_actor.clone(),
+                    verified_subject: None,
                 },
             )
             .map_err(|error| {
