@@ -102,7 +102,10 @@ Work is dependency ordered. Only these entries define open release work:
   standalone PAM/password/session/OS-policy authority; then remove the helper,
   migration binary and all PAM payload/build/documentation.  Do not treat a
   package-only omission as completion: every former authority input must be
-  proven unable to reach daemon mutation.
+  proven unable to reach daemon mutation. Direct ObjectStore ingest and
+  acknowledgement-policy updates now accept only the fixed preverified host
+  service peer with a verified subject; direct CLI/root/sudo/admin peers are
+  denied before mutation or job recording.
 - [ ] **EPIC E — physical acceptance and promotion.** Run staged synthetic
   acceptance on the available x86_64 DASServer before any representative
   workload; prove APT lifecycle, Garage/native ingest, SSD-to-HDD durability,

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.36] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for daemon
+  ObjectStore ingest and acknowledgement policy updates. These mutations now
+  accept only the fixed packaged host service peer with a non-blank verified
+  host subject; direct CLI/socket calls fail closed before policy mutation or
+  job recording.
+
 ## [0.157.35] - 2026-08-06
 
 ### Security
