@@ -92,8 +92,8 @@ pub use endpoints::{
 pub use host_auth::{
     accept_host_authenticated_context, HostAuthContextError, HostAuthenticatedContext,
     HostAuthenticationAuthority, HostAuthenticationContextVerifier,
-    VerifiedHostAuthenticatedContext, HOST_AUTH_AUDIENCE, HOST_AUTH_CONTEXT_SCHEMA_VERSION,
-    MAX_HOST_AUTH_CONTEXT_TTL_SECONDS,
+    VerifiedHostAuthenticatedContext, VerifiedHostStoreScope, HOST_AUTH_AUDIENCE,
+    HOST_AUTH_CONTEXT_SCHEMA_VERSION, MAX_HOST_AUTH_CONTEXT_TTL_SECONDS,
 };
 pub use live_status::{
     LiveStatusAggregateView, LiveStatusAvailabilityView, LiveStatusHddTransferView,

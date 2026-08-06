@@ -135,6 +135,7 @@ pub fn host_composed_gui_api_router() -> Router {
         .merge(preverified_host_operational_router())
         .merge(preverified_host_reporting_router())
         .merge(preverified_host_profile_catalogue_router())
+        .merge(preverified_host_profile_read_router())
 }
 
 /// Host-composed operational mutations that derive authority exclusively from
@@ -213,6 +214,34 @@ fn preverified_host_profile_catalogue_router() -> Router {
     preverified_host_profile_catalogue_router_with_state(
         PreverifiedHostProfileCatalogueRouteState::packaged(),
     )
+}
+
+/// Read-only profile inspection for a verified host.  Each route additionally
+/// requires an exact store scope bound to the same Pistis session; a viewer
+/// role alone is intentionally insufficient.
+pub(super) fn preverified_host_profile_read_router() -> Router {
+    Router::new()
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}",
+            get(crate::auth_routes::preverified_host_profile_s3_list)
+                .head(crate::auth_routes::preverified_host_profile_s3_head),
+        )
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}/verify",
+            get(crate::auth_routes::preverified_host_profile_s3_verify),
+        )
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}/diagnostics",
+            get(crate::auth_routes::preverified_host_profile_s3_diagnostics),
+        )
+        .route(
+            "/api/v1/profile-s3/stores/{store_id}/health",
+            get(crate::auth_routes::preverified_host_profile_s3_health),
+        )
+        .route(
+            "/api/v1/profile-readiness/stores/{store_id}",
+            get(crate::auth_routes::preverified_host_profile_readiness),
+        )
 }
 
 pub(super) fn preverified_host_profile_catalogue_router_with_state(
