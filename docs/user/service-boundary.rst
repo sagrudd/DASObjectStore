@@ -155,22 +155,23 @@ sends the store, reason, dry-run, allowance, and confirmation fields to the
 daemon; the daemon selects its live metadata path, authorizes the administrator,
 updates queue state, and returns the cancellation report.
 
-Normal ``dasobjectstore disk retire`` requests follow the same boundary: the
-daemon authenticates the administrator, selects the live metadata database,
-records its current timestamp, and returns the state-transition report.
-The force-retirement variant applies its policy allowance and exact confirmation
-inside the daemon before the risk-gated state transition.
+Disk retirement, force-retirement, and DAS media lockdown are not direct CLI
+operations. The CLI rejects them before opening the daemon socket. Monas must
+first establish the human session through Pistis, then its fixed DAS GUI/API
+service peer submits a versioned, non-secret verified subject to the daemon.
+The daemon rejects direct root, sudo, and ``dasobjectstore-admin`` peers: local
+OS identity never stands in for a human approval.
 
-``dasobjectstore disk lockdown-das`` follows the same boundary. The daemon
-discovers the managed SSD/HDD roots, plans optional service-account creation,
-checks administrator authorization and the exact confirmation marker, executes
-the ownership and mode changes, and records the completed job. The CLI remains
-responsible only for argument parsing and report rendering.
+For a permitted request, the daemon selects the live metadata database, applies
+the force-retirement policy allowance and exact confirmation where applicable,
+and records the approved Pistis subject in the administrative job record.
+Lockdown discovers managed SSD/HDD roots, plans optional service-account
+creation, checks its exact confirmation marker, and records the completed job.
 
 The Debian package configuration checks the managed root at
 ``/srv/dasobjectstore``. If that path already exists and is owned by an ordinary
 user or group, package configuration stops and asks the operator to repair the
-ownership through the formal disk lockdown workflow before continuing.
+ownership through the Monas/Pistis disk lockdown workflow before continuing.
 
 Package upgrade stops the Web and daemon processes before replacing binaries;
 post-install starts them with the retained configuration. Final DEB/RPM removal

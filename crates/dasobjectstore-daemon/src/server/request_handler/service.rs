@@ -472,20 +472,17 @@ where
         }
         DaemonApiRequest::DiskLockdown(mut request) => {
             request.confirmation_marker = request.confirmation_marker.trim().to_string();
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "disk lockdown requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "disk lockdown requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "disk lockdown",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
+            let verified_subject_id = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone());
             let now = handler.clock.now_utc();
             let response = handler
                 .service_orchestrator
@@ -498,7 +495,7 @@ where
                 progress: DaemonJobProgress::default(),
                 submitted_at_utc: response.accepted.accepted_at_utc.clone(),
                 updated_at_utc: response.accepted.accepted_at_utc.clone(),
-                actor: actor.map(DaemonLocalActor::display_name),
+                actor: verified_subject_id,
                 failure_message: None,
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
@@ -580,21 +577,17 @@ where
             // confirmation metadata and may be spoofed by a client.  Dry-run
             // validation remains available without authentication, but never
             // echoes an untrusted request actor in its response/job metadata.
-            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "profile binding requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "profile binding requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "profile binding",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
+            request.administrator_actor = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone());
             let now = handler.clock.now_utc();
             let store_definition = request.store_definition.clone();
             let mut reused = false;
@@ -728,19 +721,19 @@ where
             Ok(DaemonApiResponse::RegisterProfileBinding(response))
         }
         DaemonApiRequest::ProfileMigration(mut request) => {
-            let Some(actor) = actor else {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "administrator_authentication_required",
-                    "profile migration requires an authenticated local administrator",
-                )));
-            };
-            if !actor.is_administrator() {
-                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "administrator_authorization_required",
-                    "profile migration requires root, sudo, or dasobjectstore-admin membership",
-                )));
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "profile migration",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
-            request.administrator_actor = Some(actor.display_name());
+            let verified_subject_id = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone())
+                .expect("verified subject required before profile migration");
+            request.administrator_actor = Some(verified_subject_id.clone());
             request.validate().map_err(|error| {
                 DaemonRequestHandlerError::ServiceRuntime(
                     DaemonServiceRuntimeError::UnsupportedOperation {
@@ -800,7 +793,7 @@ where
                 report.destination_used_bytes,
                 report.state,
                 report.source_retained,
-                actor.display_name(),
+                verified_subject_id,
             );
             handler.record_admin_job(daemon_job_summary_from_profile_migration(&response))?;
             Ok(DaemonApiResponse::ProfileMigration(response))

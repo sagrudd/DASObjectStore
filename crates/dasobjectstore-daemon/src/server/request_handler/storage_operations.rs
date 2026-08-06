@@ -12,19 +12,11 @@ where
         actor: Option<&DaemonLocalActor>,
     ) -> Result<StoreDrainResponse, (&'static str, String)> {
         if !request.dry_run {
-            let Some(actor) = actor else {
-                return Err((
-                    "administrator_authentication_required",
-                    "store drain requires an authenticated local administrator".to_string(),
-                ));
-            };
-            if !actor.is_administrator() {
-                return Err((
-                    "administrator_authorization_required",
-                    "store drain requires root, sudo, or dasobjectstore-admin membership"
-                        .to_string(),
-                ));
-            }
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "store drain",
+            )?;
             if !request.allow_store_drain {
                 return Err((
                     "store_drain_not_allowed",
@@ -54,19 +46,11 @@ where
         actor: Option<&DaemonLocalActor>,
     ) -> Result<StoreDeleteResponse, (&'static str, String)> {
         if !request.dry_run {
-            let Some(actor) = actor else {
-                return Err((
-                    "administrator_authentication_required",
-                    "store delete requires an authenticated local administrator".to_string(),
-                ));
-            };
-            if !actor.is_administrator() {
-                return Err((
-                    "administrator_authorization_required",
-                    "store delete requires root, sudo, or dasobjectstore-admin membership"
-                        .to_string(),
-                ));
-            }
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "store delete",
+            )?;
             if !request.allow_store_delete {
                 return Err((
                     "store_delete_not_allowed",
@@ -228,19 +212,11 @@ where
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairResponse, (&'static str, String)> {
         if !request.dry_run {
-            let Some(actor) = actor else {
-                return Err((
-                    "administrator_authentication_required",
-                    "store repair requires an authenticated local administrator".to_string(),
-                ));
-            };
-            if !actor.is_administrator() {
-                return Err((
-                    "administrator_authorization_required",
-                    "store repair requires root, sudo, or dasobjectstore-admin membership"
-                        .to_string(),
-                ));
-            }
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "store repair",
+            )?;
         }
         if let Some(store_id) = request.store_id.as_ref() {
             let lifecycle = profile_binding_lifecycle_state(
@@ -568,19 +544,11 @@ where
         actor: Option<&DaemonLocalActor>,
     ) -> Result<StoreDeduplicateResponse, (&'static str, String)> {
         if !request.dry_run {
-            let Some(actor) = actor else {
-                return Err((
-                    "administrator_authentication_required",
-                    "store deduplicate requires an authenticated local administrator".to_string(),
-                ));
-            };
-            if !actor.is_administrator() {
-                return Err((
-                    "administrator_authorization_required",
-                    "store deduplicate requires root, sudo, or dasobjectstore-admin membership"
-                        .to_string(),
-                ));
-            }
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "store deduplicate",
+            )?;
         }
         let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
             .map_err(|error| ("store_deduplicate_failed", error.to_string()))?;
@@ -675,15 +643,14 @@ where
     ) -> Result<DiskRetireResponse, (&'static str, String)> {
         let Some(actor) = actor else {
             return Err((
-                "administrator_authentication_required",
-                "disk retirement requires an authenticated local administrator".to_string(),
+                "preverified_host_authority_required",
+                "disk retirement requires the fixed preverified host service peer".to_string(),
             ));
         };
-        if !actor.is_administrator() {
+        if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Err((
-                "administrator_authorization_required",
-                "disk retirement requires root, sudo, or dasobjectstore-admin membership"
-                    .to_string(),
+                "preverified_host_authority_required",
+                "disk retirement rejects OS-derived human authority".to_string(),
             ));
         }
         let disk_id = dasobjectstore_core::ids::DiskId::new(request.disk_id.clone())
@@ -704,15 +671,15 @@ where
     ) -> Result<DiskRetireResponse, (&'static str, String)> {
         let Some(actor) = actor else {
             return Err((
-                "administrator_authentication_required",
-                "disk force-retirement requires an authenticated local administrator".to_string(),
+                "preverified_host_authority_required",
+                "disk force-retirement requires the fixed preverified host service peer"
+                    .to_string(),
             ));
         };
-        if !actor.is_administrator() {
+        if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
             return Err((
-                "administrator_authorization_required",
-                "disk force-retirement requires root, sudo, or dasobjectstore-admin membership"
-                    .to_string(),
+                "preverified_host_authority_required",
+                "disk force-retirement rejects OS-derived human authority".to_string(),
             ));
         }
         if !request.allow_force_retire {
@@ -743,19 +710,11 @@ where
         actor: Option<&DaemonLocalActor>,
     ) -> Result<IngestQueueDrainResponse, (&'static str, String)> {
         if !request.dry_run {
-            let Some(actor) = actor else {
-                return Err((
-                    "administrator_authentication_required",
-                    "ingest queue drain requires an authenticated local administrator".to_string(),
-                ));
-            };
-            if !actor.is_administrator() {
-                return Err((
-                    "administrator_authorization_required",
-                    "ingest queue drain requires root, sudo, or dasobjectstore-admin membership"
-                        .to_string(),
-                ));
-            }
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "ingest queue drain",
+            )?;
             if !request.allow_ingest_queue_drain {
                 return Err((
                     "ingest_queue_drain_not_allowed",
@@ -907,4 +866,35 @@ where
 
         Ok(StoreInventoryResponse { stores: inventory })
     }
+}
+
+/// The fixed GUI service peer is the only process allowed to forward a human
+/// maintenance subject. Root, sudo, and local group membership are never a
+/// substitute for a verified Pistis ceremony.
+fn require_preverified_host_maintenance_peer(
+    actor: Option<&DaemonLocalActor>,
+    verified_subject: Option<&str>,
+    operation: &str,
+) -> Result<(), (&'static str, String)> {
+    let Some(actor) = actor else {
+        return Err((
+            "administrator_authentication_required",
+            format!("{operation} requires the fixed preverified host service peer"),
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err((
+            "preverified_host_authority_required",
+            format!(
+                "{operation} rejects direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+            ),
+        ));
+    }
+    if !verified_subject.is_some_and(|subject| !subject.trim().is_empty()) {
+        return Err((
+            "preverified_host_subject_required",
+            format!("{operation} requires a verified Pistis subject"),
+        ));
+    }
+    Ok(())
 }

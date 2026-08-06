@@ -11,6 +11,37 @@
   Pistis discovery/pairing and signed machine-token exchange remain explicit,
   regression-tested boundaries.
 
+## [0.157.48] - 2026-08-06
+
+### Security
+
+- Add the complete host-composed maintenance authority bridge for ObjectStore
+  drain, delete, repair, deduplicate, and ingest-queue drain. Each operation
+  requires a matching verified Pistis `storage_administrator`, forwards that
+  subject only through the fixed packaged peer, and rejects direct root, sudo,
+  and `dasobjectstore-admin` socket authority before non-dry maintenance.
+- Add typed GUI maintenance DTOs, bounded-priority daemon client methods, and
+  recording-route coverage for the complete five-operation set.
+
+## [0.157.47] - 2026-08-06
+
+### Security
+
+- Require profile binding and profile migration mutations to arrive through the
+  fixed DAS GUI/API service peer with a versioned verified Pistis subject.
+  Direct CLI, root, sudo, and local administrative-group authority fail closed.
+
+## [0.157.46] - 2026-08-06
+
+### Security
+
+- Retire direct disk lockdown, retirement, and force-retirement authority.
+  These mutations now require a versioned, non-secret Pistis subject from the
+  fixed DAS GUI/API service peer; direct CLI, root, sudo, and local
+  ``dasobjectstore-admin`` authority fail closed. The audited subject records
+  only opaque subject/session/correlation identifiers and no local OS identity
+  or credential material.
+
 ## [0.157.45] - 2026-08-06
 
 ### Security

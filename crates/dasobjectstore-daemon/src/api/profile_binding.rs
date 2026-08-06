@@ -1,4 +1,4 @@
-use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
+use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind, PreverifiedHostSubject};
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::manifest::ObjectStoreManifest;
 use dasobjectstore_core::store::CapacityPolicy;
@@ -33,6 +33,8 @@ pub struct ProfileBindingRequest {
     pub dry_run: bool,
     pub client_request_id: Option<String>,
     pub administrator_actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<PreverifiedHostSubject>,
     pub confirmation_marker: String,
 }
 
@@ -218,6 +220,7 @@ mod tests {
             backend_root: PathBuf::from("/tmp/codex"),
             ssd_staging_root: None,
             dry_run: true,
+            verified_subject: None,
             client_request_id: Some("request-1".to_string()),
             administrator_actor: Some("stephen".to_string()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),

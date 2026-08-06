@@ -163,6 +163,26 @@ pub(super) fn preverified_host_operational_router_with_state(
             post(preverified_host_control_ingest),
         )
         .route(
+            "/api/v1/workspaces/maintenance/stores/drain",
+            post(preverified_host_store_drain),
+        )
+        .route(
+            "/api/v1/workspaces/maintenance/stores/delete",
+            post(preverified_host_store_delete),
+        )
+        .route(
+            "/api/v1/workspaces/maintenance/stores/repair",
+            post(preverified_host_store_repair),
+        )
+        .route(
+            "/api/v1/workspaces/maintenance/stores/deduplicate",
+            post(preverified_host_store_deduplicate),
+        )
+        .route(
+            "/api/v1/workspaces/maintenance/ingest-queue/drain",
+            post(preverified_host_ingest_queue_drain),
+        )
+        .route(
             "/api/v1/workspaces/object-stores/ingest-policy",
             post(preverified_host_update_object_store_ingest_policy),
         )

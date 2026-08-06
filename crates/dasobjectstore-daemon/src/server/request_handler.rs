@@ -19,16 +19,16 @@ use crate::api::{
     DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
     ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
     ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
-    ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileLifecycleState, ProfileMigrationResponse, ProfileReadinessResponse,
-    ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    PreverifiedHostSubject, ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry,
+    ProfileBrowserResponse, ProfileDiagnosticsResponse, ProfileInspectionResponse,
+    ProfileInspectionRootState, ProfileLifecycleState, ProfileMigrationResponse,
+    ProfileReadinessResponse, ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
+    ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -506,6 +506,42 @@ where
     }
 }
 
+/// Accepts a human administrative mutation only from the fixed packaged host
+/// service peer carrying a versioned Pistis-verified subject. Unix root, sudo,
+/// and DAS administrator groups identify neither a human nor their authority.
+pub(super) fn require_verified_pistis_host_authority(
+    actor: Option<&DaemonLocalActor>,
+    verified_subject: Option<&PreverifiedHostSubject>,
+    operation: &str,
+) -> Result<(), DaemonApiErrorResponse> {
+    let Some(actor) = actor else {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!("{operation} require the fixed preverified host service peer"),
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!(
+                "{operation} reject direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+            ),
+        ));
+    }
+    let Some(verified_subject) = verified_subject else {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_subject_required",
+            format!("{operation} require a verified Pistis subject"),
+        ));
+    };
+    verified_subject.validate().map_err(|error| {
+        DaemonApiErrorResponse::new(
+            "preverified_host_subject_invalid",
+            format!("{operation} reject invalid verified Pistis subject: {error}"),
+        )
+    })
+}
+
 impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
@@ -939,8 +975,8 @@ fn default_live_sqlite_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        DaemonClock, DaemonRequestHandler, DaemonServiceOrchestrator, FixedDaemonClock,
-        SystemDaemonClock,
+        require_verified_pistis_host_authority, DaemonClock, DaemonRequestHandler,
+        DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock,
     };
     use crate::api::{
         ApplianceTelemetryRequest, ApplianceTelemetryState, ApplianceTelemetryWindow,
@@ -964,18 +1000,18 @@ mod tests {
         ObjectBrowserVerifiedSubject, ObjectDownloadRequest, ObjectFolderDownloadRequest,
         ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
-        ProfileBindingOperation, ProfileBindingRequest, ProfileBrowserRequest,
-        ProfileDiagnosticsRequest, ProfileInspectionRequest, ProfileInspectionRootState,
-        ProfileMigrationRequest, ProfileReadinessRequest, ProviderStreamChunkHeader,
-        ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
+        PreverifiedHostSubject, ProfileBindingOperation, ProfileBindingRequest,
+        ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileInspectionRequest,
+        ProfileInspectionRootState, ProfileMigrationRequest, ProfileReadinessRequest,
+        ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
         RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
         RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        RemoteEasyconnectUploadCompletion, StoreDeleteRequest, StoreDrainRequest,
-        StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
+        RemoteEasyconnectUploadCompletion, StoreDeduplicateRequest, StoreDeleteRequest,
+        StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
         SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
         UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
         UpsertEndpointInventoryResponse, WorkspaceControlAction, WorkspaceControlRequest,
@@ -983,7 +1019,8 @@ mod tests {
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_BROWSER_GUI_API_PEER_IDENTITY, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
-        OBJECT_STORE_CREATE_CONFIRMATION, PROFILE_BINDING_CONFIRMATION,
+        OBJECT_STORE_CREATE_CONFIRMATION, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+        PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION, PROFILE_BINDING_CONFIRMATION,
     };
     use crate::auth::DaemonLocalActor;
     use crate::runtime::{
@@ -1680,6 +1717,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
+                        verified_subject: None,
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -1737,6 +1775,7 @@ mod tests {
                     dry_run: true,
                     allow_store_drain: false,
                     confirmation_marker: String::new(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1754,6 +1793,7 @@ mod tests {
                     dry_run: true,
                     allow_store_delete: false,
                     confirmation_marker: String::new(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1779,6 +1819,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1819,6 +1860,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1891,6 +1933,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
+                        verified_subject: None,
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -1928,6 +1971,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -1998,6 +2042,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("claim-order".to_string()),
             administrator_actor: Some("codex".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2060,6 +2105,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("rollback-publication".to_string()),
             administrator_actor: None,
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2134,6 +2180,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("folder-create".to_string()),
             administrator_actor: Some("codex".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2988,7 +3035,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "preverified_host_authority_required"
+                if error.code == "administrator_authentication_required"
         ));
         let definitions = read_store_registry(&store_registry_path).expect("registry readable");
         assert_eq!(
@@ -3025,7 +3072,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -3354,6 +3401,7 @@ mod tests {
                     s3_prefix: Some("incoming".to_string()),
                     s3_expectation: None,
                     idempotency_key: None,
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |event| {
@@ -3607,6 +3655,7 @@ mod tests {
                 dry_run: false,
                 allow_store_drain: true,
                 confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
@@ -3627,6 +3676,7 @@ mod tests {
                 dry_run: false,
                 allow_store_delete: true,
                 confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
@@ -3670,6 +3720,7 @@ mod tests {
                     dry_run: false,
                     allow_ingest_queue_drain: true,
                     confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 },
             ))
             .expect("request handled");
@@ -3679,6 +3730,64 @@ mod tests {
             DaemonApiResponse::Error(error)
                 if error.code == "administrator_authentication_required"
         ));
+    }
+
+    #[test]
+    fn maintenance_operations_reject_direct_os_authority_even_with_spoofed_subject() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let root = DaemonLocalActor::new(0).with_username("root");
+        let requests = vec![
+            DaemonApiRequest::StoreDrain(StoreDrainRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_drain: true,
+                confirmation_marker: crate::api::STORE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreDelete(StoreDeleteRequest {
+                store_id: "archive".to_string(),
+                dry_run: false,
+                allow_store_delete: true,
+                confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreRepair(StoreRepairRequest {
+                store_id: None,
+                dry_run: false,
+                confirmation: crate::api::STORE_REPAIR_CONFIRMATION.to_string(),
+                reconcile_s3: false,
+                s3_prefix: None,
+                s3_expectation: None,
+                idempotency_key: None,
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::StoreDeduplicate(StoreDeduplicateRequest {
+                store_id: None,
+                dry_run: false,
+                confirmation: crate::api::STORE_DEDUPLICATE_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+            DaemonApiRequest::IngestQueueDrain(IngestQueueDrainRequest {
+                store_id: "archive".to_string(),
+                reason: "authority regression".to_string(),
+                dry_run: false,
+                allow_ingest_queue_drain: true,
+                confirmation_marker: crate::api::INGEST_QUEUE_DRAIN_CONFIRMATION.to_string(),
+                verified_subject: Some("spoofed-subject".to_string()),
+            }),
+        ];
+
+        for request in requests {
+            let response = handler
+                .handle_with_progress_for_actor(request, Some(&root), |_| Ok(()))
+                .expect("request handled");
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
     }
 
     #[test]
@@ -3711,13 +3820,55 @@ mod tests {
         let response = handler
             .handle(DaemonApiRequest::DiskRetire(DiskRetireRequest {
                 disk_id: "disk-a".to_string(),
+                verified_subject: None,
             }))
             .expect("request handled");
 
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
+        ));
+    }
+
+    #[test]
+    fn disk_retirement_rejects_root_even_when_a_pistis_subject_is_present() {
+        let handler =
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let root = DaemonLocalActor::new(0).with_username("root");
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::DiskRetire(DiskRetireRequest {
+                    disk_id: "disk-a".to_string(),
+                    verified_subject: Some(verified_pistis_subject()),
+                }),
+                Some(&root),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_authority_required"
+        ));
+    }
+
+    #[test]
+    fn disk_authority_requires_fixed_peer_and_versioned_pistis_subject() {
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
+
+        assert!(require_verified_pistis_host_authority(
+            Some(&service_peer),
+            Some(&verified_pistis_subject()),
+            "disk retirement",
+        )
+        .is_ok());
+        assert!(matches!(
+            require_verified_pistis_host_authority(Some(&service_peer), None, "disk retirement"),
+            Err(error) if error.code == "preverified_host_subject_required"
         ));
     }
 
@@ -5199,6 +5350,16 @@ mod tests {
         }
     }
 
+    fn verified_pistis_subject() -> PreverifiedHostSubject {
+        PreverifiedHostSubject {
+            schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: PREVERIFIED_HOST_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis:operator-1".to_string(),
+            session_id: "session-1".to_string(),
+            correlation_id: "request-1".to_string(),
+        }
+    }
+
     fn temp_root(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "dasobjectstore-request-handler-{label}-{}",
@@ -5239,6 +5400,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some(format!("{store_id}-auth")),
             administrator_actor: Some("spoofed-request-actor".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         }
     }
@@ -5326,7 +5488,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -5345,6 +5507,7 @@ mod tests {
                     destination_store_id: "destination-store".to_string(),
                     client_request_id: None,
                     administrator_actor: Some("spoofed".to_string()),
+                    verified_subject: None,
                     confirmation_marker: crate::api::PROFILE_MIGRATION_CONFIRMATION.to_string(),
                 },
             ))
@@ -5352,7 +5515,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
     }
 
@@ -5383,7 +5546,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }

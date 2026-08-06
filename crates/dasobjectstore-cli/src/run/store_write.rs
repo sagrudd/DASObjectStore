@@ -4,110 +4,27 @@ use super::*;
 use dasobjectstore_core::store::{CapacityBehavior, CapacityPolicy, ExportPolicy, RetentionPolicy};
 
 pub(super) fn run_store_profile_binding(
-    args: &StoreProfileBindingArgs,
-    writer: &mut impl Write,
+    _args: &StoreProfileBindingArgs,
+    _writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let manifest_json = fs::read_to_string(args.manifest()).map_err(CliError::Io)?;
-    let manifest = ObjectStoreManifest::decode_json(&manifest_json)
-        .map_err(|error| CliError::CommandFailed(error.to_string()))?;
-    let operation = match args.operation() {
-        StoreProfileBindingOperation::Create => ProfileBindingOperation::Create,
-        StoreProfileBindingOperation::Provision => ProfileBindingOperation::Provision,
-        StoreProfileBindingOperation::Adopt => ProfileBindingOperation::Adopt,
-    };
-    let config = DaemonRuntimeConfig::default_packaged();
-    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
-        .register_profile_binding(ProfileBindingRequest {
-            operation,
-            manifest,
-            capacity: args
-                .capacity_limit_bytes()
-                .map(|limit| CapacityPolicy::bounded(limit, args.backend_reserve_bytes()))
-                .unwrap_or_default(),
-            store_definition: None,
-            backend_root: args.backend_root().to_path_buf(),
-            ssd_staging_root: args.ssd_staging_root().map(Path::to_path_buf),
-            dry_run: args.dry_run(),
-            client_request_id: None,
-            administrator_actor: std::env::var("USER").ok(),
-            confirmation_marker: args.confirm().to_string(),
-        })?;
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &response)?;
-        writer.write_all(b"\n")?;
-    } else {
-        writeln!(
-            writer,
-            "Profile binding {}",
-            if args.dry_run() {
-                "validated"
-            } else {
-                "registered"
-            }
-        )?;
-        writeln!(writer, "Store: {}", response.store_id)?;
-        writeln!(writer, "Profile: {}", response.deployment_profile.name())?;
-        // Backend paths are daemon-owned implementation details and must not
-        // cross the profile-binding transport boundary.
-        writeln!(writer, "Backend root: daemon-managed")?;
-        writeln!(writer, "Adopted objects: {}", response.adopted_object_count)?;
-        writeln!(writer, "Adopted bytes: {}", response.adopted_bytes)?;
-        if response.operation == ProfileBindingOperation::Provision {
-            writeln!(
-                writer,
-                "Provisioning: {}",
-                if response.reused {
-                    "reused existing binding"
-                } else {
-                    "created binding"
-                }
-            )?;
-        }
-        writeln!(writer, "Job: {}", response.accepted.job_id)?;
-    }
-    Ok(())
+    Err(CliError::CommandFailed(profile_authority_required_message(
+        "store profile-binding",
+    )))
 }
 
 pub(super) fn run_store_profile_migration(
-    args: &StoreProfileMigrationArgs,
-    writer: &mut impl Write,
+    _args: &StoreProfileMigrationArgs,
+    _writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let config = DaemonRuntimeConfig::default_packaged();
-    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
-        .profile_migration(dasobjectstore_daemon::api::ProfileMigrationRequest {
-            migration_id: args.migration_id().to_string(),
-            source_store_id: args.source_store_id().to_string(),
-            destination_store_id: args.destination_store_id().to_string(),
-            client_request_id: None,
-            administrator_actor: std::env::var("USER").ok(),
-            confirmation_marker: args.confirm().to_string(),
-        })?;
-    if args.json() {
-        serde_json::to_writer_pretty(&mut *writer, &response)?;
-        writer.write_all(b"\n")?;
-    } else {
-        writeln!(writer, "Migration: {}", response.migration_id)?;
-        writeln!(writer, "Source store: {}", response.source_store_id)?;
-        writeln!(
-            writer,
-            "Destination store: {}",
-            response.destination_store_id
-        )?;
-        writeln!(
-            writer,
-            "Verified objects: {}",
-            response.verified_object_count
-        )?;
-        writeln!(
-            writer,
-            "Destination logical bytes: {}",
-            response.destination_used_bytes
-        )?;
-        writeln!(writer, "State: {:?}", response.state)?;
-        writeln!(writer, "Source retained: {}", response.source_retained)?;
-        writeln!(writer, "Job: {}", response.accepted.job_id)?;
-    }
-    Ok(())
+    Err(CliError::CommandFailed(profile_authority_required_message(
+        "store profile-migrate",
+    )))
+}
+
+fn profile_authority_required_message(command: &str) -> String {
+    format!(
+        "{command} is available only through the Monas host authority: a fixed DAS GUI/API service peer must submit a verified Pistis subject. Direct CLI, root, sudo, and local-group authority are rejected"
+    )
 }
 
 pub(super) fn run_store_drain(
