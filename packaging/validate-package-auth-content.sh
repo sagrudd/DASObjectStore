@@ -13,8 +13,9 @@ if [[ ! -d "$payload_root" ]]; then
   exit 1
 fi
 
-forbidden_path_pattern='(^|/)(self[-_]sign|development[-_]self|dev[-_]issuer|validation[-_]private[-_]key)'
+forbidden_path_pattern='(^|/)(self[-_]sign|development[-_]self|dev[-_]issuer|validation[-_]private[-_]key|etc/pam\.d/|[^/]*(local[-_]?auth|auth[-_]?migrate)[^/]*)'
 forbidden_text_pattern='DASOBJECTSTORE_(ENABLE|ALLOW|DEVELOPMENT)(_DEVELOPMENT)?_SELF_SIGNING|development[_-]self[_-]signing[_-](enabled|issuer|key)|validation[_-]private[_-]key|self[_-]signing[_-](key|issuer)|-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----'
+lifecycle_text_pattern='(^|[[:space:];])(systemctl[[:space:]]+(enable|start|restart|try-restart|stop)|service[[:space:]]|invoke-rc\.d[[:space:]]|deb-systemd-invoke[[:space:]])'
 
 while IFS= read -r -d '' path; do
   relative="${path#"$payload_root"/}"
@@ -32,6 +33,14 @@ while IFS= read -r -d '' path; do
     printf 'development self-signing marker is forbidden in package payload: %s\n' "$relative" >&2
     exit 1
   fi
+
+  # Maintainer scripts may reload unit metadata, but package install/upgrade
+  # must never activate or interrupt the storage runtime.
+  if [[ "$relative" == DEBIAN/postinst || "$relative" == DEBIAN/preinst || "$relative" == DEBIAN/prerm ]] \
+    && grep -Eiq -- "$lifecycle_text_pattern" "$path"; then
+    printf 'automatic service lifecycle command is forbidden in package payload: %s\n' "$relative" >&2
+    exit 1
+  fi
 done < <(find "$payload_root" -type f -print0)
 
-printf 'package auth guard passed: no development self-signing payload or enablement marker\n'
+printf 'package auth guard passed: no retired local authority or automatic service lifecycle payload\n'

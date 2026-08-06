@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.158.1] - 2026-08-06
+
+### Security
+
+- Make Debian package installation and upgrade non-activating.  The
+  maintainer scripts now install files and reconcile non-secret service state
+  only; they never enable, start, restart, or stop DAS services.  Operators
+  retain explicit control of every runtime transition.
+- Extend the package-auth guard and regression suite to reject PAM and retired
+  local-human-authority payloads as well as automatic service activation.
+
 ## [0.158.0] - 2026-08-06
 
 ### Security
