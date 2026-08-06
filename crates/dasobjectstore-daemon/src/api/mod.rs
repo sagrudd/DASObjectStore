@@ -23,6 +23,7 @@ mod local_admin;
 mod object_browser;
 mod object_mutation;
 mod object_store;
+mod preverified_host;
 mod profile_binding;
 mod profile_browser;
 mod profile_capabilities;
@@ -189,6 +190,10 @@ pub use object_mutation::{ObjectPutRequest, ObjectPutResponse, ObjectPutValidati
 pub use object_store::{
     CreateObjectStoreRequest, CreateObjectStoreResponse, CreateObjectStoreValidationError,
     OBJECT_STORE_CREATE_CONFIRMATION,
+};
+pub use preverified_host::{
+    PreverifiedHostSubject, PreverifiedHostSubjectValidationError,
+    PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
 };
 pub use profile_binding::{
     ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
@@ -822,6 +827,7 @@ mod tests {
             create_service_user: true,
             dry_run: true,
             confirmation_marker: String::new(),
+            verified_subject: None,
         });
 
         request.validate().expect("dry-run request validates");

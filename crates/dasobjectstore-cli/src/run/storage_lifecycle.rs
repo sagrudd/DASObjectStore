@@ -46,54 +46,36 @@ pub(super) fn run_pool_repair(
 }
 
 pub(super) fn run_disk_retire(
-    args: &DiskRetireArgs,
-    writer: &mut impl Write,
+    _args: &DiskRetireArgs,
+    _writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let config = DaemonRuntimeConfig::default_packaged();
-    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
-    let response = client.disk_retire(DaemonDiskRetireRequest {
-        disk_id: args.disk_id().to_string(),
-    })?;
-    write_disk_retirement_report(&response.report, writer)?;
-    Ok(())
+    Err(CliError::CommandFailed(disk_authority_required_message(
+        "disk retire",
+    )))
 }
 
 pub(super) fn run_disk_force_retire(
-    args: &DiskForceRetireArgs,
-    writer: &mut impl Write,
+    _args: &DiskForceRetireArgs,
+    _writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    let config = DaemonRuntimeConfig::default_packaged();
-    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
-    let response = client.disk_force_retire(DaemonDiskForceRetireRequest {
-        disk_id: args.disk_id().to_string(),
-        allow_force_retire: args.allow_force_retire(),
-        confirmation_marker: args.confirm().to_string(),
-    })?;
-    write_disk_force_retirement_report(&response.report, writer)?;
-    Ok(())
+    Err(CliError::CommandFailed(disk_authority_required_message(
+        "disk force-retire",
+    )))
 }
 
 pub(super) fn run_disk_lockdown_das(
-    args: &DiskLockdownDasArgs,
-    writer: &mut impl Write,
+    _args: &DiskLockdownDasArgs,
+    _writer: &mut impl Write,
 ) -> Result<(), CliError> {
-    if !args.dry_run() && args.confirm() != LOCKDOWN_CONFIRMATION {
-        return Err(CliError::CommandFailed(format!(
-            "action confirmation mismatch; pass `{LOCKDOWN_CONFIRMATION}`"
-        )));
-    }
-    let config = DaemonRuntimeConfig::default_packaged();
-    let response = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path))
-        .disk_lockdown(DaemonDiskLockdownRequest {
-            mount_root: args.mount_root().to_path_buf(),
-            service_user: args.service_user().to_string(),
-            service_group: args.service_group().to_string(),
-            create_service_user: args.create_service_user(),
-            dry_run: args.dry_run(),
-            confirmation_marker: args.confirm().to_string(),
-        })?;
-    write_lockdown_das_report(&response, writer)?;
-    Ok(())
+    Err(CliError::CommandFailed(disk_authority_required_message(
+        "disk lockdown-das",
+    )))
+}
+
+fn disk_authority_required_message(command: &str) -> String {
+    format!(
+        "{command} is available only through the Monas host authority: a fixed DAS GUI/API service peer must submit a verified Pistis subject. Direct CLI, root, sudo, and local-group authority are rejected"
+    )
 }
 
 pub(super) fn run_disk_prepare_das(

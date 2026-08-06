@@ -1670,6 +1670,7 @@ mod tests {
                 create_service_user: false,
                 dry_run: true,
                 confirmation_marker: String::new(),
+                verified_subject: None,
             })
             .expect("disk lockdown response");
 
