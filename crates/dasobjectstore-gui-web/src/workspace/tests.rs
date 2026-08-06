@@ -369,6 +369,10 @@ fn primary_navigation_is_host_mode_aware_for_users_groups() {
         .iter()
         .map(|page| page.label())
         .collect();
+    let monas_labels: Vec<_> = primary_navigation_for_host(FrontendHost::Monas)
+        .iter()
+        .map(|page| page.label())
+        .collect();
 
     assert!(standalone_labels.contains(&"Activity"));
     assert!(synoptikon_labels.contains(&"Activity"));
@@ -378,6 +382,7 @@ fn primary_navigation_is_host_mode_aware_for_users_groups() {
     assert!(!synoptikon_labels.contains(&"Connections"));
     assert!(standalone_labels.contains(&"Local Access"));
     assert!(!synoptikon_labels.contains(&"Local Access"));
+    assert!(!monas_labels.contains(&"Local Access"));
 }
 
 #[test]
