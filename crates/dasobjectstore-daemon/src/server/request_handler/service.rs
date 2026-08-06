@@ -1047,6 +1047,34 @@ where
             Ok(DaemonApiResponse::ProfileReadiness(response))
         }
         DaemonApiRequest::UpsertEndpointInventory(request) => {
+            // Endpoint inventory changes daemon-owned integration state. The
+            // human subject must originate at the verified Pistis host route
+            // and cross this boundary only through the fixed packaged service
+            // peer; root, sudo, and POSIX groups are not authority sources.
+            if !request.dry_run {
+                let Some(actor) = actor else {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "administrator_authentication_required",
+                        "endpoint inventory requires the preverified host service peer",
+                    )));
+                };
+                if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "preverified_host_authority_required",
+                        "endpoint inventory requires the fixed preverified host service peer",
+                    )));
+                }
+                if request
+                    .administrator_actor
+                    .as_deref()
+                    .is_none_or(|subject| subject.trim().is_empty())
+                {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "preverified_host_subject_required",
+                        "endpoint inventory requires a verified Pistis subject from the preverified host service",
+                    )));
+                }
+            }
             let now = handler.clock.now_utc();
             let response = handler
                 .service_orchestrator

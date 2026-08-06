@@ -3143,6 +3143,68 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_inventory_rejects_direct_os_authority_and_missing_subject() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T00:05:00Z"),
+        );
+        let mut request = endpoint_inventory_request();
+        request.dry_run = false;
+        request.administrator_actor = None;
+
+        for actor in [
+            DaemonLocalActor::new(0).with_username("root"),
+            DaemonLocalActor::new(1000)
+                .with_username("sudo-user")
+                .with_groups(["sudo"]),
+            DaemonLocalActor::new(1001)
+                .with_username("das-admin")
+                .with_groups(["dasobjectstore-admin"]),
+        ] {
+            let response = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::UpsertEndpointInventory(request.clone()),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("request handled");
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
+
+        let service_peer =
+            DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
+        let missing_subject = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpsertEndpointInventory(request.clone()),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            missing_subject,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_subject_required"
+        ));
+
+        request.administrator_actor = Some("pistis-administrator".to_string());
+        let accepted = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpsertEndpointInventory(request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            accepted,
+            DaemonApiResponse::UpsertEndpointInventory(_)
+        ));
+    }
+
+    #[test]
     fn records_accepted_prepare_enclosure_job_in_registry() {
         let root = temp_root("record-prepare");
         let registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
