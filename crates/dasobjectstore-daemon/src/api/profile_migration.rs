@@ -1,4 +1,4 @@
-use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind};
+use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind, PreverifiedHostSubject};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::migration::MigrationState;
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,8 @@ pub struct ProfileMigrationRequest {
     pub client_request_id: Option<String>,
     #[serde(default)]
     pub administrator_actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_subject: Option<PreverifiedHostSubject>,
     pub confirmation_marker: String,
 }
 
@@ -151,6 +153,7 @@ mod tests {
             destination_store_id: "destination-store".to_string(),
             client_request_id: Some("request-1".to_string()),
             administrator_actor: None,
+            verified_subject: None,
             confirmation_marker: PROFILE_MIGRATION_CONFIRMATION.to_string(),
         }
     }

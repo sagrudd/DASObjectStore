@@ -2035,6 +2035,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("claim-order".to_string()),
             administrator_actor: Some("codex".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2097,6 +2098,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("rollback-publication".to_string()),
             administrator_actor: None,
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2171,6 +2173,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("folder-create".to_string()),
             administrator_actor: Some("codex".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -3025,7 +3028,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "preverified_host_authority_required"
+                if error.code == "administrator_authentication_required"
         ));
         let definitions = read_store_registry(&store_registry_path).expect("registry readable");
         assert_eq!(
@@ -3062,7 +3065,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -5328,6 +5331,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some(format!("{store_id}-auth")),
             administrator_actor: Some("spoofed-request-actor".to_string()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         }
     }
@@ -5415,7 +5419,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -5434,6 +5438,7 @@ mod tests {
                     destination_store_id: "destination-store".to_string(),
                     client_request_id: None,
                     administrator_actor: Some("spoofed".to_string()),
+                    verified_subject: None,
                     confirmation_marker: crate::api::PROFILE_MIGRATION_CONFIRMATION.to_string(),
                 },
             ))
@@ -5441,7 +5446,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
     }
 
@@ -5472,7 +5477,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
