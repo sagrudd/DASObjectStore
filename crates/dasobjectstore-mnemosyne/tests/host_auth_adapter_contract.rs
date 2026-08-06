@@ -172,6 +172,76 @@ async fn preverified_router_exposes_host_composed_api_only_with_verified_context
     cleanup(&root);
 }
 
+/// Deletion-acceptance proof for the host composition. This is intentionally
+/// an end-to-end route reachability audit rather than a source-text check: a
+/// future router merge must not make the retained standalone local authority
+/// routes reachable through a verified Monas/Pistis product mount.
+#[tokio::test]
+async fn preverified_host_composition_has_no_legacy_human_authority_reachability() {
+    let verified_app = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_administrator"])));
+
+    for (method, path) in [
+        ("POST", "/api/register"),
+        ("POST", "/api/login"),
+        ("POST", "/api/logout"),
+        ("POST", "/api/session"),
+        ("POST", "/api/v1/remote/authenticate"),
+        ("GET", "/api/v1/workspaces/users-groups"),
+    ] {
+        let response = verified_app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(FEDERATED_CSRF_HEADER, csrf_binding())
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "legacy local-authority route {method} {path} must not be mounted"
+        );
+    }
+
+    // Raw cookies, bearer/session headers, and claimed OS identities cannot
+    // establish a host actor or reach a daemon-backed operation. Only the
+    // embedding Monas/Pistis middleware may insert the verified context.
+    for (method, path) in [
+        ("GET", "/api/v1/dashboard/home"),
+        ("GET", "/api/v1/object-stores/store-1/browser"),
+        ("POST", "/api/v1/workspaces/admin/ingest-control"),
+    ] {
+        let response = preverified_dasobjectstore_router(Router::new(), None)
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(COOKIE, "monas_session=root:raw-cookie")
+                    .header("authorization", "Bearer raw-local-session")
+                    .header("x-dasobjectstore-username", "root")
+                    .header("x-dasobjectstore-session-token", "local-session")
+                    .header(FEDERATED_CSRF_HEADER, csrf_binding())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"action":"pause","reason":"raw authority","dry_run":true}"#,
+                    ))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "raw authority must not reach host route {method} {path}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn preverified_enclosures_dashboard_uses_closed_verified_pistis_roles() {
     let request = || {

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.157.40] - 2026-08-06
+
+### Security
+
+- Add a deletion-acceptance reachability regression for the preverified host
+  composition. It proves that retained local registration/login/session,
+  remote-local authentication, and users/groups routes are not mounted, and
+  that raw cookies, bearer/session headers, and claimed OS identities cannot
+  reach dashboard, browser, or daemon-backed administrator operations without
+  a host-inserted verified Pistis context. No legacy component or package
+  payload is removed by this release.
+
 ## [0.157.39] - 2026-08-06
 
 ### Security
