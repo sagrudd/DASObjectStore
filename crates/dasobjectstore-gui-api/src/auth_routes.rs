@@ -5,7 +5,8 @@ use crate::{
     discover_local_user, AuthenticatedGuiActor, DasCapability, DasRolePolicy, DashboardWarning,
     LocalAuthStore, LocalAuthStoreError, LocalPasswordAuthError, LoginResponse, LogoutResponse,
     PamLocalPasswordAuthenticator, RegisterResponse, SessionCheckResponse,
-    UsersGroupsWorkspaceView, VerifiedHostAuthenticatedContext, VerifiedHostStoreScope,
+    UsersGroupsWorkspaceView, VerifiedHostAuthenticatedContext, VerifiedHostObjectPrefixScope,
+    VerifiedHostStoreScope,
 };
 
 #[path = "auth_admin_clients.rs"]
@@ -1089,6 +1090,34 @@ pub(crate) fn require_preverified_host_viewer_for_store(
             StatusCode::FORBIDDEN,
             "host_store_scope_denied",
             "the verified host session is not authorised for this ObjectStore",
+        ));
+    }
+    Ok(())
+}
+
+/// Require an operator role plus the exact in-process ObjectStore/prefix
+/// grant that was bound to the same verified Pistis session.  Multipart
+/// writes never inherit local browser, OS, provider, PAM, or sudo authority.
+pub(crate) fn require_preverified_host_operator_for_object_prefix(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+    scope: Option<&VerifiedHostObjectPrefixScope>,
+    store_id: &str,
+    object_id: &str,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_operator(actor, verified)?;
+    let Some(scope) = scope else {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_object_prefix_scope_required",
+            "an exact verified ObjectStore prefix scope is required for multipart operations",
+        ));
+    };
+    if !scope.permits(verified, store_id, object_id) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_object_prefix_scope_denied",
+            "the verified host session is not authorised for this ObjectStore object prefix",
         ));
     }
     Ok(())
@@ -4463,6 +4492,50 @@ mod tests {
         assert_eq!(
             response_json(response).await["code"],
             "host_store_scope_denied"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_multipart_requires_a_verified_object_prefix_scope() {
+        let app = super::auth_router::preverified_host_profile_multipart_router();
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data/multipart/reservation-1/status?key=reads/sample.fastq")
+            .extension(verified_host_context("storage_operator"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_object_prefix_scope_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_multipart_rejects_a_prefix_outside_its_verified_scope() {
+        let app = super::auth_router::preverified_host_profile_multipart_router();
+        let verified = verified_host_context("storage_operator");
+        let scope = crate::VerifiedHostObjectPrefixScope::for_verified_context(
+            &verified,
+            "generated-data",
+            "reads/approved",
+        )
+        .expect("scope builds");
+        let request = Request::builder()
+            .uri("/api/v1/profile-s3/stores/generated-data/multipart/reservation-1/status?key=reads/unapproved/sample.fastq")
+            .extension(verified)
+            .extension(scope)
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_object_prefix_scope_denied"
         );
     }
 

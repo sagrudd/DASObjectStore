@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.35] - 2026-08-06
+
+### Security
+
+- Add host-composed multipart part, status, and completion routes that require
+  a matching verified Pistis `storage_operator` plus an in-process scope bound
+  to the same subject, session, correlation, ObjectStore, and canonical object
+  prefix. Missing, substituted, or widened scopes fail before daemon work;
+  these host routes emit no delegated OS actor or provider credential.
+
 ## [0.157.34] - 2026-08-06
 
 ### Security

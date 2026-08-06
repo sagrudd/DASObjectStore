@@ -121,6 +121,61 @@ pub struct VerifiedHostStoreScope {
     store_ids: Vec<String>,
 }
 
+/// An exact object-prefix grant derived while the embedding host verified the
+/// same Pistis session.  Multipart operations are writes, so a store grant is
+/// deliberately insufficient: the caller must also carry the narrow prefix
+/// that the host authorised for this session.
+///
+/// This remains an in-process host extension.  It is neither a browser
+/// header nor a DAS-issued token, and cannot be reconstructed from a local
+/// user, password, PAM result, POSIX group, or sudo policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedHostObjectPrefixScope {
+    subject_id: String,
+    session_id: String,
+    correlation_id: String,
+    store_id: String,
+    canonical_prefix: String,
+}
+
+impl VerifiedHostObjectPrefixScope {
+    pub fn for_verified_context(
+        context: &VerifiedHostAuthenticatedContext,
+        store_id: impl Into<String>,
+        canonical_prefix: impl Into<String>,
+    ) -> Result<Self, HostAuthContextError> {
+        let store_id = store_id.into();
+        let canonical_prefix = canonical_prefix.into();
+        validate_id("store_id", &store_id)?;
+        validate_prefix(&canonical_prefix)?;
+        Ok(Self {
+            subject_id: context.context().subject_id.clone(),
+            session_id: context.context().session_id.clone(),
+            correlation_id: context.context().correlation_id.clone(),
+            store_id,
+            canonical_prefix,
+        })
+    }
+
+    /// Permit one object only when the scope was constructed for this exact
+    /// verified session, ObjectStore and canonical prefix.
+    pub fn permits(
+        &self,
+        context: &VerifiedHostAuthenticatedContext,
+        store_id: &str,
+        object_id: &str,
+    ) -> bool {
+        self.subject_id == context.context().subject_id
+            && self.session_id == context.context().session_id
+            && self.correlation_id == context.context().correlation_id
+            && self.store_id == store_id
+            && object_id.starts_with(&self.canonical_prefix)
+            && (self.canonical_prefix.is_empty()
+                || object_id.len() == self.canonical_prefix.len()
+                || object_id.as_bytes().get(self.canonical_prefix.len()) == Some(&b'/'))
+    }
+}
+
 impl VerifiedHostStoreScope {
     /// Bind the exact allowed stores to an already verified host session.
     /// Empty scopes are valid and deny every store.
@@ -225,6 +280,23 @@ fn validate_id(field: &'static str, value: &str) -> Result<(), HostAuthContextEr
     }
 }
 
+fn validate_prefix(value: &str) -> Result<(), HostAuthContextError> {
+    if value.is_empty() {
+        return Ok(());
+    }
+    if value.starts_with('/')
+        || value.ends_with('/')
+        || value
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return Err(HostAuthContextError::InvalidField {
+            field: "canonical_prefix",
+        });
+    }
+    validate_id("canonical_prefix", value)
+}
+
 fn validate_sha256(value: &str) -> Result<(), HostAuthContextError> {
     let digest = value.strip_prefix("sha256:").unwrap_or_default();
     if digest.len() == 64
@@ -322,5 +394,31 @@ mod tests {
         let other = accept_host_authenticated_context(other, 1_500, &LiveVerifier(true))
             .expect("other context is live");
         assert!(!scope.permits(&other, "generated-data"));
+    }
+
+    #[test]
+    fn object_prefix_scope_is_exact_and_bound_to_the_verified_session() {
+        let verified = accept_host_authenticated_context(
+            context(HostAuthenticationAuthority::MonasStandalone),
+            1_500,
+            &LiveVerifier(true),
+        )
+        .expect("live context");
+        let scope = VerifiedHostObjectPrefixScope::for_verified_context(
+            &verified,
+            "generated-data",
+            "reads/run-1",
+        )
+        .expect("scope builds");
+
+        assert!(scope.permits(&verified, "generated-data", "reads/run-1/sample.fastq"));
+        assert!(!scope.permits(&verified, "generated-data", "reads/run-10/sample.fastq"));
+        assert!(!scope.permits(&verified, "other-store", "reads/run-1/sample.fastq"));
+
+        let mut other = context(HostAuthenticationAuthority::MonasStandalone);
+        other.session_id = "session-2".to_string();
+        let other = accept_host_authenticated_context(other, 1_500, &LiveVerifier(true))
+            .expect("other context is live");
+        assert!(!scope.permits(&other, "generated-data", "reads/run-1/sample.fastq"));
     }
 }
