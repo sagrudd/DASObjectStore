@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.24] - 2026-08-06
+
+### Changed
+
+- Added the host-composed, verified-Pistis `storage_operator` route for
+  daemon-owned profile S3 object deletion. The route requires a matching
+  verified host subject, has no local authority dependency, and keeps deletion
+  behind the bounded daemon bridge.
+
 ## [0.157.23] - 2026-08-06
 
 ### Security

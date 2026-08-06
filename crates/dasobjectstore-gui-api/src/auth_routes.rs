@@ -29,7 +29,7 @@ mod easyconnect_discovery;
 #[path = "profile_catalogue.rs"]
 mod profile_catalogue;
 #[path = "profile_delete.rs"]
-mod profile_delete;
+pub(crate) mod profile_delete;
 #[path = "profile_download.rs"]
 mod profile_download;
 #[path = "profile_multipart.rs"]
@@ -905,9 +905,25 @@ async fn preverified_host_cancel_admin_job(
         .map(Json)
 }
 
+pub(crate) fn require_preverified_host_operator(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_capability(actor, verified, DasCapability::Operate, "operator")
+}
+
 fn require_preverified_host_administrator(
     actor: &AuthenticatedGuiActor,
     verified: &VerifiedHostAuthenticatedContext,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_capability(actor, verified, DasCapability::Administer, "administrator")
+}
+
+fn require_preverified_host_capability(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+    capability: DasCapability,
+    role_name: &str,
 ) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
     if actor.subject_id != verified.context().subject_id {
         return Err(route_error(
@@ -916,11 +932,15 @@ fn require_preverified_host_administrator(
             "the supplied host actor does not match the verified Pistis context",
         ));
     }
-    if !DasRolePolicy::from_verified(verified).permits(DasCapability::Administer) {
+    if !DasRolePolicy::from_verified(verified).permits(capability) {
         return Err(route_error(
             StatusCode::FORBIDDEN,
-            "host_administrator_role_required",
-            "a verified DAS storage_administrator role is required for this operation",
+            match capability {
+                DasCapability::View => "host_viewer_role_required",
+                DasCapability::Operate => "host_operator_role_required",
+                DasCapability::Administer => "host_administrator_role_required",
+            },
+            format!("a verified DAS storage_{role_name} role is required for this operation"),
         ));
     }
     Ok(())
@@ -4003,6 +4023,61 @@ mod tests {
                 job_id: "enclosure-prepare-1".to_string(),
                 reason: Some("operator requested cancellation".to_string()),
             }]
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_profile_delete_requires_verified_pistis_operator() {
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: recording_enclosure_client(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/v1/profile-s3/stores/zymo/objects/reads.fastq")
+            .extension(verified_host_context("storage_viewer"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_operator_role_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_profile_delete_admits_pistis_operator_before_daemon_work() {
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: recording_enclosure_client(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/v1/profile-s3/stores/%20/objects/reads.fastq")
+            .extension(verified_host_context("storage_operator"))
+            .body(Body::empty())
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        // The request is rejected by StoreId validation rather than the
+        // authority guard, proving the verified Pistis operator reached the
+        // daemon-owned operation without touching a local identity source.
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response_json(response).await["code"],
+            "profile_s3_invalid_store_id"
         );
     }
 

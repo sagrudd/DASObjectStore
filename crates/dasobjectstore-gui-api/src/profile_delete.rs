@@ -5,10 +5,11 @@
 //! and logical-capacity reconciliation.
 
 use super::{
-    admin_daemon_bridge_error_with_code, route_error, AuthRouteError, AuthenticatedGuiActor,
+    admin_daemon_bridge_error_with_code, require_preverified_host_operator, route_error,
+    AuthRouteError, AuthenticatedGuiActor, VerifiedHostAuthenticatedContext,
 };
 use axum::{
-    extract::{Path, Query},
+    extract::{Extension, Path, Query},
     http::StatusCode,
     Json,
 };
@@ -20,7 +21,7 @@ use dasobjectstore_daemon::{
 use serde::Deserialize;
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct ProfileDeleteQuery {
+pub(crate) struct ProfileDeleteQuery {
     pub version: Option<u64>,
 }
 
@@ -28,6 +29,31 @@ pub(super) async fn standalone_profile_s3_delete(
     Path((store_id, object_id)): Path<(String, String)>,
     Query(query): Query<ProfileDeleteQuery>,
     _actor: AuthenticatedGuiActor,
+) -> Result<Json<ProfileS3DeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
+    delete_profile_s3_object(store_id, object_id, query).await
+}
+
+/// Delete a profile object for an actor that Monas or Synoptikon has already
+/// verified with Pistis.
+///
+/// The host-composed route deliberately derives its authority from the
+/// matching verified subject and closed DAS `storage_operator` role only. It
+/// has no local session, password, PAM, POSIX user/group, or sudo dependency;
+/// deletion remains daemon-owned and uses the bounded daemon bridge.
+pub(crate) async fn preverified_host_profile_s3_delete(
+    Path((store_id, object_id)): Path<(String, String)>,
+    Query(query): Query<ProfileDeleteQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<ProfileS3DeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_operator(&actor, &verified)?;
+    delete_profile_s3_object(store_id, object_id, query).await
+}
+
+async fn delete_profile_s3_object(
+    store_id: String,
+    object_id: String,
+    query: ProfileDeleteQuery,
 ) -> Result<Json<ProfileS3DeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
     let store_id = store_id.parse::<StoreId>().map_err(|error| {
         route_error(
