@@ -16,7 +16,7 @@ impl LocalUserAuthorityProvider for SystemLocalUserAuthorityProvider {
         &self,
         username: &str,
     ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError> {
-        discover_local_user(username)
+        crate::discover_local_user(username)
     }
 }
 

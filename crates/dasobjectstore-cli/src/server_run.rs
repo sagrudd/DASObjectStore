@@ -8,9 +8,9 @@ use axum_server::tls_rustls::RustlsConfig;
 use dasobjectstore_gui_api::{
     application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate, s3_gateway_router,
-    LocalAuthStore, LocalAuthStoreError, MtlsApplicationConnectInfo, MtlsListenerError,
-    StandaloneAuthenticationConfig, StandaloneS3ConnectionDescriptor, StandaloneServerConfig,
-    StandaloneServerConfigError, StandaloneTlsAssetError, StandaloneTlsAssetReport,
+    MtlsApplicationConnectInfo, MtlsListenerError, StandaloneAuthenticationConfig,
+    StandaloneS3ConnectionDescriptor, StandaloneServerConfig, StandaloneServerConfigError,
+    StandaloneTlsAssetError, StandaloneTlsAssetReport,
 };
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -54,8 +54,6 @@ async fn start_server(
 ) -> Result<(), ServerRunError> {
     let socket_addr = config.socket_addr()?;
     ensure_standalone_tls_assets(&config)?;
-    let auth_store = LocalAuthStore::default_standalone();
-    let revoked_sessions = auth_store.revoke_all_sessions()?;
     let tls =
         RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
             .await?;
@@ -66,14 +64,7 @@ async fn start_server(
         "dasobjectstore-server listening on https://{}",
         socket_addr
     )?;
-    if revoked_sessions > 0 {
-        writeln!(
-            writer,
-            "dasobjectstore-server invalidated {revoked_sessions} existing session(s)"
-        )?;
-    }
     let web_root = config.product_root.join("web");
-    let auth_root = auth_store.root().to_path_buf();
     let mtls_enabled = config.application_mtls.enabled;
     let s3_ingress = config.s3_ingress.clone();
     let public_s3_descriptor = match (
@@ -93,7 +84,6 @@ async fn start_server(
     let primary_router = standalone_router_with_application_auth(
         web_root,
         config.authentication.clone(),
-        auth_root,
         !mtls_enabled,
         public_s3_descriptor,
         Some(config.public_base_url.clone()),
@@ -146,15 +136,10 @@ async fn serve_direct_s3_tls(
 }
 
 #[cfg(test)]
-fn standalone_router(
-    web_root: PathBuf,
-    authentication: StandaloneAuthenticationConfig,
-    auth_root: PathBuf,
-) -> Router {
+fn standalone_router(web_root: PathBuf, authentication: StandaloneAuthenticationConfig) -> Router {
     standalone_router_with_application_auth(
         web_root,
         authentication,
-        auth_root,
         true,
         None,
         None,
@@ -167,7 +152,6 @@ fn standalone_router(
 fn standalone_router_with_application_auth(
     web_root: PathBuf,
     authentication: StandaloneAuthenticationConfig,
-    auth_root: PathBuf,
     include_application_auth: bool,
     s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
     public_base_url: Option<String>,
@@ -177,10 +161,8 @@ fn standalone_router_with_application_auth(
     let index_root_with_slash = web_root.clone();
     let asset_root = web_root;
     let host_mode = authentication.gui_api_host_mode();
-    let auth_store = LocalAuthStore::new(auth_root);
     let root_api = gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
         host_mode,
-        auth_store.clone(),
         include_application_auth,
         s3_descriptor.clone(),
         public_base_url.clone(),
@@ -188,7 +170,6 @@ fn standalone_router_with_application_auth(
     );
     let product_api = gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
         host_mode,
-        auth_store,
         include_application_auth,
         s3_descriptor,
         public_base_url,
@@ -320,7 +301,6 @@ fn bytes_response(
 pub(crate) enum ServerRunError {
     Config(StandaloneServerConfigError),
     Tls(StandaloneTlsAssetError),
-    Auth(LocalAuthStoreError),
     Mtls(MtlsListenerError),
     Io(io::Error),
     Json(serde_json::Error),
@@ -331,7 +311,6 @@ impl Display for ServerRunError {
         match self {
             Self::Config(err) => write!(formatter, "{err}"),
             Self::Tls(err) => write!(formatter, "{err}"),
-            Self::Auth(err) => write!(formatter, "{err}"),
             Self::Mtls(err) => write!(formatter, "application mTLS listener failed: {err}"),
             Self::Io(err) => write!(formatter, "server output failed: {err}"),
             Self::Json(err) => write!(formatter, "server JSON output failed: {err}"),
@@ -350,12 +329,6 @@ impl From<StandaloneServerConfigError> for ServerRunError {
 impl From<StandaloneTlsAssetError> for ServerRunError {
     fn from(err: StandaloneTlsAssetError) -> Self {
         Self::Tls(err)
-    }
-}
-
-impl From<LocalAuthStoreError> for ServerRunError {
-    fn from(err: LocalAuthStoreError) -> Self {
-        Self::Auth(err)
     }
 }
 
@@ -526,8 +499,7 @@ mod tests {
         write_web_asset(&root, "dasobjectstore-gui-web-abcdef_bg.wasm", "wasm");
         write_web_asset(&root, "styles-abcdef.css", "body{}");
 
-        let auth_root = temp_root("server-run-auth");
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+        let response = standalone_router(root.clone(), Default::default())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
@@ -540,7 +512,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
 
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+        let response = standalone_router(root.clone(), Default::default())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/dasobjectstore-gui-web-abcdef.js")
@@ -556,7 +528,7 @@ mod tests {
             "public, max-age=31536000, immutable"
         );
 
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+        let response = standalone_router(root.clone(), Default::default())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/api/v1/health")
@@ -566,15 +538,13 @@ mod tests {
             .await
             .expect("api response");
 
-        assert_eq!(response.status(), StatusCode::OK);
-        cleanup(&auth_root);
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         cleanup(&root);
     }
 
     #[tokio::test]
     async fn primary_listener_removes_application_auth_when_mtls_is_enabled() {
         let root = temp_root("server-run-mtls-isolation");
-        let auth_root = temp_root("server-run-mtls-isolation-auth");
         let request = || {
             Request::builder()
                 .method("POST")
@@ -587,7 +557,6 @@ mod tests {
         let isolated = standalone_router_with_application_auth(
             root.clone(),
             Default::default(),
-            auth_root.clone(),
             false,
             None,
             None,
@@ -603,7 +572,6 @@ mod tests {
         let compatible = standalone_router_with_application_auth(
             root.clone(),
             Default::default(),
-            auth_root.clone(),
             true,
             None,
             None,
@@ -615,18 +583,15 @@ mod tests {
         .await
         .expect("compatible response");
         assert_ne!(compatible.status(), StatusCode::NOT_FOUND);
-        cleanup(&auth_root);
         cleanup(&root);
     }
 
     #[tokio::test]
     async fn easyconnect_discovery_uses_configured_public_base_url() {
         let root = temp_root("server-run-public-base");
-        let auth_root = temp_root("server-run-public-base-auth");
         let response = standalone_router_with_application_auth(
             root.clone(),
             Default::default(),
-            auth_root.clone(),
             true,
             None,
             Some("https://192.0.2.10:8448".to_string()),
@@ -656,7 +621,6 @@ mod tests {
             discovery["pairing_exchange_url"],
             "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
         );
-        cleanup(&auth_root);
         cleanup(&root);
     }
 
@@ -664,7 +628,6 @@ mod tests {
     async fn static_asset_lane_queues_when_all_read_permits_are_busy() {
         let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-web-saturated");
-        let auth_root = temp_root("server-run-web-saturated-auth");
         write_web_asset(&root, "index.html", "<!doctype html>");
 
         let permits = static_asset_read_permits()
@@ -673,7 +636,7 @@ mod tests {
             .await
             .expect("all static asset permits acquired");
         let queued = tokio::spawn(
-            standalone_router(root.clone(), Default::default(), auth_root.clone()).oneshot(
+            standalone_router(root.clone(), Default::default()).oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
                     .body(Body::empty())
@@ -693,33 +656,70 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
 
-        cleanup(&auth_root);
         cleanup(&root);
     }
 
     #[tokio::test]
-    async fn standalone_router_mounts_local_auth_when_configured() {
+    async fn standalone_router_omits_local_auth_when_configured() {
         let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-auth-web");
-        let auth_root = temp_root("server-run-auth-state");
         write_web_asset(&root, "index.html", "<!doctype html>");
 
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/products/dasobjectstore/api/session")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"username":"admin","session_token":"invalid"}"#,
-                    ))
-                    .expect("request builds"),
-            )
-            .await
-            .expect("auth response");
+        for path in [
+            "/api/register",
+            "/api/login",
+            "/api/logout",
+            "/api/session",
+            "/api/v1/remote/authenticate",
+        ] {
+            let response = standalone_router(root.clone(), Default::default())
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/products/dasobjectstore{path}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            r#"{"username":"admin","session_token":"invalid"}"#,
+                        ))
+                        .expect("request builds"),
+                )
+                .await
+                .expect("auth response");
+            assert!(
+                matches!(
+                    response.status(),
+                    StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+                ),
+                "{path} must not expose a local-auth handler"
+            );
+        }
+        cleanup(&root);
+    }
 
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        cleanup(&auth_root);
+    #[tokio::test]
+    async fn standalone_router_retains_only_public_pairing_and_machine_exchange_boundaries() {
+        let _asset_guard = static_asset_test_guard().await;
+        let root = temp_root("server-run-public-boundaries");
+        write_web_asset(&root, "index.html", "<!doctype html>");
+
+        for path in [
+            "/api/v1/remote/easyconnect/pairings",
+            "/api/v1/application/access-token/exchange",
+        ] {
+            let response = standalone_router(root.clone(), Default::default())
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/products/dasobjectstore{path}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from("{}"))
+                        .expect("request builds"),
+                )
+                .await
+                .expect("public boundary response");
+            assert_ne!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+
         cleanup(&root);
     }
 
@@ -727,10 +727,9 @@ mod tests {
     async fn standalone_router_rejects_asset_traversal() {
         let _asset_guard = static_asset_test_guard().await;
         let root = temp_root("server-run-web-traversal");
-        let auth_root = temp_root("server-run-web-traversal-auth");
         write_web_asset(&root, "index.html", "<!doctype html>");
 
-        let response = standalone_router(root.clone(), Default::default(), auth_root.clone())
+        let response = standalone_router(root.clone(), Default::default())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/../secret")
@@ -741,7 +740,6 @@ mod tests {
             .expect("asset response");
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        cleanup(&auth_root);
         cleanup(&root);
     }
 

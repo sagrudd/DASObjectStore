@@ -19,7 +19,7 @@ use dasobjectstore_gui_api::{
     easyconnect_public_router, federated_gui_api_router, host_composed_gui_api_router,
     pistis_easyconnect_approval_router_with_daemon, AuthenticatedGuiActor,
     EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, FederatedHostSessionResponse,
-    LocalAuthStore, VerifiedHostAuthenticatedContext,
+    VerifiedHostAuthenticatedContext,
 };
 use prosopikon_core::ProsopikonAuthStore;
 use sha2::{Digest, Sha256};
@@ -120,9 +120,7 @@ pub fn monas_dasobjectstore_router(
     host_product_routes: Router,
     auth_store: ProsopikonAuthStore,
 ) -> Router {
-    let product_router =
-        federated_gui_api_router(LocalAuthStore::from_prosopikon(auth_store.clone()))
-            .merge(host_product_routes);
+    let product_router = federated_gui_api_router().merge(host_product_routes);
     monas_federated_router(product_router, auth_store).merge(easyconnect_public_router())
 }
 

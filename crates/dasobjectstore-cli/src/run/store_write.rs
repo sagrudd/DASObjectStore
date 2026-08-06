@@ -49,6 +49,7 @@ pub(super) fn run_store_drain(
         dry_run: args.dry_run(),
         allow_store_drain: args.allow_store_drain(),
         confirmation_marker: args.confirm().to_string(),
+        verified_subject: None,
     })?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response.report)?;
@@ -81,6 +82,7 @@ pub(super) fn run_store_delete(
         dry_run: args.dry_run(),
         allow_store_delete: args.allow_store_delete(),
         confirmation_marker: args.confirm().to_string(),
+        verified_subject: None,
     })?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response.report)?;
@@ -476,6 +478,7 @@ pub(super) fn run_store_repair(
             s3_prefix: args.s3_prefix().map(ToOwned::to_owned),
             s3_expectation: None,
             idempotency_key: None,
+            verified_subject: None,
         },
         |event| {
             super::write_daemon_ingest_progress(writer, &event, started_at)
@@ -596,6 +599,7 @@ pub(super) fn run_store_deduplicate(
         store_id: args.store_id().cloned(),
         dry_run: !args.apply(),
         confirmation: args.confirm().to_string(),
+        verified_subject: None,
     })?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response)?;

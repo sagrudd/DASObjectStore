@@ -74,6 +74,7 @@ pub(super) fn run_ingest_drain_queue(
         dry_run: args.dry_run(),
         allow_ingest_queue_drain: args.allow_ingest_queue_drain(),
         confirmation_marker: args.confirm().to_string(),
+        verified_subject: None,
     })?;
     let report = response.report;
     if args.json() {

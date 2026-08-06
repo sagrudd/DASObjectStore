@@ -2,15 +2,6 @@
 
 use super::*;
 
-pub(super) async fn easyconnect_discovery(
-    State(state): State<StandaloneEasyconnectRouteState>,
-) -> Json<RemoteEasyconnectDiscoveryResponse> {
-    Json(standalone_easyconnect_discovery_payload(
-        &state.public_base_url,
-        &state.appliance_id,
-    ))
-}
-
 pub(super) async fn pistis_easyconnect_discovery(
     State(state): State<EasyconnectPublicRouteState>,
 ) -> Result<Json<RemoteEasyconnectDiscoveryResponse>, (StatusCode, Json<AuthRouteError>)> {
@@ -52,7 +43,7 @@ pub(super) fn standalone_easyconnect_discovery_payload(
         default_session_lifetime_seconds:
             dasobjectstore_daemon::REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
         session_policy: RemoteEasyconnectSessionPolicy::default(),
-        auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
+        auth_providers: vec![RemoteEasyconnectAuthProvider::Pistis],
         descriptor_schema_version: "dasobjectstore.remote_descriptor.v1".to_string(),
         server_version: dasobjectstore_core::VERSION.to_string(),
         api_schema_versions: vec![
