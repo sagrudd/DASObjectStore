@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.34] - 2026-08-06
+
+### Security
+
+- Migrate the host-composed ObjectStore folder/archive download route to the
+  verified Pistis browser envelope. The daemon accepts it only from the fixed
+  `dasobjectstore` Unix service peer and revalidates its exact endpoint and
+  canonical folder scope before resolving archive entries. This host route has
+  no delegated-OS or provider-stream fallback.
+
 ## [0.157.33] - 2026-08-06
 
 ### Security

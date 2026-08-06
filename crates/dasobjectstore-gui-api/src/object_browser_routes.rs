@@ -114,6 +114,10 @@ pub(crate) fn preverified_host_object_browser_router_with_state(
             "/api/v1/object-stores/{endpoint}/objects/download/{*object_id}",
             get(preverified_host_object_store_object_download),
         )
+        .route(
+            "/api/v1/object-stores/{endpoint}/folders/download/{*prefix}",
+            get(preverified_host_object_store_folder_download),
+        )
         .with_state(state)
 }
 
@@ -526,6 +530,80 @@ async fn preverified_host_object_store_object_download(
         })?;
     let mut response = Response::new(Body::from_stream(ReaderStream::new(file)));
     *response.headers_mut() = object_download_headers(&download)?;
+    Ok(response)
+}
+
+/// Stream a folder archive only through the verified Pistis subject envelope.
+/// As with the individual object route, this host-composed route deliberately
+/// has neither a delegated-OS actor nor a provider-stream fallback.  The
+/// daemon revalidates the exact canonical prefix against the fixed GUI/API
+/// service peer before it resolves any archive entry.
+async fn preverified_host_object_store_folder_download(
+    State(state): State<PreverifiedHostObjectBrowserRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    scope: Option<Extension<VerifiedHostStoreScope>>,
+    Path((endpoint, prefix)): Path<(String, String)>,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    crate::auth_routes::require_preverified_host_viewer_for_store(
+        &actor,
+        &verified,
+        scope.as_ref().map(|value| &value.0),
+        &endpoint,
+    )?;
+    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_folder_download_request",
+            err.to_string(),
+        )
+    })?;
+    let prefix = required_field("prefix", prefix.trim_start_matches('/').to_string())?;
+    let verified_subject = verified_object_browser_subject(
+        &verified,
+        &scope.expect("checked above").0,
+        endpoint.clone(),
+        prefix.clone(),
+    )?;
+    let request = ObjectFolderDownloadRequest {
+        endpoint,
+        prefix,
+        delegated_actor: None,
+        verified_subject: Some(verified_subject),
+    };
+    request.validate().map_err(|err| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_object_folder_download_request",
+            err.to_string(),
+        )
+    })?;
+    let client = Arc::clone(&state.object_browser_client);
+    let download = state
+        .daemon_bridge
+        .call(move || client.object_folder_download(request))
+        .await
+        .map_err(daemon_bridge_route_error)?;
+
+    let headers = object_folder_download_headers(&download)?;
+    let archive_download = download.clone();
+    let archive_permit = archive_worker_semaphore()
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            route_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "archive_worker_busy",
+                "folder archive capacity is saturated; retry shortly",
+            )
+        })?;
+    let (sender, receiver) = mpsc::channel::<Result<Bytes, io::Error>>(4);
+    tokio::task::spawn_blocking(move || {
+        let _archive_permit = archive_permit;
+        stream_folder_archive(archive_download, sender);
+    });
+    let mut response = Response::new(Body::from_stream(ReceiverStream::new(receiver)));
+    *response.headers_mut() = headers;
     Ok(response)
 }
 
@@ -1267,6 +1345,137 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert!(client.download_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_folder_download_forwards_only_a_scoped_verified_subject() {
+        let root = temp_root("preverified-host-folder-download");
+        let first = write_test_file(&root, "metadata.tsv", b"verified metadata");
+        let second = write_test_file(&root, "reads.fastq.gz", b"verified reads");
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        client.set_folder_download(ObjectFolderDownloadResponse {
+            endpoint: StoreId::new("ena").expect("endpoint"),
+            store_id: StoreId::new("ena").expect("store"),
+            prefix: "ENA/Xeno".to_string(),
+            archive_name: "Xeno.tar.gz".to_string(),
+            total_files: 2,
+            total_source_bytes: (b"verified metadata".len() + b"verified reads".len()) as u64,
+            entries: vec![
+                ObjectFolderArchiveEntry {
+                    object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object"),
+                    archive_path: "metadata.tsv".to_string(),
+                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-one")
+                        .expect("disk"),
+                    source_path: first,
+                    size_bytes: b"verified metadata".len() as u64,
+                },
+                ObjectFolderArchiveEntry {
+                    object_id: ObjectId::new("ENA/Xeno/reads.fastq.gz").expect("object"),
+                    archive_path: "reads.fastq.gz".to_string(),
+                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-one")
+                        .expect("disk"),
+                    source_path: second,
+                    size_bytes: b"verified reads".len() as u64,
+                },
+            ],
+        });
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/ena/folders/download/ENA/Xeno")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["x-dasobjectstore-archive-files"], "2");
+        assert_eq!(
+            client.folder_download_requests(),
+            vec![ObjectFolderDownloadRequest {
+                endpoint: StoreId::new("ena").expect("endpoint"),
+                prefix: "ENA/Xeno".to_string(),
+                delegated_actor: None,
+                verified_subject: Some(
+                    verified_object_browser_subject(
+                        &verified_host_context(),
+                        &VerifiedHostStoreScope::for_verified_context(
+                            &verified_host_context(),
+                            vec!["ena".to_string()],
+                        )
+                        .expect("scope"),
+                        StoreId::new("ena").expect("endpoint"),
+                        "ENA/Xeno".to_string(),
+                    )
+                    .expect("subject"),
+                ),
+            }]
+        );
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("archive bytes");
+        assert_eq!(
+            tar_gz_members(&body),
+            vec![
+                ("metadata.tsv".to_string(), b"verified metadata".to_vec()),
+                ("reads.fastq.gz".to_string(), b"verified reads".to_vec()),
+            ]
+        );
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn preverified_host_folder_download_rejects_an_out_of_scope_store_before_daemon() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostStoreScope::for_verified_context(&verified, vec!["ena".to_string()])
+                .expect("scope");
+        let client = recording_browser_client();
+        let app = preverified_host_object_browser_router_with_state(
+            PreverifiedHostObjectBrowserRouteState {
+                object_browser_client: client.clone(),
+                daemon_bridge: Arc::new(DaemonBridge::with_capacity_and_deadline(
+                    1,
+                    std::time::Duration::from_secs(1),
+                )),
+            },
+        )
+        .layer(Extension(verified))
+        .layer(Extension(scope))
+        .layer(Extension(verified_host_actor()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/object-stores/other/folders/download/ENA/Xeno")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(client.folder_download_requests().is_empty());
     }
 
     #[tokio::test]
