@@ -133,6 +133,7 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
 pub fn host_composed_gui_api_router() -> Router {
     crate::routes::gui_api_router_without_redesign_dashboards()
         .merge(preverified_host_operational_router())
+        .merge(preverified_host_reporting_router())
 }
 
 /// Host-composed operational mutations that derive authority exclusively from
@@ -177,6 +178,24 @@ pub(super) fn preverified_host_operational_router_with_state(
         .route(
             "/api/v1/workspaces/admin/jobs/{job_id}/cancel",
             post(preverified_host_cancel_admin_job),
+        )
+        .with_state(state)
+}
+
+/// Host-composed report rebuilding has no daemon mutation, but it remains a
+/// bounded operational action and is therefore independently protected by the
+/// same verified Pistis administrator boundary as daemon-backed mutations.
+fn preverified_host_reporting_router() -> Router {
+    preverified_host_reporting_router_with_state(PreverifiedHostReportingRouteState::packaged())
+}
+
+pub(super) fn preverified_host_reporting_router_with_state(
+    state: PreverifiedHostReportingRouteState,
+) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/workspaces/activity/reporting/performance-report",
+            post(preverified_host_rebuild_performance_report),
         )
         .with_state(state)
 }
