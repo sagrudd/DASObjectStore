@@ -5305,7 +5305,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn host_composed_router_keeps_local_users_groups_routes_unreachable() {
+    async fn host_composed_router_keeps_standalone_local_authority_routes_unreachable() {
         let app = host_composed_gui_api_router();
 
         for (method, path) in [
@@ -5315,6 +5315,8 @@ mod tests {
                 "POST",
                 "/api/v1/workspaces/users-groups/local-groups/members",
             ),
+            ("GET", "/api/v1/dashboard/home"),
+            ("GET", "/api/v1/workspaces/remote-upload"),
         ] {
             let response = app
                 .clone()
