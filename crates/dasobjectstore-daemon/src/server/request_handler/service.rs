@@ -2,6 +2,39 @@ use super::*;
 use crate::api::ProfileBindingOperation;
 use crate::runtime::export_profile_catalogue;
 
+/// Application identity and credential administration is a human-authority
+/// operation. It may enter the daemon only from the fixed host Web service
+/// peer with the verified Pistis subject supplied by that peer. Direct root,
+/// sudo, administrator-group, and CLI Unix-socket callers are deliberately
+/// not alternate human authorities.
+fn require_preverified_application_authority(
+    actor: Option<&DaemonLocalActor>,
+    verified_subject: Option<&str>,
+    operation: &str,
+) -> Result<(), DaemonApiErrorResponse> {
+    let Some(actor) = actor else {
+        return Err(DaemonApiErrorResponse::new(
+            "administrator_authentication_required",
+            format!("{operation} require the preverified host service peer"),
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!(
+                "{operation} reject direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+            ),
+        ));
+    }
+    if !verified_subject.is_some_and(|value| !value.trim().is_empty()) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_subject_required",
+            format!("{operation} require a verified Pistis subject"),
+        ));
+    }
+    Ok(())
+}
+
 /// Handles daemon service, provisioning, local administration, and job requests.
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
@@ -190,24 +223,13 @@ where
                 ApplicationAccessTokenExchangeResponse { claims },
             ))
         }
-        DaemonApiRequest::RegisterApplicationIdentity(mut request) => {
-            // Identity registration mutates daemon-owned authority and is
-            // therefore administrator-only. Dry-run validates policy without
-            // requiring a mutation authority or persisting metadata.
-            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "application identity registration requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "application identity registration requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+        DaemonApiRequest::RegisterApplicationIdentity(request) => {
+            if let Err(error) = require_preverified_application_authority(
+                actor,
+                request.administrator_actor.as_deref(),
+                "application identity registration",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
             let now = handler.clock.now_utc();
             let application_id = request.identity.application_id.clone();
@@ -259,21 +281,13 @@ where
             ))?;
             Ok(DaemonApiResponse::RegisterApplicationIdentity(response))
         }
-        DaemonApiRequest::RegisterApplicationKey(mut request) => {
-            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "application key registration requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "application key registration requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+        DaemonApiRequest::RegisterApplicationKey(request) => {
+            if let Err(error) = require_preverified_application_authority(
+                actor,
+                request.administrator_actor.as_deref(),
+                "application key registration",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
             let now = handler.clock.now_utc();
             let application_id = request.key.application_id.clone();
@@ -345,21 +359,13 @@ where
             ))?;
             Ok(DaemonApiResponse::RegisterApplicationKey(response))
         }
-        DaemonApiRequest::RevokeApplicationCredential(mut request) => {
-            request.administrator_actor = actor.map(DaemonLocalActor::display_name);
-            if !request.dry_run {
-                let Some(actor) = actor else {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authentication_required",
-                        "application credential revocation requires an authenticated local administrator",
-                    )));
-                };
-                if !actor.is_administrator() {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        "administrator_authorization_required",
-                        "application credential revocation requires root, sudo, or dasobjectstore-admin membership",
-                    )));
-                }
+        DaemonApiRequest::RevokeApplicationCredential(request) => {
+            if let Err(error) = require_preverified_application_authority(
+                actor,
+                request.administrator_actor.as_deref(),
+                "application credential revocation",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
             }
             let now = handler.clock.now_utc();
             let revoked = if let Some(key_id) = request.key_id.as_deref() {

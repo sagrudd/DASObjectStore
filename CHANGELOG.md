@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.42] - 2026-08-06
+
+### Security
+
+- Require application identity registration, public-key registration, and
+  credential revocation to arrive through the fixed DAS host-service peer with
+  a non-blank verified Pistis subject. Direct root, sudo,
+  `dasobjectstore-admin`, and CLI management paths fail closed; the signed
+  application access-token exchange remains the explicit machine path.
+
 ## [0.157.41] - 2026-08-06
 
 ### Security

@@ -5142,7 +5142,7 @@ mod tests {
             },
             dry_run: false,
             client_request_id: Some(format!("{application_id}-request")),
-            administrator_actor: Some("spoofed-request-actor".to_string()),
+            administrator_actor: Some("pistis-subject-1".to_string()),
             confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
         }
     }
@@ -5170,9 +5170,13 @@ mod tests {
             },
             dry_run: false,
             client_request_id: Some(format!("{application_id}-{key_id}-request")),
-            administrator_actor: Some("spoofed-request-actor".to_string()),
+            administrator_actor: Some("pistis-subject-1".to_string()),
             confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
         }
+    }
+
+    fn preverified_host_service_actor() -> DaemonLocalActor {
+        DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
     }
 
     #[test]
@@ -5314,7 +5318,23 @@ mod tests {
                 if error.code == "administrator_authentication_required"
         ));
 
-        let operator = DaemonLocalActor::new(1000).with_groups(["bioinformatics"]);
+        let mut missing_subject_request = request.clone();
+        missing_subject_request.administrator_actor = None;
+        let service_peer = preverified_host_service_actor();
+        let missing_subject = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterApplicationIdentity(missing_subject_request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            missing_subject,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_subject_required"
+        ));
+
+        let operator = DaemonLocalActor::new(0).with_username("root");
         let unauthorized = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationIdentity(request),
@@ -5325,7 +5345,7 @@ mod tests {
         assert!(matches!(
             unauthorized,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         assert!(!registry.exists());
         cleanup(&root);
@@ -5341,7 +5361,7 @@ mod tests {
         )
         .with_application_identity_registry_path(&registry)
         .with_application_audit_log_path(root.join("application-audit.json"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationIdentity(
@@ -5354,17 +5374,23 @@ mod tests {
         let DaemonApiResponse::RegisterApplicationIdentity(response) = response else {
             panic!("expected application identity response");
         };
-        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        assert_eq!(
+            response.administrator_actor.as_deref(),
+            Some("pistis-subject-1")
+        );
         assert!(!response.replaced);
         let serialized = serde_json::to_string(&response).expect("response serializes");
-        assert!(!serialized.contains("spoofed-request-actor"));
+        assert!(!serialized.contains("root"));
         assert!(!serialized.contains("private_key"));
         assert!(registry.exists());
         let audit = read_application_audit_events(root.join("application-audit.json"))
             .expect("identity audit event");
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].operation, "register_identity");
-        assert_eq!(audit[0].administrator_actor.as_deref(), Some("root"));
+        assert_eq!(
+            audit[0].administrator_actor.as_deref(),
+            Some("pistis-subject-1")
+        );
         cleanup(&root);
     }
 
@@ -5387,7 +5413,7 @@ mod tests {
             DaemonApiResponse::Error(error)
                 if error.code == "administrator_authentication_required"
         ));
-        let operator = DaemonLocalActor::new(1000).with_groups(["bioinformatics"]);
+        let operator = DaemonLocalActor::new(0).with_username("root");
         let unauthorized = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationKey(request),
@@ -5398,7 +5424,7 @@ mod tests {
         assert!(matches!(
             unauthorized,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         assert!(!registry.exists());
         cleanup(&root);
@@ -5421,7 +5447,7 @@ mod tests {
         .with_application_identity_registry_path(identity_registry)
         .with_application_key_registry_path(&registry)
         .with_application_audit_log_path(root.join("application-audit.json"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationKey(
@@ -5434,7 +5460,10 @@ mod tests {
         let DaemonApiResponse::RegisterApplicationKey(response) = response else {
             panic!("expected application key response");
         };
-        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        assert_eq!(
+            response.administrator_actor.as_deref(),
+            Some("pistis-subject-1")
+        );
         assert!(!response.replaced);
         assert_eq!(response.enrollment.application_id, "admin");
         assert_eq!(
@@ -5443,7 +5472,7 @@ mod tests {
         );
         assert!(!response.enrollment.private_material_received);
         let serialized = serde_json::to_string(&response).expect("response serializes");
-        assert!(!serialized.contains("spoofed-request-actor"));
+        assert!(!serialized.contains("root"));
         assert!(!serialized.contains("private_key"));
         assert!(registry.exists());
         let audit = read_application_audit_events(root.join("application-audit.json"))
@@ -5463,7 +5492,7 @@ mod tests {
         )
         .with_application_identity_registry_path(root.join("application-identities.json"))
         .with_application_key_registry_path(root.join("application-keys.json"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationKey(
@@ -5493,7 +5522,7 @@ mod tests {
         .with_application_identity_registry_path(&identity_registry)
         .with_application_key_registry_path(&key_registry)
         .with_application_audit_log_path(root.join("application-audit.json"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let application_id = "exchange-app";
         handler
             .handle_with_progress_for_actor(
@@ -5666,7 +5695,7 @@ mod tests {
         .with_application_identity_registry_path(&identity_registry)
         .with_application_key_registry_path(&key_registry)
         .with_application_audit_log_path(root.join("application-audit.json"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterApplicationIdentity(
@@ -5696,6 +5725,31 @@ mod tests {
                 if error.code == "administrator_authentication_required"
         ));
 
+        let direct_root = DaemonLocalActor::new(0).with_username("root");
+        let direct_root_response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RevokeApplicationCredential(
+                    ApplicationCredentialRevocationRequest {
+                        application_id: "admin".to_string(),
+                        key_id: None,
+                        reason: "scheduled rotation".to_string(),
+                        dry_run: false,
+                        client_request_id: Some("revoke-direct-root".to_string()),
+                        administrator_actor: Some("pistis-subject-1".to_string()),
+                        confirmation_marker: APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION
+                            .to_string(),
+                    },
+                ),
+                Some(&direct_root),
+                |_| Ok(()),
+            )
+            .expect("direct root rejected");
+        assert!(matches!(
+            direct_root_response,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_authority_required"
+        ));
+
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RevokeApplicationCredential(
@@ -5705,7 +5759,7 @@ mod tests {
                         reason: "scheduled rotation".to_string(),
                         dry_run: false,
                         client_request_id: Some("revoke-1".to_string()),
-                        administrator_actor: Some("spoofed-request-actor".to_string()),
+                        administrator_actor: Some("pistis-subject-1".to_string()),
                         confirmation_marker: APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION
                             .to_string(),
                     },
@@ -5718,13 +5772,16 @@ mod tests {
             panic!("expected revocation response");
         };
         assert!(response.revoked);
-        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        assert_eq!(
+            response.administrator_actor.as_deref(),
+            Some("pistis-subject-1")
+        );
         let identity = read_application_identity(&identity_registry, "admin")
             .expect("read identity")
             .expect("identity");
         assert!(!identity.active);
         let serialized = serde_json::to_string(&response).expect("response serializes");
-        assert!(!serialized.contains("spoofed-request-actor"));
+        assert!(!serialized.contains("root"));
         cleanup(&root);
     }
 
