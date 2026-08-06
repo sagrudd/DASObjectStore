@@ -173,6 +173,54 @@ async fn preverified_router_exposes_host_composed_api_only_with_verified_context
 }
 
 #[tokio::test]
+async fn preverified_enclosures_dashboard_uses_closed_verified_pistis_roles() {
+    let request = || {
+        Request::builder()
+            .uri("/api/v1/dashboard/enclosures")
+            .body(Body::empty())
+            .expect("request")
+    };
+
+    let denied = preverified_dasobjectstore_router(Router::new(), None)
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let unrelated_role = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["authenticated"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(unrelated_role.status(), StatusCode::FORBIDDEN);
+
+    let viewer = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_viewer"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(viewer.status(), StatusCode::OK);
+    let viewer_body = axum::body::to_bytes(viewer.into_body(), 128 * 1024)
+        .await
+        .expect("viewer body");
+    let viewer: serde_json::Value = serde_json::from_slice(&viewer_body).expect("viewer JSON");
+    assert_eq!(viewer["add_enclosure"]["administrator"], false);
+
+    let administrator = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_administrator"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(administrator.status(), StatusCode::OK);
+    let administrator_body = axum::body::to_bytes(administrator.into_body(), 128 * 1024)
+        .await
+        .expect("administrator body");
+    let administrator: serde_json::Value =
+        serde_json::from_slice(&administrator_body).expect("administrator JSON");
+    assert_eq!(administrator["add_enclosure"]["administrator"], true);
+}
+
+#[tokio::test]
 async fn preverified_ingest_control_requires_a_verified_das_administrator() {
     let request = || {
         Request::builder()
