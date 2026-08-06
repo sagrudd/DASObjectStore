@@ -208,6 +208,9 @@ pub(super) enum ObjectBrowserAccessFailure {
     DelegationNotAllowed {
         peer_actor: String,
     },
+    InvalidVerifiedSubject {
+        message: String,
+    },
     Authorization(DaemonAuthorizationError),
     ObjectService(ObjectServiceError),
     Endpoint(IngestAuthorizationFailure),
@@ -220,9 +223,10 @@ pub(super) enum ObjectBrowserAccessFailure {
 impl ObjectBrowserAccessFailure {
     pub(super) fn code(&self) -> &'static str {
         match self {
-            Self::MissingActor | Self::DelegationNotAllowed { .. } | Self::Authorization(_) => {
-                "permission_denied"
-            }
+            Self::MissingActor
+            | Self::DelegationNotAllowed { .. }
+            | Self::InvalidVerifiedSubject { .. }
+            | Self::Authorization(_) => "permission_denied",
             Self::ObjectService(_) | Self::Endpoint(_) | Self::MissingStore { .. } => {
                 "object_browser_authorization_failed"
             }
@@ -238,6 +242,10 @@ impl Display for ObjectBrowserAccessFailure {
             Self::DelegationNotAllowed { peer_actor } => write!(
                 formatter,
                 "actor {peer_actor} is not authorized to delegate ObjectStore browser access"
+            ),
+            Self::InvalidVerifiedSubject { message } => write!(
+                formatter,
+                "verified ObjectStore browser subject is not accepted: {message}"
             ),
             Self::Authorization(error) => Display::fmt(error, formatter),
             Self::ObjectService(error) => Display::fmt(error, formatter),

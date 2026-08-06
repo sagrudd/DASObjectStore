@@ -254,6 +254,20 @@ where
             }
         }
         DaemonApiRequest::ObjectBrowser(request) => {
+            let verified_store_id = match handler.authorize_verified_object_browser_subject(
+                actor,
+                request.verified_subject.as_ref(),
+                &request.endpoint,
+                request.prefix.as_deref(),
+            ) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
             {
@@ -265,15 +279,19 @@ where
                     )));
                 }
             };
-            let effective_actor = delegated_actor.as_ref().or(actor);
-            let store_id = match handler.authorize_endpoint_read(effective_actor, &request.endpoint)
-            {
-                Ok(store_id) => store_id,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        error.code(),
-                        error.to_string(),
-                    )));
+            let store_id = match verified_store_id {
+                Some(store_id) => store_id,
+                None => {
+                    let effective_actor = delegated_actor.as_ref().or(actor);
+                    match handler.authorize_endpoint_read(effective_actor, &request.endpoint) {
+                        Ok(store_id) => store_id,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                error.code(),
+                                error.to_string(),
+                            )));
+                        }
+                    }
                 }
             };
             let entries =
@@ -321,6 +339,20 @@ where
             }
         }
         DaemonApiRequest::ObjectDownload(request) => {
+            let verified_store_id = match handler.authorize_verified_object_browser_subject(
+                actor,
+                request.verified_subject.as_ref(),
+                &request.endpoint,
+                Some(request.object_id.as_str()),
+            ) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
             {
@@ -332,14 +364,19 @@ where
                     )));
                 }
             };
-            let effective_actor = delegated_actor.as_ref().or(actor);
-            let store_id = match handler.authorize_object_download(effective_actor, &request) {
-                Ok(store_id) => store_id,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        error.code(),
-                        error.to_string(),
-                    )));
+            let store_id = match verified_store_id {
+                Some(store_id) => store_id,
+                None => {
+                    let effective_actor = delegated_actor.as_ref().or(actor);
+                    match handler.authorize_object_download(effective_actor, &request) {
+                        Ok(store_id) => store_id,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                error.code(),
+                                error.to_string(),
+                            )));
+                        }
+                    }
                 }
             };
             match resolve_object_download_with_hdd_root(
@@ -356,6 +393,20 @@ where
             }
         }
         DaemonApiRequest::ObjectFolderDownload(request) => {
+            let verified_store_id = match handler.authorize_verified_object_browser_subject(
+                actor,
+                request.verified_subject.as_ref(),
+                &request.endpoint,
+                Some(&request.prefix),
+            ) {
+                Ok(store_id) => store_id,
+                Err(error) => {
+                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        error.code(),
+                        error.to_string(),
+                    )));
+                }
+            };
             let delegated_actor = match handler
                 .delegated_object_browser_actor(actor, request.delegated_actor.as_ref())
             {
@@ -367,15 +418,19 @@ where
                     )));
                 }
             };
-            let effective_actor = delegated_actor.as_ref().or(actor);
-            let store_id = match handler.authorize_object_folder_download(effective_actor, &request)
-            {
-                Ok(store_id) => store_id,
-                Err(error) => {
-                    return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                        error.code(),
-                        error.to_string(),
-                    )));
+            let store_id = match verified_store_id {
+                Some(store_id) => store_id,
+                None => {
+                    let effective_actor = delegated_actor.as_ref().or(actor);
+                    match handler.authorize_object_folder_download(effective_actor, &request) {
+                        Ok(store_id) => store_id,
+                        Err(error) => {
+                            return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                                error.code(),
+                                error.to_string(),
+                            )));
+                        }
+                    }
                 }
             };
             match resolve_object_folder_download_with_hdd_root(
