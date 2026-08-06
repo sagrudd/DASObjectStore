@@ -11,7 +11,6 @@
   Prosopikon. The same composition excludes standalone dashboard and
   remote-upload routes rather than allowing a host route to inherit a local
   authority path; separately reviewed Pistis dashboard routes remain explicit.
-<<<<<<< HEAD
 
 ## [0.157.40] - 2026-08-06
 
@@ -34,8 +33,6 @@
   viewer boundary. These routes carry no local session, password, PAM, POSIX
   user/group, or sudo-derived identity; capacity remains daemon-bridged and
   fails closed when its packaged peer is unavailable.
-=======
->>>>>>> 6166d7ed (test: deny standalone host authority routes)
 
 ## [0.157.38] - 2026-08-06
 
