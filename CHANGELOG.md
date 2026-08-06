@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.38] - 2026-08-06
+
+### Security
+
+- Add a host-composed provider-stream read route that requires a matching
+  verified Pistis viewer plus a session-bound ObjectStore/canonical-prefix
+  scope. The provider-stream daemon request carries the fixed-peer
+  `ObjectBrowserVerifiedSubject` and rejects any coexistence with delegated
+  OS authority or an application capability. The standalone S3 token path is
+  unchanged.
+
 ## [0.157.37] - 2026-08-06
 
 ### Security

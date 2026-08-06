@@ -2,7 +2,7 @@ use crate::{
     daemon_bridge::{DaemonBridge, DaemonBridgeError},
     discover_local_user, AuthRouteError, AuthenticatedGuiActor, LocalAuthStore,
     LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostAuthenticatedContext,
-    VerifiedHostStoreScope,
+    VerifiedHostObjectPrefixScope, VerifiedHostStoreScope,
 };
 use axum::{
     body::Body,
@@ -71,6 +71,44 @@ pub fn verified_object_browser_subject(
     };
     subject
         .validate_for_endpoint(&store_id, Some(&subject.canonical_prefix))
+        .map_err(|error| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_verified_object_browser_subject",
+                error.to_string(),
+            )
+        })?;
+    Ok(subject)
+}
+
+/// Map a verified host prefix grant into the same daemon browser envelope.
+/// Unlike the exact-object route helper above, the envelope preserves the
+/// host-issued prefix so the daemon can independently reject any attempted
+/// provider-stream read outside it.
+pub fn verified_object_browser_subject_for_prefix_scope(
+    verified: &VerifiedHostAuthenticatedContext,
+    scope: &VerifiedHostObjectPrefixScope,
+    store_id: StoreId,
+    requested_path: &str,
+) -> Result<ObjectBrowserVerifiedSubject, (StatusCode, Json<AuthRouteError>)> {
+    if !scope.permits(verified, store_id.as_str(), requested_path) {
+        return Err(route_error(
+            StatusCode::FORBIDDEN,
+            "host_object_prefix_scope_denied",
+            "the verified host session is not authorised for this ObjectStore object prefix",
+        ));
+    }
+    let subject = ObjectBrowserVerifiedSubject {
+        schema_version: OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+        peer_identity: OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+        subject_id: verified.context().subject_id.clone(),
+        session_id: verified.context().session_id.clone(),
+        correlation_id: verified.context().correlation_id.clone(),
+        store_id: store_id.clone(),
+        canonical_prefix: scope.canonical_prefix().to_string(),
+    };
+    subject
+        .validate_for_endpoint(&store_id, Some(requested_path))
         .map_err(|error| {
             route_error(
                 StatusCode::BAD_REQUEST,
@@ -1031,16 +1069,17 @@ mod tests {
     use super::{
         preverified_host_object_browser_router_with_state,
         standalone_object_browser_router_with_state, verified_object_browser_subject,
-        write_folder_archive, ObjectBrowserLocalUserProvider,
-        PreverifiedHostObjectBrowserRouteState, StandaloneObjectBrowserClient,
-        StandaloneObjectBrowserClientError, StandaloneObjectBrowserRouteState,
+        verified_object_browser_subject_for_prefix_scope, write_folder_archive,
+        ObjectBrowserLocalUserProvider, PreverifiedHostObjectBrowserRouteState,
+        StandaloneObjectBrowserClient, StandaloneObjectBrowserClientError,
+        StandaloneObjectBrowserRouteState,
     };
     use crate::{
         accept_host_authenticated_context, daemon_bridge::DaemonBridge,
         AuthenticatedActorAuthority, AuthenticatedGuiActor, HostAuthenticatedContext,
         HostAuthenticationAuthority, HostAuthenticationContextVerifier, LocalAuthStore,
-        LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostStoreScope,
-        STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+        LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostObjectPrefixScope,
+        VerifiedHostStoreScope, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
@@ -1161,6 +1200,30 @@ mod tests {
 
         assert_eq!(error.0, StatusCode::FORBIDDEN);
         assert_eq!(error.1 .0.code, "host_store_scope_denied");
+    }
+
+    #[test]
+    fn prefix_scope_mapping_preserves_the_authorised_prefix_for_daemon_validation() {
+        let verified = verified_host_context();
+        let scope =
+            VerifiedHostObjectPrefixScope::for_verified_context(&verified, "ena", "ENA/Xeno")
+                .expect("scope");
+        let subject = verified_object_browser_subject_for_prefix_scope(
+            &verified,
+            &scope,
+            StoreId::new("ena").expect("store"),
+            "ENA/Xeno/metadata.tsv",
+        )
+        .expect("subject maps");
+
+        assert_eq!(subject.canonical_prefix, "ENA/Xeno");
+        assert!(verified_object_browser_subject_for_prefix_scope(
+            &verified,
+            &scope,
+            StoreId::new("ena").expect("store"),
+            "ENA/other/metadata.tsv",
+        )
+        .is_err());
     }
 
     #[tokio::test]

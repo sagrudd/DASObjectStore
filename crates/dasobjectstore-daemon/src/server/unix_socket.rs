@@ -1173,6 +1173,7 @@ mod tests {
                     version: 1,
                 },
                 delegated_actor: None,
+                verified_subject: None,
                 application_capability: None,
                 range: None,
                 condition: Default::default(),
