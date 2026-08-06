@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.38] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for daemon
+  ingest-control mutation. The daemon request now carries a verified host
+  subject only from the fixed packaged host service peer; direct CLI and
+  local-authority paths fail closed before the global ingest state changes.
+
 ## [0.157.37] - 2026-08-06
 
 ### Security

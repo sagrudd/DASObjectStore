@@ -931,7 +931,8 @@ async fn preverified_host_control_ingest(
     Json(request): Json<IngestControlRequest>,
 ) -> Result<Json<IngestControlResponse>, (StatusCode, Json<AuthRouteError>)> {
     require_preverified_host_administrator(&actor, &verified)?;
-    let request = validate_ingest_control_request(request)?;
+    let mut request = validate_ingest_control_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
     submit_preverified_host_ingest_control_request(&state, request)
         .await
         .map(Json)
@@ -4589,6 +4590,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn preverified_host_ingest_control_forwards_pistis_subject() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/admin/ingest-control")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&IngestControlRequest {
+                    action: IngestControlAction::Pause,
+                    reason: "protect Web availability".to_string(),
+                    dry_run: true,
+                    confirmation_marker: Some("confirm ingest control".to_string()),
+                })
+                .expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.ingest_control_requests()[0]
+                .verified_subject
+                .as_deref(),
+            Some("principal-1")
+        );
+    }
+
+    #[tokio::test]
     async fn ingest_control_rejects_blank_reason_before_daemon_call() {
         let root = temp_root("objectstore-ingest-control-validation");
         let auth_store = registered_auth_store(&root);
@@ -5643,6 +5682,7 @@ mod tests {
         requests: Mutex<Vec<StandaloneEnclosurePrepareDaemonRequest>>,
         create_object_store_requests: Mutex<Vec<DaemonCreateObjectStoreRequest>>,
         ingest_policy_requests: Mutex<Vec<DaemonUpdateObjectStoreIngestPolicyRequest>>,
+        ingest_control_requests: Mutex<Vec<StandaloneIngestControlDaemonRequest>>,
         endpoint_inventory_requests: Mutex<Vec<DaemonUpsertEndpointInventoryRequest>>,
         endpoint_connection_test_requests:
             Mutex<Vec<dasobjectstore_daemon::TestEndpointConnectionRequest>>,
@@ -5674,6 +5714,13 @@ mod tests {
             self.ingest_policy_requests
                 .lock()
                 .expect("ingest policy requests lock")
+                .clone()
+        }
+
+        fn ingest_control_requests(&self) -> Vec<StandaloneIngestControlDaemonRequest> {
+            self.ingest_control_requests
+                .lock()
+                .expect("ingest control requests lock")
                 .clone()
         }
 
@@ -5838,6 +5885,10 @@ mod tests {
                     message: message.clone(),
                 });
             }
+            self.ingest_control_requests
+                .lock()
+                .expect("ingest control requests lock")
+                .push(request.clone());
             Ok(IngestControlResponse {
                 state: match request.action {
                     DaemonIngestControlAction::Pause => "paused",
@@ -5932,6 +5983,7 @@ mod tests {
             requests: Mutex::new(Vec::new()),
             create_object_store_requests: Mutex::new(Vec::new()),
             ingest_policy_requests: Mutex::new(Vec::new()),
+            ingest_control_requests: Mutex::new(Vec::new()),
             endpoint_inventory_requests: Mutex::new(Vec::new()),
             endpoint_connection_test_requests: Mutex::new(Vec::new()),
             status_requests: Mutex::new(Vec::new()),
