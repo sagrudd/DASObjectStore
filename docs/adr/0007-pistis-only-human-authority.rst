@@ -162,6 +162,46 @@ daemon/CLI administrative entrypoint so it either carries the verified host
 authority through the trusted bridge or fails closed.  This is separate from
 the S3 SigV4 data plane and does not change the 3900 gateway contract.
 
+Direct daemon/CLI authority audit and bridge contract (v1)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The daemon's Linux socket currently derives a transport peer from
+``SO_PEERCRED`` and resolves its POSIX name/groups.  The legacy
+``DaemonLocalActor::is_administrator`` predicate still recognises UID 0,
+``sudo`` and ``dasobjectstore-admin`` for direct administrative request
+families.  This is residual authority debt, not an approved human authority
+mechanism.  A future release must not silently reinterpret these values as a
+Pistis subject.
+
+The following rule applies while that migration is incomplete:
+
+* a direct CLI/socket request that depends on the legacy administrator
+  predicate is a compatibility-only operation and is **not** a valid Monas
+  product authority path;
+* a replacement direct operation requires a new versioned daemon request
+  envelope containing the verified subject, session, correlation, Site Trust
+  audience, exact operation and bounded resource scope; the envelope must be
+  mutually exclusive with legacy POSIX delegation;
+* the daemon must bind the envelope's fixed peer identity to the Unix peer,
+  reject missing/substituted/replayed values before operation dispatch, and
+  record the verified subject/correlation rather than a username; and
+* no generic root/sudo/admin bypass may be added while that bridge is absent.
+
+As an immediate bounded closure, legacy delegated browser/workspace authority
+is accepted only from the fixed ``dasobjectstore`` Web/API service peer.
+Root is no longer a delegation principal.  This prevents a privileged direct
+socket client from manufacturing an arbitrary POSIX actor while preserving the
+existing package service boundary.  It does **not** make the legacy envelope a
+Pistis bridge: all legacy delegation must still be removed after the verified
+successor covers the corresponding route family.
+
+The direct request families that remain to be migrated are the daemon
+administrative service, disk, store, workspace and local-group operations,
+together with CLI commands that submit them.  The migration must be organised
+by request family and include an explicit rejection regression for root,
+``sudo`` and ``dasobjectstore-admin`` peer credentials.  It may not be
+completed by removing package assets or by weakening socket permissions.
+
 Acceptance criteria
 -------------------
 

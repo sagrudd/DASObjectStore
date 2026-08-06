@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.157.31] - 2026-08-06
+
+### Security
+
+- Remove root as an accepted source of legacy delegated browser/workspace
+  authority at the daemon Unix-socket boundary. The retained legacy
+  delegation envelope is accepted only from the fixed packaged
+  ``dasobjectstore`` Web/API service peer; direct root, sudo, and
+  ``dasobjectstore-admin`` CLI/socket peers cannot manufacture a human actor
+  through it. This is a bounded fail-closed cutover slice, not a replacement
+  for the reviewed verified-Pistis daemon bridge.
+
 ## [0.157.30] - 2026-08-06
 
 ### Security
