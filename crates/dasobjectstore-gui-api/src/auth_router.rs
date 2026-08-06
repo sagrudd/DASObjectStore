@@ -148,12 +148,24 @@ pub fn host_composed_gui_api_router() -> Router {
 fn preverified_host_dashboard_router() -> Router {
     Router::new()
         .route(
+            "/api/v1/dashboard/home",
+            get(preverified_host_home_dashboard),
+        )
+        .route(
+            "/api/v1/dashboard/status",
+            get(preverified_host_cached_home_dashboard),
+        )
+        .route(
             "/api/v1/dashboard/enclosures",
             get(preverified_host_enclosures_dashboard),
         )
         .route(
             "/api/v1/dashboard/object-stores",
             get(preverified_host_object_stores_dashboard),
+        )
+        .route(
+            "/api/v1/dashboard/object-stores/{store_id}/capacity",
+            get(preverified_host_store_capacity),
         )
 }
 

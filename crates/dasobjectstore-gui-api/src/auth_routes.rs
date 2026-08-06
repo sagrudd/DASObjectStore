@@ -344,6 +344,21 @@ async fn standalone_home_dashboard(
     ))
 }
 
+/// Render live Home telemetry only for a matching host actor already verified
+/// by Pistis. This host-composed route carries no standalone route state and
+/// therefore cannot inspect a local session, password, PAM, POSIX user/group,
+/// or sudo-derived identity.
+async fn preverified_host_home_dashboard(
+    Query(query): Query<crate::routes::HomeDashboardQuery>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<crate::dashboard::HomeDashboardView>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer(&actor, &verified)?;
+    Ok(Json(
+        crate::home_aggregator::live_home_dashboard_for_window(query.selected_window()),
+    ))
+}
+
 async fn standalone_live_status_workspace(
     State(daemon_bridge): State<Arc<crate::daemon_bridge::DaemonBridge>>,
     _actor: AuthenticatedGuiActor,
@@ -356,6 +371,12 @@ async fn standalone_cached_home_dashboard(
     _actor: AuthenticatedGuiActor,
 ) -> Result<Json<crate::home_aggregator::CachedHomeDashboardView>, (StatusCode, Json<AuthRouteError>)>
 {
+    cached_home_dashboard_response()
+}
+
+fn cached_home_dashboard_response(
+) -> Result<Json<crate::home_aggregator::CachedHomeDashboardView>, (StatusCode, Json<AuthRouteError>)>
+{
     crate::home_aggregator::cached_home_dashboard()
         .map(Json)
         .map_err(|message| {
@@ -365,6 +386,18 @@ async fn standalone_cached_home_dashboard(
                 message,
             )
         })
+}
+
+/// Read the last Home telemetry snapshot only for a matching verified Pistis
+/// viewer. Cache availability remains a service condition, not an identity
+/// fallback.
+async fn preverified_host_cached_home_dashboard(
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<crate::home_aggregator::CachedHomeDashboardView>, (StatusCode, Json<AuthRouteError>)>
+{
+    require_preverified_host_viewer(&actor, &verified)?;
+    cached_home_dashboard_response()
 }
 
 /// Read-only profile routes for a host that has already established Pistis
@@ -467,6 +500,24 @@ pub(super) async fn preverified_host_profile_s3_diagnostics(
 async fn standalone_store_capacity(
     Path(store_id): Path<String>,
     _actor: AuthenticatedGuiActor,
+) -> Result<Json<DaemonCapacityStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    dashboard_store_capacity(store_id).await
+}
+
+/// Read daemon capacity for a matching verified Pistis viewer. The daemon
+/// bridge remains the sole appliance authority; this route carries neither a
+/// local authentication state nor an appliance-local identity assertion.
+async fn preverified_host_store_capacity(
+    Path(store_id): Path<String>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<DaemonCapacityStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer(&actor, &verified)?;
+    dashboard_store_capacity(store_id).await
+}
+
+async fn dashboard_store_capacity(
+    store_id: String,
 ) -> Result<Json<DaemonCapacityStatusResponse>, (StatusCode, Json<AuthRouteError>)> {
     let bridge = crate::daemon_bridge::DaemonBridge::shared_packaged();
     bridge
