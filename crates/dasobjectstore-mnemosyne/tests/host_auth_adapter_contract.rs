@@ -273,6 +273,52 @@ async fn preverified_object_stores_dashboard_does_not_derive_local_group_authori
 }
 
 #[tokio::test]
+async fn preverified_observability_dashboard_requires_a_verified_pistis_viewer() {
+    let home_request = || {
+        Request::builder()
+            .uri("/api/v1/dashboard/home?telemetry_window=one_day")
+            .body(Body::empty())
+            .expect("request")
+    };
+    let denied_home = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["authenticated"])))
+        .oneshot(home_request())
+        .await
+        .expect("response");
+    assert_eq!(denied_home.status(), StatusCode::FORBIDDEN);
+
+    let viewer_home = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_viewer"])))
+        .oneshot(home_request())
+        .await
+        .expect("response");
+    assert_eq!(viewer_home.status(), StatusCode::OK);
+
+    let capacity_request = || {
+        Request::builder()
+            .uri("/api/v1/dashboard/object-stores/store-1/capacity")
+            .body(Body::empty())
+            .expect("request")
+    };
+    let denied_capacity = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["authenticated"])))
+        .oneshot(capacity_request())
+        .await
+        .expect("response");
+    assert_eq!(denied_capacity.status(), StatusCode::FORBIDDEN);
+
+    // A verified viewer reaches only the bounded daemon bridge. The hermetic
+    // test has no daemon socket, so it fails as a gateway error rather than
+    // falling back to a local session or appliance-local identity.
+    let unavailable_capacity = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_viewer"])))
+        .oneshot(capacity_request())
+        .await
+        .expect("response");
+    assert_eq!(unavailable_capacity.status(), StatusCode::BAD_GATEWAY);
+}
+
+#[tokio::test]
 async fn preverified_ingest_control_requires_a_verified_das_administrator() {
     let request = || {
         Request::builder()

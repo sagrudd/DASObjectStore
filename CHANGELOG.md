@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.39] - 2026-08-06
+
+### Security
+
+- Migrate the remaining host-composed read-only dashboard family (Home
+  telemetry, cached status, and ObjectStore capacity) to the verified Pistis
+  viewer boundary. These routes carry no local session, password, PAM, POSIX
+  user/group, or sudo-derived identity; capacity remains daemon-bridged and
+  fails closed when its packaged peer is unavailable.
+
 ## [0.157.38] - 2026-08-06
 
 ### Security
