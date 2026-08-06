@@ -3876,6 +3876,7 @@ mod tests {
                     endpoint: StoreId::new("ena").expect("store id"),
                     object_id: ObjectId::new("ena/raw/sample.fastq.gz").expect("object id"),
                     delegated_actor: None,
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -3933,6 +3934,7 @@ mod tests {
                     endpoint: StoreId::new("ena").expect("store id"),
                     prefix: "ena/raw/Xeno".to_string(),
                     delegated_actor: None,
+                    verified_subject: None,
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -5942,6 +5944,7 @@ mod tests {
             page: ObjectBrowserPageRequest::default(),
             include_placement: false,
             delegated_actor: None,
+            verified_subject: None,
         }
     }
 
