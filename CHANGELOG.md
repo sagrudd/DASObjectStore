@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.157.23] - 2026-08-06
+
+### Security
+
+- Migrate host-composed enclosure preparation to the verified Pistis boundary.
+  The destructive operation preserves its explicit format/data-loss
+  acknowledgements, requires a matching verified `storage_administrator`,
+  records that subject for the daemon, and uses only the bounded priority
+  bridge.
+
 ## [0.157.22] - 2026-08-05
 
 ### Security

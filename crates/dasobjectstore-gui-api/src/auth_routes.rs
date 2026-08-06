@@ -798,6 +798,26 @@ async fn preverified_host_create_object_store(
         .map(Json)
 }
 
+/// Prepare an enclosure for a host actor already verified by Pistis.
+///
+/// This destructive operation retains the existing format and data-loss
+/// acknowledgement validation. Its authority is exclusively the matching
+/// verified host subject and closed DAS administrator role; no local session,
+/// password, PAM, POSIX group, or sudo-derived identity is consulted.
+async fn preverified_host_prepare_enclosure(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<PrepareEnclosureRequest>,
+) -> Result<Json<StandaloneEnclosurePrepareResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_prepare_enclosure_request(request)?;
+    request.administrator_actor = Some(actor.subject_id);
+    submit_preverified_host_prepare_enclosure_request(&state, request)
+        .await
+        .map(Json)
+}
+
 /// Test a registered endpoint for a host actor already verified by Pistis.
 ///
 /// This state carries only the daemon client and priority bridge. Authority
@@ -955,6 +975,25 @@ async fn submit_preverified_host_create_object_store_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "objectstore_create_failed"))
+}
+
+async fn submit_preverified_host_prepare_enclosure_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: StandaloneEnclosurePrepareDaemonRequest,
+) -> Result<StandaloneEnclosurePrepareResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .submit_prepare_enclosure(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| {
+            admin_daemon_bridge_error_with_code(error, "daemon_enclosure_prepare_failed")
+        })
 }
 
 async fn submit_preverified_host_endpoint_connection_test_request(
@@ -3670,6 +3709,68 @@ mod tests {
             "host_administrator_role_required"
         );
         assert!(client.create_object_store_requests().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preverified_host_enclosure_prepare_requires_pistis_administrator_and_records_subject()
+    {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/enclosures/prepare")
+            .extension(verified_host_context("storage_administrator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&prepare_enclosure_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            client.requests()[0].administrator_actor.as_deref(),
+            Some("principal-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn preverified_host_enclosure_prepare_rejects_non_administrator_before_daemon_call() {
+        let client = recording_enclosure_client();
+        let app = super::auth_router::preverified_host_operational_router_with_state(
+            PreverifiedHostAdminRouteState {
+                enclosure_admin_client: client.clone(),
+                priority_daemon_bridge: Arc::new(
+                    crate::daemon_bridge::DaemonBridge::priority_packaged(),
+                ),
+            },
+        );
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/enclosures/prepare")
+            .extension(verified_host_context("storage_operator"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&prepare_enclosure_request()).expect("request serializes"),
+            ))
+            .expect("request builds");
+
+        let response = app.oneshot(request).await.expect("request completes");
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(response).await["code"],
+            "host_administrator_role_required"
+        );
+        assert!(client.requests().is_empty());
     }
 
     #[tokio::test]

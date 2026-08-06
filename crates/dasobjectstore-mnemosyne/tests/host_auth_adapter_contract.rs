@@ -233,6 +233,56 @@ async fn preverified_ingest_control_requires_a_verified_das_administrator() {
 }
 
 #[tokio::test]
+async fn preverified_enclosure_prepare_requires_a_verified_das_administrator() {
+    let request = || {
+        Request::builder()
+            .method("POST")
+            .uri("/api/v1/workspaces/enclosures/prepare")
+            .header(FEDERATED_CSRF_HEADER, csrf_binding())
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"ssd_device":"/dev/disk/by-id/nvme-test","hdd_devices":[],"dry_run":true,"allow_format":true,"existing_data_acknowledged":true,"confirmation_marker":"confirm enclosure preparation"}"#,
+            ))
+            .expect("request")
+    };
+
+    let denied = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_operator"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    // A verified administrator reaches only request validation. This proves
+    // the host route is protected by the preverified boundary before it can
+    // access a daemon, local session store, or local identity mechanism.
+    let invalid = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_administrator"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let legacy_headers = preverified_dasobjectstore_router(Router::new(), None)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/workspaces/enclosures/prepare")
+                .header("x-dasobjectstore-username", "operator")
+                .header("x-dasobjectstore-session-token", "local-secret")
+                .header(FEDERATED_CSRF_HEADER, csrf_binding())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"ssd_device":"/dev/disk/by-id/nvme-test","hdd_devices":[],"dry_run":true,"allow_format":true,"existing_data_acknowledged":true,"confirmation_marker":"confirm enclosure preparation"}"#,
+                ))
+                .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(legacy_headers.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn monas_exposes_only_pairing_create_and_exchange_without_a_session() {
     let root = temp_root("monas-easyconnect-public");
     let store = registered_store(&root);

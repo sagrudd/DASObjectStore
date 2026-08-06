@@ -159,6 +159,10 @@ pub(super) fn preverified_host_operational_router_with_state(
             post(preverified_host_create_object_store),
         )
         .route(
+            "/api/v1/workspaces/enclosures/prepare",
+            post(preverified_host_prepare_enclosure),
+        )
+        .route(
             "/api/v1/workspaces/endpoints/test",
             post(preverified_host_test_endpoint_connection),
         )
