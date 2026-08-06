@@ -130,8 +130,9 @@ pub fn federated_gui_api_router(auth_store: LocalAuthStore) -> Router {
 /// In particular, standalone Users & Groups management is not a host product
 /// capability: human identity and role management remain with Pistis and
 /// Prosopikon, while the local group mutation routes stay unreachable here.
-/// The same rule excludes standalone dashboard and remote-upload routes;
-/// separately reviewed Pistis dashboard routes are mounted explicitly below.
+/// The same rule excludes remote-upload routes. Separately reviewed Pistis
+/// dashboard routes are mounted explicitly below; they do not consult
+/// appliance-local users or sudo state.
 ///
 /// The embedding host must apply its preverified actor middleware around this
 /// router. Calling it directly does not establish an authority boundary.

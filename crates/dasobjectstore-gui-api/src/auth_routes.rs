@@ -5366,7 +5366,6 @@ mod tests {
                 "POST",
                 "/api/v1/workspaces/users-groups/local-groups/members",
             ),
-            ("GET", "/api/v1/dashboard/home"),
             ("GET", "/api/v1/workspaces/remote-upload"),
         ] {
             let response = app
