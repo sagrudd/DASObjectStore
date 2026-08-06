@@ -221,6 +221,58 @@ async fn preverified_enclosures_dashboard_uses_closed_verified_pistis_roles() {
 }
 
 #[tokio::test]
+async fn preverified_object_stores_dashboard_does_not_derive_local_group_authority() {
+    let request = || {
+        Request::builder()
+            .uri("/api/v1/dashboard/object-stores")
+            .body(Body::empty())
+            .expect("request")
+    };
+
+    let unrelated_role = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["authenticated"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(unrelated_role.status(), StatusCode::FORBIDDEN);
+
+    let viewer = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_viewer"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(viewer.status(), StatusCode::OK);
+    let viewer_body = axum::body::to_bytes(viewer.into_body(), 128 * 1024)
+        .await
+        .expect("viewer body");
+    let viewer: serde_json::Value = serde_json::from_slice(&viewer_body).expect("viewer JSON");
+    assert_eq!(viewer["groups_file_path"], "pistis-managed");
+    assert_eq!(viewer["groups"], serde_json::json!([]));
+    assert_eq!(viewer["create_object_store"]["enabled"], false);
+    assert!(viewer["warnings"]
+        .as_array()
+        .expect("warnings")
+        .iter()
+        .any(|warning| { warning["code"] == "pistis_writer_membership_not_evaluated" }));
+
+    let administrator = preverified_dasobjectstore_router(Router::new(), None)
+        .layer(Extension(verified_host_context(&["storage_administrator"])))
+        .oneshot(request())
+        .await
+        .expect("response");
+    assert_eq!(administrator.status(), StatusCode::OK);
+    let administrator_body = axum::body::to_bytes(administrator.into_body(), 128 * 1024)
+        .await
+        .expect("administrator body");
+    let administrator: serde_json::Value =
+        serde_json::from_slice(&administrator_body).expect("administrator JSON");
+    assert_ne!(
+        administrator["create_object_store"]["state"],
+        "admin_required"
+    );
+}
+
+#[tokio::test]
 async fn preverified_ingest_control_requires_a_verified_das_administrator() {
     let request = || {
         Request::builder()

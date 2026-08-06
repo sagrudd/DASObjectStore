@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.157.36] - 2026-08-06
+
+### Security
+
+- Migrate the host-composed ObjectStores dashboard to the verified Pistis
+  boundary. Visibility requires a matching `storage_viewer` role and the
+  create-store affordance requires only `storage_administrator`; the route
+  does not consult a local session, password, PAM, POSIX user/group, or sudo
+  identity. A Pistis dashboard role deliberately does not imply legacy
+  writer-group membership.
+
 ## [0.157.35] - 2026-08-06
 
 ### Security

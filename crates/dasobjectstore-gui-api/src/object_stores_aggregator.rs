@@ -56,6 +56,54 @@ pub(crate) fn live_object_stores_dashboard_for_user(
     build_object_stores_dashboard(config)
 }
 
+/// Build a host-composed ObjectStores dashboard from the verified Pistis role
+/// policy alone.
+///
+/// A product-scoped Pistis role grants dashboard visibility, but it is not a
+/// claim about legacy appliance-local group membership.  Consequently this
+/// view deliberately omits the local groups registry and reports every legacy
+/// writer-group membership as unavailable.  Upload and group-scoped access
+/// remain on their own, separately migrated authority path.
+pub(crate) fn live_object_stores_dashboard_for_verified_pistis(
+    administrator: bool,
+) -> ObjectStoresPageView {
+    let config = ObjectStoresAggregatorConfig::from_env();
+    let mut warnings = vec![DashboardWarning::new(
+        "pistis_writer_membership_not_evaluated",
+        "ObjectStore writer-group membership is not derived from a Pistis dashboard role.",
+    )];
+    let groups = Vec::new();
+    let stores = registry_object_store_cards(
+        &config.store_registry_path,
+        Some(&config.live_sqlite_path),
+        &groups,
+        &mut warnings,
+    );
+    let selected_store_id = stores.first().map(|store| store.store_id.clone());
+    let mounted_enclosures =
+        crate::enclosures_aggregator::live_enclosures_dashboard_for_administrator(administrator)
+            .enclosures;
+    let create_object_store = if !administrator {
+        CreateObjectStoreAffordanceView::admin_required()
+    } else if mounted_enclosures.is_empty() {
+        CreateObjectStoreAffordanceView::enclosure_required()
+    } else {
+        CreateObjectStoreAffordanceView::enabled()
+    };
+
+    ObjectStoresPageView {
+        schema_version: REDESIGN_DASHBOARD_SCHEMA_VERSION.to_string(),
+        generated_at_utc: now_utc_string(),
+        groups_file_path: "pistis-managed".to_string(),
+        groups,
+        mounted_enclosures,
+        stores,
+        selected_store_id,
+        create_object_store,
+        warnings,
+    }
+}
+
 fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> ObjectStoresPageView {
     let mut warnings = Vec::new();
     let groups_snapshot =
