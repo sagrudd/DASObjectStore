@@ -82,6 +82,7 @@ impl ProductProfileProvisioningPlan {
             dry_run: self.dry_run,
             client_request_id: Some(self.client_request_id.clone()),
             administrator_actor: Some(self.administrator_actor.clone()),
+            verified_subject: None,
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         request.validate()?;

@@ -980,6 +980,76 @@ async fn preverified_host_control_ingest(
         .map(Json)
 }
 
+async fn preverified_host_store_drain(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDrainRequest>,
+) -> Result<Json<HostStoreDrainResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_drain_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_drain_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_delete(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDeleteRequest>,
+) -> Result<Json<HostStoreDeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_delete_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_delete_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_repair(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreRepairRequest>,
+) -> Result<Json<HostStoreRepairResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_repair_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_repair_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_store_deduplicate(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostStoreDeduplicateRequest>,
+) -> Result<Json<HostStoreDeduplicateResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_store_deduplicate_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_store_deduplicate_request(&state, request)
+        .await
+        .map(Json)
+}
+
+async fn preverified_host_ingest_queue_drain(
+    State(state): State<PreverifiedHostAdminRouteState>,
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+    Json(request): Json<HostIngestQueueDrainRequest>,
+) -> Result<Json<HostIngestQueueDrainResponse>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_administrator(&actor, &verified)?;
+    let mut request = validate_host_ingest_queue_drain_request(request)?;
+    request.verified_subject = Some(actor.subject_id);
+    submit_preverified_host_ingest_queue_drain_request(&state, request)
+        .await
+        .map(Json)
+}
+
 async fn preverified_host_update_object_store_ingest_policy(
     State(state): State<PreverifiedHostAdminRouteState>,
     actor: AuthenticatedGuiActor,
@@ -1271,6 +1341,79 @@ async fn submit_preverified_host_ingest_control_request(
         })
         .await
         .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
+}
+
+async fn submit_preverified_host_store_drain_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDrainRequest,
+) -> Result<HostStoreDrainResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_drain(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_drain_failed"))
+}
+
+async fn submit_preverified_host_store_delete_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDeleteRequest,
+) -> Result<HostStoreDeleteResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_delete(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_delete_failed"))
+}
+
+async fn submit_preverified_host_store_repair_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreRepairRequest,
+) -> Result<HostStoreRepairResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || client.store_repair(request).map_err(|error| error.message))
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_repair_failed"))
+}
+
+async fn submit_preverified_host_store_deduplicate_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::StoreDeduplicateRequest,
+) -> Result<HostStoreDeduplicateResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .store_deduplicate(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "store_deduplicate_failed"))
+}
+
+async fn submit_preverified_host_ingest_queue_drain_request(
+    state: &PreverifiedHostAdminRouteState,
+    request: dasobjectstore_daemon::IngestQueueDrainRequest,
+) -> Result<HostIngestQueueDrainResponse, (StatusCode, Json<AuthRouteError>)> {
+    let client = Arc::clone(&state.enclosure_admin_client);
+    state
+        .priority_daemon_bridge
+        .clone()
+        .call_message(move || {
+            client
+                .ingest_queue_drain(request)
+                .map_err(|error| error.message)
+        })
+        .await
+        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_queue_drain_failed"))
 }
 
 async fn submit_preverified_host_ingest_policy_request(
