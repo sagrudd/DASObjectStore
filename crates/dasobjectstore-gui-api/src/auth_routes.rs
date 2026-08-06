@@ -700,6 +700,24 @@ async fn standalone_enclosures_dashboard(
     ))
 }
 
+/// Render the enclosure dashboard for a host actor that Monas or Synoptikon
+/// has already verified with Pistis.
+///
+/// This host-composed route has no local authentication store, local-user
+/// provider, POSIX group, or sudo lookup. A matching verified DAS viewer role
+/// admits dashboard visibility, while the closed administrator role alone
+/// controls the existing administrator affordance in the response.
+async fn preverified_host_enclosures_dashboard(
+    actor: AuthenticatedGuiActor,
+    Extension(verified): Extension<VerifiedHostAuthenticatedContext>,
+) -> Result<Json<crate::dashboard::EnclosuresPageView>, (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_viewer(&actor, &verified)?;
+    let administrator = DasRolePolicy::from_verified(&verified).permits(DasCapability::Administer);
+    Ok(Json(
+        crate::enclosures_aggregator::live_enclosures_dashboard_for_administrator(administrator),
+    ))
+}
+
 async fn standalone_object_stores_dashboard(
     State(state): State<StandaloneDashboardRouteState>,
     actor: AuthenticatedGuiActor,
@@ -1074,6 +1092,16 @@ pub(crate) fn require_preverified_host_viewer_for_store(
         ));
     }
     Ok(())
+}
+
+/// Require the closed DAS viewer role for host-wide read-only views. This
+/// admits only a matching verified Pistis context; local browser sessions,
+/// passwords, PAM, POSIX users/groups, and sudo policy never participate.
+pub(crate) fn require_preverified_host_viewer(
+    actor: &AuthenticatedGuiActor,
+    verified: &VerifiedHostAuthenticatedContext,
+) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    require_preverified_host_capability(actor, verified, DasCapability::View, "viewer")
 }
 
 pub(super) fn require_preverified_host_administrator(
@@ -1514,7 +1542,7 @@ mod tests {
     use super::{
         easyconnect_approve_pairing, easyconnect_public_router_with_config,
         easyconnect_public_router_with_config_and_daemon, gui_api_router_for_host_mode,
-        local_standalone_user, standalone_auth_router_with_state,
+        host_composed_gui_api_router, local_standalone_user, standalone_auth_router_with_state,
         standalone_dashboard_router_with_state, standalone_easyconnect_router_with_state,
         standalone_enclosure_admin_router_with_state, standalone_live_status_router_with_bridge,
         standalone_reporting_router_with_state, standalone_users_groups_router_with_state,
@@ -2645,6 +2673,67 @@ mod tests {
         );
 
         cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn host_composed_enclosures_dashboard_uses_only_verified_pistis_roles() {
+        let missing_context = host_composed_gui_api_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response completes");
+        assert_eq!(missing_context.status(), StatusCode::UNAUTHORIZED);
+
+        let unknown_role = host_composed_gui_api_router()
+            .layer(Extension(verified_host_context("authenticated")))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response completes");
+        assert_eq!(unknown_role.status(), StatusCode::FORBIDDEN);
+
+        let viewer = host_composed_gui_api_router()
+            .layer(Extension(verified_host_context("storage_viewer")))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response completes");
+        assert_eq!(viewer.status(), StatusCode::OK);
+        let viewer_body = to_bytes(viewer.into_body(), 128 * 1024)
+            .await
+            .expect("viewer response body");
+        let viewer: serde_json::Value = serde_json::from_slice(&viewer_body).expect("viewer JSON");
+        assert_eq!(viewer["add_enclosure"]["administrator"], false);
+
+        let administrator = host_composed_gui_api_router()
+            .layer(Extension(verified_host_context("storage_administrator")))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/dashboard/enclosures")
+                    .body(Body::empty())
+                    .expect("request builds"),
+            )
+            .await
+            .expect("response completes");
+        assert_eq!(administrator.status(), StatusCode::OK);
+        let administrator_body = to_bytes(administrator.into_body(), 128 * 1024)
+            .await
+            .expect("administrator response body");
+        let administrator: serde_json::Value =
+            serde_json::from_slice(&administrator_body).expect("administrator JSON");
+        assert_eq!(administrator["add_enclosure"]["administrator"], true);
     }
 
     #[tokio::test]
