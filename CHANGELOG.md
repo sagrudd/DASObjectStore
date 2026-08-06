@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.157.42] - 2026-08-06
+## [0.157.45] - 2026-08-06
 
 ### Security
 
@@ -9,6 +9,34 @@
   a non-blank verified Pistis subject. Direct root, sudo,
   `dasobjectstore-admin`, and CLI management paths fail closed; the signed
   application access-token exchange remains the explicit machine path.
+
+## [0.157.44] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for
+  non-dry endpoint-inventory changes. The daemon now requires the fixed
+  packaged host service peer and a non-blank verified Pistis subject before
+  recording endpoint integration state.
+
+## [0.157.43] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for
+  non-dry ObjectStore creation and destructive enclosure preparation. Both
+  operations now require the fixed packaged host service peer and a non-blank
+  verified Pistis subject; direct local peers fail closed before provisioning
+  or formatting work is dispatched.
+
+## [0.157.42] - 2026-08-06
+
+### Security
+
+- Retire direct root, sudo, and ``dasobjectstore-admin`` authority for daemon
+  ingest-control mutation. The daemon request now carries a verified host
+  subject only from the fixed packaged host service peer; direct CLI and
+  local-authority paths fail closed before the global ingest state changes.
 
 ## [0.157.41] - 2026-08-06
 

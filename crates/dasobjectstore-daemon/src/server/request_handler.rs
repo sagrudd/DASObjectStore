@@ -2655,7 +2655,66 @@ mod tests {
     }
 
     #[test]
-    fn object_store_creation_uses_peer_derived_administrator() {
+    fn enclosure_preparation_rejects_direct_os_authority_and_missing_subject() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-08T20:45:00Z"),
+        );
+        let mut request = prepare_enclosure_request();
+        request.dry_run = false;
+        request.administrator_actor = None;
+
+        for actor in [
+            DaemonLocalActor::new(0).with_username("root"),
+            DaemonLocalActor::new(1000)
+                .with_username("sudo-user")
+                .with_groups(["sudo"]),
+            DaemonLocalActor::new(1001)
+                .with_username("das-admin")
+                .with_groups(["dasobjectstore-admin"]),
+        ] {
+            let response = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::PrepareEnclosure(request.clone()),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("request handled");
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
+
+        let service_peer =
+            DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
+        let missing_subject = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::PrepareEnclosure(request.clone()),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            missing_subject,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_subject_required"
+        ));
+
+        request.administrator_actor = Some("pistis-administrator".to_string());
+        let accepted = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::PrepareEnclosure(request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(accepted, DaemonApiResponse::PrepareEnclosure(_)));
+    }
+
+    #[test]
+    fn object_store_creation_requires_preverified_service_subject() {
         let root = temp_root("create-objectstore-catalogue");
         let live_sqlite = root.join("metadata/live.sqlite");
         let service = FakeService::default();
@@ -2665,8 +2724,8 @@ mod tests {
         let mut request = create_object_store_request();
         request.store_id = "pinakotheke-rcb-proof".to_string();
         request.dry_run = false;
-        request.administrator_actor = Some("spoofed".to_string());
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        request.administrator_actor = Some("pistis-administrator".to_string());
+        let actor = DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
 
         let response = handler
             .handle_with_progress_for_actor(
@@ -2679,7 +2738,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::CreateObjectStore(response)
-                if response.administrator_actor.as_deref() == Some("root")
+                if response.administrator_actor.as_deref() == Some("pistis-administrator")
         ));
 
         let connection = Connection::open(&live_sqlite).expect("open catalogue");
@@ -2729,7 +2788,7 @@ mod tests {
     }
 
     #[test]
-    fn object_store_creation_rejects_writer_but_accepts_trusted_web_peer() {
+    fn object_store_creation_rejects_direct_os_authority_and_missing_subject() {
         let root = temp_root("create-objectstore-trusted-web-peer");
         let handler = DaemonRequestHandler::new(
             FakeService::default(),
@@ -2738,25 +2797,32 @@ mod tests {
         .with_live_sqlite_path(root.join("metadata/live.sqlite"));
         let mut request = create_object_store_request();
         request.dry_run = false;
-        let writer = DaemonLocalActor::new(1000)
-            .with_username("writer")
-            .with_groups(["mnemosyne"]);
-        let rejected = handler
-            .handle_with_progress_for_actor(
-                DaemonApiRequest::CreateObjectStore(request.clone()),
-                Some(&writer),
-                |_| Ok(()),
-            )
-            .expect("request handled");
-        assert!(matches!(
-            rejected,
-            DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
-        ));
+        request.administrator_actor = None;
+        for actor in [
+            DaemonLocalActor::new(0).with_username("root"),
+            DaemonLocalActor::new(1000)
+                .with_username("sudo-user")
+                .with_groups(["sudo"]),
+            DaemonLocalActor::new(1001)
+                .with_username("das-admin")
+                .with_groups(["dasobjectstore-admin"]),
+        ] {
+            let rejected = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::CreateObjectStore(request.clone()),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("request handled");
+            assert!(matches!(
+                rejected,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
 
-        request.administrator_actor = Some("spoofed".to_string());
         let web_peer = DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
-        let accepted = handler
+        let missing_subject = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::CreateObjectStore(request),
                 Some(&web_peer),
@@ -2764,10 +2830,9 @@ mod tests {
             )
             .expect("request handled");
         assert!(matches!(
-            accepted,
-            DaemonApiResponse::CreateObjectStore(response)
-                if response.administrator_actor.as_deref()
-                    == Some(crate::DEFAULT_DAEMON_SERVICE_USER)
+            missing_subject,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_subject_required"
         ));
         cleanup(&root);
     }
@@ -2966,7 +3031,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_store_ingest_policy_update_for_non_admin_actor() {
+    fn rejects_store_ingest_policy_update_for_non_service_peer() {
         let root = temp_root("update-ingest-policy-non-admin");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
@@ -2999,7 +3064,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authorization_required"
+                if error.code == "preverified_host_authority_required"
         ));
         cleanup(&root);
     }
@@ -3075,6 +3140,68 @@ mod tests {
                 true,
             )]
         );
+    }
+
+    #[test]
+    fn endpoint_inventory_rejects_direct_os_authority_and_missing_subject() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-09T00:05:00Z"),
+        );
+        let mut request = endpoint_inventory_request();
+        request.dry_run = false;
+        request.administrator_actor = None;
+
+        for actor in [
+            DaemonLocalActor::new(0).with_username("root"),
+            DaemonLocalActor::new(1000)
+                .with_username("sudo-user")
+                .with_groups(["sudo"]),
+            DaemonLocalActor::new(1001)
+                .with_username("das-admin")
+                .with_groups(["dasobjectstore-admin"]),
+        ] {
+            let response = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::UpsertEndpointInventory(request.clone()),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("request handled");
+            assert!(matches!(
+                response,
+                DaemonApiResponse::Error(error)
+                    if error.code == "preverified_host_authority_required"
+            ));
+        }
+
+        let service_peer =
+            DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
+        let missing_subject = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpsertEndpointInventory(request.clone()),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            missing_subject,
+            DaemonApiResponse::Error(error)
+                if error.code == "preverified_host_subject_required"
+        ));
+
+        request.administrator_actor = Some("pistis-administrator".to_string());
+        let accepted = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::UpsertEndpointInventory(request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("request handled");
+        assert!(matches!(
+            accepted,
+            DaemonApiResponse::UpsertEndpointInventory(_)
+        ));
     }
 
     #[test]
@@ -3565,6 +3692,7 @@ mod tests {
                     reason: "operator incident".to_string(),
                     dry_run: false,
                     confirmation_marker: crate::api::INGEST_CONTROL_CONFIRMATION.to_string(),
+                    verified_subject: None,
                 },
             ))
             .expect("request handled");
