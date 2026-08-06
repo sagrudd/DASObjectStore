@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.31] - 2026-08-06
+
+### Security
+
+- Migrate the host-composed ObjectStore browser listing to the verified Pistis
+  boundary. A matching `storage_viewer` and exact store scope now produce the
+  peer-bound, canonical-prefix daemon subject; the route emits neither a
+  local user nor a delegated POSIX authority.
+
 ## [0.157.30] - 2026-08-06
 
 ### Security
