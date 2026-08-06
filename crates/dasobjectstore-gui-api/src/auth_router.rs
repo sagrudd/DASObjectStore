@@ -150,17 +150,6 @@ fn preverified_host_dashboard_router() -> Router {
     )
 }
 
-/// Host-composed dashboard routes derive their visibility and administrator
-/// affordances solely from the verified Pistis role policy. They deliberately
-/// do not mount the standalone dashboard, which consults appliance-local
-/// users and sudo state.
-fn preverified_host_dashboard_router() -> Router {
-    Router::new().route(
-        "/api/v1/dashboard/enclosures",
-        get(preverified_host_enclosures_dashboard),
-    )
-}
-
 /// Host-composed operational mutations that derive authority exclusively from
 /// `VerifiedHostAuthenticatedContext` and send work through the bounded
 /// priority daemon bridge.

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.157.29] - 2026-08-06
+
+### Fixed
+
+- Resolve the verified-Pistis Enclosures dashboard rebase without duplicating
+  its host route. The host-composed endpoint remains available only through
+  the matching verified Pistis viewer/administrator role boundary.
+
 ## [0.157.28] - 2026-08-06
 
 ### Security
