@@ -174,6 +174,13 @@ impl VerifiedHostObjectPrefixScope {
                 || object_id.len() == self.canonical_prefix.len()
                 || object_id.as_bytes().get(self.canonical_prefix.len()) == Some(&b'/'))
     }
+
+    /// The validated canonical prefix carried by this in-process grant.
+    /// Host-composed peer envelopes use it so the daemon can independently
+    /// reject a request that widens the same verified session's scope.
+    pub fn canonical_prefix(&self) -> &str {
+        &self.canonical_prefix
+    }
 }
 
 impl VerifiedHostStoreScope {
