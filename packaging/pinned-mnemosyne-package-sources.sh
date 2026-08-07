@@ -43,12 +43,15 @@ das_require_clean_pinned_checkout() {
     printf 'DASObjectStore package build requires sibling %s checkout: %s\n' "$label" "$checkout" >&2
     return 1
   fi
-  actual_revision="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
+  # Isolated container builders commonly mount source owned by the invoking
+  # host user. Scope Git's safe-directory exception to this verified path;
+  # do not weaken the builder's global Git configuration.
+  actual_revision="$(git -c safe.directory="$checkout" -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
   if [[ "$actual_revision" != "$expected_revision" ]]; then
     printf 'DASObjectStore package build requires %s at %s, found %s\n' "$label" "$expected_revision" "${actual_revision:-unresolved}" >&2
     return 1
   fi
-  if [[ -n "$(git -C "$checkout" status --porcelain 2>/dev/null)" ]]; then
+  if [[ -n "$(git -c safe.directory="$checkout" -C "$checkout" status --porcelain 2>/dev/null)" ]]; then
     printf 'DASObjectStore package build requires a clean %s checkout: %s\n' "$label" "$checkout" >&2
     return 1
   fi
