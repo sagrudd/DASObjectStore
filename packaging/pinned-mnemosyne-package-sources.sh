@@ -9,6 +9,11 @@ das_package_configure_pinned_mnemosyne_sources() {
   local workspace_root prosopikon_root pistis_root prosopikon_revision
   local pistis_revisions
 
+  if ! command -v git >/dev/null 2>&1; then
+    printf 'DASObjectStore package build requires git to verify pinned Mnemosyne sources\n' >&2
+    return 1
+  fi
+
   workspace_root="$(cd "$repo_root/.." && pwd)"
   prosopikon_root="$workspace_root/prosopikon"
   pistis_root="$workspace_root/pistis"
