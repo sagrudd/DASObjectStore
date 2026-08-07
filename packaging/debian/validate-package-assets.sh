@@ -29,6 +29,7 @@ build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
 build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
 prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
+pinned_sources="$repo_root/packaging/pinned-mnemosyne-package-sources.sh"
 
 require_file() {
   local path="$1"
@@ -83,6 +84,7 @@ require_file "$build_remote_deb"
 require_file "$build_remote_rpm"
 require_file "$prepare_web_dist"
 require_file "$package_auth_guard"
+require_file "$pinned_sources"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -185,6 +187,20 @@ require_text "$postrm" 'systemctl daemon-reload'
 require_text "$postrm" 'package removal is never that'
 
 require_text "$build_deb" "cargo build --release --no-default-features -p dasobjectstore-daemon"
+for builder in "$build_deb" "$build_rpm" "$build_remote_deb" "$build_remote_rpm"; do
+  require_text "$builder" "pinned-mnemosyne-package-sources.sh"
+  require_text "$builder" "das_package_configure_pinned_mnemosyne_sources"
+done
+require_text "$pinned_sources" 'git -c safe.directory="$checkout" -C "$checkout" status --porcelain'
+require_text "$pinned_sources" 'command -v git'
+require_text "$pinned_sources" 'das_package_write_pinned_dependency_provenance'
+require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/prosopikon.git"]'
+require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
+require_text "$repo_root/Cargo.toml" 'pistis-canonical = { path = "../pistis/crates/pistis-canonical" }'
+require_text "$build_deb" 'das_package_write_pinned_dependency_provenance'
+require_text "$build_rpm" 'das_package_write_pinned_dependency_provenance'
+require_text "$build_remote_deb" 'das_package_write_pinned_dependency_provenance'
+require_text "$build_remote_rpm" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'

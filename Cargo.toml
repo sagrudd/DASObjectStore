@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.158.1"
+version = "0.158.2"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -77,3 +77,13 @@ wasm-bindgen-futures = "0.4.76"
 web-sys = "0.3.82"
 x509-parser = "0.18.0"
 yew = { version = "0.23.0", features = ["csr"] }
+
+[patch."https://github.com/sagrudd/prosopikon.git"]
+prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }
+prosopikon-yew = { path = "../prosopikon/crates/prosopikon-yew" }
+
+[patch."https://github.com/sagrudd/pistis.git"]
+pistis-canonical = { path = "../pistis/crates/pistis-canonical" }
+pistis-cose = { path = "../pistis/crates/pistis-cose" }
+pistis-crypto = { path = "../pistis/crates/pistis-crypto" }
+pistis-protocol = { path = "../pistis/crates/pistis-protocol" }
