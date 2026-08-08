@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.159.0] - 2026-08-08
+
+### Added
+
+- Add the owner-side canonical projection for a committed `jenkins.dossier`
+  EvidenceRef. The projection binds an exact immutable DAS object version to
+  the canonical Expedition dossier digest without carrying authority or
+  secret material. Live Monas/Pistis grant admission, daemon persistence,
+  independent read-back, and retained Jenkins qualification remain separate
+  fail-closed gates.
+
 ## [0.158.1] - 2026-08-06
 
 ### Security
