@@ -19,10 +19,13 @@ pub const JENKINS_DOSSIER_EVIDENCE_KIND: &str = "jenkins.dossier";
 
 /// Canonical facts required to project a committed retained dossier object.
 ///
-/// `dossier_digest` is the canonical Expedition dossier digest in the exact
-/// `sha256:<lowercase-hex>` spelling.  Its hexadecimal payload becomes the
-/// `EvidenceRefV1.subject_digest`; it binds the DAS evidence assertion to the
-/// same canonical dossier that Jenkins retains and verifies.
+/// `dossier_digest` is the domain-separated Jenkins dossier subject digest in
+/// the exact `sha256:<lowercase-hex>` spelling. Its hexadecimal payload becomes
+/// the `EvidenceRefV1.subject_digest`. The producer excludes only external
+/// artifact references from this subject projection, so the DAS assertion can
+/// be embedded in the final canonical dossier without creating a hash fixed
+/// point. The final canonical dossier digest remains reference-complete and is
+/// separately bound by the Jenkins approval.
 ///
 /// This is a non-secret data type.  It contains no URI, backend location,
 /// bearer capability, credential, session token, local username, or OS role.
