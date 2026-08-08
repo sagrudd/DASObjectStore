@@ -5,10 +5,12 @@ Status: owner-side canonical projection foundation; not a live authority path
 `dasobjectstore.jenkins_dossier_evidence_projection.v1` is the single DAS
 owner-side construction seam for the `jenkins.dossier` EvidenceRef required by
 the Jenkins retained-dossier contract. It accepts only facts for an already
-committed immutable object version and a canonical Expedition
-`sha256:<lowercase-hex>` dossier digest. The projection places the digest's
-hexadecimal payload in `EvidenceRefV1.subject_digest`, so the assertion is
-bound to the exact canonical dossier Jenkins retains.
+committed immutable object version and a domain-separated Jenkins
+`sha256:<lowercase-hex>` dossier subject digest. The producer derives this
+subject projection from the canonical dossier while excluding only external
+artifact references. The projection places its hexadecimal payload in
+`EvidenceRefV1.subject_digest`, so the assertion can be embedded in the final,
+reference-complete dossier without creating a hash fixed point.
 
 The projected reference is deliberately non-secret. It contains no backend
 path, bucket, URL, capability, credential, token, session cookie, local user,
