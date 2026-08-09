@@ -7,7 +7,7 @@ release build.
 
 | Local path | Purpose and reference | Required revision / branch | Remote | Observed local state |
 | --- | --- | --- | --- | --- |
-| `../prosopikon` | Identity contracts and Yew components. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `aa920e024fb3e33f28a367798ec0d2323a7caf17` (`main`, Prosopikon #44) | `https://github.com/sagrudd/prosopikon.git` | Primary checkout: `main` at `206ff7cec384062217cdc7401ab43c0f8c11ea23`, dirty/unsafe for release packaging; package builds require a clean checkout at the pinned revision. |
+| `../prosopikon` | Identity contracts and Yew components. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `19ce07d763c131bae6d925c12f8368f464efd926` (`main`, Prosopikon #45) | `https://github.com/sagrudd/prosopikon.git` | Primary checkout: `main` at `206ff7cec384062217cdc7401ab43c0f8c11ea23`, dirty/unsafe for release packaging; package builds require a clean checkout at the pinned revision. |
 | `../pistis` | Canonical, COSE, crypto, and protocol contracts transitive through Prosopikon. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `6d52ae2c1551e45eb970124418f18b8b0e84d407` (detached package checkout) | `https://github.com/sagrudd/pistis.git` | Primary checkout: `feature/mnemosyne-mobile-branding` at `e948369c6f22696228897e6ea0f59c5b5b9ed0e9`, dirty/unsafe for release packaging. |
 
 `make pull` discovers both repositories but does not rewrite a sibling
