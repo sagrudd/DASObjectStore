@@ -8,6 +8,8 @@ use super::storage_reconciliation::{
 use super::*;
 #[path = "storage_control.rs"]
 mod storage_control;
+#[path = "storage_jenkins_dossier.rs"]
+mod storage_jenkins_dossier;
 #[path = "storage_operations.rs"]
 mod storage_operations;
 #[path = "storage_profile_requests.rs"]
@@ -27,6 +29,9 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::JenkinsDossierEvidenceSettlement(request) => {
+            Ok(storage_jenkins_dossier::settle(handler, request, actor))
+        }
         DaemonApiRequest::DiskRetire(request) => {
             if let Err(error) = require_verified_pistis_host_authority(
                 actor,

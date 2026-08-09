@@ -87,7 +87,8 @@ where
         | DaemonApiRequest::ProfileS3Health(_)
         | DaemonApiRequest::ProfileDiagnostics(_)
         | DaemonApiRequest::ObjectDownload(_)
-        | DaemonApiRequest::ObjectFolderDownload(_)) => {
+        | DaemonApiRequest::ObjectFolderDownload(_)
+        | DaemonApiRequest::JenkinsDossierEvidenceSettlement(_)) => {
             storage::request(handler, storage_request, actor, emit_progress)
         }
         easyconnect_request @ (DaemonApiRequest::RemoteEasyconnectCreatePairing(_)

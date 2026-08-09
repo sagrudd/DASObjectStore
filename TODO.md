@@ -149,8 +149,11 @@ Work is dependency ordered. Only these entries define open release work:
   library with an offline downstream consumer fixture; publication and all
   authority-bearing follow-on work remain explicitly out of scope.
   Atomic issuance/persistence, authenticated transport, action-time scope
-  authorization, read-back, evidence-kind authority, restart recovery, and
-  Jenkins/Expedition qualification remain open and manual/fail-closed. A
+  authorization, evidence-kind authority, restart recovery, and
+  Jenkins/Expedition qualification remain open and manual/fail-closed. The
+  daemon-owned, fixed-peer verified-scope read-back boundary is delivered in
+  ``0.160.0``; it remains unusable until the real Monas/Pistis producer and
+  retained Jenkins dossier are available. A
   source-only retained-dossier prerequisite now makes a pinned Jenkins
   revision, exact EvidenceRef, and supplied byte digest/size comparison
   explicit; it is not a resolver, session, receipt, promotion, or dossier run.

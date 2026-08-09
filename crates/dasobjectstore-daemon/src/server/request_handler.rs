@@ -1283,17 +1283,24 @@ mod tests {
         .with_registry_paths(&store_registry, &subobject_registry)
         .with_profile_binding_registry_path(&profile_registry)
         .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store"));
-        let administrator_peer = DaemonLocalActor::new(0).with_username("root");
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
         let mut binding_request =
             profile_binding_request_for_auth_test("stream-store", backend_root.clone());
         binding_request.store_definition = Some(store_definitions[0].clone());
-        handler
+        binding_request.verified_subject = Some(verified_pistis_subject());
+        let registration = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
-                Some(&administrator_peer),
+                Some(&service_peer),
                 |_| Ok(()),
             )
-            .expect("profile binding");
+            .expect("profile binding request");
+        assert!(
+            matches!(registration, DaemonApiResponse::RegisterProfileBinding(_)),
+            "unexpected registration: {registration:?}"
+        );
 
         let mut backend = FolderBackend::open(
             backend_root,
@@ -1315,9 +1322,6 @@ mod tests {
             .commit_batch(std::slice::from_ref(&finalized))
             .expect("catalogue commit");
 
-        let service_peer = DaemonLocalActor::new(997)
-            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
-            .with_groups(["dasobjectstore"]);
         let request = ProviderStreamOpenRequest {
             schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
             request_id: "open-test".to_string(),
@@ -1370,6 +1374,132 @@ mod tests {
             .read_to_end(&mut ranged_bytes)
             .expect("read ranged provider source");
         assert_eq!(ranged_bytes, b"ell");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn settles_jenkins_dossier_only_from_fixed_peer_and_verified_scope() {
+        let root = temp_root("jenkins-dossier-settlement");
+        cleanup(&root);
+        let backend_root = root.join("backend");
+        fs::create_dir_all(&backend_root).expect("backend root");
+        let (store_registry, subobject_registry) = write_test_store_registry_with_read_policy(
+            &root,
+            "dossiers",
+            Some("readers"),
+            None,
+            false,
+        );
+        let mut definitions = read_store_registry(&store_registry).expect("store registry");
+        definitions[0].policy.capacity =
+            dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
+        fs::write(
+            &store_registry,
+            serde_json::to_string_pretty(&definitions).expect("registry JSON"),
+        )
+        .expect("store registry written");
+        let profile_registry = root.join("profile-bindings.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-08-09T10:00:00Z"),
+        )
+        .with_registry_paths(&store_registry, &subobject_registry)
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "dossiers"));
+        let service_peer = DaemonLocalActor::new(997)
+            .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
+            .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
+        let mut binding = profile_binding_request_for_auth_test("dossiers", backend_root.clone());
+        binding.store_definition = Some(definitions[0].clone());
+        binding.verified_subject = Some(verified_pistis_subject());
+        let registration = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::RegisterProfileBinding(binding.clone()),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("profile binding request");
+        assert!(
+            matches!(registration, DaemonApiResponse::RegisterProfileBinding(_)),
+            "unexpected registration: {registration:?}"
+        );
+        assert!(
+            read_profile_binding(&profile_registry, "dossiers")
+                .expect("binding registry reads")
+                .is_some(),
+            "registered dossier profile remains available"
+        );
+        let mut backend = FolderBackend::open(backend_root, binding.manifest, binding.capacity, 0)
+            .expect("folder backend");
+        let key = BackendObjectKey {
+            object_id: "dossier-0001".to_string(),
+            version: 1,
+        };
+        backend.reserve("dossier-upload", 5).expect("reserve");
+        let staged = backend
+            .stage("dossier-upload", &key, &mut &b"hello"[..])
+            .expect("stage");
+        let finalized = backend.finalize(staged).expect("finalize");
+        backend
+            .commit_batch(std::slice::from_ref(&finalized))
+            .expect("catalogue commit");
+        let verified_subject = ObjectBrowserVerifiedSubject {
+            schema_version: OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: OBJECT_BROWSER_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis.subject.1".to_string(),
+            session_id: "session.1".to_string(),
+            correlation_id: "correlation.1".to_string(),
+            store_id: StoreId::new("dossiers").expect("store"),
+            canonical_prefix: String::new(),
+        };
+        let request = crate::api::JenkinsDossierEvidenceSettlementRequest {
+            schema_version: crate::api::JENKINS_DOSSIER_EVIDENCE_SETTLEMENT_V1_SCHEMA.to_string(),
+            request_id: "jenkins.dossier.1".to_string(),
+            projection: dasobjectstore_core::JenkinsDossierEvidenceProjectionV1 {
+                schema: dasobjectstore_core::JENKINS_DOSSIER_EVIDENCE_PROJECTION_V1_SCHEMA
+                    .to_string(),
+                authority_scope: dasobjectstore_core::AuthorityScopeV1 {
+                    installation_id: "installation-1".to_string(),
+                    site_trust_domain_id: Some("site-1".to_string()),
+                    tenant_id: None,
+                    project_id: None,
+                },
+                store_id: "dossiers".to_string(),
+                object_id: key.object_id,
+                object_version: key.version,
+                size_bytes: 5,
+                content_sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+                    .to_string(),
+                dossier_digest: format!("sha256:{}", "b".repeat(64)),
+                evidence_revision: 1,
+            },
+            verified_subject,
+        };
+        let denied = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::JenkinsDossierEvidenceSettlement(request.clone()),
+                Some(&DaemonLocalActor::new(0).with_username("root")),
+                |_| Ok(()),
+            )
+            .expect("root request handled");
+        assert!(matches!(denied, DaemonApiResponse::Error(_)));
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::JenkinsDossierEvidenceSettlement(request),
+                Some(&service_peer),
+                |_| Ok(()),
+            )
+            .expect("settlement handled");
+        assert!(
+            matches!(
+                response,
+                DaemonApiResponse::JenkinsDossierEvidenceSettlement(ref response)
+                    if response.size_bytes == 5
+                        && response.content_sha256
+                            == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+            ),
+            "unexpected response: {response:?}"
+        );
         cleanup(&root);
     }
 

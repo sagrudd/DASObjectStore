@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.160.0] - 2026-08-09
+
+### Added
+
+- Add the fixed-peer, verified-Pistis-scope daemon endpoint for an exact
+  Jenkins dossier evidence read-back. It derives the canonical
+  `jenkins.dossier` EvidenceRef only from a committed provider object, re-reads
+  bounded bytes through the daemon, and fails closed on scope, size, or digest
+  mismatch. It has no local-user, OS-role, session-cookie, capability, or
+  fallback authority path.
+
 ## [0.159.1] - 2026-08-08
 
 ### Fixed
