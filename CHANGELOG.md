@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.160.2 - 2026-08-09
+
+- Advance both Prosopikon workspace dependencies to immutable revision
+  ``19ce07d763c131bae6d925c12f8368f464efd926`` (Prosopikon #45), retaining
+  one shared authority type identity with Monas. This is a dependency lockstep
+  only; DASObjectStore authority, authentication, package lifecycle, and host
+  behaviour are unchanged.
+
 ## 0.160.1 - 2026-08-09
 
 - Advance both Prosopikon workspace dependencies to immutable revision
