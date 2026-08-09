@@ -17,6 +17,7 @@ mod ingest;
 #[path = "ingest/control.rs"]
 pub(crate) mod ingest_control;
 mod ingest_mutation;
+mod jenkins_dossier_evidence;
 mod jobs;
 mod live_status;
 mod local_admin;
@@ -157,6 +158,10 @@ pub use ingest_control::{
 pub use ingest_mutation::{
     IngestQueueDrainRequest, IngestQueueDrainResponse, IngestQueueDrainValidationError,
     INGEST_QUEUE_DRAIN_CONFIRMATION,
+};
+pub use jenkins_dossier_evidence::{
+    JenkinsDossierEvidenceSettlementRequest, JenkinsDossierEvidenceSettlementResponse,
+    JenkinsDossierEvidenceSettlementValidationError, JENKINS_DOSSIER_EVIDENCE_SETTLEMENT_V1_SCHEMA,
 };
 pub use jobs::{
     DaemonJobAcceptedResponse, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobEvent,
@@ -402,6 +407,7 @@ pub enum DaemonApiRequest {
     RemoteObjectGroupStatus(RemoteObjectGroupStatusRequest),
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
+    JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     TestEndpointConnection(TestEndpointConnectionRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
@@ -490,6 +496,7 @@ impl DaemonApiRequest {
             Self::RemoteObjectGroupStatus(_) => "remote_object_group_status",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
+            Self::JenkinsDossierEvidenceSettlement(_) => "jenkins_dossier_evidence_settlement",
             Self::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
             Self::TestEndpointConnection(_) => "test_endpoint_connection",
             Self::CreateLocalGroup(_) => "create_local_group",
@@ -626,6 +633,13 @@ impl DaemonApiRequest {
             Self::RemoteObjectGroupStatus(request) => request.validate(),
             Self::ObjectDownload(request) => request.validate(),
             Self::ObjectFolderDownload(request) => request.validate(),
+            Self::JenkinsDossierEvidenceSettlement(request) => {
+                request
+                    .validate()
+                    .map_err(|error| DaemonRequestValidationError::InvalidPolicy {
+                        message: error.to_string(),
+                    })
+            }
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
@@ -746,6 +760,7 @@ pub enum DaemonApiResponse {
     RemoteObjectGroupStatus(RemoteObjectGroupStatusResponse),
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),
+    JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     TestEndpointConnection(TestEndpointConnectionResponse),
     CreateLocalGroup(CreateLocalGroupResponse),

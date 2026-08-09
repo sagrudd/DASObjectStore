@@ -13,6 +13,7 @@ pub mod health;
 pub mod ids;
 pub mod ingress;
 pub mod jenkins_dossier_evidence;
+pub mod jenkins_dossier_readback;
 pub mod lifecycle;
 pub mod manifest;
 pub mod migration;
@@ -64,6 +65,9 @@ pub use enclosure_registry::{
 pub use jenkins_dossier_evidence::{
     JenkinsDossierEvidenceProjectionError, JenkinsDossierEvidenceProjectionV1,
     JENKINS_DOSSIER_EVIDENCE_KIND, JENKINS_DOSSIER_EVIDENCE_PROJECTION_V1_SCHEMA,
+};
+pub use jenkins_dossier_readback::{
+    verify_jenkins_dossier_readback, JenkinsDossierReadbackError, JenkinsDossierReadbackV1,
 };
 pub use manifest::{
     BackendReference, DriveMediaKind, ObjectStoreManifest, ObjectStoreManifestDecodeError,

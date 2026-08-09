@@ -37,7 +37,8 @@ use crate::api::{
     ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
     GovernedBindingAuthorityAdmissionRequest, GovernedBindingAuthorityAdmissionResponse,
     IngestControlRequest, IngestControlResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, LiveStatusRequest, LiveStatusResponse,
+    IngestQueueDrainRequest, IngestQueueDrainResponse, JenkinsDossierEvidenceSettlementRequest,
+    JenkinsDossierEvidenceSettlementResponse, LiveStatusRequest, LiveStatusResponse,
     ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
     ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
     ObjectStoreCapabilityDiscoveryRequest, ObjectStoreCapabilityDiscoveryResponse,
@@ -132,6 +133,17 @@ where
         match self.send(DaemonApiRequest::CapacityStatus(request))? {
             DaemonApiResponse::CapacityStatus(response) => Ok(response),
             response => Err(unexpected("capacity_status", response)),
+        }
+    }
+
+    /// Request one fixed-peer, verified-scope retained dossier read-back.
+    pub fn jenkins_dossier_evidence_settlement(
+        &self,
+        request: JenkinsDossierEvidenceSettlementRequest,
+    ) -> Result<JenkinsDossierEvidenceSettlementResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::JenkinsDossierEvidenceSettlement(request))? {
+            DaemonApiResponse::JenkinsDossierEvidenceSettlement(response) => Ok(response),
+            response => Err(unexpected("jenkins_dossier_evidence_settlement", response)),
         }
     }
 
@@ -958,6 +970,9 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RemoteObjectGroupStatus(_) => "remote_object_group_status",
         DaemonApiResponse::ObjectDownload(_) => "object_download",
         DaemonApiResponse::ObjectFolderDownload(_) => "object_folder_download",
+        DaemonApiResponse::JenkinsDossierEvidenceSettlement(_) => {
+            "jenkins_dossier_evidence_settlement"
+        }
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::TestEndpointConnection(_) => "test_endpoint_connection",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",
