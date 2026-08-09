@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.160.1 - 2026-08-09
+
+- Advance both Prosopikon workspace dependencies to immutable revision
+  ``aa920e024fb3e33f28a367798ec0d2323a7caf17`` so DASObjectStore and Monas
+  use one `prosopikon-core` type identity. This is a dependency lockstep only:
+  it introduces no DAS authority adapter, authentication fallback, package
+  lifecycle change, or host mutation.
+
 ## [0.160.0] - 2026-08-09
 
 ### Added
