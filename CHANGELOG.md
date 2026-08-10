@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.8 - 2026-08-10
+
+- Advance Prosopikon to immutable revision
+  `81dd19cbd1bd67b768652d0a2e177a4a8c0e5987` (#52), preserving one actor type
+  with Monas while adopting the governed expired bootstrap-invitation reissue
+  transition. DAS authentication and data-plane behavior are unchanged.
+
 ## 0.161.7 - 2026-08-10
 
 - Advance both Prosopikon workspace dependencies to immutable revision
