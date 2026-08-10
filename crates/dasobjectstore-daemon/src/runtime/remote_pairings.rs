@@ -70,8 +70,31 @@ pub struct RemoteEasyconnectPairingRecord {
     pub client_request_id: Option<String>,
     pub created_at_utc: String,
     pub expires_at_utc: String,
+    /// Legacy approvals predate the authority-bound approval context. They are
+    /// deliberately downgraded to pending during deserialization so an old
+    /// exchange code can never be promoted into a Pistis session after an
+    /// upgrade.
+    #[serde(default, deserialize_with = "deserialize_compatible_approval")]
     pub approval: Option<RemoteEasyconnectPairingApproval>,
     pub exchanged_at_utc: Option<String>,
+}
+
+fn deserialize_compatible_approval<'de, D>(
+    deserializer: D,
+) -> Result<Option<RemoteEasyconnectPairingApproval>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.get("context").is_none() {
+        return Ok(None);
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 impl RemoteEasyconnectPairingRecord {
@@ -842,6 +865,34 @@ mod tests {
             crate::RemoteEasyconnectPairingState::Pending
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn legacy_approval_without_authority_context_is_downgraded_to_pending() {
+        let raw = r#"{
+          "schema_version": 1,
+          "pairings": [{
+            "pairing_id": "legacy-pairing",
+            "client_name": "old-client",
+            "callback_url": "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback",
+            "requested_object_store": "requested-store",
+            "requested_session_lifetime_seconds": null,
+            "client_request_id": null,
+            "created_at_utc": "2026-07-28T10:00:00Z",
+            "expires_at_utc": "2026-07-28T10:05:00Z",
+            "approval": {
+              "pairing_id": "legacy-pairing",
+              "approval_expires_at_utc": "2026-07-28T10:04:00Z",
+              "exchange_code": "legacy-unbound-secret"
+            },
+            "exchanged_at_utc": null
+          }]
+        }"#;
+
+        let store: RemoteEasyconnectPairingStoreFile =
+            serde_json::from_str(raw).expect("legacy store remains readable");
+        assert_eq!(store.pairings.len(), 1);
+        assert!(store.pairings[0].approval.is_none());
     }
 
     #[test]

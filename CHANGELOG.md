@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.1 - 2026-08-10
+
+- Preserve EasyConnect state across upgrades that add authority-bound approval
+  context. Legacy unbound approvals are deliberately downgraded to pending so
+  their old exchange secrets cannot mint Pistis sessions, while the daemon can
+  continue admitting new device-code pairings without deleting state files.
+
 ## 0.161.0 - 2026-08-10
 
 - Turn the Pistis EasyConnect CLI into a complete device-style sign-in
