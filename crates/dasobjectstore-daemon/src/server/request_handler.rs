@@ -5130,6 +5130,7 @@ mod tests {
             .handle(DaemonApiRequest::RemoteEasyconnectApprovePairing(
                 RemoteEasyconnectApprovePairingRequest {
                     pairing_id: create.pairing_id.clone(),
+                    user_code: create.user_code.clone(),
                     approval_context: crate::RemoteEasyconnectApprovalContext {
                         authority_id: "authority-1".to_string(),
                         principal_id: "stephen".to_string(),

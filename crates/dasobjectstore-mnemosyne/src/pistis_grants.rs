@@ -381,6 +381,7 @@ mod tests {
         let approved = client
             .remote_easyconnect_approve_pairing(RemoteEasyconnectApprovePairingRequest {
                 pairing_id: created.pairing_id.clone(),
+                user_code: created.user_code.clone(),
                 approval_context,
             })
             .expect("pairing is approved");

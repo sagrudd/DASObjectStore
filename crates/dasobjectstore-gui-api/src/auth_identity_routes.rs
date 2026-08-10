@@ -473,6 +473,8 @@ pub(super) async fn easyconnect_create_pairing(
         .append_pair("object_store", &requested_object_store)
         .append_pair("expires_at_utc", &response.expires_at_utc);
     response.browser_login_url = browser_url.to_string();
+    response.verification_uri = response.browser_login_url.clone();
+    response.verification_uri_complete = response.browser_login_url.clone();
     response.polling_url = format!(
         "{}{}",
         public_base_url.trim_end_matches('/'),
@@ -530,6 +532,7 @@ pub(super) async fn easyconnect_approve_pairing(
     }
     let request = RemoteEasyconnectApprovePairingRequest {
         pairing_id: intent.pairing_id,
+        user_code: intent.user_code,
         approval_context,
     };
     request.validate().map_err(|error| {

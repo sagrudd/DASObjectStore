@@ -27,26 +27,40 @@ Start easyconnect from the remote computer:
 
 .. code-block:: console
 
-   dasobjectstore-remote easyconnect 192.168.1.192
+   dasobjectstore-remote easyconnect 192.168.1.192 \
+     --object-store epic_collection \
+     --set-s3-config
 
-Use ``--object-store NAME`` when the requested ObjectStore must be fixed before
-approval. EasyConnect requires an already enrolled appliance certificate pin.
+``login`` is a visible alias for ``easyconnect`` when a conventional sign-in
+verb is clearer; both invoke the same Pistis-only implementation.
 
-The client starts a loopback callback listener, opens the appliance login page
-in a browser, and waits for authenticated approval. Use ``--no-browser`` on a
-headless remote host; the command prints the browser URL and still waits for
-approval. Use ``--contract`` to inspect the easyconnect contract without
-starting a pairing.
+The CLI always prints a short verification code and the complete approval URL
+before it attempts to open a browser. Confirm that the Pistis approval page
+shows the same code and ObjectStore, then approve the request. The code binds
+what the terminal requested to what Pistis authorizes; it is not an S3
+credential and cannot complete the one-time exchange by itself.
+
+``--set-s3-config`` installs and verifies the standard
+``dasobjectstore-epic_collection`` AWS profile as part of the same workflow.
+Use ``--s3-profile NAME`` to choose another profile. No manual ``aws configure``
+commands are required. EasyConnect requires already enrolled appliance trust;
+certificate trust remains separate from human Pistis authentication.
+
+The client starts a loopback callback listener, opens the Pistis-protected
+appliance approval page, and waits for approval. Use ``--no-browser`` on a
+headless remote host; copy the printed URL into a browser that can reach the
+appliance. Polling remains active if the loopback callback is lost. Use
+``--contract`` to inspect the easyconnect contract without starting a pairing.
 
 Browser Authentication
 ----------------------
 
-Standalone appliances use the same local-user Web session as the rest of the
-console. Sign in with the appliance account that should own the upload. The
-daemon filters the issued remote session to the ObjectStores that account may
-read or write. Public-read access is not enough for upload; the account must be
-allowed to write the target ObjectStore, normally through the ObjectStore writer
-group or administrator group.
+Human approval comes only from the verified Pistis host session composed by
+Monas (or the corresponding Synoptikon host). DASObjectStore does not accept a
+password, mint a human identity, or infer authority from the local OS account.
+The daemon filters the issued remote session to the exact ObjectStore granted
+by the verified Pistis context. Public-read access is not enough for upload;
+Pistis must authorize writable access to the requested ObjectStore.
 
 After approval, the remote client performs a one-time exchange and atomically
 stores the issued session, temporary S3 credentials, expiry time, renewal

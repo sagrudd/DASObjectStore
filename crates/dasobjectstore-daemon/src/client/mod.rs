@@ -1772,6 +1772,9 @@ mod tests {
             Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(
                 RemoteEasyconnectCreatePairingResponse {
                     pairing_id: "pair-1".to_string(),
+                    user_code: "ABCD-1234".to_string(),
+                    verification_uri: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login".to_string(),
+                    verification_uri_complete: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login?pairing_id=pair-1&user_code=ABCD-1234".to_string(),
                     browser_login_url: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login?pairing_id=pair-1".to_string(),
                     callback_url: "http://127.0.0.1:49321/callback".to_string(),
                     expires_at_utc: "2026-07-09T12:10:00Z".to_string(),

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.161.0 - 2026-08-10
+
+- Turn the Pistis EasyConnect CLI into a complete device-style sign-in
+  ceremony. Pairing creation now returns a short human verification code and
+  approval URL, both are always shown before browser launch, and the
+  Pistis-protected approval must present the exact daemon-persisted code.
+  ``login`` is provided as a visible alias for the same command.
+- Add ``easyconnect --set-s3-config`` with optional ``--s3-profile``. After a
+  single-use Pistis exchange the remote client installs temporary,
+  ObjectStore-scoped credentials, verifies the server-advertised S3 endpoint
+  with a signed request, and records the profile association without exposing
+  secrets. AWS files are restored if the local association commit fails.
+
 ## 0.160.2 - 2026-08-09
 
 - Advance both Prosopikon workspace dependencies to immutable revision

@@ -89,7 +89,8 @@ pub enum RemoteCommand {
     Trust(TrustArgs),
     /// Inspect locally configured S3 access for an authenticated ObjectStore.
     S3(S3Args),
-    /// Define the browser-approved easyconnect pairing flow for a DAS appliance.
+    /// Sign in through Pistis using a browser code and create a scoped session.
+    #[command(visible_alias = "login")]
     Easyconnect(EasyconnectArgs),
     /// Configure this remote client.
     Config(ConfigArgs),
@@ -306,6 +307,12 @@ pub struct EasyconnectArgs {
     /// Exact ObjectStore requested for this session; omit to select it in the approval page.
     #[arg(long)]
     object_store: Option<String>,
+    /// Install and verify a standard AWS CLI profile after Pistis approval.
+    #[arg(long, requires = "object_store")]
+    set_s3_config: bool,
+    /// AWS profile name; defaults to dasobjectstore-<ObjectStore>.
+    #[arg(long, requires = "set_s3_config")]
+    s3_profile: Option<String>,
     /// HTTPS port for the standalone DASObjectStore Web application.
     #[arg(long, default_value_t = crate::easyconnect::DEFAULT_APPLIANCE_HTTPS_PORT)]
     https_port: u16,
@@ -341,6 +348,14 @@ impl EasyconnectArgs {
 
     pub fn callback_port(&self) -> Option<u16> {
         self.callback_port
+    }
+
+    pub fn set_s3_config(&self) -> bool {
+        self.set_s3_config
+    }
+
+    pub fn s3_profile(&self) -> Option<&str> {
+        self.s3_profile.as_deref()
     }
 
     pub fn contract(&self) -> bool {
@@ -848,6 +863,9 @@ mod tests {
             "49321",
             "--object-store",
             "epic_collection",
+            "--set-s3-config",
+            "--s3-profile",
+            "dasobjectstore-epic",
             "--json",
             "--timeout-seconds",
             "10",
@@ -862,9 +880,29 @@ mod tests {
         assert_eq!(args.object_store(), Some("epic_collection"));
         assert_eq!(args.callback_port(), Some(49321));
         assert_eq!(args.timeout_seconds(), 10);
+        assert!(args.set_s3_config());
+        assert_eq!(args.s3_profile(), Some("dasobjectstore-epic"));
         assert!(!args.no_browser());
         assert!(!args.contract());
         assert!(args.json());
+    }
+
+    #[test]
+    fn login_alias_selects_the_pistis_easyconnect_workflow() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "das.example",
+            "--object-store",
+            "epic_collection",
+            "--set-s3-config",
+        ])
+        .expect("login alias parses");
+        let RemoteCommand::Easyconnect(args) = cli.command() else {
+            panic!("login must resolve to EasyConnect");
+        };
+        assert_eq!(args.object_store(), Some("epic_collection"));
+        assert!(args.set_s3_config());
     }
 
     #[test]

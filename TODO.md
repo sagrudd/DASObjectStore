@@ -3909,6 +3909,13 @@ browser and appliance acceptance remain external validation gates.
       expiry, collision, CSRF, crash-recovery, grant-substitution, callback-loss,
       restart, and missing-context evidence before marking the passwordless
       path complete.
+      - [x] Deliver the device-style CLI contract: daemon-persisted human
+        verification code, code-bound Pistis approval, always-visible approval
+        URL, callback/poll recovery, single-use exchange, and optional verified
+        AWS-profile installation in ``0.161.0``.
+      - [ ] Run the packaged end-to-end ceremony against the real Monas/Pistis
+        producer and retain the browser, restart, replay, expiry, callback-loss,
+        and post-exchange AWS evidence before closing the parent item.
   - [x] Complete the remaining Monas host evidence against ``0.6.0`` commit
     ``adfbef19e1e8bad0e503dcdf8584b7a7b0131020``. Mounted-router tests prove
     CSRF wiring, and the real browser proves ordinary/admin OS-policy access,

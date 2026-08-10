@@ -24,7 +24,10 @@ pub fn run_complete_easyconnect_pairing_with_ready<F>(
     ready: F,
 ) -> Result<RemoteEasyconnectCompletedPairing, RemoteEasyconnectPairingError>
 where
-    F: FnOnce(&RemoteEasyconnectContract, &str) -> Result<(), RemoteEasyconnectPairingError>,
+    F: FnOnce(
+        &RemoteEasyconnectContract,
+        &RemoteEasyconnectCreatePairingResponse,
+    ) -> Result<(), RemoteEasyconnectPairingError>,
 {
     let bind_address = options
         .callback_port
@@ -52,6 +55,15 @@ where
     )?;
     let discovery =
         get_json::<RemoteEasyconnectDiscoveryResponse>(&transport.client, &discovery_url)?;
+    if !discovery
+        .auth_providers
+        .contains(&dasobjectstore_daemon::RemoteEasyconnectAuthProvider::Pistis)
+    {
+        return Err(RemoteEasyconnectPairingError::Protocol(
+            "appliance does not advertise a Pistis EasyConnect authority; no pairing was created"
+                .to_string(),
+        ));
+    }
     validate_server_url(
         &contract.appliance_base_url,
         &discovery.pairing_create_url,
@@ -90,7 +102,7 @@ where
             "appliance changed the exact loopback callback URL".to_string(),
         ));
     }
-    ready(&contract, &pairing.browser_login_url)?;
+    ready(&contract, &pairing)?;
     if options.open_browser {
         launcher.open(&pairing.browser_login_url)?;
     }

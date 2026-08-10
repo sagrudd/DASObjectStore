@@ -172,6 +172,7 @@ pub(super) struct ProfileS3HeadQuery {
 #[derive(Clone, Debug, Deserialize)]
 struct EasyconnectBrowserApprovalQuery {
     pairing_id: String,
+    user_code: String,
     object_store: String,
     expires_at_utc: String,
 }
@@ -179,6 +180,7 @@ struct EasyconnectBrowserApprovalQuery {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct EasyconnectBrowserApprovalIntent {
     pairing_id: String,
+    user_code: String,
     object_store: String,
 }
 

@@ -31,6 +31,7 @@ pub(crate) async fn easyconnect_browser_approval(
     Query(query): Query<EasyconnectBrowserApprovalQuery>,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     if query.pairing_id.trim().is_empty()
+        || query.user_code.trim().is_empty()
         || query.object_store.trim().is_empty()
         || query.expires_at_utc.trim().is_empty()
         || query.pairing_id.len() > 128
@@ -45,6 +46,7 @@ pub(crate) async fn easyconnect_browser_approval(
     }
     let intent = serde_json::to_string(&EasyconnectBrowserApprovalIntent {
         pairing_id: query.pairing_id.clone(),
+        user_code: query.user_code.clone(),
         object_store: query.object_store.clone(),
     })
     .map_err(|error| {
@@ -63,9 +65,10 @@ pub(crate) async fn easyconnect_browser_approval(
     })?;
     let principal = html_escape(&actor.subject_id);
     let object_store = html_escape(&query.object_store);
+    let user_code = html_escape(&query.user_code);
     let nonce = &verified.context().csrf_binding_sha256;
     let body = Html(format!(
-        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd>{principal}</dd><dt>ObjectStore</dt><dd>{object_store}</dd></dl><p>This creates one short-lived, ObjectStore-scoped session. No GitHub credential is sent to DASObjectStore.</p><button id="approve" type="button">Approve connection</button><pre id="status" role="status"></pre></main><script nonce="{nonce}">const intent={intent};const csrf={csrf};document.getElementById("approve").onclick=async()=>{{const status=document.getElementById("status");status.textContent="Approving…";const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json","x-dasobjectstore-csrf":csrf}},body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};</script></body></html>"#
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Approve DASObjectStore connection</title><body><main><h1>Approve remote DASObjectStore connection</h1><dl><dt>Authority principal</dt><dd>{principal}</dd><dt>ObjectStore</dt><dd>{object_store}</dd><dt>Verification code</dt><dd><strong>{user_code}</strong></dd></dl><p>Confirm that this code exactly matches the code shown by your CLI. This creates one short-lived, ObjectStore-scoped session. No Pistis credential is sent to DASObjectStore.</p><button id="approve" type="button">Approve connection</button><pre id="status" role="status"></pre></main><script nonce="{nonce}">const intent={intent};const csrf={csrf};document.getElementById("approve").onclick=async()=>{{const status=document.getElementById("status");status.textContent="Approving…";const response=await fetch("/products/dasobjectstore/api/v1/remote/easyconnect/pairings/approve",{{method:"POST",credentials:"same-origin",headers:{{"content-type":"application/json","x-dasobjectstore-csrf":csrf}},body:JSON.stringify(intent)}});const result=await response.json();if(!response.ok){{status.textContent="Approval failed.";return;}}const form=document.createElement("form");form.method="POST";form.action=result.callback_url;for(const [name,value] of Object.entries({{pairing_id:result.pairing_id,exchange_code:result.exchange_code}})){{const input=document.createElement("input");input.type="hidden";input.name=name;input.value=value;form.appendChild(input);}}document.body.appendChild(form);form.submit();}};</script></body></html>"#
     ));
     let mut response = body.into_response();
     let headers = response.headers_mut();

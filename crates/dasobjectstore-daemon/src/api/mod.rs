@@ -1340,6 +1340,7 @@ mod tests {
         let request = DaemonApiRequest::RemoteEasyconnectApprovePairing(
             crate::api::RemoteEasyconnectApprovePairingRequest {
                 pairing_id: "pair-1".to_string(),
+                user_code: "ABCD-1234".to_string(),
                 approval_context: crate::RemoteEasyconnectApprovalContext {
                     authority_id: "authority-1".to_string(),
                     principal_id: "stephen".to_string(),

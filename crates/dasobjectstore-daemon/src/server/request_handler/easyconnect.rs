@@ -73,6 +73,11 @@ fn random_easyconnect_value(prefix: &str, byte_count: usize) -> Result<String, S
     Ok(format!("{prefix}{encoded}"))
 }
 
+fn random_easyconnect_user_code() -> Result<String, String> {
+    let value = random_easyconnect_value("", 4)?.to_ascii_uppercase();
+    Ok(format!("{}-{}", &value[..4], &value[4..]))
+}
+
 fn temporary_s3_session_credentials() -> Result<RemoteEasyconnectSessionCredentials, String> {
     Ok(RemoteEasyconnectSessionCredentials {
         access_key_id: random_easyconnect_value("DOST", 16)?,
@@ -741,11 +746,18 @@ where
                 message,
             }
         })?;
+        let user_code = random_easyconnect_user_code().map_err(|message| {
+            RemoteEasyconnectPairingStoreError::Json {
+                path: self.remote_easyconnect_pairing_store_path.clone(),
+                message,
+            }
+        })?;
         let store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
         store.create(RemoteEasyconnectPairingRecord {
             pairing_id: pairing_id.clone(),
+            user_code: Some(user_code.clone()),
             client_name: request.client_name,
             callback_url: request.callback_url.clone(),
             requested_object_store: request.requested_object_store,
@@ -759,8 +771,15 @@ where
 
         Ok(RemoteEasyconnectCreatePairingResponse {
             pairing_id: pairing_id.clone(),
+            user_code: user_code.clone(),
+            verification_uri: format!(
+                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}&user_code={user_code}"
+            ),
+            verification_uri_complete: format!(
+                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}&user_code={user_code}"
+            ),
             browser_login_url: format!(
-                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}"
+                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}&user_code={user_code}"
             ),
             callback_url: request.callback_url,
             expires_at_utc,
@@ -791,6 +810,7 @@ where
                     ),
                 })?;
         let pairing = store.approve(
+            &request.user_code,
             RemoteEasyconnectPairingApproval {
                 pairing_id: request.pairing_id.clone(),
                 context: request.approval_context,

@@ -28,26 +28,52 @@ pub(super) fn run_easyconnect(
         let outcome = run_complete_easyconnect_pairing_with_ready(
             options,
             &SystemBrowserLauncher,
-            |contract, browser_login_url| {
-                write_easyconnect_pairing_ready(contract, browser_login_url, open_browser, writer)?;
+            |contract, pairing| {
+                write_easyconnect_pairing_ready(contract, pairing, open_browser, writer)?;
                 writer.flush()?;
                 Ok(())
             },
         )?;
         install_easyconnect_result(cli, &outcome)?;
+        if args.set_s3_config() {
+            install_easyconnect_s3_profile(cli, args, &outcome)?;
+        }
         write_easyconnect_pairing(&outcome, writer)?;
+        if args.set_s3_config() {
+            let profile = args
+                .s3_profile()
+                .map(str::to_string)
+                .map(Ok)
+                .unwrap_or_else(|| {
+                    crate::aws_profile::default_profile_name(
+                        args.object_store()
+                            .expect("--set-s3-config requires ObjectStore"),
+                    )
+                })?;
+            writeln!(writer, "AWS profile: {profile} (installed and verified)")?;
+        }
     }
     Ok(())
 }
 
 pub(super) fn write_easyconnect_pairing_ready(
     contract: &RemoteEasyconnectContract,
-    browser_login_url: &str,
+    pairing: &dasobjectstore_daemon::RemoteEasyconnectCreatePairingResponse,
     open_browser: bool,
     writer: &mut impl Write,
 ) -> Result<(), std::io::Error> {
     writeln!(writer, "Remote easyconnect pairing")?;
     writeln!(writer, "Appliance: {}", contract.appliance_base_url)?;
+    writeln!(
+        writer,
+        "ObjectStore verification code: {}",
+        pairing.user_code
+    )?;
+    writeln!(
+        writer,
+        "Approval URL: {}",
+        pairing.verification_uri_complete
+    )?;
     writeln!(
         writer,
         "Local callback bind: {}",
@@ -56,7 +82,10 @@ pub(super) fn write_easyconnect_pairing_ready(
     if open_browser {
         writeln!(writer, "Browser launch: requested")?;
     } else {
-        writeln!(writer, "Open browser URL: {browser_login_url}")?;
+        writeln!(
+            writer,
+            "Browser launch: disabled; open the approval URL above"
+        )?;
     }
     writeln!(writer, "Waiting for browser-approved pairing callback...")?;
     Ok(())
@@ -157,9 +186,11 @@ fn install_easyconnect_result(
                 "easyconnect appliance trust disappeared before config commit".to_string(),
             )
         })?;
-    config
-        .session_bindings
-        .retain(|binding| binding.appliance_id != exchange.appliance_id);
+    config.session_bindings.retain(|binding| {
+        !grants
+            .iter()
+            .any(|grant| grant.object_store == binding.store_id)
+    });
     for grant in &grants {
         config.session_bindings.push(RemoteSessionBinding {
             appliance_id: exchange.appliance_id.clone(),
@@ -180,6 +211,82 @@ fn install_easyconnect_result(
     config.region = outcome.exchange.s3.region.clone();
     config.auth_authority = auth_authority;
     write_config(&path, &config)?;
+    Ok(())
+}
+
+fn install_easyconnect_s3_profile(
+    cli: &RemoteCli,
+    args: &EasyconnectArgs,
+    outcome: &crate::easyconnect::RemoteEasyconnectCompletedPairing,
+) -> Result<(), RemoteRunError> {
+    let store = args
+        .object_store()
+        .expect("clap requires ObjectStore with --set-s3-config");
+    let grant = outcome
+        .exchange
+        .exchange
+        .object_stores
+        .iter()
+        .find(|grant| grant.object_store == store)
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(format!(
+                "Pistis exchange did not grant requested ObjectStore {store}"
+            ))
+        })?;
+    let exchange = &outcome.exchange.exchange;
+    let profile = args
+        .s3_profile()
+        .map(str::to_string)
+        .map(Ok)
+        .unwrap_or_else(|| crate::aws_profile::default_profile_name(store))?;
+    let context = crate::authenticate::RemoteConnectionContext {
+        schema_version: outcome.exchange.schema_version.clone(),
+        appliance_id: exchange.appliance_id.clone(),
+        appliance_host: outcome.contract.host_or_ip.clone(),
+        endpoint_url: outcome.exchange.s3.endpoint_url.clone(),
+        region: outcome.exchange.s3.region.clone(),
+        addressing_style: outcome.exchange.s3.addressing_style.clone(),
+        object_store: store.to_string(),
+        bucket: grant.bucket.clone(),
+        access_key_id: exchange.session.credentials.access_key_id.clone(),
+        secret_access_key: exchange.session.credentials.secret_access_key.clone(),
+        session_token: exchange.session.credentials.session_token.clone(),
+        session_id: exchange.session.session_id.clone(),
+        issued_at_utc: exchange.session.issued_at_utc.clone(),
+        expires_at_utc: exchange.session.expires_at_utc.clone(),
+        renew_url: exchange.session.renewal.renew_url.clone(),
+        renew_after_utc: exchange.session.renewal.renew_after_utc.clone(),
+        renewal_token: exchange.session.renewal.renewal_token.clone(),
+    };
+    let path = config_path(cli)?;
+    let before = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    let existing = before
+        .s3_profiles
+        .iter()
+        .find(|association| association.profile == profile);
+    let aws_before = crate::aws_profile::snapshot_profile_state()?;
+    let (association, _) =
+        crate::aws_profile::install_profile(&context, &profile, existing, true, true)?;
+    let mut config = read_optional_config(&path)?.unwrap_or_else(empty_config);
+    config
+        .s3_profiles
+        .retain(|item| item.profile != profile && item.store_id != store);
+    config.s3_profiles.push(association);
+    if let Some(binding) = config
+        .session_bindings
+        .iter_mut()
+        .find(|binding| binding.appliance_id == exchange.appliance_id && binding.store_id == store)
+    {
+        binding.s3_profile = Some(profile.clone());
+    }
+    config.profile = profile;
+    if let Err(error) = write_config(&path, &config) {
+        let rollback = crate::aws_profile::restore_profile_state(&aws_before);
+        return Err(RemoteRunError::UploadRouting(format!(
+            "Pistis session succeeded but AWS profile association commit failed: {error}; AWS rollback_succeeded={}",
+            rollback.is_ok()
+        )));
+    }
     Ok(())
 }
 

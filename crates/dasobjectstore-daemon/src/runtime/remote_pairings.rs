@@ -34,6 +34,7 @@ pub trait RemoteEasyconnectPairingStore: Send + Sync {
 
     fn approve(
         &self,
+        user_code: &str,
         approval: RemoteEasyconnectPairingApproval,
         approved_at_utc: &str,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError>;
@@ -58,6 +59,10 @@ pub trait RemoteEasyconnectPairingStore: Send + Sync {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairingRecord {
     pub pairing_id: String,
+    /// Optional only so a pairing written by an older release can expire
+    /// safely after an upgrade. Every new pairing has a code.
+    #[serde(default)]
+    pub user_code: Option<String>,
     pub client_name: String,
     pub callback_url: String,
     pub requested_object_store: Option<String>,
@@ -72,6 +77,7 @@ pub struct RemoteEasyconnectPairingRecord {
 impl RemoteEasyconnectPairingRecord {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectPairingStoreError> {
         require_non_blank("pairing_id", &self.pairing_id)?;
+        validate_optional_non_blank("user_code", self.user_code.as_deref())?;
         require_non_blank("client_name", &self.client_name)?;
         require_non_blank("callback_url", &self.callback_url)?;
         validate_optional_non_blank(
@@ -167,6 +173,7 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
 
     fn approve(
         &self,
+        user_code: &str,
         mut approval: RemoteEasyconnectPairingApproval,
         approved_at_utc: &str,
     ) -> Result<RemoteEasyconnectPairingRecord, RemoteEasyconnectPairingStoreError> {
@@ -179,6 +186,11 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
                 pairing_id: approval.pairing_id,
             });
         };
+        if pairing.user_code.as_deref() != Some(user_code) {
+            return Err(RemoteEasyconnectPairingStoreError::UserCodeMismatch {
+                pairing_id: pairing.pairing_id.clone(),
+            });
+        }
         ensure_pairing_usable(pairing, approved_at_utc)?;
         if approval.context.host_session_expires_at_utc.as_str() <= approved_at_utc {
             return Err(RemoteEasyconnectPairingStoreError::ApprovalExpired {
@@ -360,6 +372,9 @@ pub enum RemoteEasyconnectPairingStoreError {
     PairingNotFound {
         pairing_id: String,
     },
+    UserCodeMismatch {
+        pairing_id: String,
+    },
     PairingNotApproved {
         pairing_id: String,
     },
@@ -436,6 +451,10 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
                     "remote easyconnect pairing {pairing_id} was not found"
                 )
             }
+            Self::UserCodeMismatch { pairing_id } => write!(
+                formatter,
+                "remote easyconnect pairing {pairing_id} user verification code did not match"
+            ),
             Self::PairingNotApproved { pairing_id } => {
                 write!(
                     formatter,
@@ -744,6 +763,7 @@ mod tests {
         store
             .create(RemoteEasyconnectPairingRecord {
                 pairing_id: "pairing-1".to_string(),
+                user_code: Some("ABCD-1234".to_string()),
                 client_name: "remote CLI".to_string(),
                 callback_url:
                     "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
@@ -759,6 +779,7 @@ mod tests {
             .expect("pairing is stored");
         let error = store
             .approve(
+                "ABCD-1234",
                 RemoteEasyconnectPairingApproval {
                     pairing_id: "pairing-1".to_string(),
                     context: RemoteEasyconnectApprovalContext {
@@ -792,6 +813,34 @@ mod tests {
             error,
             RemoteEasyconnectPairingStoreError::RequestedObjectStoreMismatch { .. }
         ));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn approval_requires_the_cli_user_verification_code() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        store
+            .create(pairing("pairing-code-bound"))
+            .expect("created");
+        let error = store
+            .approve(
+                "WXYZ-9876",
+                approval("pairing-code-bound", "requested-store"),
+                "2026-07-28T10:01:00Z",
+            )
+            .expect_err("a substituted verification code must fail");
+        assert!(matches!(
+            error,
+            RemoteEasyconnectPairingStoreError::UserCodeMismatch { .. }
+        ));
+        assert_eq!(
+            store
+                .status("pairing-code-bound", "2026-07-28T10:01:01Z")
+                .expect("status")
+                .state,
+            crate::RemoteEasyconnectPairingState::Pending
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -912,6 +961,7 @@ mod tests {
         store.create(pairing("pairing-atomic")).expect("created");
         store
             .approve(
+                "ABCD-1234",
                 approval("pairing-atomic", "requested-store"),
                 "2026-07-28T10:01:00Z",
             )
@@ -945,6 +995,7 @@ mod tests {
     fn pairing(pairing_id: &str) -> RemoteEasyconnectPairingRecord {
         RemoteEasyconnectPairingRecord {
             pairing_id: pairing_id.to_string(),
+            user_code: Some("ABCD-1234".to_string()),
             client_name: "remote CLI".to_string(),
             callback_url:
                 "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"

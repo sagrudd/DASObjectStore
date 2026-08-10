@@ -182,6 +182,11 @@ impl RemoteEasyconnectCreatePairingRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectCreatePairingResponse {
     pub pairing_id: String,
+    /// Human-verifiable binding shown by both the CLI and Pistis approval page.
+    /// This is not an exchange credential.
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
     pub browser_login_url: String,
     pub callback_url: String,
     pub expires_at_utc: String,

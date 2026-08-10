@@ -33,12 +33,14 @@ pub struct RemoteEasyconnectPairingStatusResponse {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectApprovePairingRequest {
     pub pairing_id: String,
+    pub user_code: String,
     pub approval_context: RemoteEasyconnectApprovalContext,
 }
 
 impl RemoteEasyconnectApprovePairingRequest {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
         require_non_blank("pairing_id", &self.pairing_id)?;
+        require_non_blank("user_code", &self.user_code)?;
         self.approval_context.validate()
     }
 }
