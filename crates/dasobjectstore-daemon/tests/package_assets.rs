@@ -38,6 +38,11 @@ const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
     "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
+const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
+    "Provides: dasobjectstore-remote",
+    "Conflicts: dasobjectstore-remote",
+    "Replaces: dasobjectstore-remote",
+];
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -422,6 +427,9 @@ fn package_excludes_retired_local_human_authority() {
     assert_not_contains(BUILD_DEB, "dasobjectstore-local-auth-helper");
     assert_not_contains(BUILD_DEB, "dasobjectstore-auth-migrate");
     assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
+    for marker in DEBIAN_REMOTE_TRANSITION {
+        assert_contains(BUILD_DEB, marker);
+    }
     assert_contains(BUILD_DEB, "Recommends: awscli");
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends:");
     assert_contains(BUILD_DEB, "docker-buildx");
