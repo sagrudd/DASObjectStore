@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.161.9 - 2026-08-10
+
+- Align the embedded Prosopikon authority boundary with 0.20.0 so Monas and
+  DASObjectStore consume one compatible actor-authority type.
+
 ## 0.161.8 - 2026-08-10
 
 - Advance Prosopikon to immutable revision
