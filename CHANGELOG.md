@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.161.7 - 2026-08-10
+
+- Advance both Prosopikon workspace dependencies to immutable revision
+  ``34458e6861847bdeaa82ab0351dd6b17c98193f4``. DASObjectStore and Monas now
+  share the exact signer-security-identity and `AudienceBoundActorContext`
+  types required by the provider-enrolment composition; storage behaviour and
+  authority policy are unchanged.
+
 ## 0.161.6 - 2026-08-10
 
 - Declare the full Debian appliance package as the provider and replacement

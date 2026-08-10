@@ -7,7 +7,7 @@ release build.
 
 | Local path | Purpose and reference | Required revision / branch | Remote | Observed local state |
 | --- | --- | --- | --- | --- |
-| `../prosopikon` | Identity contracts and Yew components. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `940fc6bbb46f89737fe6a80fd78fe1eecd956f3e` (`main`, Prosopikon #50) | `https://github.com/sagrudd/prosopikon.git` | Primary checkout state is not used for release packaging; package builds require a clean checkout at the pinned revision. |
+| `../prosopikon` | Identity contracts and Yew components. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `34458e6861847bdeaa82ab0351dd6b17c98193f4` (`main`, signer security-identity matching) | `https://github.com/sagrudd/prosopikon.git` | Primary checkout state is not used for release packaging; package builds require a clean checkout at the pinned revision. |
 | `../pistis` | Canonical, COSE, crypto, and protocol contracts transitive through Prosopikon. Patched by `Cargo.toml`; package preflight is `packaging/pinned-mnemosyne-package-sources.sh`. | `3bb6e96948734fbc6e7d6cf20b7805ff88011af2` (detached package checkout) | `https://github.com/sagrudd/pistis.git` | Primary checkout state is not used for release packaging; package builds require a clean checkout at the pinned revision. |
 
 `make pull` discovers both repositories but does not rewrite a sibling
