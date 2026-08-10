@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.6 - 2026-08-10
+
+- Declare the full Debian appliance package as the provider and replacement
+  for the former remote-client-only package. A formal appliance installation
+  can now transition an existing ``dasobjectstore-remote`` client without an
+  unpack collision, while preserving the same client binary and configuration.
+
 ## 0.161.5 - 2026-08-10
 
 - Accept either the distribution Docker package or the supported Docker CE

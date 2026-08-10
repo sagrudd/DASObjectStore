@@ -122,6 +122,9 @@ Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
 Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
+Provides: dasobjectstore-remote
+Conflicts: dasobjectstore-remote
+Replaces: dasobjectstore-remote
 Recommends: awscli
 X-DASObjectStore-Build-Depends: rustc, cargo, trunk, wasm32-unknown-unknown, clang, libclang-dev, dpkg, docker-buildx
 Homepage: https://github.com/sagrudd/DASObjectStore
