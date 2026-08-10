@@ -30,7 +30,7 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
 ) -> Router {
     match host_mode {
         GuiApiHostMode::Standalone => {
-            let router = easyconnect_public_pairing_router_with_config(None, None);
+            let router = easyconnect_public_router_with_config(None, None);
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {
@@ -76,8 +76,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
                     descriptor,
                     tls_certificate_path: s3_tls_certificate_path.clone(),
                 });
-            let router =
-                easyconnect_public_pairing_router_with_config(s3_endpoint, public_base_url);
+            let router = easyconnect_public_router_with_config(s3_endpoint, public_base_url);
             if include_application_auth {
                 router.merge(standalone_application_auth_router())
             } else {

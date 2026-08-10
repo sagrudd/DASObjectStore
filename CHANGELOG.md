@@ -14,6 +14,8 @@
   secrets. AWS files are restored if the local association commit fails.
 - Make product-prefixed API routes win over the Web static-asset fallback, so
   the documented EasyConnect discovery GET no longer returns an asset 404.
+  Standalone composition now mounts discovery together with create, poll, and
+  exchange rather than accidentally publishing only the latter routes.
 
 ## 0.160.2 - 2026-08-09
 
