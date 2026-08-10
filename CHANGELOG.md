@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.161.4 - 2026-08-10
+
+- Advance both Prosopikon workspace dependencies to immutable revision
+  ``940fc6bbb46f89737fe6a80fd78fe1eecd956f3e`` (Prosopikon #50) and record
+  its exact Pistis revision. This keeps DASObjectStore and Monas on one
+  `AudienceBoundActorContext` type identity while adopting the atomic unused
+  custody-profile transition; DAS authority, routing, package lifecycle, and
+  storage behaviour are unchanged.
+
 ## 0.161.3 - 2026-08-10
 
 - Advance both Prosopikon workspace dependencies to immutable revision
