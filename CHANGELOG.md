@@ -12,6 +12,8 @@
   ObjectStore-scoped credentials, verifies the server-advertised S3 endpoint
   with a signed request, and records the profile association without exposing
   secrets. AWS files are restored if the local association commit fails.
+- Make product-prefixed API routes win over the Web static-asset fallback, so
+  the documented EasyConnect discovery GET no longer returns an asset 404.
 
 ## 0.160.2 - 2026-08-09
 

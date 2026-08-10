@@ -174,6 +174,10 @@ fn standalone_router_with_application_auth(
         s3_descriptor,
         public_base_url,
         s3_tls_certificate_path,
+    )
+    .route(
+        "/{*asset}",
+        get(move |AxumPath(asset): AxumPath<String>| serve_named_asset(asset_root.clone(), asset)),
     );
     Router::new()
         .route("/", get(root_redirect))
@@ -188,12 +192,6 @@ fn standalone_router_with_application_auth(
                     index_root_with_slash.join("index.html"),
                     "text/html; charset=utf-8",
                 )
-            }),
-        )
-        .route(
-            "/products/dasobjectstore/{*asset}",
-            get(move |AxumPath(asset): AxumPath<String>| {
-                serve_named_asset(asset_root.clone(), asset)
             }),
         )
         .merge(root_api)
@@ -621,6 +619,32 @@ mod tests {
             discovery["pairing_exchange_url"],
             "https://192.0.2.10:8448/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
         );
+        cleanup(&root);
+    }
+
+    #[tokio::test]
+    async fn product_prefixed_easyconnect_discovery_precedes_static_asset_fallback() {
+        let root = temp_root("server-run-product-easyconnect");
+        write_web_asset(&root, "index.html", "<!doctype html>");
+        let response = standalone_router_with_application_auth(
+            root.clone(),
+            Default::default(),
+            true,
+            None,
+            Some("https://192.0.2.10:8448".to_string()),
+            StandaloneServerConfig::default_localhost()
+                .tls
+                .certificate_path,
+        )
+        .oneshot(
+            Request::builder()
+                .uri("/products/dasobjectstore/api/v1/remote/easyconnect/discovery")
+                .body(Body::empty())
+                .expect("request builds"),
+        )
+        .await
+        .expect("product discovery response");
+        assert_eq!(response.status(), StatusCode::OK);
         cleanup(&root);
     }
 
