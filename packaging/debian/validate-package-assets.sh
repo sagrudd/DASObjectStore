@@ -223,7 +223,7 @@ require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
-require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin'
 require_text "$workspace_host_config" '"aggregate_root": "/srv/dasobjectstore/workspaces"'
 require_text "$workspace_host_config" '"live_metadata_path": "/srv/dasobjectstore/ssd/.dasobjectstore/live.sqlite"'
 require_text "$workspace_host_config" '"nfs_clients": {}'

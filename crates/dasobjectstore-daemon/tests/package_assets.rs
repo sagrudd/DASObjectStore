@@ -37,7 +37,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
