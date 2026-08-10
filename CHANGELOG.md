@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.161.5 - 2026-08-10
+
+- Accept either the distribution Docker package or the supported Docker CE
+  package as the Debian container-runtime dependency. This prevents APT from
+  attempting to replace an already managed Docker CE installation while
+  retaining the mandatory Buildx dependency and non-activating package
+  lifecycle.
+
 ## 0.161.4 - 2026-08-10
 
 - Advance both Prosopikon workspace dependencies to immutable revision
