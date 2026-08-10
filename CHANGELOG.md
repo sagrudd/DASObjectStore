@@ -1,12 +1,14 @@
 # Changelog
 
-## 0.160.3 - 2026-08-10
+## 0.161.2 - 2026-08-10
 
 - Advance both Prosopikon workspace dependencies to immutable revision
   ``89a168bd95785e62369be9e76fecda517d859ce9`` (Prosopikon #48). This is a
   dependency lockstep only: it adopts the one-use first Site Trust bootstrap
   presentation authority transition without changing DASObjectStore adapters,
   actor policy, authentication behaviour, package lifecycle, or host state.
+  The version is deliberately above the already-installed 0.161.1 appliance
+  package; package builders must never produce a formal downgrade.
 
 ## 0.160.2 - 2026-08-09
 
