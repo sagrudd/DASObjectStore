@@ -23,14 +23,18 @@ The remote client must be able to reach:
   hostname-valid appliance address such as
   ``https://objects.appliance.example:3900``.
 
-Start easyconnect from the remote computer:
+Start the canonical login from the remote computer:
 
 .. code-block:: console
 
-   dasobjectstore-remote easyconnect 192.168.1.192
+   dasobjectstore-remote login 192.168.1.192 OBJECTSTORE \
+     --username USER --set-s3-config
 
-Use ``--object-store NAME`` when the requested ObjectStore must be fixed before
-approval. EasyConnect requires an already enrolled appliance certificate pin.
+The ObjectStore and Pistis username are fixed before approval. EasyConnect
+requires an already enrolled appliance certificate pin. The lower-level
+``easyconnect`` command remains available for contract diagnostics; the old
+``authenticate`` command is retained only to reject retired local-password
+invocations and is not an authority fallback.
 
 The client starts a loopback callback listener, opens the appliance login page
 in a browser, and waits for authenticated approval. Use ``--no-browser`` on a
@@ -41,12 +45,11 @@ starting a pairing.
 Browser Authentication
 ----------------------
 
-Standalone appliances use the same local-user Web session as the rest of the
-console. Sign in with the appliance account that should own the upload. The
-daemon filters the issued remote session to the ObjectStores that account may
-read or write. Public-read access is not enough for upload; the account must be
-allowed to write the target ObjectStore, normally through the ObjectStore writer
-group or administrator group.
+Monas projects the approved Pistis actor into DASObjectStore. DASObjectStore
+does not accept PAM, a local password, browser-local identity, or operating
+system identity as human authority. The daemon filters the issued remote
+session to the ObjectStores that actor may read or write. Public-read access is
+not enough for upload; the actor must have a Monas-projected writer role.
 
 After approval, the remote client performs a one-time exchange and atomically
 stores the issued session, temporary S3 credentials, expiry time, renewal

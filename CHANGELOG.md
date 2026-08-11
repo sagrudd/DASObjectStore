@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.162.0 - 2026-08-11
+
+- Add the canonical ``dasobjectstore-remote login HOST STORE --username USER
+  --set-s3-config`` workflow. It creates a fresh browser-approved Pistis
+  pairing, requires the approved actor and exact ObjectStore to match, commits
+  only the scoped temporary session, and atomically installs and verifies the
+  AWS profile without printing credentials. The retired local-password
+  ``authenticate`` command remains a fail-closed rejection boundary rather
+  than becoming a compatibility path around Pistis.
+
 ## 0.161.12 - 2026-08-11
 
 - Advance the shared embedded identity boundary to Prosopikon 0.22.1 at

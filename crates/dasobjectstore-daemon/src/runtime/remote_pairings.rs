@@ -517,6 +517,13 @@ impl RemoteEasyconnectPairingStoreFile {
             });
         }
         self.prune_terminal(&pairing.created_at_utc);
+        if let Some(request_id) = pairing.client_request_id.as_deref() {
+            self.pairings.retain(|stored| {
+                stored.client_request_id.as_deref() != Some(request_id)
+                    || stored.approval.is_some()
+                    || stored.exchanged_at_utc.is_some()
+            });
+        }
         if self.pairings.len() >= max_live_pairings {
             return Err(RemoteEasyconnectPairingStoreError::CapacityExceeded { max_live_pairings });
         }
@@ -868,6 +875,24 @@ mod tests {
             .map(|pairing| pairing.pairing_id.as_str())
             .collect::<Vec<_>>();
         assert_eq!(ids, ["still-live", "new-live"]);
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn fresh_request_mint_supersedes_only_the_prior_pending_pairing() {
+        let root = root();
+        let path = root.join("pairings.json");
+        let store = FileBackedRemoteEasyconnectPairingStore::new(&path);
+        let mut first = pairing("pairing-old");
+        first.client_request_id = Some("login:stephen@example.com:allele-anchor".to_string());
+        store.create(first).expect("first pending mint");
+        let mut replacement = pairing("pairing-new");
+        replacement.client_request_id = Some("login:stephen@example.com:allele-anchor".to_string());
+        store.create(replacement).expect("replacement mint");
+
+        let stored = read_store(&path).expect("stored pairings");
+        assert_eq!(stored.pairings.len(), 1);
+        assert_eq!(stored.pairings[0].pairing_id, "pairing-new");
         fs::remove_dir_all(root).expect("cleanup");
     }
 
