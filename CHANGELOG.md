@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.168.3 - 2026-08-11
+
+- Align the signed local-authority retirement finalizer with the package-owned
+  Monas configuration boundary by resolving the fixed `dasobjectstore` group
+  and requiring `/opt/dasobjectstore/config.json` to remain exactly
+  `root:dasobjectstore` mode `0640`.
+- Add a regression that binds finalizer acceptance to the Debian package's
+  enforced configuration ownership and mode.
+
 ## 0.168.2 - 2026-08-11
 
 - Retry the exact durably reserved DAS challenge within one absolute
