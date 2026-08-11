@@ -2,9 +2,12 @@
 
 use std::{
     fs::{self, File, OpenOptions},
-    io::Write as _,
+    io::{Read as _, Write as _},
+    net::Shutdown,
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use coset::{iana, Algorithm, CborSerializable as _, CoseSign1};
@@ -18,6 +21,13 @@ const PURPOSE: &str = "monas.das-local-authority-replacement-receipt.v1";
 const SIGNING_PURPOSE: &str = "das_local_authority_replacement_receipt";
 const AUDIENCE: &str = "dasobjectstore-local-authority-retirement";
 const PEER: &str = "org.mnemosyne.dasobjectstore.package.local-authority-retirement.v1";
+/// Sole Monas receipt endpoint accepted by the package consumer.
+pub const MONAS_DAS_REPLACEMENT_RECEIPT_SOCKET_V1: &str =
+    "/run/mnemosyne-monas/das-replacement-receipt.v1.sock";
+const REQUEST_MAGIC: &[u8; 5] = b"MDRQ\x01";
+const RESPONSE_MAGIC: &[u8; 5] = b"MDRR\x01";
+const MAX_RECEIPT: usize = 16 * 1024;
+const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Root-only signer discovery projected through the accepted Site Trust path.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -120,6 +130,69 @@ pub enum DasLocalAuthorityRetirementErrorV1 {
     UnsafeState,
     Conflict,
     IoUnavailable,
+}
+
+/// Requests the one-use receipt through the fixed package socket.
+///
+/// # Errors
+///
+/// Returns a coarse unavailable result for any connection, framing, timeout,
+/// truncation, or bounds failure. The returned bytes still require full
+/// [`verify_das_replacement_receipt_v1`] verification before use.
+pub fn request_das_replacement_receipt_v1(
+    challenge: [u8; 32],
+) -> Result<Vec<u8>, DasLocalAuthorityRetirementErrorV1> {
+    request_das_replacement_receipt_from_v1(
+        Path::new(MONAS_DAS_REPLACEMENT_RECEIPT_SOCKET_V1),
+        challenge,
+    )
+}
+
+fn request_das_replacement_receipt_from_v1(
+    socket: &Path,
+    challenge: [u8; 32],
+) -> Result<Vec<u8>, DasLocalAuthorityRetirementErrorV1> {
+    if challenge == [0; 32] {
+        return Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied);
+    }
+    let mut stream = UnixStream::connect(socket)
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    stream
+        .set_read_timeout(Some(IO_TIMEOUT))
+        .and_then(|()| stream.set_write_timeout(Some(IO_TIMEOUT)))
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    stream
+        .write_all(REQUEST_MAGIC)
+        .and_then(|()| stream.write_all(&challenge))
+        .and_then(|()| stream.flush())
+        .and_then(|()| stream.shutdown(Shutdown::Write))
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    let mut prefix = [0_u8; 9];
+    stream
+        .read_exact(&mut prefix)
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    let length = usize::try_from(u32::from_be_bytes(
+        prefix[5..]
+            .try_into()
+            .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?,
+    ))
+    .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    if &prefix[..5] != RESPONSE_MAGIC || length == 0 || length > MAX_RECEIPT {
+        return Err(DasLocalAuthorityRetirementErrorV1::IoUnavailable);
+    }
+    let mut receipt = vec![0_u8; length];
+    stream
+        .read_exact(&mut receipt)
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    let mut trailing = [0_u8; 1];
+    if stream
+        .read(&mut trailing)
+        .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?
+        != 0
+    {
+        return Err(DasLocalAuthorityRetirementErrorV1::IoUnavailable);
+    }
+    Ok(receipt)
 }
 
 /// Completion acknowledgement published only after durable archive rename.
@@ -406,7 +479,10 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::{
+        os::unix::{fs::PermissionsExt as _, net::UnixListener},
+        thread,
+    };
 
     use coset::{CoseSign1Builder, HeaderBuilder};
     use p256::ecdsa::{signature::Signer as _, Signature, SigningKey};
@@ -555,6 +631,30 @@ mod tests {
             verify_das_replacement_receipt_v1(&bytes, &changed),
             Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied)
         );
+    }
+
+    #[test]
+    fn fixed_client_accepts_only_the_exact_bounded_response() {
+        let root = PathBuf::from("/tmp").join(format!("das-receipt-client-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let socket = root.join("monas.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 37];
+            stream.read_exact(&mut request).unwrap();
+            assert_eq!(&request[..5], REQUEST_MAGIC);
+            assert_eq!(&request[5..], &[7; 32]);
+            stream.write_all(RESPONSE_MAGIC).unwrap();
+            stream.write_all(&7_u32.to_be_bytes()).unwrap();
+            stream.write_all(b"receipt").unwrap();
+        });
+        assert_eq!(
+            request_das_replacement_receipt_from_v1(&socket, [7; 32]).unwrap(),
+            b"receipt"
+        );
+        server.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
