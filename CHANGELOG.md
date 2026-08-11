@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.168.1 - 2026-08-11
+
+- Synchronize the locked local Pistis protocol package version with the exact
+  clean `3bb6e96948734fbc6e7d6cf20b7805ff88011af2` checkout required and recorded
+  by the release package dependency-provenance gate.
+
 ## 0.168.0 - 2026-08-11
 
 - Correct the signed local-authority retirement boundary to resolve the fixed
