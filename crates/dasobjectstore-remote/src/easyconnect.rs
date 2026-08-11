@@ -5,7 +5,10 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
+pub const DEFAULT_MONAS_HTTPS_PORT: u16 = 8443;
+pub const DEFAULT_LEGACY_STANDALONE_HTTPS_PORT: u16 = 8448;
+/// Legacy default retained for explicit low-level standalone commands.
+pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = DEFAULT_LEGACY_STANDALONE_HTTPS_PORT;
 pub const DEFAULT_PAIRING_TIMEOUT_SECS: u64 = 300;
 pub const DEFAULT_REMOTE_SESSION_LIFETIME_SECS: u64 = 8 * 60 * 60;
 pub const DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS: u64 = 60 * 60;
@@ -651,6 +654,28 @@ mod tests {
             .cli_output
             .iter()
             .any(|line| line.contains("without printing passwords")));
+    }
+
+    #[test]
+    fn integrated_monas_contract_pins_product_routes_on_8443() {
+        let contract = define_easyconnect_contract(RemoteEasyconnectContractRequest {
+            host_or_ip: "192.168.1.192".to_string(),
+            https_port: super::DEFAULT_MONAS_HTTPS_PORT,
+            callback_port: Some(49321),
+        })
+        .expect("integrated contract builds");
+
+        assert_eq!(
+            contract.discovery_url,
+            "https://192.168.1.192:8443/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
+        );
+        assert_eq!(
+            contract.pairing_create_url,
+            "https://192.168.1.192:8443/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+        );
+        assert!(contract.browser_login_url.starts_with(
+            "https://192.168.1.192:8443/products/dasobjectstore/remote/easyconnect/login?"
+        ));
     }
 
     #[test]

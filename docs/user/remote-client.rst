@@ -370,6 +370,11 @@ command:
    dasobjectstore-remote login 192.168.1.192 OBJECTSTORE \
      --username USER --set-s3-config
 
+The canonical profile uses Monas on HTTPS port 8443 for discovery, browser
+approval, and session completion. Integrated deployments keep the standalone
+DAS Web/API listener on 8448 closed. ``--authority-profile legacy-standalone``
+is required to select the legacy 8448 boundary explicitly.
+
 Each invocation asks the appliance to mint a fresh, one-use pairing and shows
 the exact browser approval URL. The exchange must return the requested
 ObjectStore and exact Pistis actor. Temporary credentials are written only to

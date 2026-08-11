@@ -114,9 +114,12 @@ pub struct LoginArgs {
     /// Pistis username that must match the approved actor returned by Monas.
     #[arg(long)]
     username: String,
-    /// HTTPS port for the standalone DASObjectStore Web application.
-    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_APPLIANCE_HTTPS_PORT)]
-    https_port: u16,
+    /// Authority boundary used for discovery and completion.
+    #[arg(long, value_enum, default_value_t = LoginAuthorityProfile::IntegratedMonas)]
+    authority_profile: LoginAuthorityProfile,
+    /// Override the authority HTTPS port selected by the profile.
+    #[arg(long)]
+    https_port: Option<u16>,
     /// Fixed local callback port; omit to let the remote client choose one.
     #[arg(long)]
     callback_port: Option<u16>,
@@ -148,7 +151,12 @@ impl LoginArgs {
         &self.username
     }
     pub fn https_port(&self) -> u16 {
-        self.https_port
+        self.https_port.unwrap_or(match self.authority_profile {
+            LoginAuthorityProfile::IntegratedMonas => crate::easyconnect::DEFAULT_MONAS_HTTPS_PORT,
+            LoginAuthorityProfile::LegacyStandalone => {
+                crate::easyconnect::DEFAULT_LEGACY_STANDALONE_HTTPS_PORT
+            }
+        })
     }
     pub fn callback_port(&self) -> Option<u16> {
         self.callback_port
@@ -168,6 +176,15 @@ impl LoginArgs {
     pub fn force(&self) -> bool {
         self.force
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+pub enum LoginAuthorityProfile {
+    /// Monas owns discovery, approval, and session completion.
+    #[default]
+    IntegratedMonas,
+    /// Explicit compatibility profile for a standalone DASObjectStore host.
+    LegacyStandalone,
 }
 
 #[derive(Debug, Args)]
@@ -985,8 +1002,28 @@ mod tests {
         assert_eq!(args.host_or_ip(), "192.168.1.48");
         assert_eq!(args.object_store(), "allele-anchor");
         assert_eq!(args.username(), "stephen@mnemosyne.co.uk");
+        assert_eq!(args.https_port(), 8443);
         assert!(args.set_s3_config());
         assert!(args.s3_profile().is_none());
+    }
+
+    #[test]
+    fn legacy_standalone_login_requires_explicit_profile() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "legacy.example",
+            "archive",
+            "--username",
+            "operator",
+            "--authority-profile",
+            "legacy-standalone",
+        ])
+        .expect("legacy profile parses");
+        let RemoteCommand::Login(args) = cli.command() else {
+            panic!("expected login command");
+        };
+        assert_eq!(args.https_port(), 8448);
     }
 
     #[test]
