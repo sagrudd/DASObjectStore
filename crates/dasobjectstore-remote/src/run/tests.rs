@@ -434,6 +434,7 @@ fn paired_config() -> RemoteConfig {
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
                 auth_authority: RemoteAuthAuthority::Pistis,
+                tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
                 object_stores: vec![RemoteObjectStoreGrant {
@@ -456,6 +457,7 @@ fn paired_config() -> RemoteConfig {
                 region: "garage".to_string(),
                 addressing_style: "path".to_string(),
                 s3_profile: None,
+                tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
                 trust_fingerprint_sha256: "test-fingerprint".to_string(),
                 trust_spki_sha256: "test-spki".to_string(),
                 session,

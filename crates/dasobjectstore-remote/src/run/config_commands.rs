@@ -13,6 +13,11 @@ pub(super) fn run_login(
         callback_port: args.callback_port(),
         timeout: Duration::from_secs(args.timeout_seconds()),
         open_browser: !args.no_browser(),
+        tls_trust: if args.uses_system_pki() {
+            crate::easyconnect::RemoteEasyconnectTlsTrust::SystemPki
+        } else {
+            crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate
+        },
     };
     let open_browser = !args.no_browser();
     let outcome = run_complete_easyconnect_pairing_with_ready(
@@ -116,6 +121,7 @@ pub(super) fn run_easyconnect(
             callback_port: args.callback_port(),
             timeout: Duration::from_secs(args.timeout_seconds()),
             open_browser: !args.no_browser(),
+            tls_trust: crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate,
         };
         let open_browser = !args.no_browser();
         let outcome = run_complete_easyconnect_pairing_with_ready(
@@ -194,6 +200,26 @@ fn install_easyconnect_result(
         RemoteEasyconnectAuthProvider::Synoptikon => RemoteAuthAuthority::Synoptikon,
         RemoteEasyconnectAuthProvider::Mneion => RemoteAuthAuthority::Mneion,
     };
+    let tls_trust = match outcome.tls_trust {
+        crate::easyconnect::RemoteEasyconnectTlsTrust::SystemPki => {
+            crate::config::RemoteTlsTrust::SystemPki
+        }
+        crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate => {
+            crate::config::RemoteTlsTrust::EnrolledCertificate
+        }
+    };
+    let enrolled_trust = if tls_trust == crate::config::RemoteTlsTrust::EnrolledCertificate {
+        Some(
+            crate::trust::load_trust(&outcome.contract.host_or_ip, outcome.https_port)?
+                .ok_or_else(|| {
+                    RemoteRunError::UploadRouting(
+                        "easyconnect appliance trust disappeared before config commit".to_string(),
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
     let session = RemoteUploadSession {
         session_id: exchange.session.session_id.clone(),
         issued_at: exchange.session.issued_at_utc.clone(),
@@ -239,17 +265,12 @@ fn install_easyconnect_result(
         appliance_base_url: outcome.contract.appliance_base_url.clone(),
         discovery_url: outcome.contract.discovery_url.clone(),
         auth_authority,
+        tls_trust,
         paired_actor: Some(exchange.approved_actor.clone()),
         default_object_store: default_object_store.clone(),
         session: Some(session.clone()),
         object_stores: grants.clone(),
     });
-    let trust = crate::trust::load_trust(&outcome.contract.host_or_ip, outcome.https_port)?
-        .ok_or_else(|| {
-            RemoteRunError::UploadRouting(
-                "easyconnect appliance trust disappeared before config commit".to_string(),
-            )
-        })?;
     config
         .session_bindings
         .retain(|binding| binding.appliance_id != exchange.appliance_id);
@@ -263,8 +284,15 @@ fn install_easyconnect_result(
             region: outcome.exchange.s3.region.clone(),
             addressing_style: outcome.exchange.s3.addressing_style.clone(),
             s3_profile: None,
-            trust_fingerprint_sha256: trust.fingerprint_sha256.clone(),
-            trust_spki_sha256: trust.spki_sha256.clone(),
+            tls_trust,
+            trust_fingerprint_sha256: enrolled_trust
+                .as_ref()
+                .map(|trust| trust.fingerprint_sha256.clone())
+                .unwrap_or_default(),
+            trust_spki_sha256: enrolled_trust
+                .as_ref()
+                .map(|trust| trust.spki_sha256.clone())
+                .unwrap_or_default(),
             session: session.clone(),
         });
     }

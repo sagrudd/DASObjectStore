@@ -86,6 +86,16 @@ pub struct RemoteEasyconnectPairingOptions {
     pub callback_port: Option<u16>,
     pub timeout: Duration,
     pub open_browser: bool,
+    /// TLS authority selected by the caller's host profile.
+    pub tls_trust: RemoteEasyconnectTlsTrust,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RemoteEasyconnectTlsTrust {
+    /// Validate through the operating-system trust store and exact URL identity.
+    SystemPki,
+    /// Validate through the explicitly enrolled legacy appliance certificate.
+    EnrolledCertificate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -597,7 +607,7 @@ mod tests {
         define_easyconnect_contract, parse_pairing_callback_request, query_value,
         run_easyconnect_pairing, BrowserLauncher, RemoteEasyconnectContractError,
         RemoteEasyconnectContractRequest, RemoteEasyconnectPairingError,
-        RemoteEasyconnectPairingOptions, DEFAULT_APPLIANCE_HTTPS_PORT,
+        RemoteEasyconnectPairingOptions, RemoteEasyconnectTlsTrust, DEFAULT_APPLIANCE_HTTPS_PORT,
         DEFAULT_REMOTE_SESSION_LIFETIME_SECS, DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS,
         EASYCONNECT_CALLBACK_PATH,
     };
@@ -891,6 +901,7 @@ mod tests {
                 callback_port: None,
                 timeout: Duration::from_secs(5),
                 open_browser: true,
+                tls_trust: RemoteEasyconnectTlsTrust::EnrolledCertificate,
             },
             &launcher,
         )

@@ -375,6 +375,12 @@ approval, and session completion. Integrated deployments keep the standalone
 DAS Web/API listener on 8448 closed. ``--authority-profile legacy-standalone``
 is required to select the legacy 8448 boundary explicitly.
 
+Integrated Monas uses the platform operating-system trust store and ordinary
+certificate-chain plus exact IP-or-DNS validation. Install the current,
+governed Site root through the platform trust workflow before login. Do not run
+``trust enroll`` for the integrated endpoint: per-endpoint certificate records
+remain only for the explicit legacy standalone profile.
+
 Each invocation asks the appliance to mint a fresh, one-use pairing and shows
 the exact browser approval URL. The exchange must return the requested
 ObjectStore and exact Pistis actor. Temporary credentials are written only to

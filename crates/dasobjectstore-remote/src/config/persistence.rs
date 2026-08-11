@@ -679,6 +679,7 @@ fn migrate_legacy_sessions(config: &mut RemoteConfig) -> Result<(), RemoteConfig
                     .map(|association| association.addressing_style.clone())
                     .unwrap_or_else(|| "path".to_string()),
                 s3_profile: profile,
+                tls_trust: appliance.tls_trust,
                 trust_fingerprint_sha256: trust
                     .as_ref()
                     .map(|record| record.fingerprint_sha256.clone())
@@ -870,6 +871,7 @@ mod tests {
             region: "garage".to_string(),
             addressing_style: "path".to_string(),
             s3_profile: Some("dasobjectstore-epic_collection".to_string()),
+            tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
             trust_fingerprint_sha256: "AA:BB".to_string(),
             trust_spki_sha256: "CC:DD".to_string(),
             session: RemoteUploadSession {
