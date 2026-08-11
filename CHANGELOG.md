@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.162.2 - 2026-08-11
+
+- Make the release-version guard safe under ``set -o pipefail`` by parsing
+  manifests and changelogs without early-closing pipelines. This preserves the
+  uniqueness enforcement in the exact Debian package build environment.
+
 ## 0.162.1 - 2026-08-11
 
 - Assign a unique patch release to the Prosopikon 0.23.0 installation-owner
