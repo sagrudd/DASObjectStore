@@ -30,6 +30,12 @@ Start the canonical login from the remote computer:
    dasobjectstore-remote login 192.168.1.192 OBJECTSTORE \
      --username USER --set-s3-config
 
+Canonical login discovers and completes through the Monas authority boundary
+at ``https://HOST:8443``. Port 8448 is not opened by an integrated installation.
+Only a deliberately standalone legacy host may select
+``--authority-profile legacy-standalone``; that explicit compatibility profile
+uses port 8448 and does not weaken the integrated default.
+
 The ObjectStore and Pistis username are fixed before approval. EasyConnect
 requires an already enrolled appliance certificate pin. The lower-level
 ``easyconnect`` command remains available for contract diagnostics; the old

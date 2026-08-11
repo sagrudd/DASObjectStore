@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.163.1 - 2026-08-11
+
+- Route canonical remote login through the integrated Monas authority boundary
+  on port 8443. Port 8448 is available only through the explicit
+  ``legacy-standalone`` authority profile.
+
 ## 0.163.0 - 2026-08-11
 
 - Add ``external_gateway`` S3 ingress mode for Monas-integrated deployments.
