@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.162.0 - 2026-08-11
+
+- Consume Prosopikon 0.23.0 from exact merge revision
+  ``446c9a359eea1ffa2ca4f53b4dd2bdf950b610e2``. Embedded DASObjectStore now
+  shares Monas's governed first-installation-owner actor type and accepts its
+  explicit ``dasobjectstore/Administer`` entitlement without username,
+  operating-system, local-account, or global-administrator translation.
+
 ## 0.161.12 - 2026-08-11
 
 - Advance the shared embedded identity boundary to Prosopikon 0.22.1 at
