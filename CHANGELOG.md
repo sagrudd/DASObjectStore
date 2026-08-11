@@ -1,10 +1,24 @@
 # Changelog
 
-## 0.162.1 - 2026-08-11
+## 0.162.3 - 2026-08-11
 
 - Restore the verified sibling source patches required by the release package
   provenance preflight. Package builds still require clean Prosopikon and
   Pistis checkouts at the exact revisions pinned by the workspace.
+
+## 0.162.2 - 2026-08-11
+
+- Make the release-version guard safe under ``set -o pipefail`` by parsing
+  manifests and changelogs without early-closing pipelines. This preserves the
+  uniqueness enforcement in the exact Debian package build environment.
+
+## 0.162.1 - 2026-08-11
+
+- Assign a unique patch release to the Prosopikon 0.23.0 installation-owner
+  alignment and canonical remote-login aggregate. Package builds now reject a
+  package-relevant source revision that reuses its first parent's version,
+  preventing two different aggregate artifacts from sharing one Debian
+  version.
 
 ## 0.162.0 - 2026-08-11
 
