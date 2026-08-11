@@ -73,6 +73,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mo
   "$build_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
   "$build_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config" \
+  "$build_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
@@ -122,7 +124,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
 Provides: dasobjectstore-remote
 Conflicts: dasobjectstore-remote
 Replaces: dasobjectstore-remote

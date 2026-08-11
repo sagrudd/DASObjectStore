@@ -90,7 +90,7 @@ async fn start_server(
         s3_tls_certificate_path,
     );
     let direct_s3 = async move {
-        if s3_ingress.enabled() {
+        if s3_ingress.binds_listener() {
             let address = s3_ingress.socket_addr().map_err(io::Error::other)?;
             serve_direct_s3_tls(address, s3_tls, s3_ingress.max_concurrent_uploads).await
         } else {

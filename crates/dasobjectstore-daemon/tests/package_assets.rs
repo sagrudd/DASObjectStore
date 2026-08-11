@@ -19,6 +19,9 @@ const DAEMON_CONFIG: &str = include_str!("../../../packaging/linux/etc/dasobject
 const S3_GATEWAY_CONFIG: &str =
     include_str!("../../../packaging/linux/etc/dasobjectstore/s3-gateway.json");
 const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectstore/config.json");
+const MONAS_CONFIG_MIGRATION: &str = include_str!(
+    "../../../packaging/linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
+);
 const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
@@ -37,7 +40,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
 const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
     "Provides: dasobjectstore-remote",
     "Conflicts: dasobjectstore-remote",
@@ -58,6 +61,8 @@ fn package_daemon_config_matches_runtime_defaults() {
 #[test]
 fn packaged_web_config_declares_disabled_production_mtls_listener() {
     let config: serde_json::Value = serde_json::from_str(WEB_CONFIG).expect("Web config parses");
+    assert_eq!(config["authentication"]["authority"], "monas");
+    assert_ne!(config["authentication"]["authority"], "local_user");
     let mtls = &config["application_mtls"];
     assert_eq!(mtls["enabled"], false);
     assert_eq!(mtls["bind_address"], "0.0.0.0");
@@ -74,6 +79,18 @@ fn packaged_web_config_declares_disabled_production_mtls_listener() {
         mtls["application_key_registry_path"],
         "/var/lib/dasobjectstore/application-keys.json"
     );
+}
+
+#[test]
+fn packages_atomic_monas_integrated_config_migration() {
+    assert_contains(MONAS_CONFIG_MIGRATION, "os.replace(temporary_name, path)");
+    assert_contains(MONAS_CONFIG_MIGRATION, "os.fsync(target.fileno())");
+    assert_contains(MONAS_CONFIG_MIGRATION, "[\"authority\"] = \"monas\"");
+    assert_contains(MONAS_CONFIG_MIGRATION, "mode=\"external_gateway\"");
+    for build in [BUILD_DEB, BUILD_RPM] {
+        assert_contains(build, "migrate-monas-integrated-config");
+        assert_contains(build, "python3");
+    }
 }
 
 #[test]
@@ -674,7 +691,12 @@ fn rpm_post_requires_profile_marker_before_repairing_existing_trees() {
 #[test]
 fn package_scripts_never_auto_activate_the_operator_gated_s3_gateway() {
     for script in [POSTINST, BUILD_RPM] {
-        assert_no_automatic_unit_activation(script, "dasobjectstore-s3-gateway.service");
+        for unit in [
+            "dasobjectstore-s3-gateway.service",
+            "dasobjectstore-server.service",
+        ] {
+            assert_no_automatic_unit_activation(script, unit);
+        }
     }
 
     // The guard must detect a future accidental lifecycle activation while

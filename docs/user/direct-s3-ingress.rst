@@ -111,6 +111,46 @@ The standalone server configuration at
      }
    }
 
+When the packaged ``dasobjectstore-s3-gateway.service`` owns the endpoint,
+the Web/API server must advertise that endpoint without opening a second
+listener. Use the dedicated-gateway descriptor mode:
+
+.. code-block:: json
+
+   {
+     "s3_ingress": {
+       "mode": "external_gateway",
+       "public_endpoint_url": "https://objects.appliance.example:3900",
+       "region": "garage",
+       "addressing_style": "path"
+     }
+   }
+
+``external_gateway`` requires the complete descriptor but ignores listener
+ownership fields. It never binds port 3900. Migrate a Monas-integrated host
+from ``direct_gateway`` to ``external_gateway`` before starting the Web/API
+server when the dedicated gateway unit is active. Do not stop or replace the
+dedicated gateway merely to make the Web listener start.
+
+The aggregate package installs both units but does not enable, start, restart,
+or stop either ``dasobjectstore-server.service`` or
+``dasobjectstore-s3-gateway.service``. Monas deployment owns their explicit,
+ordered activation. The integrated server configuration must continue to use
+Monas/Pistis authority; configuration validation rejects ``local_user`` with
+``external_gateway`` and provides no local authentication fallback.
+
+For an existing preserved package conffile, perform the atomic migration while
+the Web/API unit is inactive, then validate before activation::
+
+   sudo /usr/libexec/dasobjectstore/migrate-monas-integrated-config \
+     --public-endpoint-url https://storage.example:3900 \
+     --region mnemosyne-local
+   sudo /usr/bin/dasobjectstore-server \
+     --config /opt/dasobjectstore/config.json --check-config --json
+
+The migration preserves unrelated TLS, listener, and product settings, keeps
+the existing file ownership and mode, and refuses non-HTTPS descriptors.
+
 Omitting ``s3_ingress`` is backward compatible and resolves to:
 
 .. code-block:: json

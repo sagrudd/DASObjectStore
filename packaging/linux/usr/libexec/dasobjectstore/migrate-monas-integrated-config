@@ -1,0 +1,65 @@
+#!/usr/bin/python3
+"""Atomically migrate a preserved Web/API conffile to the Monas gateway profile."""
+
+import argparse
+import json
+import os
+import pathlib
+import tempfile
+import urllib.parse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="/opt/dasobjectstore/config.json")
+    parser.add_argument("--public-endpoint-url", required=True)
+    parser.add_argument("--region", required=True)
+    parser.add_argument("--addressing-style", choices=("path", "virtual"), default="path")
+    args = parser.parse_args()
+
+    endpoint = urllib.parse.urlsplit(args.public_endpoint_url)
+    if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.password:
+        parser.error("public endpoint must be an HTTPS URL without credentials")
+    if endpoint.path not in ("", "/") or endpoint.query or endpoint.fragment:
+        parser.error("public endpoint must not contain a path, query, or fragment")
+    if not args.region.strip():
+        parser.error("region must not be empty")
+
+    path = pathlib.Path(args.config)
+    original_stat = path.stat()
+    with path.open("r", encoding="utf-8") as source:
+        config = json.load(source)
+    config.setdefault("authentication", {})["authority"] = "monas"
+    ingress = config.setdefault("s3_ingress", {})
+    ingress.update(
+        mode="external_gateway",
+        public_endpoint_url=args.public_endpoint_url,
+        region=args.region,
+        addressing_style=args.addressing_style,
+    )
+
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(descriptor, original_stat.st_mode & 0o777)
+        os.fchown(descriptor, original_stat.st_uid, original_stat.st_gid)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as target:
+            json.dump(config, target, indent=2)
+            target.write("\n")
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary_name, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+if __name__ == "__main__":
+    main()
