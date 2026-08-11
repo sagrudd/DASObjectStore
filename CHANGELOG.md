@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.162.3 - 2026-08-11
+
+- Restore the verified sibling source patches required by the release package
+  provenance preflight. Package builds still require clean Prosopikon and
+  Pistis checkouts at the exact revisions pinned by the workspace.
+
 ## 0.162.2 - 2026-08-11
 
 - Make the release-version guard safe under ``set -o pipefail`` by parsing
