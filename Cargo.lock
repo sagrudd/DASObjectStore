@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "chrono",
  "dasobjectstore-reference",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "base64",
  "dasobjectstore-core",
@@ -820,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -852,7 +852,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -871,7 +871,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -884,18 +884,21 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "axum",
+ "chrono",
  "coset",
  "dasobjectstore-core",
  "dasobjectstore-daemon",
  "dasobjectstore-gui-api",
  "dasobjectstore-object-service",
+ "libc",
  "p256",
  "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2)",
  "prosopikon-core",
  "serde",
+ "serde_jcs",
  "serde_json",
  "sha2",
  "tokio",
@@ -905,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -914,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -924,7 +927,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -933,7 +936,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "base64",
  "clap",
@@ -953,7 +956,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -963,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.167.0"
+version = "0.168.0"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -1153,7 +1156,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2636,8 +2639,12 @@ name = "pistis-protocol"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
+ "pistis-canonical 0.1.0",
+ "pistis-cose",
+ "pistis-crypto",
  "pistis-domain",
  "subtle",
+ "url",
 ]
 
 [[package]]
@@ -2754,8 +2761,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.25.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=dba0716e787e1be6c10d982a0b4b572c57a21bd1#dba0716e787e1be6c10d982a0b4b572c57a21bd1"
+version = "0.26.0"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=bbd006470b4a4efaaba2881c657859a7a87f3358#bbd006470b4a4efaaba2881c657859a7a87f3358"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2764,6 +2771,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom 0.2.17",
  "getrandom 0.3.4",
+ "hex",
  "hmac",
  "p256",
  "parking_lot",
@@ -2786,7 +2794,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=dba0716e787e1be6c10d982a0b4b572c57a21bd1#dba0716e787e1be6c10d982a0b4b572c57a21bd1"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=bbd006470b4a4efaaba2881c657859a7a87f3358#bbd006470b4a4efaaba2881c657859a7a87f3358"
 dependencies = [
  "prosopikon-core",
  "web-sys",
@@ -2855,7 +2863,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3188,7 +3196,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

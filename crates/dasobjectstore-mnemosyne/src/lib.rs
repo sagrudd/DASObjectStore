@@ -1,5 +1,6 @@
 //! Mnemosyne and Synoptikon adapter boundary.
 
+pub mod authority_retirement_projection;
 pub mod binding;
 pub mod boundary;
 pub mod flounder_telemetry;

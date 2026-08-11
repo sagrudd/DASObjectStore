@@ -1,4 +1,5 @@
 use std::{
+    ffi::CString,
     fs::{self, File, OpenOptions},
     io::{Read as _, Write as _},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
@@ -56,6 +57,7 @@ fn main() {
 }
 
 fn run() -> Result<(), ()> {
+    let (service_uid, service_gid) = service_account_ids()?;
     let projection = load_root_projection()?;
     let challenge = reserve_challenge()?;
     let now = SystemTime::now()
@@ -91,13 +93,29 @@ fn run() -> Result<(), ()> {
     let receipt = request_das_replacement_receipt_v1(challenge).map_err(|_| ())?;
     let verified = verify_das_replacement_receipt_v1(&receipt, &expected).map_err(|_| ())?;
     let completion = retire_local_authority_v1(
-        &DasLocalAuthorityRetirementPathsV1::production(),
+        &DasLocalAuthorityRetirementPathsV1::production(service_uid, service_gid).ok_or(())?,
         &verified,
         projection.observation,
     )
     .map_err(|_| ())?;
     println!("{}", serde_json::to_string(&completion).map_err(|_| ())?);
     Ok(())
+}
+
+fn service_account_ids() -> Result<(u32, u32), ()> {
+    let account = CString::new("dasobjectstore").map_err(|_| ())?;
+    // SAFETY: `account` is a live NUL-terminated string. We copy the numeric
+    // fields immediately and never retain the libc-owned passwd pointer.
+    let record = unsafe { libc::getpwnam(account.as_ptr()) };
+    if record.is_null() {
+        return Err(());
+    }
+    // SAFETY: non-null was checked above and the fields are copied immediately.
+    let record = unsafe { &*record };
+    if record.pw_uid == 0 || record.pw_gid == 0 {
+        return Err(());
+    }
+    Ok((record.pw_uid, record.pw_gid))
 }
 
 fn load_root_projection() -> Result<AcceptedProjectionV1, ()> {
@@ -120,8 +138,45 @@ fn load_root_projection() -> Result<AcceptedProjectionV1, ()> {
 }
 
 fn reserve_challenge() -> Result<[u8; 32], ()> {
+    reserve_challenge_from(Path::new(RESERVATION), Path::new(RANDOM), 0, 0)
+}
+
+fn reserve_challenge_from(
+    reservation_path: &Path,
+    random_path: &Path,
+    state_uid: u32,
+    state_gid: u32,
+) -> Result<[u8; 32], ()> {
+    if let Ok(metadata) = fs::symlink_metadata(reservation_path) {
+        if !metadata.is_file()
+            || metadata.uid() != state_uid
+            || metadata.gid() != state_gid
+            || metadata.permissions().mode() & 0o777 != 0o600
+            || metadata.len() != 65
+        {
+            return Err(());
+        }
+        let encoded = fs::read(reservation_path).map_err(|_| ())?;
+        if encoded.len() != 65
+            || encoded[64] != b'\n'
+            || !encoded[..64]
+                .iter()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(());
+        }
+        let mut challenge = [0_u8; 32];
+        for (index, byte) in challenge.iter_mut().enumerate() {
+            *byte = u8::from_str_radix(
+                std::str::from_utf8(&encoded[index * 2..index * 2 + 2]).map_err(|_| ())?,
+                16,
+            )
+            .map_err(|_| ())?;
+        }
+        return (challenge != [0; 32]).then_some(challenge).ok_or(());
+    }
     let mut challenge = [0_u8; 32];
-    File::open(RANDOM)
+    File::open(random_path)
         .and_then(|mut file| file.read_exact(&mut challenge))
         .map_err(|_| ())?;
     if challenge == [0; 32] {
@@ -131,15 +186,44 @@ fn reserve_challenge() -> Result<[u8; 32], ()> {
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(RESERVATION)
+        .open(reservation_path)
         .map_err(|_| ())?;
     for byte in challenge {
         write!(reservation, "{byte:02x}").map_err(|_| ())?;
     }
     writeln!(reservation).map_err(|_| ())?;
     reservation.sync_all().map_err(|_| ())?;
-    File::open(Path::new(RESERVATION).parent().ok_or(())?)
+    File::open(reservation_path.parent().ok_or(())?)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| ())?;
     Ok(challenge)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn challenge_reservation_reuses_exact_bytes_and_denies_conflict() {
+        let root = std::env::temp_dir().join(format!("das-challenge-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let random = root.join("random");
+        let reservation = root.join("reservation");
+        fs::write(&random, [7_u8; 32]).unwrap();
+        let metadata = fs::metadata(&root).unwrap();
+        let first =
+            reserve_challenge_from(&reservation, &random, metadata.uid(), metadata.gid()).unwrap();
+        assert_eq!(first, [7; 32]);
+        fs::write(&random, [8_u8; 32]).unwrap();
+        assert_eq!(
+            reserve_challenge_from(&reservation, &random, metadata.uid(), metadata.gid(),).unwrap(),
+            first
+        );
+        fs::write(&reservation, b"conflicting-reservation").unwrap();
+        fs::set_permissions(&reservation, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            reserve_challenge_from(&reservation, &random, metadata.uid(), metadata.gid(),).is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }

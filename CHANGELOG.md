@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.168.0 - 2026-08-11
+
+- Correct the signed local-authority retirement boundary to resolve the fixed
+  `dasobjectstore` service account and require the production registry's exact
+  `dasobjectstore:dasobjectstore` ownership and `0640` mode. Root-owned `0600`
+  projection, intent, archive and completion state remain unchanged.
+- Add a no-input root finalizer that validates the fixed Prosopikon governance
+  projection and protected producer provenance, independently observes the
+  inactive legacy surface, and atomically publishes the sole accepted
+  retirement projection with root-only metadata.
+- Keep the fixed DAS request open for the bounded 300-second attended ceremony
+  and validate/reuse the same durable challenge reservation after timeout or a
+  lost response; a retry never generates or replaces the reserved challenge.
+
 ## 0.167.0 - 2026-08-11
 
 - Package the no-argument, fixed-peer DAS replacement-receipt consumer and its

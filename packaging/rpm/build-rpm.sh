@@ -41,6 +41,7 @@ cargo build --release --no-default-features -p dasobjectstore-daemon --manifest-
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement-finalize --manifest-path "$repo_root/Cargo.toml"
 
 rpm_root="$repo_root/target/rpm/rpmbuild"
 staging_root="$repo_root/target/rpm/staging"
@@ -74,6 +75,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
 install -m 0755 "$repo_root/target/release/dasobjectstore-authority-retirement" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement"
+install -m 0755 "$repo_root/target/release/dasobjectstore-authority-retirement-finalize" \
+  "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
@@ -407,6 +410,7 @@ fi
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-workspace-host
 /usr/libexec/dasobjectstore/dasobjectstore-authority-retirement
+/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
