@@ -11,6 +11,7 @@ control_slice="$repo_root/packaging/linux/systemd/dasobjectstore-control.slice"
 storage_slice="$repo_root/packaging/linux/systemd/dasobjectstore-storage.slice"
 workspace_host_service="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.service"
 workspace_host_socket="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.socket"
+authority_retirement_service="$repo_root/packaging/linux/systemd/dasobjectstore-authority-retirement.service"
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 monas_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
@@ -68,6 +69,7 @@ require_file "$control_slice"
 require_file "$storage_slice"
 require_file "$workspace_host_service"
 require_file "$workspace_host_socket"
+require_file "$authority_retirement_service"
 require_file "$source_access_helper"
 require_file "$monas_access_helper"
 require_file "$mount_policy_helper"
@@ -205,9 +207,10 @@ done
 require_text "$pinned_sources" 'git -c safe.directory="$checkout" -C "$checkout" status --porcelain'
 require_text "$pinned_sources" 'command -v git'
 require_text "$pinned_sources" 'das_package_write_pinned_dependency_provenance'
-require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/prosopikon.git"]'
+require_text "$repo_root/Cargo.toml" 'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
+require_text "$repo_root/Cargo.toml" 'prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
 require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
-require_text "$repo_root/Cargo.toml" 'pistis-canonical = { path = "../pistis/crates/pistis-canonical" }'
+require_text "$repo_root/Cargo.toml" 'pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = '
 require_text "$build_deb" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_rpm" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_deb" 'das_package_write_pinned_dependency_provenance'
@@ -223,6 +226,8 @@ require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.servi
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-control.slice'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-storage.slice'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-authority-retirement.service'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/dasobjectstore-authority-retirement'
 require_text "$build_deb" 'opt/dasobjectstore/config.json'
 require_text "$build_deb" 'opt/dasobjectstore/web'
 require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
@@ -255,6 +260,8 @@ require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-control.slice'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage.slice'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-authority-retirement.service'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement'
 require_text "$build_rpm" '%preun'
 require_text "$build_rpm" '%postun'
 require_text "$build_rpm" 'RPM removal never authorizes data'

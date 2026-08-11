@@ -13,7 +13,7 @@ use std::{
 use coset::{iana, Algorithm, CborSerializable as _, CoseSign1};
 use p256::ecdsa::{signature::Verifier as _, Signature, VerifyingKey};
 use pistis_canonical::{from_slice, to_vec, Value};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
@@ -67,7 +67,8 @@ pub struct VerifiedDasReplacementReceiptV1 {
 }
 
 /// Complete closed legacy-surface observation supplied by package probes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct LegacyAuthoritySurfaceObservationV1 {
     pub standalone_service_disabled_inactive: bool,
     pub legacy_listeners_absent: bool,

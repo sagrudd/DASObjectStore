@@ -1,0 +1,23 @@
+[Unit]
+Description=DASObjectStore signed local-authority retirement
+After=monas-das-replacement-receipt.service
+Requires=monas-das-replacement-receipt.service
+ConditionPathExists=/var/lib/dasobjectstore/authority-retirement/accepted-projection.v1.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/dasobjectstore/auth /var/lib/dasobjectstore/auth-retired /var/lib/dasobjectstore/authority-retirement
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
