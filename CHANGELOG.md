@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.162.1 - 2026-08-11
+
+- Restore the verified sibling source patches required by the release package
+  provenance preflight. Package builds still require clean Prosopikon and
+  Pistis checkouts at the exact revisions pinned by the workspace.
+
 ## 0.162.0 - 2026-08-11
 
 - Consume Prosopikon 0.23.0 from exact merge revision
