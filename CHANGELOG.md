@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.162.1 - 2026-08-11
+
+- Assign a unique patch release to the Prosopikon 0.23.0 installation-owner
+  alignment and canonical remote-login aggregate. Package builds now reject a
+  package-relevant source revision that reuses its first parent's version,
+  preventing two different aggregate artifacts from sharing one Debian
+  version.
+
 ## 0.162.0 - 2026-08-11
 
 - Consume Prosopikon 0.23.0 from exact merge revision
