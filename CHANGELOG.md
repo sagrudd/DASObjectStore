@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.10 - 2026-08-11
+
+- Align the embedded authority boundary with Prosopikon 0.21.0. DASObjectStore
+  continues to accept only Monas-projected Pistis actors while sharing the
+  generation-aware mobile device-replacement authority types required by
+  Monas.
+
 ## 0.161.9 - 2026-08-10
 
 - Align the embedded Prosopikon authority boundary with 0.20.0 so Monas and
