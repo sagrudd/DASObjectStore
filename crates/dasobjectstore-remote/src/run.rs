@@ -9,10 +9,10 @@ use crate::aws_profile::{
     status as s3_profile_status, AwsProfileError,
 };
 use crate::cli::{
-    AuthenticateArgs, ConfigCommand, EasyconnectArgs, ObjectReconcileS3Args, ObjectSnapshotArgs,
-    ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand, RemoteCli,
-    RemoteCommand, ResyncArgs, S3Command, StoreListArgs, StoreReadinessArgs, StoresCommand,
-    TrustCommand, TrustEnrollArgs, TrustRepairArgs, UploadArgs,
+    AuthenticateArgs, ConfigCommand, EasyconnectArgs, LoginArgs, ObjectReconcileS3Args,
+    ObjectSnapshotArgs, ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand,
+    RemoteCli, RemoteCommand, ResyncArgs, S3Command, StoreListArgs, StoreReadinessArgs,
+    StoresCommand, TrustCommand, TrustEnrollArgs, TrustRepairArgs, UploadArgs,
 };
 use crate::config::{
     acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
@@ -57,6 +57,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         ));
     }
     match cli.command() {
+        RemoteCommand::Login(args) => run_login(cli, args, writer),
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {

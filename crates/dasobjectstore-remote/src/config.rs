@@ -215,9 +215,7 @@ impl RemoteConfig {
                 message: format!(
                     "no authoritative session generation exists for ObjectStore {store_id}"
                 ),
-                remediation: format!(
-                    "dasobjectstore-remote authenticate HOST {store_id} --username USER"
-                ),
+                remediation: format!("dasobjectstore-remote login HOST {store_id} --username USER"),
             }),
             _ => Err(RemoteConfigError::Integrity {
                 code: "ambiguous_session_state",

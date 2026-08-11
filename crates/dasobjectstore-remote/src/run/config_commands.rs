@@ -1,5 +1,97 @@
 use super::*;
 
+pub(super) fn run_login(
+    cli: &RemoteCli,
+    args: &LoginArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let options = RemoteEasyconnectPairingOptions {
+        host_or_ip: args.host_or_ip().to_string(),
+        https_port: args.https_port(),
+        requested_object_store: Some(args.object_store().to_string()),
+        client_request_id: Some(format!("login:{}:{}", args.username(), args.object_store())),
+        callback_port: args.callback_port(),
+        timeout: Duration::from_secs(args.timeout_seconds()),
+        open_browser: !args.no_browser(),
+    };
+    let open_browser = !args.no_browser();
+    let outcome = run_complete_easyconnect_pairing_with_ready(
+        options,
+        &SystemBrowserLauncher,
+        |contract, browser_login_url| {
+            write_easyconnect_pairing_ready(contract, browser_login_url, open_browser, writer)?;
+            writer.flush()?;
+            Ok(())
+        },
+    )?;
+    if outcome.exchange.exchange.approved_actor != args.username() {
+        return Err(RemoteRunError::UploadRouting(
+            "approved Pistis actor did not match the requested --username; no session or AWS profile was committed".to_string(),
+        ));
+    }
+    install_easyconnect_result(cli, &outcome)?;
+    if args.set_s3_config() {
+        install_login_profile(cli, args, &outcome)?;
+    }
+    write_easyconnect_pairing(&outcome, writer)?;
+    if args.set_s3_config() {
+        writeln!(
+            writer,
+            "AWS profile: configured and authenticated access verified"
+        )?;
+    }
+    Ok(())
+}
+
+fn install_login_profile(
+    cli: &RemoteCli,
+    args: &LoginArgs,
+    outcome: &crate::easyconnect::RemoteEasyconnectCompletedPairing,
+) -> Result<(), RemoteRunError> {
+    let path = config_path(cli)?;
+    let transaction_lock = acquire_config_transaction(&path)?;
+    let mut config = read_optional_config(&path)?.ok_or_else(|| {
+        RemoteRunError::UploadRouting("passwordless session was not committed".to_string())
+    })?;
+    let binding = config.session_binding(args.object_store())?.clone();
+    let profile = match args.s3_profile() {
+        Some(profile) => profile.to_string(),
+        None => default_profile_name(args.object_store())?,
+    };
+    let existing = config
+        .s3_profiles
+        .iter()
+        .find(|association| association.profile == profile)
+        .cloned();
+    let backup = snapshot_profile_state()?;
+    let context = connection_context_from_binding(&binding)?;
+    let (association, _) =
+        match install_profile(&context, &profile, existing.as_ref(), args.force(), true) {
+            Ok(result) => result,
+            Err(error) => {
+                restore_profile_state(&backup)?;
+                return Err(error.into());
+            }
+        };
+    config.s3_profiles.retain(|item| item.profile != profile);
+    config.s3_profiles.push(association);
+    let session_binding = config
+        .session_bindings
+        .iter_mut()
+        .find(|binding| binding.store_id == args.object_store())
+        .ok_or_else(|| {
+            RemoteRunError::UploadRouting(format!(
+                "no passwordless session is bound to ObjectStore {}",
+                args.object_store()
+            ))
+        })?;
+    session_binding.s3_profile = Some(profile.clone());
+    config.profile = profile;
+    config.username = Some(outcome.exchange.exchange.approved_actor.clone());
+    write_config_locked(&path, &config, &transaction_lock)?;
+    Ok(())
+}
+
 pub(super) fn run_easyconnect(
     cli: &RemoteCli,
     args: &EasyconnectArgs,
@@ -20,6 +112,7 @@ pub(super) fn run_easyconnect(
             host_or_ip: args.host_or_ip().to_string(),
             https_port: args.https_port(),
             requested_object_store: args.object_store().map(str::to_string),
+            client_request_id: None,
             callback_port: args.callback_port(),
             timeout: Duration::from_secs(args.timeout_seconds()),
             open_browser: !args.no_browser(),

@@ -81,7 +81,9 @@ impl RemoteCli {
 
 #[derive(Debug, Subcommand)]
 pub enum RemoteCommand {
-    /// Authenticate to one appliance ObjectStore and emit an 8-hour S3 context.
+    /// Sign in through Pistis and configure one scoped ObjectStore session.
+    Login(LoginArgs),
+    /// Deprecated local-password command retained only for explicit rejection.
     Authenticate(AuthenticateArgs),
     /// Reconcile trust, session, S3 profile, and readiness in one workflow.
     Resync(ResyncArgs),
@@ -101,6 +103,71 @@ pub enum RemoteCommand {
     Operations(OperationsArgs),
     /// Upload a file or folder to an accessible object store.
     Upload(UploadArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct LoginArgs {
+    /// DAS appliance host name or IP address, without a URL scheme.
+    host_or_ip: String,
+    /// Exact ObjectStore requested for this session.
+    object_store: String,
+    /// Pistis username that must match the approved actor returned by Monas.
+    #[arg(long)]
+    username: String,
+    /// HTTPS port for the standalone DASObjectStore Web application.
+    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_APPLIANCE_HTTPS_PORT)]
+    https_port: u16,
+    /// Fixed local callback port; omit to let the remote client choose one.
+    #[arg(long)]
+    callback_port: Option<u16>,
+    /// Print the browser URL and wait for approval without opening a browser.
+    #[arg(long)]
+    no_browser: bool,
+    /// Seconds to wait for Pistis approval.
+    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_PAIRING_TIMEOUT_SECS)]
+    timeout_seconds: u64,
+    /// Install and verify the issued session in a standard AWS CLI profile.
+    #[arg(long)]
+    set_s3_config: bool,
+    /// AWS profile name; defaults to dasobjectstore-<ObjectStore>.
+    #[arg(long, requires = "set_s3_config")]
+    s3_profile: Option<String>,
+    /// Replace a conflicting DASObjectStore-managed AWS profile association.
+    #[arg(long, requires = "set_s3_config")]
+    force: bool,
+}
+
+impl LoginArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn object_store(&self) -> &str {
+        &self.object_store
+    }
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn callback_port(&self) -> Option<u16> {
+        self.callback_port
+    }
+    pub fn no_browser(&self) -> bool {
+        self.no_browser
+    }
+    pub fn timeout_seconds(&self) -> u64 {
+        self.timeout_seconds
+    }
+    pub fn set_s3_config(&self) -> bool {
+        self.set_s3_config
+    }
+    pub fn s3_profile(&self) -> Option<&str> {
+        self.s3_profile.as_deref()
+    }
+    pub fn force(&self) -> bool {
+        self.force
+    }
 }
 
 #[derive(Debug, Args)]
@@ -898,6 +965,40 @@ mod tests {
         assert!(args.set_s3_config());
         assert_eq!(args.s3_profile(), Some("dasobjectstore-porkchop"));
         assert!(args.verify_s3());
+    }
+
+    #[test]
+    fn parses_canonical_passwordless_login_command() {
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "192.168.1.48",
+            "allele-anchor",
+            "--username",
+            "stephen@mnemosyne.co.uk",
+            "--set-s3-config",
+        ])
+        .expect("login parses");
+        let RemoteCommand::Login(args) = cli.command() else {
+            panic!("expected login command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.1.48");
+        assert_eq!(args.object_store(), "allele-anchor");
+        assert_eq!(args.username(), "stephen@mnemosyne.co.uk");
+        assert!(args.set_s3_config());
+        assert!(args.s3_profile().is_none());
+    }
+
+    #[test]
+    fn canonical_login_requires_a_pistis_username() {
+        assert!(RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "192.168.1.48",
+            "allele-anchor",
+            "--set-s3-config",
+        ])
+        .is_err());
     }
 
     #[test]

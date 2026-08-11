@@ -292,7 +292,7 @@ fn unique_binding_index(config: &RemoteConfig, store: &str) -> Result<usize, Rem
     match matches.as_slice() {
         [index] => Ok(*index),
         [] => Err(RemoteControlError::Authentication(format!(
-            "configuration_migration_required: ObjectStore {store} has no authoritative session; run `dasobjectstore-remote authenticate HOST {store} --username USER`"
+            "configuration_migration_required: ObjectStore {store} has no authoritative session; run `dasobjectstore-remote login HOST {store} --username USER`"
         ))),
         _ => Err(RemoteControlError::Configuration(format!(
             "ambiguous_session_state: ObjectStore {store} has multiple sessions; run `dasobjectstore-remote config repair --dry-run --json`"
@@ -417,7 +417,7 @@ fn reject_expired_session(session: &RemoteUploadSession) -> Result<(), RemoteCon
     let now = unix_now()?;
     if expiry <= now {
         return Err(RemoteControlError::Authentication(
-            "session_expired_reauthentication_required: the committed session has expired; run `dasobjectstore-remote authenticate HOST OBJECTSTORE --username USER --set-s3-config`"
+            "session_expired_reauthentication_required: the committed session has expired; run `dasobjectstore-remote login HOST OBJECTSTORE --username USER --set-s3-config`"
                 .to_string(),
         ));
     }
