@@ -79,6 +79,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-
   "$payload_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config" \
   "$payload_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
+  "$payload_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -173,6 +175,7 @@ set -e
 service_user="dasobjectstore"
 service_group="dasobjectstore"
 admin_group="dasobjectstore-admin"
+shared_monas_group="mnemosyne-pistis-das"
 managed_root="/srv/dasobjectstore"
 workspace_aggregate_root="\$managed_root/workspaces"
 
@@ -184,6 +187,9 @@ if ! getent group "\$service_group" >/dev/null; then
 fi
 if ! getent group "\$admin_group" >/dev/null; then
   groupadd --system "\$admin_group"
+fi
+if ! getent group "\$shared_monas_group" >/dev/null; then
+  groupadd --system "\$shared_monas_group"
 fi
 if ! id -u "\$service_user" >/dev/null 2>&1; then
   useradd --system --gid "\$service_group" --home-dir /var/lib/dasobjectstore --no-create-home --shell /sbin/nologin "\$service_user"
@@ -199,8 +205,8 @@ WARNING
 fi
 usermod -aG "\$admin_group" "\$service_user"
 
-install -d -o "\$service_user" -g "\$service_group" -m 0750 /run/dasobjectstore
-install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore
+install -d -o "\$service_user" -g "\$shared_monas_group" -m 0750 /run/dasobjectstore
+install -d -o "\$service_user" -g "\$shared_monas_group" -m 0750 /var/lib/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectstore/object-service
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry
@@ -209,6 +215,17 @@ install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore/tls
 install -d -o root -g "\$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$service_group" {} + -exec chmod 0640 {} +
+store_registry_state=/var/lib/dasobjectstore/stores.json
+store_registry_config=/etc/dasobjectstore/stores.json
+if [ ! -e "\$store_registry_state" ] && [ -f "\$store_registry_config" ]; then
+  install -o "\$service_user" -g "\$shared_monas_group" -m 0640 "\$store_registry_config" "\$store_registry_state"
+elif [ -f "\$store_registry_state" ]; then
+  chown "\$service_user:\$shared_monas_group" "\$store_registry_state"
+  chmod 0640 "\$store_registry_state"
+fi
+if [ -e /run/dasobjectstore/dasobjectstored.sock ]; then
+  /usr/libexec/dasobjectstore/manage-monas-access-boundary publish-socket
+fi
 if [ -f /opt/dasobjectstore/config.json ]; then
   chown root:"\$service_group" /opt/dasobjectstore/config.json
   chmod 0640 /opt/dasobjectstore/config.json
@@ -336,11 +353,6 @@ if command -v systemd-tmpfiles >/dev/null 2>&1; then
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service \
-    dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
-  systemctl start dasobjectstore-source-access.service || true
-  systemctl restart dasobjectstored.service || true
-  systemctl restart dasobjectstore-workspace-host.socket || true
 fi
 
 wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"

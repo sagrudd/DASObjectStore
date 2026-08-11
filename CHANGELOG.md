@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.164.0 - 2026-08-11
+
+- Package the producer half of the least-privilege Monas integration boundary.
+  Only the authoritative store registry and live daemon socket are projected
+  through `mnemosyne-pistis-das`; credentials, local-auth state, storage data,
+  private TLS material and unrelated DAS state remain private. Service startup
+  and upgrades now reject missing registries, unsafe metadata and stale sockets
+  without restarting the storage data plane or retiring `auth/users.json`.
+- Pin both Prosopikon crates to the merged 0.24.0 reconciliation authority at
+  `60a77cf495bcf0018324ed56e39119702fb6e453`, keeping the embedded
+  `AudienceBoundActorContext` type identical to the Monas consumer.
+
 ## 0.163.2 - 2026-08-11
 
 - Validate canonical integrated-Monas login through the operating-system trust

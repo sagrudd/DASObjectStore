@@ -22,6 +22,7 @@ stabilized in the current MVP.
    nas-endpoints
    disk-preparation
    object-stores
+   monas-package-access-boundary
    inspecting-store-contents
    subobjects
    ingesting-files

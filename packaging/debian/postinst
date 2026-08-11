@@ -4,6 +4,7 @@ set -euo pipefail
 service_user="dasobjectstore"
 service_group="dasobjectstore"
 admin_group="dasobjectstore-admin"
+shared_monas_group="mnemosyne-pistis-das"
 managed_root="/srv/dasobjectstore"
 workspace_aggregate_root="$managed_root/workspaces"
 product_root="/opt/dasobjectstore"
@@ -14,6 +15,9 @@ ensure_group() {
   fi
   if ! getent group "$admin_group" >/dev/null; then
     groupadd --system "$admin_group"
+  fi
+  if ! getent group "$shared_monas_group" >/dev/null; then
+    groupadd --system "$shared_monas_group"
   fi
 }
 
@@ -205,8 +209,8 @@ ensure_user
 ensure_web_admin_peer_membership
 ensure_container_runtime_access
 
-ensure_owned_dir /run/dasobjectstore 0750
-ensure_owned_dir /var/lib/dasobjectstore 0750
+install -d -o "$service_user" -g "$shared_monas_group" -m 0750 /run/dasobjectstore
+install -d -o "$service_user" -g "$shared_monas_group" -m 0750 /var/lib/dasobjectstore
 ensure_owned_dir /var/lib/dasobjectstore/object-service 0700
 ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750
 ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750
@@ -220,11 +224,14 @@ find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
 store_registry_state=/var/lib/dasobjectstore/stores.json
 store_registry_config=/etc/dasobjectstore/stores.json
 if [[ ! -e "$store_registry_state" && -f "$store_registry_config" ]]; then
-  install -o "$service_user" -g "$service_group" -m 0640 \
+  install -o "$service_user" -g "$shared_monas_group" -m 0640 \
     "$store_registry_config" "$store_registry_state"
 elif [[ -f "$store_registry_state" ]]; then
-  chown "$service_user:$service_group" "$store_registry_state"
+  chown "$service_user:$shared_monas_group" "$store_registry_state"
   chmod 0640 "$store_registry_state"
+fi
+if [[ -e /run/dasobjectstore/dasobjectstored.sock ]]; then
+  /usr/libexec/dasobjectstore/manage-monas-access-boundary publish-socket
 fi
 if [[ -f "$product_root/config.json" ]]; then
   chown root:"$service_group" "$product_root/config.json"
