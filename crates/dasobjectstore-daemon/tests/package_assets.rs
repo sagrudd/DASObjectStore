@@ -22,6 +22,9 @@ const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectsto
 const MONAS_CONFIG_MIGRATION: &str = include_str!(
     "../../../packaging/linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 );
+const MONAS_ACCESS_BOUNDARY: &str = include_str!(
+    "../../../packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
+);
 const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
@@ -91,6 +94,25 @@ fn packages_atomic_monas_integrated_config_migration() {
         assert_contains(build, "migrate-monas-integrated-config");
         assert_contains(build, "python3");
     }
+}
+
+#[test]
+fn packages_fail_closed_monas_access_boundary() {
+    for required in [
+        "mnemosyne-pistis-das",
+        "pre-start",
+        "publish-socket",
+        "retire-socket",
+        "state_dir/auth",
+        "srv/dasobjectstore",
+        "opt/dasobjectstore/tls",
+        "pistis-grants.json",
+        "ss -H -xl state listening",
+    ] {
+        assert_contains(MONAS_ACCESS_BOUNDARY, required);
+    }
+    assert_not_contains(MONAS_ACCESS_BOUNDARY, "users.json");
+    assert_not_contains(POSTINST, "auth/users.json");
 }
 
 #[test]
@@ -331,8 +353,11 @@ fn package_web_config_exposes_appliance_listener_by_default() {
 fn systemd_service_uses_packaged_identity_and_paths() {
     assert_contains(SERVICE, &format!("User={DEFAULT_DAEMON_SERVICE_USER}"));
     assert_contains(SERVICE, &format!("Group={DEFAULT_DAEMON_GROUP}"));
-    assert_contains(SERVICE, "RuntimeDirectory=dasobjectstore");
-    assert_contains(SERVICE, "StateDirectory=dasobjectstore");
+    assert_not_contains(SERVICE, "RuntimeDirectory=dasobjectstore");
+    assert_not_contains(SERVICE, "StateDirectory=dasobjectstore");
+    assert_contains(SERVICE, "manage-monas-access-boundary pre-start");
+    assert_contains(SERVICE, "manage-monas-access-boundary publish-socket");
+    assert_contains(SERVICE, "manage-monas-access-boundary retire-socket");
     assert_contains(SERVICE, "LogsDirectory=dasobjectstore");
     assert_contains(
         SERVICE,
@@ -396,6 +421,7 @@ fn sysusers_declares_packaged_service_identity() {
             .any(|line| line == format!("g {DEFAULT_DAEMON_GROUP} -")),
         "the daemon group declaration must use systemd-sysusers' three-field group syntax"
     );
+    assert_contains(SYSUSERS, "g mnemosyne-pistis-das -");
     assert!(
         SYSUSERS
             .lines()
@@ -408,11 +434,11 @@ fn sysusers_declares_packaged_service_identity() {
 fn tmpfiles_declares_daemon_runtime_and_state_directories() {
     assert_contains(
         TMPFILES,
-        &format!("d {LINUX_DAEMON_RUNTIME_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"),
+        &format!("d {LINUX_DAEMON_RUNTIME_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} mnemosyne-pistis-das -"),
     );
     assert_contains(
         TMPFILES,
-        &format!("d {LINUX_DAEMON_STATE_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"),
+        &format!("d {LINUX_DAEMON_STATE_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} mnemosyne-pistis-das -"),
     );
     assert_contains(
         TMPFILES,

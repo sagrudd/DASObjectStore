@@ -75,6 +75,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-
   "$build_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config" \
   "$build_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
+  "$build_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"

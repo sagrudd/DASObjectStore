@@ -12,6 +12,7 @@ storage_slice="$repo_root/packaging/linux/systemd/dasobjectstore-storage.slice"
 workspace_host_service="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.service"
 workspace_host_socket="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.socket"
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+monas_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
@@ -30,6 +31,7 @@ build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
 prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
 pinned_sources="$repo_root/packaging/pinned-mnemosyne-package-sources.sh"
+monas_access_test="$repo_root/packaging/tests/monas-access-boundary.sh"
 
 require_file() {
   local path="$1"
@@ -67,6 +69,7 @@ require_file "$storage_slice"
 require_file "$workspace_host_service"
 require_file "$workspace_host_socket"
 require_file "$source_access_helper"
+require_file "$monas_access_helper"
 require_file "$mount_policy_helper"
 require_file "$sysusers"
 require_file "$tmpfiles"
@@ -85,11 +88,15 @@ require_file "$build_remote_rpm"
 require_file "$prepare_web_dist"
 require_file "$package_auth_guard"
 require_file "$pinned_sources"
+require_file "$monas_access_test"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
-require_text "$service" "RuntimeDirectory=dasobjectstore"
-require_text "$service" "RuntimeDirectoryPreserve=yes"
+require_absent "$service" "RuntimeDirectory=dasobjectstore"
+require_absent "$service" "StateDirectory=dasobjectstore"
+require_text "$service" "manage-monas-access-boundary pre-start"
+require_text "$service" "manage-monas-access-boundary publish-socket"
+require_text "$service" "manage-monas-access-boundary retire-socket"
 require_text "$service" "Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.json"
 require_text "$service" "Slice=dasobjectstore-storage.slice"
 require_absent "$service" "CPUAccounting="
@@ -133,8 +140,11 @@ require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS'
 require_text "$sysusers" "u dasobjectstore"
 require_text "$sysusers" "g dasobjectstore"
 require_text "$sysusers" "g dasobjectstore-admin"
+require_text "$sysusers" "g mnemosyne-pistis-das"
 
 require_text "$tmpfiles" "z /srv/dasobjectstore 0750 dasobjectstore dasobjectstore -"
+require_text "$tmpfiles" "d /run/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
+require_text "$tmpfiles" "d /var/lib/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
 require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/object-service 0700 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/report-rebuild 0750 dasobjectstore dasobjectstore -"
@@ -154,6 +164,7 @@ require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/object-servic
 require_text "$postinst" 'ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750'
 require_text "$postinst" 'ensure_container_runtime_access'
 require_text "$postinst" 'admin_group="dasobjectstore-admin"'
+require_text "$postinst" 'shared_monas_group="mnemosyne-pistis-das"'
 require_text "$postinst" 'ensure_web_admin_peer_membership'
 require_text "$postinst" 'configure-external-mount-policy'
 require_text "$postinst" 'usermod -aG "$admin_group" "$service_user"'
@@ -219,6 +230,7 @@ require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/manage-monas-access-boundary'
 require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
@@ -226,6 +238,7 @@ require_text "$build_deb" 'DEBIAN/postrm'
 require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin'
 require_text "$build_deb" 'migrate-monas-integrated-config'
 require_text "$build_rpm" 'migrate-monas-integrated-config'
+require_text "$build_rpm" 'manage-monas-access-boundary'
 require_text "$build_deb" 'Provides: dasobjectstore-remote'
 require_text "$build_deb" 'Conflicts: dasobjectstore-remote'
 require_text "$build_deb" 'Replaces: dasobjectstore-remote'
