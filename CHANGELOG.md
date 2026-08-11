@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.166.0 - 2026-08-11
+
+- Add the package-owned fixed Monas replacement-receipt client. It sends only
+  a non-zero one-use challenge through the bounded Unix frame, accepts only the
+  exact fixed response and returns bytes exclusively to the full canonical
+  receipt verifier. There is no endpoint override or local-authority fallback.
+
 ## 0.165.0 - 2026-08-11
 
 - Add the package-owned DAS local-authority retirement boundary. It verifies
