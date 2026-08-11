@@ -2,6 +2,11 @@
 
 ## 0.162.0 - 2026-08-11
 
+- Consume Prosopikon 0.23.0 from exact merge revision
+  ``446c9a359eea1ffa2ca4f53b4dd2bdf950b610e2``. Embedded DASObjectStore now
+  shares Monas's governed first-installation-owner actor type and accepts its
+  explicit ``dasobjectstore/Administer`` entitlement without username,
+  operating-system, local-account, or global-administrator translation.
 - Add the canonical ``dasobjectstore-remote login HOST STORE --username USER
   --set-s3-config`` workflow. It creates a fresh browser-approved Pistis
   pairing, requires the approved actor and exact ObjectStore to match, commits

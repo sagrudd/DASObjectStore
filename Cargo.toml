@@ -49,8 +49,8 @@ flate2 = "1.1.5"
 getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
 js-sys = "0.3.83"
 plist = "1"
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "afe9fd3d52804f188cbf35c48fafa274a8903f0b" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "afe9fd3d52804f188cbf35c48fafa274a8903f0b" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "446c9a359eea1ffa2ca4f53b4dd2bdf950b610e2" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "446c9a359eea1ffa2ca4f53b4dd2bdf950b610e2" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
@@ -77,13 +77,3 @@ wasm-bindgen-futures = "0.4.76"
 web-sys = "0.3.82"
 x509-parser = "0.18.0"
 yew = { version = "0.23.0", features = ["csr"] }
-
-[patch."https://github.com/sagrudd/prosopikon.git"]
-prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }
-prosopikon-yew = { path = "../prosopikon/crates/prosopikon-yew" }
-
-[patch."https://github.com/sagrudd/pistis.git"]
-pistis-canonical = { path = "../pistis/crates/pistis-canonical" }
-pistis-cose = { path = "../pistis/crates/pistis-cose" }
-pistis-crypto = { path = "../pistis/crates/pistis-crypto" }
-pistis-protocol = { path = "../pistis/crates/pistis-protocol" }
