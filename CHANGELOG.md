@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.11 - 2026-08-11
+
+- Align both embedded identity dependencies with Prosopikon 0.22.0 at immutable
+  merge revision ``f4ba81e893136525e961eb4bdb995e70ef6085fa``. DASObjectStore
+  and Monas therefore consume the same exported Pistis actor types and typed
+  production runtime identity boundary without a local compatibility adapter.
+
 ## 0.161.10 - 2026-08-11
 
 - Align the embedded authority boundary with Prosopikon 0.21.0. DASObjectStore
