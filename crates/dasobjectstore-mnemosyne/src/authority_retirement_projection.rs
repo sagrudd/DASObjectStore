@@ -249,11 +249,21 @@ fn semver(value: &str) -> bool {
 }
 
 fn observe_monas_config(path: &Path) -> Result<bool, ()> {
+    let (_, service_gid) = account_ids("dasobjectstore").ok_or(())?;
+    observe_monas_config_for_identity(path, 0, service_gid)
+}
+
+fn observe_monas_config_for_identity(
+    path: &Path,
+    root_uid: u32,
+    service_gid: u32,
+) -> Result<bool, ()> {
     let metadata = fs::symlink_metadata(path).map_err(|_| ())?;
     if !metadata.is_file()
-        || metadata.uid() != 0
-        || metadata.gid() != 0
-        || metadata.permissions().mode() & 0o777 != 0o644
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != root_uid
+        || metadata.gid() != service_gid
+        || metadata.permissions().mode() & 0o777 != 0o640
     {
         return Err(());
     }
@@ -483,6 +493,8 @@ fn write_once_root(path: &Path, bytes: &[u8]) -> Result<(), ()> {
 mod tests {
     use super::*;
 
+    const DEBIAN_POSTINST: &str = include_str!("../../../packaging/debian/postinst");
+
     #[test]
     fn semver_and_hex_are_closed() {
         assert!(semver("1.2.3"));
@@ -504,6 +516,29 @@ mod tests {
             observe_registry(&path, metadata.uid(), metadata.gid(), 1_700_000_000).unwrap(),
             (1, 1)
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn package_and_finalizer_share_server_config_metadata_contract() {
+        assert!(
+            DEBIAN_POSTINST.contains("chown root:\"$service_group\" \"$product_root/config.json\"")
+        );
+        assert!(DEBIAN_POSTINST.contains("chmod 0640 \"$product_root/config.json\""));
+
+        let root = std::env::temp_dir().join(format!("das-monas-config-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("config.json");
+        fs::write(&path, br#"{"authentication":{"authority":"monas"}}"#).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        assert_eq!(
+            observe_monas_config_for_identity(&path, metadata.uid(), metadata.gid()),
+            Ok(true)
+        );
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(observe_monas_config_for_identity(&path, metadata.uid(), metadata.gid()).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 }
