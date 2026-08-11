@@ -502,7 +502,19 @@ fn package_owns_fixed_authority_retirement_consumer() {
     );
     assert_contains(
         AUTHORITY_RETIREMENT_SERVICE,
-        "Requires=monas-das-replacement-receipt.service",
+        "ExecStartPre=/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize",
+    );
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "Requires=monas-site-trust-genesis-bootstrap.service",
+    );
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "After=monas-site-trust-genesis-bootstrap.service",
+    );
+    assert_not_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "monas-das-replacement-receipt.service",
     );
     assert_contains(
         AUTHORITY_RETIREMENT_SERVICE,
@@ -518,6 +530,7 @@ fn package_owns_fixed_authority_retirement_consumer() {
     );
     for builder in [BUILD_DEB, BUILD_RPM] {
         assert_contains(builder, "dasobjectstore-authority-retirement");
+        assert_contains(builder, "dasobjectstore-authority-retirement-finalize");
         assert_contains(builder, "dasobjectstore-authority-retirement.service");
     }
 }

@@ -12,18 +12,25 @@ path = "src/lib.rs"
 name = "dasobjectstore-authority-retirement"
 path = "src/bin/dasobjectstore-authority-retirement.rs"
 
+[[bin]]
+name = "dasobjectstore-authority-retirement-finalize"
+path = "src/bin/dasobjectstore-authority-retirement-finalize.rs"
+
 [dependencies]
 axum.workspace = true
+chrono.workspace = true
 coset.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
 dasobjectstore-gui-api.workspace = true
 dasobjectstore-object-service.workspace = true
+libc.workspace = true
 prosopikon-core.workspace = true
 p256.workspace = true
 pistis-canonical.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_jcs.workspace = true
 sha2.workspace = true
 uuid.workspace = true
 

@@ -27,7 +27,7 @@ pub const MONAS_DAS_REPLACEMENT_RECEIPT_SOCKET_V1: &str =
 const REQUEST_MAGIC: &[u8; 5] = b"MDRQ\x01";
 const RESPONSE_MAGIC: &[u8; 5] = b"MDRR\x01";
 const MAX_RECEIPT: usize = 16 * 1024;
-const IO_TIMEOUT: Duration = Duration::from_secs(5);
+const IO_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Root-only signer discovery projected through the accepted Site Trust path.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,7 +67,7 @@ pub struct VerifiedDasReplacementReceiptV1 {
 }
 
 /// Complete closed legacy-surface observation supplied by package probes.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LegacyAuthoritySurfaceObservationV1 {
     pub standalone_service_disabled_inactive: bool,
@@ -97,28 +97,37 @@ pub struct DasLocalAuthorityRetirementPathsV1 {
     source: PathBuf,
     archive_directory: PathBuf,
     transaction_directory: PathBuf,
-    expected_uid: u32,
+    source_uid: u32,
+    source_gid: u32,
+    state_uid: u32,
 }
 
 impl DasLocalAuthorityRetirementPathsV1 {
     /// Exact package production paths.
     #[must_use]
-    pub fn production() -> Self {
-        Self {
+    pub fn production(source_uid: u32, source_gid: u32) -> Option<Self> {
+        if source_uid == 0 || source_gid == 0 {
+            return None;
+        }
+        Some(Self {
             source: PathBuf::from("/var/lib/dasobjectstore/auth/users.json"),
             archive_directory: PathBuf::from("/var/lib/dasobjectstore/auth-retired"),
             transaction_directory: PathBuf::from("/var/lib/dasobjectstore/authority-retirement"),
-            expected_uid: 0,
-        }
+            source_uid,
+            source_gid,
+            state_uid: 0,
+        })
     }
 
     #[cfg(test)]
-    fn fixture(root: &Path, uid: u32) -> Self {
+    fn fixture(root: &Path, uid: u32, gid: u32) -> Self {
         Self {
             source: root.join("auth/users.json"),
             archive_directory: root.join("auth-retired"),
             transaction_directory: root.join("authority-retirement"),
-            expected_uid: uid,
+            source_uid: uid,
+            source_gid: gid,
+            state_uid: uid,
         }
     }
 }
@@ -327,9 +336,9 @@ pub fn retire_local_authority_v1(
     if !observation.is_inactive() {
         return Err(DasLocalAuthorityRetirementErrorV1::LegacySurfaceActive);
     }
-    let source_meta = safe_file(&paths.source, paths.expected_uid, 0o600)?;
-    let archive_meta = safe_directory(&paths.archive_directory, paths.expected_uid, 0o700)?;
-    let transaction_meta = safe_directory(&paths.transaction_directory, paths.expected_uid, 0o700)?;
+    let source_meta = safe_file(&paths.source, paths.source_uid, paths.source_gid, 0o640)?;
+    let archive_meta = safe_directory(&paths.archive_directory, paths.state_uid, 0o700)?;
+    let transaction_meta = safe_directory(&paths.transaction_directory, paths.state_uid, 0o700)?;
     if source_meta.dev() != archive_meta.dev() || source_meta.dev() != transaction_meta.dev() {
         return Err(DasLocalAuthorityRetirementErrorV1::UnsafeState);
     }
@@ -401,11 +410,15 @@ pub fn retire_local_authority_v1(
 fn safe_file(
     path: &Path,
     uid: u32,
+    gid: u32,
     mode: u32,
 ) -> Result<fs::Metadata, DasLocalAuthorityRetirementErrorV1> {
     let metadata =
         fs::symlink_metadata(path).map_err(|_| DasLocalAuthorityRetirementErrorV1::UnsafeState)?;
-    if !metadata.is_file() || metadata.uid() != uid || metadata.permissions().mode() & 0o777 != mode
+    if !metadata.is_file()
+        || metadata.uid() != uid
+        || metadata.gid() != gid
+        || metadata.permissions().mode() & 0o777 != mode
     {
         return Err(DasLocalAuthorityRetirementErrorV1::UnsafeState);
     }
@@ -675,9 +688,10 @@ mod tests {
         }
         let source = auth.join("users.json");
         fs::write(&source, b"legacy-authority").unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
-        let uid = fs::metadata(&source).unwrap().uid();
-        let paths = DasLocalAuthorityRetirementPathsV1::fixture(&root, uid);
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).unwrap();
+        let metadata = fs::metadata(&source).unwrap();
+        let paths =
+            DasLocalAuthorityRetirementPathsV1::fixture(&root, metadata.uid(), metadata.gid());
         let verified = VerifiedDasReplacementReceiptV1 {
             receipt_sha256: [31; 32],
             challenge_digest: [32; 32],
@@ -702,6 +716,52 @@ mod tests {
             .join("authority-retirement")
             .join(format!("{}.complete.json", completion.transaction_id))
             .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn production_source_identity_is_explicit_and_wrong_metadata_denies() {
+        assert!(DasLocalAuthorityRetirementPathsV1::production(0, 100).is_none());
+        assert!(DasLocalAuthorityRetirementPathsV1::production(100, 0).is_none());
+
+        let root = std::env::temp_dir().join(format!("das-retirement-meta-{}", Uuid::new_v4()));
+        let auth = root.join("auth");
+        fs::create_dir_all(&auth).unwrap();
+        fs::create_dir(root.join("auth-retired")).unwrap();
+        fs::create_dir(root.join("authority-retirement")).unwrap();
+        for directory in [
+            &root,
+            &auth,
+            &root.join("auth-retired"),
+            &root.join("authority-retirement"),
+        ] {
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let source = auth.join("users.json");
+        fs::write(&source, b"legacy-authority").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+        let metadata = fs::metadata(&source).unwrap();
+        let paths =
+            DasLocalAuthorityRetirementPathsV1::fixture(&root, metadata.uid(), metadata.gid());
+        let verified = VerifiedDasReplacementReceiptV1 {
+            receipt_sha256: [31; 32],
+            challenge_digest: [33; 32],
+            authority_revision: 5,
+        };
+        let inactive = LegacyAuthoritySurfaceObservationV1 {
+            standalone_service_disabled_inactive: true,
+            legacy_listeners_absent: true,
+            monas_authority_selected_only: true,
+            legacy_routes_absent: true,
+            legacy_helpers_and_pam_absent: true,
+            live_sessions: 0,
+            live_registration_tokens: 0,
+        };
+        assert_eq!(
+            retire_local_authority_v1(&paths, &verified, inactive),
+            Err(DasLocalAuthorityRetirementErrorV1::UnsafeState)
+        );
+        assert_eq!(fs::read(source).unwrap(), b"legacy-authority");
         fs::remove_dir_all(root).unwrap();
     }
 }
