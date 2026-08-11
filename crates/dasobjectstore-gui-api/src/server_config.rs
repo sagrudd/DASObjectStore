@@ -67,6 +67,11 @@ impl StandaloneServerConfig {
         validate_absolute_path("product_root", &self.product_root)?;
         self.tls.validate()?;
         self.authentication.validate()?;
+        if self.s3_ingress.mode == StandaloneS3IngressMode::ExternalGateway
+            && self.authentication.authority == StandaloneAuthenticationAuthority::LocalUser
+        {
+            return Err(StandaloneServerConfigError::ExternalGatewayRequiresIntegratedAuthority);
+        }
         self.application_mtls.validate(self.https_port)?;
         self.s3_ingress
             .validate(self.https_port, &self.application_mtls)?;
@@ -84,6 +89,8 @@ pub enum StandaloneS3IngressMode {
     #[default]
     GarageLegacy,
     DirectGateway,
+    /// Publish the configured S3 descriptor; a dedicated service owns the listener.
+    ExternalGateway,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -109,7 +116,7 @@ pub struct StandaloneS3IngressConfig {
 }
 
 impl StandaloneS3IngressConfig {
-    pub fn enabled(&self) -> bool {
+    pub fn binds_listener(&self) -> bool {
         self.mode == StandaloneS3IngressMode::DirectGateway
     }
 
@@ -140,7 +147,7 @@ impl StandaloneS3IngressConfig {
         }
         if let Some(endpoint) = &self.public_endpoint_url {
             let endpoint_port = validate_s3_public_endpoint(endpoint)?;
-            if endpoint_port != self.port {
+            if self.binds_listener() && endpoint_port != self.port {
                 return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
             }
         }
@@ -155,8 +162,14 @@ impl StandaloneS3IngressConfig {
         {
             return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
         }
-        if !self.enabled() {
+        if self.mode == StandaloneS3IngressMode::GarageLegacy {
             if self.public_endpoint_url.is_some() {
+                return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
+            }
+            return Ok(());
+        }
+        if self.mode == StandaloneS3IngressMode::ExternalGateway {
+            if !descriptor_fields.iter().all(|present| *present) {
                 return Err(StandaloneServerConfigError::InvalidS3PublicDescriptor);
             }
             return Ok(());
@@ -384,6 +397,7 @@ pub enum StandaloneServerConfigError {
         value: usize,
     },
     InvalidS3PublicDescriptor,
+    ExternalGatewayRequiresIntegratedAuthority,
     AdvertisedS3EndpointProtocolMismatch {
         advertised: String,
         observed: String,
@@ -454,6 +468,9 @@ impl Display for StandaloneServerConfigError {
             ),
             Self::InvalidS3PublicDescriptor => formatter.write_str(
                 "S3 public descriptor requires an HTTP(S) endpoint with a host, a non-empty region, and addressing_style path or virtual",
+            ),
+            Self::ExternalGatewayRequiresIntegratedAuthority => formatter.write_str(
+                "external_gateway requires Monas or Synoptikon authority; local_user is forbidden",
             ),
             Self::AdvertisedS3EndpointProtocolMismatch {
                 advertised,
@@ -754,7 +771,7 @@ mod tests {
             config.s3_ingress.mode,
             super::StandaloneS3IngressMode::GarageLegacy
         );
-        assert!(!config.s3_ingress.enabled());
+        assert!(!config.s3_ingress.binds_listener());
         config.validate().expect("legacy config remains valid");
     }
 
@@ -799,6 +816,49 @@ mod tests {
         assert_ne!(
             config.s3_ingress.public_endpoint_url.as_deref(),
             Some("http://127.0.0.1:3900")
+        );
+    }
+
+    #[test]
+    fn external_gateway_publishes_descriptor_without_owning_listener() {
+        let mut config = StandaloneServerConfig::default();
+        config.authentication.authority = super::StandaloneAuthenticationAuthority::Monas;
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::ExternalGateway;
+        config.s3_ingress.public_endpoint_url =
+            Some("https://objects.lab.example:3900".to_string());
+        config.s3_ingress.region = Some("garage".to_string());
+        config.s3_ingress.addressing_style = Some("path".to_string());
+
+        config.validate().expect("external descriptor is valid");
+        assert!(!config.s3_ingress.binds_listener());
+    }
+
+    #[test]
+    fn external_gateway_requires_a_complete_descriptor() {
+        let mut config = StandaloneServerConfig::default();
+        config.authentication.authority = super::StandaloneAuthenticationAuthority::Monas;
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::ExternalGateway;
+        config.s3_ingress.public_endpoint_url =
+            Some("https://objects.lab.example:3900".to_string());
+
+        assert_eq!(
+            config.validate().expect_err("partial descriptor rejected"),
+            StandaloneServerConfigError::InvalidS3PublicDescriptor
+        );
+    }
+
+    #[test]
+    fn external_gateway_rejects_local_user_authority() {
+        let mut config = StandaloneServerConfig::default();
+        config.s3_ingress.mode = super::StandaloneS3IngressMode::ExternalGateway;
+        config.s3_ingress.public_endpoint_url =
+            Some("https://objects.lab.example:3900".to_string());
+        config.s3_ingress.region = Some("garage".to_string());
+        config.s3_ingress.addressing_style = Some("path".to_string());
+
+        assert_eq!(
+            config.validate().expect_err("local authority rejected"),
+            StandaloneServerConfigError::ExternalGatewayRequiresIntegratedAuthority
         );
     }
 

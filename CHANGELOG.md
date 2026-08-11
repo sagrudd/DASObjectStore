@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.163.0 - 2026-08-11
+
+- Add ``external_gateway`` S3 ingress mode for Monas-integrated deployments.
+  The Web/API server publishes the complete dedicated-gateway descriptor to
+  remote login without binding port 3900, preventing listener collisions while
+  retaining the dedicated gateway and fail-closed Pistis authority boundary.
+- Prove aggregate package lifecycle never auto-activates either the Web/API
+  server or dedicated S3 gateway unit.
+- Ship the Web/API package profile with Monas authority and reject legacy
+  ``local_user`` authority whenever ``external_gateway`` is selected.
+- Package an atomic migration command for preserved conffiles so operators can
+  adopt the Monas-authoritative external-gateway profile without replacing TLS
+  or unrelated runtime settings.
+
 ## 0.162.3 - 2026-08-11
 
 - Restore the verified sibling source patches required by the release package

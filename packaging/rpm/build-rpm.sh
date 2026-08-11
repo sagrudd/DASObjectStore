@@ -77,6 +77,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mo
   "$payload_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
   "$payload_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config" \
+  "$payload_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
@@ -140,6 +142,7 @@ Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       mergerfs
 Requires:       nfs-utils
+Requires:       python3
 Requires:       quota
 Requires:       systemd
 Requires:       udisks2
@@ -333,10 +336,10 @@ if command -v systemd-tmpfiles >/dev/null 2>&1; then
 fi
 if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
-  systemctl enable --now dasobjectstored.service dasobjectstore-server.service \
+  systemctl enable --now dasobjectstored.service \
     dasobjectstore-source-access.path dasobjectstore-workspace-host.socket || true
   systemctl start dasobjectstore-source-access.service || true
-  systemctl restart dasobjectstored.service dasobjectstore-server.service || true
+  systemctl restart dasobjectstored.service || true
   systemctl restart dasobjectstore-workspace-host.socket || true
 fi
 
@@ -389,6 +392,7 @@ fi
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
+/usr/libexec/dasobjectstore/migrate-monas-integrated-config
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/systemd/system/dasobjectstore-s3-gateway.service
