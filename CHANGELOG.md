@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.161.12 - 2026-08-11
+
+- Advance the shared embedded identity boundary to Prosopikon 0.22.1 at
+  immutable merge revision ``afe9fd3d52804f188cbf35c48fafa274a8903f0b``.
+  Monas and DASObjectStore retain identical exported actor types while durable
+  identical consumed-invitation history is canonicalized fail-closed.
+
 ## 0.161.11 - 2026-08-11
 
 - Align both embedded identity dependencies with Prosopikon 0.22.0 at immutable
