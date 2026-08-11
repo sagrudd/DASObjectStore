@@ -8,6 +8,7 @@ pub mod host_auth_router;
 pub mod host_boundary;
 pub mod host_mode;
 pub mod integrated_session;
+pub mod local_authority_retirement;
 pub mod monas_host_boundary;
 pub mod nas_nfs_endpoint;
 pub mod nas_nfs_runtime;

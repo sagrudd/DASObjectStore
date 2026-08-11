@@ -10,11 +10,14 @@ path = "src/lib.rs"
 
 [dependencies]
 axum.workspace = true
+coset.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
 dasobjectstore-gui-api.workspace = true
 dasobjectstore-object-service.workspace = true
 prosopikon-core.workspace = true
+p256.workspace = true
+pistis-canonical.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
