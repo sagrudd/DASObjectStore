@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+bash "$repo_root/packaging/validate-release-version.sh" "$repo_root"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
 package_name="dasobjectstore"
