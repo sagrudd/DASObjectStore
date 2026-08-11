@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.168.4 - 2026-08-11
+
+- Pin all Prosopikon integration surfaces to exact revision
+  `526afc1f58cac208f31a91856306b606a6aedb9d` so DASObjectStore and Monas share
+  the corrected 0.26.1 authority projection types without duplicate crate
+  identities.
+
 ## 0.168.3 - 2026-08-11
 
 - Align the signed local-authority retirement finalizer with the package-owned
