@@ -7,7 +7,8 @@ use std::{
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     os::unix::net::UnixStream,
     path::{Path, PathBuf},
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
 
 use coset::{iana, Algorithm, CborSerializable as _, CoseSign1};
@@ -28,6 +29,7 @@ const REQUEST_MAGIC: &[u8; 5] = b"MDRQ\x01";
 const RESPONSE_MAGIC: &[u8; 5] = b"MDRR\x01";
 const MAX_RECEIPT: usize = 16 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(300);
+const RETRY_DELAY: Duration = Duration::from_secs(1);
 
 /// Root-only signer discovery projected through the accepted Site Trust path.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,14 +164,46 @@ fn request_das_replacement_receipt_from_v1(
     socket: &Path,
     challenge: [u8; 32],
 ) -> Result<Vec<u8>, DasLocalAuthorityRetirementErrorV1> {
+    request_das_replacement_receipt_within_v1(socket, challenge, IO_TIMEOUT)
+}
+
+fn request_das_replacement_receipt_within_v1(
+    socket: &Path,
+    challenge: [u8; 32],
+    total_timeout: Duration,
+) -> Result<Vec<u8>, DasLocalAuthorityRetirementErrorV1> {
     if challenge == [0; 32] {
         return Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied);
     }
+    let deadline = Instant::now()
+        .checked_add(total_timeout)
+        .ok_or(DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(DasLocalAuthorityRetirementErrorV1::IoUnavailable);
+        }
+        if let Ok(receipt) = request_das_replacement_receipt_once_v1(socket, challenge, remaining) {
+            return Ok(receipt);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(DasLocalAuthorityRetirementErrorV1::IoUnavailable);
+        }
+        thread::sleep(RETRY_DELAY.min(remaining));
+    }
+}
+
+fn request_das_replacement_receipt_once_v1(
+    socket: &Path,
+    challenge: [u8; 32],
+    timeout: Duration,
+) -> Result<Vec<u8>, DasLocalAuthorityRetirementErrorV1> {
     let mut stream = UnixStream::connect(socket)
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
     stream
-        .set_read_timeout(Some(IO_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(IO_TIMEOUT)))
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
     stream
         .write_all(REQUEST_MAGIC)
@@ -665,6 +699,35 @@ mod tests {
         });
         assert_eq!(
             request_das_replacement_receipt_from_v1(&socket, [7; 32]).unwrap(),
+            b"receipt"
+        );
+        server.join().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn fixed_client_retries_the_exact_challenge_after_lost_response() {
+        let root = PathBuf::from("/tmp").join(format!("das-receipt-retry-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let socket = root.join("monas.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let server = thread::spawn(move || {
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 37];
+                stream.read_exact(&mut request).unwrap();
+                assert_eq!(&request[..5], REQUEST_MAGIC);
+                assert_eq!(&request[5..], &[7; 32]);
+                if attempt == 1 {
+                    stream.write_all(RESPONSE_MAGIC).unwrap();
+                    stream.write_all(&7_u32.to_be_bytes()).unwrap();
+                    stream.write_all(b"receipt").unwrap();
+                }
+            }
+        });
+        assert_eq!(
+            request_das_replacement_receipt_within_v1(&socket, [7; 32], Duration::from_secs(3),)
+                .unwrap(),
             b"receipt"
         );
         server.join().unwrap();

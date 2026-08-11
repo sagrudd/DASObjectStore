@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.168.2 - 2026-08-11
+
+- Retry the exact durably reserved DAS challenge within one absolute
+  300-second ceremony bound when the Monas connection or MDRR response is
+  lost, allowing Monas to replay an already issued receipt without another
+  Face ID ceremony. No retry changes or replaces the challenge.
+
 ## 0.168.1 - 2026-08-11
 
 - Synchronize the locked local Pistis protocol package version with the exact
