@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.164.0"
+version = "0.165.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -49,8 +49,11 @@ flate2 = "1.1.5"
 getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
 js-sys = "0.3.83"
 plist = "1"
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "60a77cf495bcf0018324ed56e39119702fb6e453" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "60a77cf495bcf0018324ed56e39119702fb6e453" }
+p256 = { version = "0.13.2", features = ["ecdsa"] }
+coset = "0.3.8"
+pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "3bb6e96948734fbc6e7d6cf20b7805ff88011af2" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "dba0716e787e1be6c10d982a0b4b572c57a21bd1" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "dba0716e787e1be6c10d982a0b4b572c57a21bd1" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
@@ -78,12 +81,7 @@ web-sys = "0.3.82"
 x509-parser = "0.18.0"
 yew = { version = "0.23.0", features = ["csr"] }
 
-[patch."https://github.com/sagrudd/prosopikon.git"]
-prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }
-prosopikon-yew = { path = "../prosopikon/crates/prosopikon-yew" }
-
 [patch."https://github.com/sagrudd/pistis.git"]
-pistis-canonical = { path = "../pistis/crates/pistis-canonical" }
 pistis-cose = { path = "../pistis/crates/pistis-cose" }
 pistis-crypto = { path = "../pistis/crates/pistis-crypto" }
 pistis-protocol = { path = "../pistis/crates/pistis-protocol" }

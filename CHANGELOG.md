@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.165.0 - 2026-08-11
+
+- Add the package-owned DAS local-authority retirement boundary. It verifies
+  the dedicated attached ES256 Monas receipt against a Site Trust-anchored
+  root-only signer record, requires the closed legacy service/listener/route/
+  helper/session inventory inactive, and preserves the exact registry through
+  durable intent, same-filesystem atomic archive rename/fsync and completion
+  manifest publication. Install/upgrade remains non-activating; rollback stays
+  a separate unavailable recovery contract.
+
 ## 0.164.0 - 2026-08-11
 
 - Package the producer half of the least-privilege Monas integration boundary.
