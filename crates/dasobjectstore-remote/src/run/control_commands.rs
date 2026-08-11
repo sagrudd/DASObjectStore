@@ -327,7 +327,7 @@ pub(super) fn control_client_for_operation(
 ) -> Result<RemoteControlClient, RemoteRunError> {
     let appliance_id = config.default_appliance_id.as_deref().ok_or_else(|| {
         RemoteRunError::UploadRouting(
-            "no canonical default appliance is configured; authenticate first".to_string(),
+            "no canonical default appliance is configured; log in first".to_string(),
         )
     })?;
     let stores = config
@@ -360,7 +360,7 @@ pub(super) fn control_client_for_operation(
 pub(super) fn operation_store(config: &RemoteConfig) -> Result<String, RemoteRunError> {
     let appliance_id = config.default_appliance_id.as_deref().ok_or_else(|| {
         RemoteRunError::UploadRouting(
-            "no canonical default appliance is configured; authenticate first".to_string(),
+            "no canonical default appliance is configured; log in first".to_string(),
         )
     })?;
     let stores = config

@@ -78,6 +78,8 @@ pub struct RemoteEasyconnectPairingOptions {
     pub host_or_ip: String,
     pub https_port: u16,
     pub requested_object_store: Option<String>,
+    /// Stable, non-secret request identity used to supersede an earlier pending mint.
+    pub client_request_id: Option<String>,
     pub callback_port: Option<u16>,
     pub timeout: Duration,
     pub open_browser: bool,
@@ -860,6 +862,7 @@ mod tests {
                 host_or_ip: "192.168.1.192".to_string(),
                 https_port: DEFAULT_APPLIANCE_HTTPS_PORT,
                 requested_object_store: None,
+                client_request_id: None,
                 callback_port: None,
                 timeout: Duration::from_secs(5),
                 open_browser: true,

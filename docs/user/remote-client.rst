@@ -320,13 +320,9 @@ the following operations:
 * explicit session revocation; and
 * renewal of an active session during long uploads.
 
-Standalone appliances advertise ``standalone_local_user`` as the active
-easyconnect authentication provider. The browser approval path uses the same
-local-user Web session as the rest of the standalone console: the user logs in
-with their appliance OS/PAM credentials, and protected easyconnect approval
-routes resolve the authenticated local subject from the browser session token.
-The API shape also reserves ``synoptikon`` and ``mneion`` providers for later
-integrated-host deployments. A Monas-hosted approval carries the immutable
+Monas appliances advertise ``pistis`` as the active easyconnect authentication
+provider. PAM, local passwords, browser-local identity, and operating-system
+identity are not accepted as human authority. A Monas-hosted approval carries the immutable
 Prosopikon subject and a separately verified appliance-local policy subject;
 neither GitHub display values nor email addresses are accepted as product
 authorization.
@@ -365,6 +361,22 @@ browser, or ``--json`` when another tool should consume the contract:
 
    dasobjectstore-remote easyconnect 192.168.1.192 --contract
    dasobjectstore-remote easyconnect 192.168.1.192 --json
+
+For normal use, create the passwordless session and verified AWS profile in one
+command:
+
+.. code-block:: console
+
+   dasobjectstore-remote login 192.168.1.192 OBJECTSTORE \
+     --username USER --set-s3-config
+
+Each invocation asks the appliance to mint a fresh, one-use pairing and shows
+the exact browser approval URL. The exchange must return the requested
+ObjectStore and exact Pistis actor. Temporary credentials are written only to
+owner-private configuration and the AWS profile; terminal output is redacted.
+The historical ``authenticate`` spelling remains parseable solely so retired
+local-password invocations fail with explicit remediation. It is deliberately
+not an alias around Pistis.
 
 Use ``--https-port`` only when a standalone appliance is intentionally deployed
 on a non-default Web port. Use ``--callback-port`` when firewall policy or a

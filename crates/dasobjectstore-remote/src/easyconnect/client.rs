@@ -77,7 +77,7 @@ where
             requested_session_lifetime_seconds: Some(
                 discovery.session_policy.default_lifetime_seconds,
             ),
-            client_request_id: None,
+            client_request_id: options.client_request_id.clone(),
         },
     )?;
     validate_server_url(
