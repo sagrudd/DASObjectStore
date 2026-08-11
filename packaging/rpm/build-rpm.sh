@@ -40,6 +40,7 @@ cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.to
 cargo build --release --no-default-features -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
+cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement --manifest-path "$repo_root/Cargo.toml"
 
 rpm_root="$repo_root/target/rpm/rpmbuild"
 staging_root="$repo_root/target/rpm/staging"
@@ -71,6 +72,8 @@ install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
 install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
+install -m 0755 "$repo_root/target/release/dasobjectstore-authority-retirement" \
+  "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
@@ -109,6 +112,8 @@ install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.service"
   "$payload_root/usr/lib/systemd/system/dasobjectstore-workspace-host.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-workspace-host.socket" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-workspace-host.socket"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-authority-retirement.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-authority-retirement.service"
 install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
@@ -401,6 +406,7 @@ fi
 /usr/bin/dasobjectstored
 /usr/bin/dasobjectstore-remote
 /usr/libexec/dasobjectstore/dasobjectstore-workspace-host
+/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
@@ -414,6 +420,7 @@ fi
 /usr/lib/systemd/system/dasobjectstore-storage.slice
 /usr/lib/systemd/system/dasobjectstore-workspace-host.service
 /usr/lib/systemd/system/dasobjectstore-workspace-host.socket
+/usr/lib/systemd/system/dasobjectstore-authority-retirement.service
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md

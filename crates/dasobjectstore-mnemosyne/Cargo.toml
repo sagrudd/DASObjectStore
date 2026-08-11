@@ -8,6 +8,10 @@ repository.workspace = true
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "dasobjectstore-authority-retirement"
+path = "src/bin/dasobjectstore-authority-retirement.rs"
+
 [dependencies]
 axum.workspace = true
 coset.workspace = true

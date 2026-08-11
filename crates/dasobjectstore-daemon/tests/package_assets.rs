@@ -7,6 +7,8 @@ use dasobjectstore_daemon::{
 const SERVICE: &str = include_str!("../../../packaging/linux/systemd/dasobjectstored.service");
 const WEB_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-server.service");
+const AUTHORITY_RETIREMENT_SERVICE: &str =
+    include_str!("../../../packaging/linux/systemd/dasobjectstore-authority-retirement.service");
 const S3_GATEWAY_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-s3-gateway.service");
 const CONTROL_SLICE: &str =
@@ -438,7 +440,9 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
     );
     assert_contains(
         TMPFILES,
-        &format!("d {LINUX_DAEMON_STATE_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} mnemosyne-pistis-das -"),
+        &format!(
+            "d {LINUX_DAEMON_STATE_DIR} 0750 {DEFAULT_DAEMON_SERVICE_USER} mnemosyne-pistis-das -"
+        ),
     );
     assert_contains(
         TMPFILES,
@@ -488,6 +492,34 @@ fn package_excludes_retired_local_human_authority() {
     assert_contains(BUILD_RPM, "Requires:       /usr/bin/docker");
     assert_contains(BUILD_RPM, "Requires:       docker-buildx-plugin");
     assert_contains(BUILD_RPM, "sudo dnf install cargo rust clang clang-devel");
+}
+
+#[test]
+fn package_owns_fixed_authority_retirement_consumer() {
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "ExecStart=/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement",
+    );
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "Requires=monas-das-replacement-receipt.service",
+    );
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "RestrictAddressFamilies=AF_UNIX",
+    );
+    assert_contains(
+        TMPFILES,
+        "d /var/lib/dasobjectstore/auth-retired 0700 root root -",
+    );
+    assert_contains(
+        TMPFILES,
+        "d /var/lib/dasobjectstore/authority-retirement 0700 root root -",
+    );
+    for builder in [BUILD_DEB, BUILD_RPM] {
+        assert_contains(builder, "dasobjectstore-authority-retirement");
+        assert_contains(builder, "dasobjectstore-authority-retirement.service");
+    }
 }
 
 #[test]

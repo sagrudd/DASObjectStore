@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.167.0 - 2026-08-11
+
+- Package the no-argument, fixed-peer DAS replacement-receipt consumer and its
+  manual one-shot systemd unit. The consumer durably reserves its challenge,
+  accepts only a root-owned fixed verifier/probe projection, verifies Monas's
+  canonical receipt, and invokes the atomic retirement boundary. The unit is
+  shipped inactive until the accepted Site Trust discovery profile provisions
+  the projection.
+- Keep the local-container Prosopikon pin and package validation synchronized
+  with the current immutable workspace dependency.
+
 ## 0.166.0 - 2026-08-11
 
 - Add the package-owned fixed Monas replacement-receipt client. It sends only
