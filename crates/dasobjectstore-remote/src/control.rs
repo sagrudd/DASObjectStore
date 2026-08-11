@@ -355,12 +355,33 @@ fn pinned_client(
 fn pinned_client_for_binding(
     binding: &crate::config::RemoteSessionBinding,
 ) -> Result<PinnedControlTransport, RemoteControlError> {
+    if binding.tls_trust == crate::config::RemoteTlsTrust::SystemPki {
+        let url = reqwest::Url::parse(&binding.control_base_url).map_err(|_| {
+            RemoteControlError::Configuration(
+                "authoritative control endpoint is malformed".to_string(),
+            )
+        })?;
+        if url.scheme() != "https" {
+            return Err(RemoteControlError::Configuration(
+                "system-PKI control requires an HTTPS appliance URL".to_string(),
+            ));
+        }
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(RemoteControlError::Transport)?;
+        return Ok(PinnedControlTransport {
+            client,
+            base_url: binding.control_base_url.clone(),
+        });
+    }
     let appliance = RemotePairedAppliance {
         appliance_id: binding.appliance_id.clone(),
         display_name: binding.appliance_id.clone(),
         appliance_base_url: binding.control_base_url.clone(),
         discovery_url: String::new(),
         auth_authority: crate::auth::RemoteAuthAuthority::LocalPassword,
+        tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
         paired_actor: None,
         default_object_store: Some(binding.store_id.clone()),
         session: None,

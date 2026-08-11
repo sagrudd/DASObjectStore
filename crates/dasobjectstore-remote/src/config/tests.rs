@@ -25,6 +25,7 @@ fn overrides_config_without_losing_unset_values() {
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
                 auth_authority: RemoteAuthAuthority::Pistis,
+                tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
                 paired_actor: Some("alice".to_string()),
                 default_object_store: Some("generated-data".to_string()),
                 session: None,
@@ -102,6 +103,7 @@ fn redacts_session_credentials_for_display() {
                     "https://192.168.1.192:8448/products/dasobjectstore/api/v1/remote/easyconnect/discovery"
                         .to_string(),
                 auth_authority: RemoteAuthAuthority::Pistis,
+                tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
                 paired_actor: Some("stephen".to_string()),
                 default_object_store: Some("zymo_fecal_2025.05".to_string()),
                 object_stores: vec![RemoteObjectStoreGrant {

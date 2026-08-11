@@ -12,6 +12,7 @@ use std::net::ToSocketAddrs;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteEasyconnectCompletedPairing {
     pub https_port: u16,
+    pub tls_trust: RemoteEasyconnectTlsTrust,
     pub contract: RemoteEasyconnectContract,
     pub discovery: RemoteEasyconnectDiscoveryResponse,
     pub pairing: RemoteEasyconnectCreatePairingResponse,
@@ -43,7 +44,7 @@ where
         callback_port: Some(callback_port),
     })?;
     let requested_object_store = options.requested_object_store.clone();
-    let transport = pinned_https_client(&contract.host_or_ip, options.https_port)?;
+    let transport = https_client(&contract.host_or_ip, options.https_port, options.tls_trust)?;
     let discovery_url = transport_url(
         &contract.appliance_base_url,
         &transport.base_url,
@@ -137,6 +138,7 @@ where
     )?;
     Ok(RemoteEasyconnectCompletedPairing {
         https_port: options.https_port,
+        tls_trust: options.tls_trust,
         contract,
         discovery,
         pairing,
@@ -339,6 +341,31 @@ struct PinnedHttpsClient {
     base_url: String,
 }
 
+fn https_client(
+    host: &str,
+    port: u16,
+    tls_trust: RemoteEasyconnectTlsTrust,
+) -> Result<PinnedHttpsClient, RemoteEasyconnectPairingError> {
+    match tls_trust {
+        RemoteEasyconnectTlsTrust::SystemPki => system_pki_https_client(host, port),
+        RemoteEasyconnectTlsTrust::EnrolledCertificate => pinned_https_client(host, port),
+    }
+}
+
+fn system_pki_https_client(
+    host: &str,
+    port: u16,
+) -> Result<PinnedHttpsClient, RemoteEasyconnectPairingError> {
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|error| RemoteEasyconnectPairingError::Transport(error.to_string()))?;
+    Ok(PinnedHttpsClient {
+        client,
+        base_url: format!("https://{host}:{port}"),
+    })
+}
+
 fn pinned_https_client(
     host: &str,
     port: u16,
@@ -440,4 +467,64 @@ pub(super) fn transport_url(
     rewritten.set_path(logical.path());
     rewritten.set_query(logical.query());
     Ok(rewritten.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{https_client, RemoteEasyconnectTlsTrust};
+    use rustls::pki_types::PrivatePkcs8KeyDer;
+    use std::sync::Arc;
+
+    #[test]
+    fn integrated_system_pki_transport_requires_no_enrollment_record() {
+        let transport = https_client("127.0.0.1", 8443, RemoteEasyconnectTlsTrust::SystemPki)
+            .expect("system-PKI client construction does not consult appliance trust");
+        assert_eq!(transport.base_url, "https://127.0.0.1:8443");
+    }
+
+    #[test]
+    fn legacy_transport_still_fails_closed_without_enrollment_record() {
+        let error = match https_client(
+            "legacy-system-pki-regression.invalid",
+            8448,
+            RemoteEasyconnectTlsTrust::EnrolledCertificate,
+        ) {
+            Ok(_) => panic!("legacy transport must retain explicit enrollment"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("no enrolled certificate exists"));
+    }
+
+    #[test]
+    fn integrated_system_pki_rejects_an_untrusted_self_signed_peer() {
+        let generated = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+            .expect("test certificate");
+        let key = PrivatePkcs8KeyDer::from(generated.signing_key.serialize_der());
+        let server = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("test TLS protocol versions")
+        .with_no_client_auth()
+        .with_single_cert(vec![generated.cert.der().clone()], key.into())
+        .expect("test TLS server config");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("test listener");
+        let port = listener.local_addr().expect("listener address").port();
+        let server_thread = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("client connection");
+            let mut connection =
+                rustls::ServerConnection::new(Arc::new(server)).expect("server connection");
+            let _ = connection.complete_io(&mut socket);
+        });
+
+        let transport = https_client("127.0.0.1", port, RemoteEasyconnectTlsTrust::SystemPki)
+            .expect("system-PKI client construction");
+        let error = transport
+            .client
+            .get(format!("{}/health", transport.base_url))
+            .send()
+            .expect_err("untrusted certificate must fail closed");
+        assert!(error.is_connect() || error.is_request());
+        server_thread.join().expect("server thread");
+    }
 }

@@ -37,7 +37,11 @@ Only a deliberately standalone legacy host may select
 uses port 8448 and does not weaken the integrated default.
 
 The ObjectStore and Pistis username are fixed before approval. EasyConnect
-requires an already enrolled appliance certificate pin. The lower-level
+through integrated Monas requires the current Site root in the operating-system
+trust store and performs ordinary certificate-chain and exact host validation;
+it neither requires nor records an appliance certificate pin. Explicit
+``legacy-standalone`` EasyConnect continues to require an enrolled certificate
+for that endpoint. The lower-level
 ``easyconnect`` command remains available for contract diagnostics; the old
 ``authenticate`` command is retained only to reject retired local-password
 invocations and is not an authority fallback.
@@ -47,6 +51,15 @@ in a browser, and waits for authenticated approval. Use ``--no-browser`` on a
 headless remote host; the command prints the browser URL and still waits for
 approval. Use ``--contract`` to inspect the easyconnect contract without
 starting a pairing.
+
+For an attended login from a headless GB10 host, keep the command running and
+open its printed URL in a separately trusted browser:
+
+.. code-block:: console
+
+   dasobjectstore-remote login 192.168.1.192 epic_collection \
+     --username stephen --authority-profile integrated-monas \
+     --no-browser --set-s3-config
 
 Browser Authentication
 ----------------------

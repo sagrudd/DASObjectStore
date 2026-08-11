@@ -176,6 +176,9 @@ impl LoginArgs {
     pub fn force(&self) -> bool {
         self.force
     }
+    pub fn uses_system_pki(&self) -> bool {
+        self.authority_profile == LoginAuthorityProfile::IntegratedMonas
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
@@ -1357,5 +1360,40 @@ mod tests {
         assert_eq!(args.store(), "dos-generated");
         assert_eq!(args.prefix(), Some("runs/001"));
         assert_eq!(args.content_type(), Some("application/gzip"));
+    }
+
+    #[test]
+    fn login_selects_system_pki_only_for_integrated_monas() {
+        let integrated = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "192.168.1.192",
+            "epic_collection",
+            "--username",
+            "stephen",
+        ])
+        .expect("integrated login parses");
+        let RemoteCommand::Login(integrated) = integrated.command() else {
+            panic!("expected login command");
+        };
+        assert!(integrated.uses_system_pki());
+        assert_eq!(integrated.https_port(), 8443);
+
+        let legacy = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "192.168.1.192",
+            "epic_collection",
+            "--username",
+            "stephen",
+            "--authority-profile",
+            "legacy-standalone",
+        ])
+        .expect("legacy login parses");
+        let RemoteCommand::Login(legacy) = legacy.command() else {
+            panic!("expected login command");
+        };
+        assert!(!legacy.uses_system_pki());
+        assert_eq!(legacy.https_port(), 8448);
     }
 }

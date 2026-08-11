@@ -141,6 +141,7 @@ impl RemoteSessionBinding {
             region: self.region.clone(),
             addressing_style: self.addressing_style.clone(),
             s3_profile: self.s3_profile.clone(),
+            tls_trust: self.tls_trust,
             trust_fingerprint_sha256: self.trust_fingerprint_sha256.clone(),
             trust_spki_sha256: self.trust_spki_sha256.clone(),
             session: self.session.redacted(),
@@ -159,9 +160,19 @@ pub struct RemoteSessionBinding {
     pub addressing_style: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_profile: Option<String>,
+    #[serde(default)]
+    pub tls_trust: RemoteTlsTrust,
     pub trust_fingerprint_sha256: String,
     pub trust_spki_sha256: String,
     pub session: RemoteUploadSession,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteTlsTrust {
+    #[default]
+    EnrolledCertificate,
+    SystemPki,
 }
 
 impl RemoteConfig {
@@ -290,6 +301,8 @@ pub struct RemotePairedAppliance {
     pub discovery_url: String,
     #[serde(default)]
     pub auth_authority: RemoteAuthAuthority,
+    #[serde(default)]
+    pub tls_trust: RemoteTlsTrust,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_actor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -308,6 +321,7 @@ impl RemotePairedAppliance {
             appliance_base_url: self.appliance_base_url.clone(),
             discovery_url: self.discovery_url.clone(),
             auth_authority: self.auth_authority,
+            tls_trust: self.tls_trust,
             paired_actor: self.paired_actor.clone(),
             default_object_store: self.default_object_store.clone(),
             session: self.session.as_ref().map(RemoteUploadSession::redacted),
@@ -439,6 +453,7 @@ pub struct RedactedRemoteSessionBinding {
     pub addressing_style: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_profile: Option<String>,
+    pub tls_trust: RemoteTlsTrust,
     pub trust_fingerprint_sha256: String,
     pub trust_spki_sha256: String,
     pub session: RedactedRemoteUploadSession,
@@ -451,6 +466,7 @@ pub struct RedactedRemotePairedAppliance {
     pub appliance_base_url: String,
     pub discovery_url: String,
     pub auth_authority: RemoteAuthAuthority,
+    pub tls_trust: RemoteTlsTrust,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_actor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.163.2 - 2026-08-11
+
+- Validate canonical integrated-Monas login through the operating-system trust
+  store and exact HTTPS IP or DNS identity. Integrated login no longer requires
+  or records the obsolete per-endpoint appliance certificate pin; explicit
+  ``legacy-standalone`` EasyConnect retains its enrolled-certificate boundary.
+
 ## 0.163.1 - 2026-08-11
 
 - Route canonical remote login through the integrated Monas authority boundary
