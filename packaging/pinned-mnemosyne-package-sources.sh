@@ -1,22 +1,17 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 
-# The workspace patches private Mnemosyne dependencies to sibling checkouts.
-# Release package builds must prove the checked-out revisions rather than
-# silently accepting whatever a developer happens to have locally.
+# Release packages consume immutable Git revisions. Prove that the manifest
+# and lockfile agree without substituting mutable sibling worktrees.
 das_package_configure_pinned_mnemosyne_sources() {
   local repo_root="$1"
-  local workspace_root prosopikon_root pistis_root prosopikon_revision
-  local pistis_revisions
+  local prosopikon_revision locked_prosopikon_revisions pistis_revisions
 
   if ! command -v git >/dev/null 2>&1; then
     printf 'DASObjectStore package build requires git to verify pinned Mnemosyne sources\n' >&2
     return 1
   fi
 
-  workspace_root="$(cd "$repo_root/.." && pwd)"
-  prosopikon_root="$workspace_root/prosopikon"
-  pistis_root="$workspace_root/pistis"
   prosopikon_revision="$(sed -n 's/^prosopikon-core = { git = "https:\/\/github.com\/sagrudd\/prosopikon.git", rev = "\([0-9a-f]\{40\}\)" }$/\1/p' "$repo_root/Cargo.toml")"
 
   if [[ ! "$prosopikon_revision" =~ ^[0-9a-f]{40}$ ]]; then
@@ -24,37 +19,21 @@ das_package_configure_pinned_mnemosyne_sources() {
     return 1
   fi
 
-  pistis_revisions="$(awk -F 'rev = "' '/^pistis-(canonical|cose|crypto|protocol) = \{ git = "https:\/\/github.com\/sagrudd\/pistis.git", rev = "/ { split($2, value, "\""); print value[1] }' "$prosopikon_root/Cargo.toml" 2>/dev/null | sort -u)"
-  if [[ "$(printf '%s\n' "$pistis_revisions" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" || ! "$pistis_revisions" =~ ^[0-9a-f]{40}$ ]]; then
-    printf 'DASObjectStore package build requires one exact Pistis revision in sibling Prosopikon\n' >&2
+  locked_prosopikon_revisions="$(sed -n 's#^source = "git+https://github.com/sagrudd/prosopikon.git?rev=\([0-9a-f]\{40\}\).*#\1#p' "$repo_root/Cargo.lock" | sort -u)"
+  if [[ "$locked_prosopikon_revisions" != "$prosopikon_revision" ]]; then
+    printf 'DASObjectStore package build requires Cargo.lock at Prosopikon %s, found %s\n' \
+      "$prosopikon_revision" "${locked_prosopikon_revisions:-unresolved}" >&2
     return 1
   fi
 
-  das_require_clean_pinned_checkout "$prosopikon_root" "$prosopikon_revision" "Prosopikon" || return 1
-  das_require_clean_pinned_checkout "$pistis_root" "$pistis_revisions" "Pistis" || return 1
+  pistis_revisions="$(sed -n 's#^source = "git+https://github.com/sagrudd/pistis.git?rev=\([0-9a-f]\{40\}\).*#\1#p' "$repo_root/Cargo.lock" | sort -u)"
+  if [[ "$(printf '%s\n' "$pistis_revisions" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" || ! "$pistis_revisions" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'DASObjectStore package build requires one exact Pistis revision in Cargo.lock\n' >&2
+    return 1
+  fi
+
   export DAS_PACKAGE_PROSOPIKON_REVISION="$prosopikon_revision"
   export DAS_PACKAGE_PISTIS_REVISION="$pistis_revisions"
-}
-
-das_require_clean_pinned_checkout() {
-  local checkout="$1" expected_revision="$2" label="$3" actual_revision
-
-  if [[ ! -f "$checkout/Cargo.toml" ]]; then
-    printf 'DASObjectStore package build requires sibling %s checkout: %s\n' "$label" "$checkout" >&2
-    return 1
-  fi
-  # Isolated container builders commonly mount source owned by the invoking
-  # host user. Scope Git's safe-directory exception to this verified path;
-  # do not weaken the builder's global Git configuration.
-  actual_revision="$(git -c safe.directory="$checkout" -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "$actual_revision" != "$expected_revision" ]]; then
-    printf 'DASObjectStore package build requires %s at %s, found %s\n' "$label" "$expected_revision" "${actual_revision:-unresolved}" >&2
-    return 1
-  fi
-  if [[ -n "$(git -c safe.directory="$checkout" -C "$checkout" status --porcelain 2>/dev/null)" ]]; then
-    printf 'DASObjectStore package build requires a clean %s checkout: %s\n' "$label" "$checkout" >&2
-    return 1
-  fi
 }
 
 das_package_write_pinned_dependency_provenance() {

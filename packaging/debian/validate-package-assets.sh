@@ -191,12 +191,12 @@ for builder in "$build_deb" "$build_rpm" "$build_remote_deb" "$build_remote_rpm"
   require_text "$builder" "pinned-mnemosyne-package-sources.sh"
   require_text "$builder" "das_package_configure_pinned_mnemosyne_sources"
 done
-require_text "$pinned_sources" 'git -c safe.directory="$checkout" -C "$checkout" status --porcelain'
 require_text "$pinned_sources" 'command -v git'
 require_text "$pinned_sources" 'das_package_write_pinned_dependency_provenance'
-require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/prosopikon.git"]'
-require_text "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
-require_text "$repo_root/Cargo.toml" 'pistis-canonical = { path = "../pistis/crates/pistis-canonical" }'
+require_text "$repo_root/Cargo.toml" 'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "'
+require_absent "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/prosopikon.git"]'
+require_absent "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
+require_text "$repo_root/Cargo.lock" 'source = "git+https://github.com/sagrudd/pistis.git?rev='
 require_text "$build_deb" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_rpm" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_deb" 'das_package_write_pinned_dependency_provenance'

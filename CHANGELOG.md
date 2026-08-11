@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.162.3 - 2026-08-11
+
+- Align Debian/RPM validation and dependency provenance with the immutable Git
+  dependency model adopted by Prosopikon 0.23.0. Package builds now prove the
+  exact Prosopikon and Pistis revisions in ``Cargo.toml`` and ``Cargo.lock``;
+  they no longer require or silently substitute mutable sibling worktrees.
+
 ## 0.162.2 - 2026-08-11
 
 - Make the release-version guard safe under ``set -o pipefail`` by parsing
