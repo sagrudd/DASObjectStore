@@ -8,8 +8,8 @@ use dasobjectstore_metadata::{
     acquire_disk_capacity_claims, backfill_destage_scheduler_jobs, claim_destage_for_scheduler,
     claim_next_scheduler_job, complete_scheduler_job, fail_destage, list_ssd_eviction_candidates,
     mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement, read_disk_capacity_claims,
-    read_outstanding_disk_capacity_excluding, read_ssd_placement,
-    renew_destage_and_scheduler_leases, retry_scheduler_job,
+    read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
+    read_ssd_placement, renew_destage_and_scheduler_leases, retry_scheduler_job,
     settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
     DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
     DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, SchedulerClaimRequest,
@@ -447,10 +447,16 @@ fn roots_for_held_claims(
             object_id: record.object_id.clone(),
         });
     }
+    let eligible_disk_ids = read_settlement_eligible_disk_ids(&config.live_sqlite_path)?;
     let discovered = discover_managed_hdd_roots(&config.hdd_root)?;
     claims
         .iter()
         .map(|claim| {
+            if !eligible_disk_ids.contains(&claim.disk_id) {
+                return Err(DurableDestageWorkerError::ReservedDiskIneligible {
+                    disk_id: claim.disk_id.as_str().to_string(),
+                });
+            }
             discovered
                 .iter()
                 .find(|root| root.disk_id == claim.disk_id)
@@ -474,12 +480,16 @@ pub(crate) fn select_managed_hdd_roots_with_capacity(
     required_bytes: u64,
     excluded_destage_owner: Option<&str>,
 ) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    let eligible_disk_ids = read_settlement_eligible_disk_ids(live_sqlite_path)?;
     let outstanding = read_outstanding_disk_capacity_excluding(
         live_sqlite_path,
         excluded_destage_owner.map(|owner| (DiskCapacityClaimKind::Destage, owner)),
     )?;
     select_hdd_roots_with_capacity(
-        discover_managed_hdd_roots(hdd_root)?,
+        discover_managed_hdd_roots(hdd_root)?
+            .into_iter()
+            .filter(|root| eligible_disk_ids.contains(&root.disk_id))
+            .collect(),
         required_copies,
         required_bytes,
         |root| {
@@ -756,6 +766,9 @@ pub enum DurableDestageWorkerError {
     ReservedDiskUnavailable {
         disk_id: String,
     },
+    ReservedDiskIneligible {
+        disk_id: String,
+    },
     SchedulerJobMissingObject(String),
     LeaseFenceLost {
         object_id: ObjectId,
@@ -827,6 +840,9 @@ impl Display for DurableDestageWorkerError {
             Self::ReservedDiskUnavailable { disk_id } => {
                 write!(formatter, "reserved HDD disk {disk_id} is unavailable")
             }
+            Self::ReservedDiskIneligible { disk_id } => {
+                write!(formatter, "reserved HDD disk {disk_id} is no longer placement-eligible")
+            }
             Self::SchedulerJobMissingObject(job_id) => {
                 write!(formatter, "destage scheduler job {job_id} has no object identity")
             }
@@ -880,13 +896,16 @@ mod tests {
     use super::{
         parse_queued_object_type, remove_managed_direct_s3_payload, remove_managed_ssd_job_root,
         retry_delay_seconds, safe_relative_path, select_hdd_roots_with_capacity,
+        select_managed_hdd_roots_with_capacity,
     };
     use dasobjectstore_core::ids::{DiskId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
-    use dasobjectstore_metadata::DiskCopyRoot;
+    use dasobjectstore_metadata::{DiskCopyRoot, LIVE_SCHEMA_SQL};
+    use rusqlite::Connection;
     use sha2::Digest;
     use std::collections::BTreeMap;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn retry_backoff_is_bounded() {
@@ -950,6 +969,50 @@ mod tests {
         })
         .expect("capacity-eligible root");
         assert_eq!(selected[0].disk_id.as_str(), "disk-c");
+    }
+
+    #[test]
+    fn durable_destage_accepts_watch_but_excludes_unregistered_managed_roots() {
+        let root = temporary_root("registry-health-selection");
+        let hdd_root = root.join("hdd");
+        for disk_id in ["disk-watch", "disk-healthy", "disk-unregistered"] {
+            let marker = hdd_root.join(disk_id).join(".dasobjectstore/device.env");
+            fs::create_dir_all(marker.parent().expect("marker parent")).expect("disk root");
+            fs::write(marker, format!("role=hdd:{disk_id}\n")).expect("disk marker");
+        }
+        let database = root.join("live.sqlite");
+        let connection = Connection::open(&database).expect("database");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools (pool_id,state,created_at_utc,updated_at_utc)
+                 VALUES ('pool-a','Clean','now','now')",
+                [],
+            )
+            .expect("pool");
+        for (disk_id, state) in [("disk-watch", "Watch"), ("disk-healthy", "Healthy")] {
+            connection
+                .execute(
+                    "INSERT INTO disks (
+                        disk_id,pool_id,role,state,created_at_utc,updated_at_utc
+                     ) VALUES (?1,'pool-a','hdd_capacity',?2,'now','now')",
+                    [disk_id, state],
+                )
+                .expect("disk registry entry");
+        }
+        drop(connection);
+
+        let selected = select_managed_hdd_roots_with_capacity(&database, &hdd_root, 2, 1, None)
+            .expect("placement-eligible destinations");
+        assert_eq!(selected.len(), 2);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|root| root.disk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["disk-healthy", "disk-watch"]
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
@@ -1071,5 +1134,16 @@ mod tests {
         assert!(remove_managed_direct_s3_payload(&root, &expected, &payload).is_err());
         assert!(payload.exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn temporary_root(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "dasobjectstore-destage-{name}-{}-{nanos}",
+            std::process::id()
+        ))
     }
 }

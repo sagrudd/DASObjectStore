@@ -29,15 +29,16 @@ use crate::api::{
     DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse,
     DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
     DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, DiskForceRetireRequest,
-    DiskLockdownRequest, DiskLockdownResponse, DiskRetireRequest, DiskRetireResponse,
-    ErgasterionCapabilityDiscoveryResponse, ErgasterionCapabilityExchangeRequest,
-    ErgasterionCapabilityExchangeResponse, ErgasterionCapabilityRenewalRequest,
-    ErgasterionObjectGroupStatusRequest, ErgasterionObjectGroupStatusResponse,
-    ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
-    GovernedBindingAuthorityAdmissionRequest, GovernedBindingAuthorityAdmissionResponse,
-    IngestControlRequest, IngestControlResponse, IngestJobStatusRequest, IngestJobStatusResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, JenkinsDossierEvidenceSettlementRequest,
+    DaemonServiceStatusRequest, DaemonServiceStatusResponse, DestageRetryRequest,
+    DestageRetryResponse, DiskForceRetireRequest, DiskLockdownRequest, DiskLockdownResponse,
+    DiskRetireRequest, DiskRetireResponse, ErgasterionCapabilityDiscoveryResponse,
+    ErgasterionCapabilityExchangeRequest, ErgasterionCapabilityExchangeResponse,
+    ErgasterionCapabilityRenewalRequest, ErgasterionObjectGroupStatusRequest,
+    ErgasterionObjectGroupStatusResponse, ErgasterionObjectSnapshotRequest,
+    ErgasterionObjectSnapshotResponse, GovernedBindingAuthorityAdmissionRequest,
+    GovernedBindingAuthorityAdmissionResponse, IngestControlRequest, IngestControlResponse,
+    IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
+    IngestQueueDrainResponse, JenkinsDossierEvidenceSettlementRequest,
     JenkinsDossierEvidenceSettlementResponse, LiveStatusRequest, LiveStatusResponse,
     ObjectBrowserRequest, ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
     ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ObjectPutRequest, ObjectPutResponse,
@@ -278,6 +279,16 @@ where
         match self.send(DaemonApiRequest::IngestQueueDrain(request))? {
             DaemonApiResponse::IngestQueueDrain(response) => Ok(response),
             response => Err(unexpected("ingest_queue_drain", response)),
+        }
+    }
+
+    pub fn destage_retry(
+        &self,
+        request: DestageRetryRequest,
+    ) -> Result<DestageRetryResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::DestageRetry(request))? {
+            DaemonApiResponse::DestageRetry(response) => Ok(response),
+            response => Err(unexpected("destage_retry", response)),
         }
     }
 
@@ -917,6 +928,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::StoreRepair(_) => "store_repair",
         DaemonApiResponse::ObjectPut(_) => "object_put",
         DaemonApiResponse::IngestQueueDrain(_) => "ingest_queue_drain",
+        DaemonApiResponse::DestageRetry(_) => "destage_retry",
         DaemonApiResponse::IngestControl(_) => "ingest_control",
         DaemonApiResponse::SubmitIngestFiles(_) => "submit_ingest_files",
         DaemonApiResponse::IngestJobStatus(_) => "ingest_job_status",

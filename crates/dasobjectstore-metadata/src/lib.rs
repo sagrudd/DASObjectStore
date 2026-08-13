@@ -83,6 +83,7 @@ pub use destage::{
 pub use destage_control::{
     pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
 };
+pub use destage_control::{retry_needs_review_destage_for_store, DestageRetryReport};
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
     DirectHddImportRequest,
@@ -92,9 +93,10 @@ pub use disk::{
 };
 pub use disk_capacity::{
     acquire_disk_capacity_claims, read_disk_capacity_claims, read_outstanding_disk_capacity,
-    read_outstanding_disk_capacity_excluding, release_disk_capacity_claims,
-    update_disk_capacity_claim_consumption, DiskCapacityClaim, DiskCapacityClaimAllocation,
-    DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
+    read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
+    release_disk_capacity_claims, update_disk_capacity_claim_consumption, DiskCapacityClaim,
+    DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+    DiskCapacityClaimRequest,
 };
 pub use drain::{
     read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,

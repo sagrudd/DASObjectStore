@@ -83,6 +83,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mo
   "$payload_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
   "$payload_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/verify-managed-storage-mounts" \
+  "$payload_root/usr/libexec/dasobjectstore/verify-managed-storage-mounts"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config" \
   "$payload_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
@@ -91,6 +93,8 @@ install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_nam
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
+install -m 0640 "$packaging_linux/etc/dasobjectstore/managed-storage.v1.json" \
+  "$payload_root/etc/dasobjectstore/managed-storage.v1.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/s3-gateway.json" \
   "$payload_root/etc/dasobjectstore/s3-gateway.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
@@ -99,6 +103,10 @@ install -m 0644 "$packaging_product/config.json" \
   "$payload_root/opt/dasobjectstore/config.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstored.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage-ready.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-storage-ready.service"
+install -m 0644 "$packaging_linux/systemd/dasobjectstore-garage.service" \
+  "$payload_root/usr/lib/systemd/system/dasobjectstore-garage.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-server.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstore-server.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-s3-gateway.service" \
@@ -399,6 +407,7 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
+%config(noreplace) /etc/dasobjectstore/managed-storage.v1.json
 %config(noreplace) /etc/dasobjectstore/s3-gateway.json
 %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /opt/dasobjectstore/config.json
@@ -414,7 +423,10 @@ fi
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
+/usr/libexec/dasobjectstore/verify-managed-storage-mounts
 /usr/libexec/dasobjectstore/migrate-monas-integrated-config
+/usr/lib/systemd/system/dasobjectstore-storage-ready.service
+/usr/lib/systemd/system/dasobjectstore-garage.service
 /usr/lib/systemd/system/dasobjectstored.service
 /usr/lib/systemd/system/dasobjectstore-server.service
 /usr/lib/systemd/system/dasobjectstore-s3-gateway.service

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Fail closed unless the configured DAS enclosure is mounted exactly."""
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    raise SystemExit(f"DASObjectStore managed storage is not ready: {message}")
+
+
+def command(*arguments: str) -> str:
+    try:
+        return subprocess.run(
+            arguments,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        fail(f"command {' '.join(arguments)} failed: {error}")
+
+
+def marker(path: Path) -> dict[str, str]:
+    result: dict[str, str] = {}
+    marker_path = path / ".dasobjectstore" / "device.env"
+    try:
+        for line in marker_path.read_text(encoding="utf-8").splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key not in result:
+                result[key] = value
+    except OSError as error:
+        fail(f"cannot read {marker_path}: {error}")
+    return result
+
+
+def verify(entry: dict[str, object], expected_role: str | None = None) -> None:
+    required = {"path", "uuid", "label", "device", "filesystem", "role"}
+    if set(entry) != required:
+        fail(f"{expected_role} entry must contain exactly {sorted(required)}")
+    values = {key: str(entry[key]).strip() for key in required}
+    if any(not value for value in values.values()):
+        fail(f"{expected_role} entry contains a blank value")
+    path = Path(values["path"])
+    role = values["role"]
+    if expected_role is not None and role != expected_role:
+        fail(f"{path} role {role!r} does not match {expected_role!r}")
+    if not path.is_absolute() or path == Path("/"):
+        fail(f"{expected_role} path is not a managed absolute path: {path}")
+    target = command(
+        "findmnt", "--mountpoint", str(path), "--first-only", "--noheadings", "--output", "TARGET"
+    )
+    if target != str(path):
+        fail(f"{path} is not an exact mountpoint")
+    findmnt = ("findmnt", "--mountpoint", str(path), "--first-only", "--noheadings", "--output")
+    source = command(*findmnt, "SOURCE")
+    filesystem = command(*findmnt, "FSTYPE")
+    options = command(*findmnt, "OPTIONS").split(",")
+    actual_uuid = command("blkid", "--output", "value", "--match-tag", "UUID", source)
+    actual_label = command("blkid", "--output", "value", "--match-tag", "LABEL", source)
+    if actual_uuid != values["uuid"]:
+        fail(f"{path} UUID {actual_uuid!r} does not match {values['uuid']!r}")
+    if actual_label != values["label"]:
+        fail(f"{path} label {actual_label!r} does not match {values['label']!r}")
+    if filesystem != values["filesystem"]:
+        fail(f"{path} filesystem {filesystem!r} does not match {values['filesystem']!r}")
+    if "rw" not in options:
+        fail(f"{path} is not mounted read-write")
+    actual_marker = marker(path)
+    expected_marker = {
+        "role": role,
+        "device": values["device"],
+        "filesystem": values["filesystem"],
+    }
+    if actual_marker != expected_marker:
+        fail(f"{path} marker {actual_marker!r} does not match {expected_marker!r}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--manifest",
+        default="/etc/dasobjectstore/managed-storage.v1.json",
+    )
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="continue checking and exit as soon as a managed mount is lost",
+    )
+    parser.add_argument("--interval-seconds", type=float, default=2.0)
+    arguments = parser.parse_args()
+    if arguments.interval_seconds <= 0:
+        fail("watch interval must be greater than zero")
+    try:
+        manifest = json.loads(Path(arguments.manifest).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"cannot read manifest: {error}")
+    if set(manifest) != {"schema_version", "ssd", "hdds"} or manifest["schema_version"] != 1:
+        fail("manifest is not the exact schema version 1 object")
+    if not isinstance(manifest["ssd"], dict):
+        fail("SSD identity has not been configured")
+    if not isinstance(manifest["hdds"], list) or not manifest["hdds"]:
+        fail("at least one HDD identity must be configured")
+    while True:
+        verify(manifest["ssd"], "ssd")
+        seen_paths: set[str] = set()
+        seen_uuids: set[str] = set()
+        for entry in manifest["hdds"]:
+            if not isinstance(entry, dict):
+                fail("HDD entry is not an object")
+            path = str(entry.get("path", ""))
+            uuid = str(entry.get("uuid", ""))
+            if path in seen_paths or uuid in seen_uuids:
+                fail("HDD paths and UUIDs must be unique")
+            seen_paths.add(path)
+            seen_uuids.add(uuid)
+            role = str(entry.get("role", ""))
+            if not role.startswith("hdd:"):
+                fail(f"{path} does not declare an HDD role")
+            verify(entry)
+        live_metadata = (
+            Path(str(manifest["ssd"]["path"])) / ".dasobjectstore" / "live.sqlite"
+        )
+        if not live_metadata.is_file() or live_metadata.stat().st_size == 0:
+            fail(f"authoritative metadata is absent at {live_metadata}")
+        if not arguments.watch:
+            print("DASObjectStore managed storage is ready")
+            return
+        time.sleep(arguments.interval_seconds)
+
+
+if __name__ == "__main__":
+    main()

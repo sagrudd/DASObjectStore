@@ -1,7 +1,8 @@
 [Unit]
 Description=DASObjectStore managed storage daemon
 Documentation=https://github.com/sagrudd/DASObjectStore
-After=local-fs.target
+BindsTo=dasobjectstore-storage-ready.service
+After=local-fs.target dasobjectstore-storage-ready.service
 
 [Service]
 Type=simple
@@ -16,6 +17,7 @@ LogsDirectoryMode=0750
 ConfigurationDirectory=dasobjectstore
 ConfigurationDirectoryMode=0750
 Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.json
+Environment=DASOBJECTSTORE_MANAGED_STORAGE_MANIFEST=/etc/dasobjectstore/managed-storage.v1.json
 ExecStartPre=+/usr/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf
 ExecStartPre=+/usr/libexec/dasobjectstore/manage-monas-access-boundary pre-start
 ExecStart=/usr/bin/dasobjectstored --config /etc/dasobjectstore/daemon.json

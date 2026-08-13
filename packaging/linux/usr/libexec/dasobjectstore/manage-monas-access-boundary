@@ -25,6 +25,17 @@ private() {
   mode=$(stat -c %a "$1"); [[ "$mode" =~ ^[0-7]+$ && "${mode: -1}" == 0 ]] || deny
 }
 live() { ss -H -xl state listening | awk -v expected="$socket" '{for(i=1;i<=NF;i++)if($i==expected)found=1} END{exit(found?0:1)}'; }
+await_live_socket() {
+  if [[ -n "$root" ]]; then
+    [[ -S "$socket" ]] && live
+    return
+  fi
+  for _ in {1..100}; do
+    [[ -S "$socket" ]] && live && return 0
+    sleep 0.1
+  done
+  return 1
+}
 
 getent group "$shared_group" >/dev/null || deny
 [[ -d "$state_dir" && ! -L "$state_dir" ]] || deny
@@ -43,6 +54,7 @@ case "$action" in
     [[ ! -e "$socket" && ! -L "$socket" ]] || deny
     ;;
   publish-socket)
+    await_live_socket || deny
     [[ -S "$socket" && ! -L "$socket" ]] || deny
     [[ "$(stat -c %U "$socket")" == "$service_user" && "$(stat -c %a "$socket")" == 660 ]] || deny
     case "$(stat -c %G "$socket")" in "$service_group"|"$shared_group") ;; *) deny ;; esac

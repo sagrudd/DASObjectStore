@@ -1,6 +1,8 @@
 [Unit]
 Description=DASObjectStore managed workspace host broker socket
 Documentation=https://github.com/sagrudd/DASObjectStore
+BindsTo=dasobjectstore-storage-ready.service
+After=dasobjectstore-storage-ready.service
 
 [Socket]
 ListenStream=/run/dasobjectstore/workspace-host.sock

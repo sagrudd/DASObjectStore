@@ -1,14 +1,15 @@
 #[cfg(feature = "debug-commands")]
 use crate::cli::PoolMarkerArgs;
 use crate::cli::{
-    Cli, Command, DiskCommand, DiskDrainArgs, DiskForceRetireArgs, DiskLockdownDasArgs,
-    DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs, DiskRetireArgs, EndpointCommand,
-    EndpointTestArgs, HealthArgs, IngestCommand, IngestControlArgs, IngestDirectImportArgs,
-    IngestDrainQueueArgs, IngestFilesArgs, IngestQueueArgs, IngestStatusArgs, MnemosyneCommand,
-    MnemosyneExportArgs, MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs,
-    ObjectInspectArgs, ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection,
-    PerformanceReportArgs, PerformanceScenarioSelection, PerformanceTestArgs, PistisGrantCommand,
-    PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
+    Cli, Command, DestageRetryArgs, DiskCommand, DiskDrainArgs, DiskForceRetireArgs,
+    DiskLockdownDasArgs, DiskPrepareDasArgs, DiskPrepareFilesystem, DiskReplaceArgs,
+    DiskRetireArgs, EndpointCommand, EndpointTestArgs, HealthArgs, IngestCommand,
+    IngestControlArgs, IngestDirectImportArgs, IngestDrainQueueArgs, IngestFilesArgs,
+    IngestQueueArgs, IngestStatusArgs, MnemosyneCommand, MnemosyneExportArgs,
+    MnemosyneValidateNasNfsEndpointArgs, ObjectCommand, ObjectExportArgs, ObjectInspectArgs,
+    ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
+    PerformanceScenarioSelection, PerformanceTestArgs, PistisGrantCommand, PoolCommand,
+    PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
     ServiceRenderComposeArgs, StoreAcknowledgementPolicyArgs, StoreAdoptArgs,
     StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
     StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
@@ -179,7 +180,8 @@ use dasobjectstore_daemon::{
     authoritative_performance_recommendation_path, CapacityStatusRequest, CreateObjectStoreRequest,
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
     DaemonIngestControlAction, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
-    DaemonRuntimeConfig, IngestControlRequest as DaemonIngestControlRequest,
+    DaemonRuntimeConfig, DestageRetryRequest as DaemonDestageRetryRequest,
+    IngestControlRequest as DaemonIngestControlRequest,
     IngestQueueDrainRequest as DaemonIngestQueueDrainRequest,
     ObjectPutRequest as DaemonObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
@@ -343,6 +345,7 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
                 ingest_queue::run_ingest_drain_queue(args, writer)
             }
             Some(IngestCommand::Control(args)) => run_ingest_control(args, writer),
+            Some(IngestCommand::RetryDestage(args)) => run_destage_retry(args, writer),
             Some(IngestCommand::DirectImport(args)) => run_ingest_direct_import(args, writer),
             None => Cli::write_subcommand_help("ingest", writer).map_err(CliError::Io),
         },
@@ -667,6 +670,33 @@ fn run_ingest_control(args: &IngestControlArgs, writer: &mut impl Write) -> Resu
         writeln!(writer, "Ingest control: {:?}", response.state)?;
         writeln!(writer, "Changed: {}", response.changed)?;
         writeln!(writer, "Reason: {}", response.reason)?;
+    }
+    Ok(())
+}
+
+fn run_destage_retry(args: &DestageRetryArgs, writer: &mut impl Write) -> Result<(), CliError> {
+    let config = DaemonRuntimeConfig::default_packaged();
+    let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
+    let response = client.destage_retry(DaemonDestageRetryRequest {
+        store_id: args.store_id().as_str().to_string(),
+        from_state: args.from_state().to_string(),
+        dry_run: args.dry_run(),
+        allow_destage_retry: args.allow_destage_retry(),
+        confirmation_marker: args.confirm().to_string(),
+        verified_subject: args.verified_subject().map(str::to_string),
+    })?;
+    if args.json() {
+        serde_json::to_writer_pretty(&mut *writer, &response)?;
+        writer.write_all(b"\n")?;
+    } else {
+        writeln!(writer, "Store: {}", response.report.store_id)?;
+        writeln!(
+            writer,
+            "Matched needs_review: {}",
+            response.report.matched_object_ids.len()
+        )?;
+        writeln!(writer, "Retried: {}", response.report.retried_object_count)?;
+        writeln!(writer, "Dry run: {}", response.report.dry_run)?;
     }
     Ok(())
 }

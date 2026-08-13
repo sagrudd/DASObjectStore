@@ -119,6 +119,14 @@ where
                 ))),
             }
         }
+        DaemonApiRequest::DestageRetry(request) => {
+            match handler.destage_retry_for_actor(request, actor) {
+                Ok(response) => Ok(DaemonApiResponse::DestageRetry(response)),
+                Err((code, message)) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    code, message,
+                ))),
+            }
+        }
         DaemonApiRequest::StoreDrain(request) => {
             match handler.store_drain_for_actor(request, actor) {
                 Ok(response) => Ok(DaemonApiResponse::StoreDrain(response)),

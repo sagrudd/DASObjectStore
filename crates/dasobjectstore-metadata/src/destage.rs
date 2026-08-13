@@ -15,6 +15,7 @@ use std::time::Duration;
 #[cfg(test)]
 use crate::destage_control::{
     pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
+    retry_needs_review_destage_for_store,
 };
 
 const PUBLICATION_BUSY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1329,6 +1330,102 @@ mod tests {
         assert_eq!(
             states,
             ("queued_for_hdd".to_string(), 0, "queued".to_string(), 0)
+        );
+        cleanup(path);
+    }
+
+    #[test]
+    fn store_retry_is_dry_runnable_scoped_and_atomic_with_scheduler_state() {
+        let path = database("store-retry-needs-review");
+        prepare(&path, &["store-a", "store-b"]);
+        for (store, object, job) in [
+            ("store-a", "object-a", "job-a"),
+            ("store-a", "object-b", "job-b"),
+            ("store-b", "object-c", "job-c"),
+        ] {
+            commit(&path, store, object, job, 5).expect("commit");
+        }
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute(
+                "UPDATE destage_queue SET state='needs_review',attempt_count=max_attempts",
+                [],
+            )
+            .expect("exhaust destage jobs");
+        connection
+            .execute(
+                "UPDATE scheduler_jobs SET state='needs_review',attempt_count=max_attempts",
+                [],
+            )
+            .expect("exhaust scheduler jobs");
+        drop(connection);
+
+        let store = StoreId::new("store-a").expect("store");
+        let dry_run =
+            retry_needs_review_destage_for_store(&path, &store, "2026-01-01T00:03:00Z", true)
+                .expect("dry run");
+        assert_eq!(dry_run.matched_object_ids.len(), 2);
+        assert_eq!(dry_run.retried_object_count, 0);
+        let connection = Connection::open(&path).expect("open");
+        let still_terminal: u32 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM destage_queue WHERE state='needs_review'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("terminal count");
+        assert_eq!(still_terminal, 3);
+        drop(connection);
+
+        let applied =
+            retry_needs_review_destage_for_store(&path, &store, "2026-01-01T00:04:00Z", false)
+                .expect("apply retry");
+        assert_eq!(applied.retried_object_count, 2);
+        let connection = Connection::open(&path).expect("open");
+        let states = connection
+            .prepare(
+                "SELECT d.object_id,d.state,d.attempt_count,s.state,s.attempt_count
+                 FROM destage_queue d JOIN scheduler_jobs s ON s.object_id=d.object_id
+                 ORDER BY d.object_id",
+            )
+            .expect("prepare")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
+                ))
+            })
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("states");
+        assert_eq!(
+            states,
+            vec![
+                (
+                    "object-a".into(),
+                    "queued_for_hdd".into(),
+                    0,
+                    "queued".into(),
+                    0
+                ),
+                (
+                    "object-b".into(),
+                    "queued_for_hdd".into(),
+                    0,
+                    "queued".into(),
+                    0
+                ),
+                (
+                    "object-c".into(),
+                    "needs_review".into(),
+                    3,
+                    "needs_review".into(),
+                    8
+                ),
+            ]
         );
         cleanup(path);
     }

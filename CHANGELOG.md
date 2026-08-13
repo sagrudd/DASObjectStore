@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.168.8 - 2026-08-13
+
+- Fail closed before opening the authoritative SQLite catalogue unless the
+  configured SSD and every HDD are exact read-write mounts with the expected
+  filesystem UUID, label, filesystem, and DAS role marker.
+- Make the daemon, Web/API, S3 gateway, workspace broker, and retained Garage
+  provider depend on one package-owned storage-readiness boundary.
+- Remove Docker's autonomous Garage restart policy so an absent SSD cannot
+  create a second node identity or metadata database on the system volume.
+- Document and regress the resource-bound boot contract while retaining
+  mergerfs only for isolated daemon-managed compute workspaces.
+- Add a daemon-owned, store-scoped recovery action that dry-runs or atomically
+  retries only terminal ``needs_review`` HDD-destage and scheduler rows.
+- Accept the duplicate mount-table projection created by systemd service
+  namespaces while still verifying the exact underlying device identity.
+- Bound socket publication to the daemon's actual listening socket instead of
+  racing service startup and terminating a healthy daemon prematurely.
+
 ## 0.168.4 - 2026-08-11
 
 - Pin all Prosopikon integration surfaces to exact revision

@@ -187,6 +187,77 @@ distributions do not all publish that package. Install official AWS CLI v2 on
 such hosts before enabling S3 provider workflows; the daemon fails provider
 commands explicitly when it is absent.
 
+Resource-bound storage startup
+------------------------------
+
+Packaged storage writers do not start merely because
+``/srv/dasobjectstore/ssd`` and the HDD directories exist. An ordinary
+directory at one of those paths can reside on the system filesystem after a
+disk fails to mount; treating it as storage would create a second, divergent
+data plane.
+
+The root-owned ``/etc/dasobjectstore/managed-storage.v1.json`` manifest records
+the exact managed SSD and HDD resources. Before either ``dasobjectstored`` or
+the packaged Garage object service may start,
+``dasobjectstore-storage-ready.service`` verifies all of the following:
+
+* every declared path is a distinct, read-write mount rather than a directory
+  on ``/``;
+* the observed filesystem identity matches the manifest;
+* each on-media ``.dasobjectstore/device.env`` marker has the expected role and
+  disk identity; and
+* the authoritative SSD metadata is present and readable.
+
+The check is fail-closed. A missing, unmounted, read-only, duplicated, or
+identity-drifted resource keeps every storage writer stopped. It does not make
+a fallback directory, select another disk, or reconstruct authority from an
+HDD or stale host path. Restore the expected resource, inspect its identity and
+marker, and then start the storage target again. Do not bypass the gate with a
+manual Garage container or by copying metadata between roots.
+
+The readiness service continues checking the declared resources after startup.
+All packaged writers are bound to that service, so losing a mount or changing
+an on-media identity stops the daemon, Web/API, S3 gateway, workspace broker,
+and retained Garage provider together. They remain stopped until the complete
+manifest verifies again.
+
+Garage container restart is deliberately disabled in generated Compose
+configuration. Systemd owns its lifecycle and starts it only after the same
+storage gate succeeds. This prevents the container runtime from restarting a
+writer while the managed disks are absent.
+
+The SSD is the ingress and authoritative live-metadata resource; it is not a
+permanent substitute for required HDD durability. A completed upload may be
+acknowledged at the configured SSD-ingress checkpoint, but operators must use
+the normal placement/group-status interfaces to confirm required HDD copies
+are verified and settled. Only after settlement may normal retention policy
+release the SSD staging copy.
+
+Retrying terminal HDD settlement
+--------------------------------
+
+Exhausted HDD settlement stays in ``needs_review`` until an authenticated
+operator explicitly requeues it. Inspect the exact store-scoped set without
+mutation first::
+
+   dasobjectstore ingest retry-destage epic_collection \
+     --from-state needs_review --dry-run --json
+
+The apply request is deliberately restricted to ``needs_review`` and requires
+both the policy switch and exact confirmation marker::
+
+   dasobjectstore ingest retry-destage epic_collection \
+     --from-state needs_review \
+     --allow-destage-retry \
+     --confirm "confirm retry needs-review destage" \
+     --json
+
+The fixed host service must attach the Pistis-verified administrator subject
+for apply. Direct root, sudo, or local group membership is not accepted as
+human authority. The daemon selects only rows belonging to the named store and
+resets each destage row and its scheduler row in one SQLite transaction; it
+does not rewrite placements or remove the protected SSD payload.
+
 Completed reconciliation recovery
 ---------------------------------
 

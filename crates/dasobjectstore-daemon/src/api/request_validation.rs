@@ -470,6 +470,27 @@ pub(super) fn ingest_queue_drain_validation_error(
     }
 }
 
+pub(super) fn destage_retry_validation_error(
+    err: DestageRetryValidationError,
+) -> DaemonRequestValidationError {
+    match err {
+        DestageRetryValidationError::BlankStoreId => {
+            DaemonRequestValidationError::BlankField { field: "store_id" }
+        }
+        DestageRetryValidationError::UnsafeFromState => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "from_state",
+                value: "only needs_review is retryable".to_string(),
+            }
+        }
+        DestageRetryValidationError::ConfirmationMismatch => {
+            DaemonRequestValidationError::ConfirmationMismatch {
+                expected: DESTAGE_RETRY_CONFIRMATION,
+            }
+        }
+    }
+}
+
 pub(super) fn ingest_control_validation_error(
     err: IngestControlValidationError,
 ) -> DaemonRequestValidationError {
