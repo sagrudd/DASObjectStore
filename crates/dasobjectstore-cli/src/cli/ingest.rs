@@ -28,6 +28,8 @@ pub(crate) enum IngestCommand {
     DrainQueue(IngestDrainQueueArgs),
     /// Pause, throttle, or resume new daemon-owned source reads.
     Control(IngestControlArgs),
+    /// Requeue terminal HDD settlement jobs for one store.
+    RetryDestage(DestageRetryArgs),
     /// Request a policy-gated direct-to-HDD import from the DAS server.
     DirectImport(IngestDirectImportArgs),
 }
@@ -231,6 +233,49 @@ pub(crate) struct IngestControlArgs {
     /// Render a compact operator snapshot suitable for captured TUI evidence.
     #[arg(long, conflicts_with = "json")]
     tui: bool,
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct DestageRetryArgs {
+    store_id: StoreId,
+    /// Required optimistic state guard; only needs_review is accepted.
+    #[arg(long, value_parser = ["needs_review"])]
+    from_state: String,
+    #[arg(long)]
+    dry_run: bool,
+    #[arg(long)]
+    allow_destage_retry: bool,
+    #[arg(long, default_value = "")]
+    confirm: String,
+    #[arg(long)]
+    json: bool,
+    /// Verified subject forwarded only by the fixed host service.
+    #[arg(long, hide = true)]
+    verified_subject: Option<String>,
+}
+
+impl DestageRetryArgs {
+    pub(crate) fn store_id(&self) -> &StoreId {
+        &self.store_id
+    }
+    pub(crate) fn from_state(&self) -> &str {
+        &self.from_state
+    }
+    pub(crate) fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    pub(crate) fn allow_destage_retry(&self) -> bool {
+        self.allow_destage_retry
+    }
+    pub(crate) fn confirm(&self) -> &str {
+        &self.confirm
+    }
+    pub(crate) fn json(&self) -> bool {
+        self.json
+    }
+    pub(crate) fn verified_subject(&self) -> Option<&str> {
+        self.verified_subject.as_deref()
+    }
 }
 
 impl IngestControlArgs {
@@ -523,6 +568,45 @@ mod tests {
         ])
         .expect_err("tui and json must be mutually exclusive");
         assert!(error.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn parses_store_scoped_needs_review_destage_retry() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "retry-destage",
+            "epic_collection",
+            "--from-state",
+            "needs_review",
+            "--allow-destage-retry",
+            "--confirm",
+            "confirm retry needs-review destage",
+            "--json",
+        ])
+        .expect("destage retry parses");
+        let Some(Command::Ingest(args)) = cli.command() else {
+            panic!("expected ingest command")
+        };
+        let Some(IngestCommand::RetryDestage(retry)) = args.command() else {
+            panic!("expected retry-destage command")
+        };
+        assert_eq!(retry.store_id().as_str(), "epic_collection");
+        assert_eq!(retry.from_state(), "needs_review");
+        assert!(retry.allow_destage_retry());
+        assert_eq!(retry.confirm(), "confirm retry needs-review destage");
+        assert!(retry.json());
+
+        let error = Cli::try_parse_from([
+            "dasobjectstore",
+            "ingest",
+            "retry-destage",
+            "epic_collection",
+            "--from-state",
+            "queued_for_hdd",
+        ])
+        .expect_err("active state is rejected");
+        assert!(error.to_string().contains("needs_review"));
     }
 
     #[test]

@@ -3,6 +3,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 service="$repo_root/packaging/linux/systemd/dasobjectstored.service"
+storage_ready_service="$repo_root/packaging/linux/systemd/dasobjectstore-storage-ready.service"
+garage_service="$repo_root/packaging/linux/systemd/dasobjectstore-garage.service"
 web_service="$repo_root/packaging/linux/systemd/dasobjectstore-server.service"
 s3_gateway_service="$repo_root/packaging/linux/systemd/dasobjectstore-s3-gateway.service"
 source_access_service="$repo_root/packaging/linux/systemd/dasobjectstore-source-access.service"
@@ -15,9 +17,11 @@ authority_retirement_service="$repo_root/packaging/linux/systemd/dasobjectstore-
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
 monas_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
+storage_mount_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/verify-managed-storage-mounts"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
+managed_storage_manifest="$repo_root/packaging/linux/etc/dasobjectstore/managed-storage.v1.json"
 s3_gateway_config="$repo_root/packaging/linux/etc/dasobjectstore/s3-gateway.json"
 workspace_host_config="$repo_root/packaging/linux/etc/dasobjectstore/workspace-host.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
@@ -33,6 +37,8 @@ prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
 pinned_sources="$repo_root/packaging/pinned-mnemosyne-package-sources.sh"
 monas_access_test="$repo_root/packaging/tests/monas-access-boundary.sh"
+storage_startup_test="$repo_root/packaging/tests/resource-bound-storage-startup.sh"
+garage_renderer="$repo_root/crates/dasobjectstore-object-service/src/garage.rs"
 
 require_file() {
   local path="$1"
@@ -42,11 +48,28 @@ require_file() {
   fi
 }
 
+require_executable() {
+  local path="$1"
+  if [[ ! -x "$path" ]]; then
+    printf 'package asset must be executable: %s\n' "$path" >&2
+    exit 1
+  fi
+}
+
 require_text() {
   local path="$1"
   local expected="$2"
   if ! grep -Fq -- "$expected" "$path"; then
     printf 'package asset %s must contain: %s\n' "$path" "$expected" >&2
+    exit 1
+  fi
+}
+
+require_pattern() {
+  local path="$1"
+  local expected="$2"
+  if ! grep -Eq -- "$expected" "$path"; then
+    printf 'package asset %s must match: %s\n' "$path" "$expected" >&2
     exit 1
   fi
 }
@@ -61,6 +84,8 @@ require_absent() {
 }
 
 require_file "$service"
+require_file "$storage_ready_service"
+require_file "$garage_service"
 require_file "$web_service"
 require_file "$s3_gateway_service"
 require_file "$source_access_service"
@@ -73,9 +98,12 @@ require_file "$authority_retirement_service"
 require_file "$source_access_helper"
 require_file "$monas_access_helper"
 require_file "$mount_policy_helper"
+require_file "$storage_mount_helper"
+require_executable "$storage_mount_helper"
 require_file "$sysusers"
 require_file "$tmpfiles"
 require_file "$daemon_config"
+require_file "$managed_storage_manifest"
 require_file "$s3_gateway_config"
 require_file "$workspace_host_config"
 require_file "$web_config"
@@ -91,6 +119,8 @@ require_file "$prepare_web_dist"
 require_file "$package_auth_guard"
 require_file "$pinned_sources"
 require_file "$monas_access_test"
+require_file "$storage_startup_test"
+require_file "$garage_renderer"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -100,6 +130,8 @@ require_text "$service" "manage-monas-access-boundary pre-start"
 require_text "$service" "manage-monas-access-boundary publish-socket"
 require_text "$service" "manage-monas-access-boundary retire-socket"
 require_text "$service" "Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.json"
+require_text "$service" "BindsTo=dasobjectstore-storage-ready.service"
+require_pattern "$service" '^After=.*dasobjectstore-storage-ready\.service'
 require_text "$service" "Slice=dasobjectstore-storage.slice"
 require_absent "$service" "CPUAccounting="
 require_absent "$web_service" "CPUAccounting="
@@ -107,6 +139,20 @@ require_text "$service" "MemoryAccounting=true"
 require_text "$service" "IOAccounting=true"
 require_text "$service" "ProtectHome=read-only"
 require_text "$service" "ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore /srv/dasobjectstore"
+
+require_text "$storage_ready_service" "Type=simple"
+require_text "$storage_ready_service" "ExecStartPre=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json"
+require_text "$storage_ready_service" "ExecStart=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json --watch --interval-seconds 2"
+require_text "$storage_ready_service" "Before=dasobjectstored.service dasobjectstore-garage.service"
+require_text "$garage_service" "BindsTo=dasobjectstore-storage-ready.service"
+require_pattern "$garage_service" '^After=.*dasobjectstore-storage-ready\.service'
+require_text "$managed_storage_manifest" '"schema_version": 1'
+require_text "$managed_storage_manifest" '"ssd"'
+require_text "$managed_storage_manifest" '"hdds"'
+require_text "$storage_mount_helper" "findmnt"
+require_text "$storage_mount_helper" "mount"
+require_text "$garage_renderer" 'restart: \"no\"'
+require_absent "$garage_renderer" 'push_str("    restart: unless-stopped'
 
 require_text "$web_service" "User=dasobjectstore"
 require_text "$web_service" "Group=dasobjectstore"
@@ -237,6 +283,10 @@ require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control
 require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/manage-monas-access-boundary'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/verify-managed-storage-mounts'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-storage-ready.service'
+require_text "$build_deb" 'lib/systemd/system/dasobjectstore-garage.service'
+require_text "$build_deb" 'etc/dasobjectstore/managed-storage.v1.json'
 require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
@@ -245,6 +295,10 @@ require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-s
 require_text "$build_deb" 'migrate-monas-integrated-config'
 require_text "$build_rpm" 'migrate-monas-integrated-config'
 require_text "$build_rpm" 'manage-monas-access-boundary'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/verify-managed-storage-mounts'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage-ready.service'
+require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-garage.service'
+require_text "$build_rpm" '/etc/dasobjectstore/managed-storage.v1.json'
 require_text "$build_deb" 'Provides: dasobjectstore-remote'
 require_text "$build_deb" 'Conflicts: dasobjectstore-remote'
 require_text "$build_deb" 'Replaces: dasobjectstore-remote'

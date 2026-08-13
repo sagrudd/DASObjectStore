@@ -66,6 +66,7 @@ where
         | DaemonApiRequest::StoreRepair(_)
         | DaemonApiRequest::ObjectPut(_)
         | DaemonApiRequest::IngestQueueDrain(_)
+        | DaemonApiRequest::DestageRetry(_)
         | DaemonApiRequest::IngestControl(_)
         | DaemonApiRequest::ApplianceTelemetry(_)
         | DaemonApiRequest::SubmitIngestFiles(_)

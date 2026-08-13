@@ -1,0 +1,11 @@
+[Unit]
+Description=Verify the complete DASObjectStore managed enclosure
+Documentation=https://github.com/sagrudd/DASObjectStore
+After=local-fs.target
+Before=dasobjectstored.service dasobjectstore-garage.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json
+ExecStart=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json --watch --interval-seconds 2
+Restart=no

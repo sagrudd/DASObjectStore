@@ -1,9 +1,10 @@
 [Unit]
 Description=DASObjectStore standalone Web UI and API
 Documentation=https://github.com/sagrudd/DASObjectStore
-After=network-online.target dasobjectstored.service
+After=network-online.target dasobjectstored.service dasobjectstore-storage-ready.service
 Wants=network-online.target
-Requires=dasobjectstored.service
+Requires=dasobjectstored.service dasobjectstore-storage-ready.service
+BindsTo=dasobjectstore-storage-ready.service
 
 [Service]
 Type=simple

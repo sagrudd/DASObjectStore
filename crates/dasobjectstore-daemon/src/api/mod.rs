@@ -7,6 +7,7 @@ mod application_mtls;
 mod application_token;
 mod application_upload;
 mod capacity;
+mod destage_retry;
 mod disk_lockdown;
 mod disk_mutation;
 mod enclosure;
@@ -88,6 +89,10 @@ pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
     CapacityAdmissionReservationError, CapacityAdmissionResponse, CapacityAdmissionValidationError,
     CapacityStatusRequest, CapacityStatusResponse,
+};
+pub use destage_retry::{
+    DestageRetryRequest, DestageRetryResponse, DestageRetryValidationError,
+    DESTAGE_RETRY_CONFIRMATION,
 };
 pub use disk_lockdown::{
     DiskLockdownRequest, DiskLockdownResponse, DiskLockdownValidationError,
@@ -353,6 +358,7 @@ pub enum DaemonApiRequest {
     StoreRepair(StoreRepairRequest),
     ObjectPut(ObjectPutRequest),
     IngestQueueDrain(IngestQueueDrainRequest),
+    DestageRetry(DestageRetryRequest),
     IngestControl(IngestControlRequest),
     SubmitIngestFiles(SubmitIngestFilesRequest),
     IngestJobStatus(IngestJobStatusRequest),
@@ -440,6 +446,7 @@ impl DaemonApiRequest {
             Self::StoreRepair(_) => "store_repair",
             Self::ObjectPut(_) => "object_put",
             Self::IngestQueueDrain(_) => "ingest_queue_drain",
+            Self::DestageRetry(_) => "destage_retry",
             Self::IngestControl(_) => "ingest_control",
             Self::SubmitIngestFiles(_) => "submit_ingest_files",
             Self::IngestJobStatus(_) => "ingest_job_status",
@@ -549,6 +556,9 @@ impl DaemonApiRequest {
             Self::IngestQueueDrain(request) => request
                 .validate()
                 .map_err(ingest_queue_drain_validation_error),
+            Self::DestageRetry(request) => {
+                request.validate().map_err(destage_retry_validation_error)
+            }
             Self::CancelIngestJob(request) => request.validate(),
             Self::CancelJob(request) => request.validate().map_err(generic_job_validation_error),
             Self::ServiceLifecycle(request) => request.validate(),
@@ -709,6 +719,7 @@ pub enum DaemonApiResponse {
     StoreRepair(StoreRepairResponse),
     ObjectPut(ObjectPutResponse),
     IngestQueueDrain(IngestQueueDrainResponse),
+    DestageRetry(DestageRetryResponse),
     IngestControl(IngestControlResponse),
     SubmitIngestFiles(SubmitIngestFilesResponse),
     IngestJobStatus(IngestJobStatusResponse),
@@ -807,10 +818,10 @@ mod tests {
         DaemonIngressOrigin, DaemonJobCancelRequest, DaemonJobId, DaemonJobListRequest,
         DaemonJobStatusRequest, DaemonServiceLifecycleRequest, DaemonServiceOperation,
         DaemonServiceProvisionRequest, DaemonServiceStatusRequest, DaemonSsdPressure,
-        IngestControlRequest, ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectDownloadRequest, ObjectFolderDownloadRequest, PrepareEnclosureFilesystem,
-        PrepareEnclosureHddDevice, PrepareEnclosureRequest, ProfileBrowserRequest,
-        ProfileS3ListRequest, RemoteEasyconnectAuthProvider,
+        DestageRetryRequest, IngestControlRequest, ObjectBrowserPageRequest, ObjectBrowserRequest,
+        ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+        PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
+        ProfileBrowserRequest, ProfileS3ListRequest, RemoteEasyconnectAuthProvider,
         RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
         RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
         RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
@@ -831,6 +842,24 @@ mod tests {
         let encoded = serde_json::to_value(request).expect("request serializes");
 
         assert_eq!(encoded["command"], "store_inventory");
+    }
+
+    #[test]
+    fn destage_retry_command_has_store_and_state_guard() {
+        let request = DaemonApiRequest::DestageRetry(DestageRetryRequest {
+            store_id: "epic_collection".to_string(),
+            from_state: "needs_review".to_string(),
+            dry_run: true,
+            allow_destage_retry: false,
+            confirmation_marker: String::new(),
+            verified_subject: None,
+        });
+
+        request.validate().expect("dry-run request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["command"], "destage_retry");
+        assert_eq!(encoded["payload"]["store_id"], "epic_collection");
+        assert_eq!(encoded["payload"]["from_state"], "needs_review");
     }
 
     #[test]

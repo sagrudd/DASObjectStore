@@ -195,6 +195,8 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
+    verify_managed_storage_resources()?;
+
     let capacity_provider = Arc::new(FileBackedCapacityAdmissionProvider::for_daemon(
         &config.state_dir,
     ));
@@ -357,6 +359,31 @@ fn run() -> Result<(), String> {
         server.socket_path().display()
     );
     server.serve_forever().map_err(|err| err.to_string())
+}
+
+fn verify_managed_storage_resources() -> Result<(), String> {
+    let manifest = env::var_os("DASOBJECTSTORE_MANAGED_STORAGE_MANIFEST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/etc/dasobjectstore/managed-storage.v1.json"));
+    let helper = env::var_os("DASOBJECTSTORE_STORAGE_VERIFIER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from("/usr/libexec/dasobjectstore/verify-managed-storage-mounts")
+        });
+    let output = std::process::Command::new(&helper)
+        .arg("--manifest")
+        .arg(&manifest)
+        .output()
+        .map_err(|error| format!("managed storage verifier could not start: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if error.is_empty() {
+        format!("managed storage verifier failed with {}", output.status)
+    } else {
+        error
+    })
 }
 
 fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::JoinHandle<()> {

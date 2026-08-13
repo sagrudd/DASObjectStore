@@ -737,6 +737,37 @@ where
         Ok(IngestQueueDrainResponse { report })
     }
 
+    pub(super) fn destage_retry_for_actor(
+        &self,
+        request: DestageRetryRequest,
+        actor: Option<&DaemonLocalActor>,
+    ) -> Result<DestageRetryResponse, (&'static str, String)> {
+        if !request.dry_run {
+            require_preverified_host_maintenance_peer(
+                actor,
+                request.verified_subject.as_deref(),
+                "destage retry",
+            )?;
+            if !request.allow_destage_retry {
+                return Err((
+                    "destage_retry_not_allowed",
+                    "destage retry requires policy allowance".to_string(),
+                ));
+            }
+        }
+        let store_id = StoreId::new(request.store_id)
+            .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        let now_utc = self.clock.now_utc();
+        let report = dasobjectstore_metadata::retry_needs_review_destage_for_store(
+            &self.live_sqlite_path,
+            &store_id,
+            &now_utc,
+            request.dry_run,
+        )
+        .map_err(|error| ("destage_retry_failed", error.to_string()))?;
+        Ok(DestageRetryResponse { report })
+    }
+
     pub(super) fn store_inventory_for_actor(
         &self,
         request: StoreInventoryRequest,

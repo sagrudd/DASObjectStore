@@ -1,8 +1,9 @@
 [Unit]
 Description=DASObjectStore authenticated S3 gateway
 Documentation=https://github.com/sagrudd/DASObjectStore
-Requires=dasobjectstored.service
-After=network-online.target dasobjectstored.service
+Requires=dasobjectstored.service dasobjectstore-storage-ready.service
+BindsTo=dasobjectstore-storage-ready.service
+After=network-online.target dasobjectstored.service dasobjectstore-storage-ready.service
 Wants=network-online.target
 
 [Service]

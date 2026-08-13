@@ -135,7 +135,7 @@ impl ObjectServiceProvider for GarageProvider {
         yaml.push_str(&format!("  {}:\n", self.config.service_name));
         yaml.push_str(&format!("    image: {}\n", self.config.image));
         yaml.push_str("    init: true\n");
-        yaml.push_str("    restart: unless-stopped\n");
+        yaml.push_str("    restart: \"no\"\n");
         yaml.push_str("    stop_grace_period: 30s\n");
         yaml.push_str("    ports:\n");
         let published_api_port = self
@@ -335,7 +335,7 @@ mod tests {
         assert!(rendered
             .compose_yaml
             .contains("command: [\"/garage\", \"server\", \"--single-node\"]"));
-        assert!(rendered.compose_yaml.contains("restart: unless-stopped"));
+        assert!(rendered.compose_yaml.contains("restart: \"no\""));
         assert!(rendered
             .compose_yaml
             .contains("test: [\"CMD\", \"/garage\", \"status\"]"));

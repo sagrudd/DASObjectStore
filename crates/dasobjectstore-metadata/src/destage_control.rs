@@ -6,9 +6,19 @@ use crate::scheduler::{
     retry_destage_scheduler_job_tx, SchedulerError,
 };
 use crate::schema::LIVE_SCHEMA_SQL;
-use dasobjectstore_core::ids::ObjectId;
+use dasobjectstore_core::ids::{ObjectId, StoreId};
 use rusqlite::{params, Connection, Transaction};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DestageRetryReport {
+    pub store_id: StoreId,
+    pub from_state: String,
+    pub matched_object_ids: Vec<ObjectId>,
+    pub retried_object_count: usize,
+    pub dry_run: bool,
+}
 
 pub fn renew_destage_and_scheduler_leases(
     path: impl AsRef<Path>,
@@ -105,6 +115,58 @@ pub fn retry_destage(
     )
 }
 
+/// Atomically requeue every exhausted destage job for one store.
+///
+/// The fixed `needs_review` predicate is deliberate: this operator action
+/// cannot disturb active, paused, settled, or cancelled work. The destage and
+/// scheduler rows are reset in the same transaction for every selected object.
+pub fn retry_needs_review_destage_for_store(
+    path: impl AsRef<Path>,
+    store_id: &StoreId,
+    updated_at_utc: &str,
+    dry_run: bool,
+) -> Result<DestageRetryReport, DestageMetadataError> {
+    let mut connection = Connection::open(path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let tx = connection.transaction()?;
+    let matched_object_ids = {
+        let mut statement = tx.prepare(
+            "SELECT object_id FROM destage_queue
+             WHERE store_id=?1 AND state='needs_review'
+             ORDER BY created_at_utc,destage_job_id",
+        )?;
+        let values = statement
+            .query_map([store_id.as_str()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        values
+            .into_iter()
+            .map(|value| ObjectId::new(value).map_err(|_| DestageMetadataError::InvalidIdentifier))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    if !dry_run {
+        for object_id in &matched_object_ids {
+            control_tx(
+                &tx,
+                object_id,
+                "queued_for_hdd",
+                updated_at_utc,
+                "state='needs_review'",
+                true,
+                retry_destage_scheduler_job_tx,
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(DestageRetryReport {
+        store_id: store_id.clone(),
+        from_state: "needs_review".to_string(),
+        retried_object_count: if dry_run { 0 } else { matched_object_ids.len() },
+        matched_object_ids,
+        dry_run,
+    })
+}
+
 fn control(
     path: impl AsRef<Path>,
     object_id: &ObjectId,
@@ -117,6 +179,28 @@ fn control(
     let mut connection = Connection::open(path)?;
     connection.execute_batch(LIVE_SCHEMA_SQL)?;
     let tx = connection.transaction()?;
+    control_tx(
+        &tx,
+        object_id,
+        state,
+        at,
+        predicate,
+        reset_attempts,
+        scheduler_control,
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn control_tx(
+    tx: &Transaction<'_>,
+    object_id: &ObjectId,
+    state: &str,
+    at: &str,
+    predicate: &str,
+    reset_attempts: bool,
+    scheduler_control: fn(&Transaction<'_>, &ObjectId, &str) -> Result<(), SchedulerError>,
+) -> Result<(), DestageMetadataError> {
     let sql = format!(
         "UPDATE destage_queue SET state=?1,next_retry_at_utc=NULL,
          lease_owner=NULL,lease_expires_at_utc=NULL,
@@ -126,7 +210,6 @@ fn control(
     if tx.execute(&sql, params![state, at, object_id.as_str(), reset_attempts])? != 1 {
         return Err(DestageMetadataError::InvalidTransition);
     }
-    scheduler_control(&tx, object_id, at)?;
-    tx.commit()?;
+    scheduler_control(tx, object_id, at)?;
     Ok(())
 }

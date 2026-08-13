@@ -2,7 +2,8 @@
 Description=DASObjectStore privileged managed workspace host broker
 Documentation=https://github.com/sagrudd/DASObjectStore
 Requires=dasobjectstore-workspace-host.socket
-After=local-fs.target
+BindsTo=dasobjectstore-storage-ready.service
+After=local-fs.target dasobjectstore-storage-ready.service
 
 [Service]
 Type=simple

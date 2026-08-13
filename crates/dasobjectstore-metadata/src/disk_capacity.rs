@@ -170,6 +170,25 @@ pub fn read_disk_capacity_claims(
     read_owner_claims(&connection, kind, owner_id)
 }
 
+/// Read disk identities that are currently eligible to receive new settlement
+/// writes. Transitional and degraded states, including `Watch`, are excluded.
+pub fn read_healthy_disk_ids(
+    live_sqlite_path: impl AsRef<Path>,
+) -> Result<BTreeSet<DiskId>, DiskCapacityClaimError> {
+    let connection = open(live_sqlite_path.as_ref())?;
+    let mut statement =
+        connection.prepare("SELECT disk_id FROM disks WHERE state='Healthy' ORDER BY disk_id")?;
+    let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+    let mut disk_ids = BTreeSet::new();
+    for row in rows {
+        let stored = row?;
+        let disk_id =
+            DiskId::new(&stored).map_err(|_| DiskCapacityClaimError::InvalidStoredDisk(stored))?;
+        disk_ids.insert(disk_id);
+    }
+    Ok(disk_ids)
+}
+
 /// Acquire claims inside an existing immediate transaction. This is used when
 /// SSD acknowledgement metadata and its mandatory HDD capacity reservation
 /// must become visible atomically.
@@ -218,7 +237,16 @@ pub(crate) fn acquire_disk_capacity_claims_in_transaction(
                 |row| row.get::<_, String>(0),
             )
             .optional()?;
-        if !matches!(state.as_deref(), Some("Healthy" | "Watch")) {
+        // Destage publishes the durable protected copy, so its admission is
+        // stricter than advisory/background reservations: Watch is not an
+        // operational destination. This also closes the race between the
+        // daemon's registry-aware selection and transactional claim creation.
+        let eligible = if request.kind == DiskCapacityClaimKind::Destage {
+            state.as_deref() == Some("Healthy")
+        } else {
+            matches!(state.as_deref(), Some("Healthy" | "Watch"))
+        };
+        if !eligible {
             return Err(DiskCapacityClaimError::IneligibleDisk {
                 disk_id: allocation.disk_id.clone(),
                 state,
@@ -518,9 +546,10 @@ fn parse_kind(value: &str) -> Option<DiskCapacityClaimKind> {
 #[cfg(test)]
 mod tests {
     use super::{
-        acquire_disk_capacity_claims, read_outstanding_disk_capacity, release_disk_capacity_claims,
-        update_disk_capacity_claim_consumption, DiskCapacityClaimAllocation,
-        DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
+        acquire_disk_capacity_claims, read_healthy_disk_ids, read_outstanding_disk_capacity,
+        release_disk_capacity_claims, update_disk_capacity_claim_consumption,
+        DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+        DiskCapacityClaimRequest,
     };
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::DiskId;
@@ -690,6 +719,58 @@ mod tests {
         assert!(matches!(
             error,
             DiskCapacityClaimError::InvalidConsumption { .. }
+        ));
+        cleanup(&database);
+    }
+
+    #[test]
+    fn settlement_eligible_registry_view_contains_only_healthy_disks() {
+        let database = fixture("healthy-registry-view");
+        let connection = Connection::open(&database).expect("open fixture");
+        connection
+            .execute("UPDATE disks SET state='Watch' WHERE disk_id='disk-a'", [])
+            .expect("degrade disk");
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id, pool_id, role, state, created_at_utc, updated_at_utc
+                 ) VALUES (
+                    'disk-b', 'pool-a', 'hdd_capacity', 'Healthy',
+                    '2026-07-25T00:00:00Z', '2026-07-25T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("healthy disk");
+        drop(connection);
+
+        let disk_ids = read_healthy_disk_ids(&database).expect("healthy disk ids");
+        assert_eq!(
+            disk_ids.iter().map(DiskId::as_str).collect::<Vec<_>>(),
+            vec!["disk-b"]
+        );
+        cleanup(&database);
+    }
+
+    #[test]
+    fn destage_claim_rejects_disk_that_changed_to_watch_after_selection() {
+        let database = fixture("destage-watch-race");
+        let connection = Connection::open(&database).expect("open fixture");
+        connection
+            .execute("UPDATE disks SET state='Watch' WHERE disk_id='disk-a'", [])
+            .expect("degrade disk");
+        drop(connection);
+
+        let error = acquire_disk_capacity_claims(&request(
+            &database,
+            DiskCapacityClaimKind::Destage,
+            "object-a",
+            1,
+        ))
+        .expect_err("watch disk must be fenced");
+        assert!(matches!(
+            error,
+            DiskCapacityClaimError::IneligibleDisk { state, .. }
+                if state.as_deref() == Some("Watch")
         ));
         cleanup(&database);
     }
