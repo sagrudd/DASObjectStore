@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.169.0 - 2026-08-13
+
+- Add the fixed-peer Expedition retained-dossier writer transaction. It
+  validates the live Prosopikon/Pistis authority projection, commits bounded
+  exact bytes through daemon-owned SSD ingress and configured HDD
+  acknowledgement, constructs the canonical EvidenceRef, and independently
+  reads the object back before returning a receipt.
+- Pin Prosopikon 0.27.0 for the narrow retained-evidence grant projection.
+
 ## 0.168.8 - 2026-08-13
 
 - Fail closed before opening the authoritative SQLite catalogue unless the
