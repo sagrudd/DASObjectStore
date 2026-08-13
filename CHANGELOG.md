@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.169.1 - 2026-08-13
+
+- Restore the S3 gateway's provider-stream request constructors after the
+  retained-dossier field addition, and compile the full workspace as a release
+  gate so ordinary and multipart S3 ingress remain qualified.
+
 ## 0.169.0 - 2026-08-13
 
 - Add the fixed-peer Expedition retained-dossier writer transaction. It
