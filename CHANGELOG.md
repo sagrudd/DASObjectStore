@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.168.7 - 2026-08-13
+## 0.168.8 - 2026-08-13
 
 - Fail closed before opening the authoritative SQLite catalogue unless the
   configured SSD and every HDD are exact read-write mounts with the expected
@@ -15,6 +15,8 @@
   retries only terminal ``needs_review`` HDD-destage and scheduler rows.
 - Accept the duplicate mount-table projection created by systemd service
   namespaces while still verifying the exact underlying device identity.
+- Bound socket publication to the daemon's actual listening socket instead of
+  racing service startup and terminating a healthy daemon prematurely.
 
 ## 0.168.4 - 2026-08-11
 
