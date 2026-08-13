@@ -1727,6 +1727,7 @@ mod tests {
             expected_size_bytes: 5,
             expected_sha256: checksum.to_string(),
             chunk_size_bytes: 1024,
+            retained_dossier: None,
         };
         let frames = std::cell::RefCell::new(vec![
             (

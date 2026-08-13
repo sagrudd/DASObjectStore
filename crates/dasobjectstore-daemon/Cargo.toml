@@ -18,6 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 base64.workspace = true
+chrono.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-metadata.workspace = true
 dasobjectstore-object-service.workspace = true

@@ -296,6 +296,7 @@ async fn s3_upload_part(
         expected_size_bytes: content_length,
         expected_sha256: checksum,
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
+        retained_dossier: None,
     };
     match stream_profile_s3_multipart_part(request, body).await {
         Ok(_) => {

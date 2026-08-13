@@ -5,7 +5,10 @@
 //! payload bytes travel in length-prefixed frames and never as base64 or
 //! backend paths.
 
-use super::{ObjectBrowserDelegatedActor, ObjectBrowserVerifiedSubject};
+use super::{
+    JenkinsDossierEvidenceSettlementResponse, ObjectBrowserDelegatedActor,
+    ObjectBrowserVerifiedSubject,
+};
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_core::ids::StoreId;
 use serde::{Deserialize, Serialize};
@@ -91,6 +94,71 @@ pub struct ProviderStreamUploadOpenRequest {
     pub expected_size_bytes: u64,
     pub expected_sha256: String,
     pub chunk_size_bytes: u32,
+    /// Present only for Expedition's fixed-peer retained-dossier transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_dossier: Option<ExpeditionRetainedDossierWriteV1>,
+}
+
+pub const EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA: &str =
+    "dasobjectstore.expedition_retained_dossier_write.v1";
+pub const EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY: &str = "mnemosyne-expedition-basecamp";
+pub const EXPEDITION_RETAINED_EVIDENCE_CAPABILITY: &str = "dasobjectstore.retained-evidence.write";
+
+/// Credential-free authority facts projected by Prosopikon through Monas.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExpeditionRetainedDossierWriteV1 {
+    pub schema_version: String,
+    pub peer_identity: String,
+    pub authority_id: String,
+    pub authority_revision: u64,
+    pub session_id: String,
+    pub principal_id: String,
+    pub entitlement_assignment_id: String,
+    pub entitlement: String,
+    pub session_expires_at_utc: String,
+    pub capability: String,
+    pub canonical_prefix: String,
+    pub dossier_digest: String,
+    pub evidence_revision: u64,
+    pub authority_scope: dasobjectstore_core::AuthorityScopeV1,
+}
+
+impl ExpeditionRetainedDossierWriteV1 {
+    pub fn validate(
+        &self,
+        request: &ProviderStreamUploadOpenRequest,
+    ) -> Result<(), ProviderStreamValidationError> {
+        if self.schema_version != EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA
+            || self.peer_identity != EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY
+            || self.capability != EXPEDITION_RETAINED_EVIDENCE_CAPABILITY
+            || !matches!(self.entitlement.as_str(), "operate" | "administer")
+            || self.authority_revision == 0
+            || self.evidence_revision == 0
+        {
+            return Err(ProviderStreamValidationError::InvalidRetainedDossierAuthority);
+        }
+        for value in [
+            &self.authority_id,
+            &self.session_id,
+            &self.principal_id,
+            &self.entitlement_assignment_id,
+        ] {
+            validate_non_blank(value, "retained_dossier.authority")?;
+        }
+        let prefix = self.canonical_prefix.trim_matches('/');
+        if prefix != self.canonical_prefix
+            || prefix.is_empty()
+            || !request.object.object_id.starts_with(&format!("{prefix}/"))
+        {
+            return Err(ProviderStreamValidationError::InvalidRetainedDossierScope);
+        }
+        validate_sha256(&self.dossier_digest, "retained_dossier.dossier_digest")
+            .map_err(|_| ProviderStreamValidationError::InvalidRetainedDossierDigest)?;
+        chrono::DateTime::parse_from_rfc3339(&self.session_expires_at_utc)
+            .map_err(|_| ProviderStreamValidationError::InvalidRetainedDossierAuthority)?;
+        Ok(())
+    }
 }
 
 /// Path-free open envelope for one reservation-bound multipart part.
@@ -188,6 +256,8 @@ pub struct ProviderStreamUploadResponse {
     pub object: BackendObjectKey,
     pub size_bytes: u64,
     pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_dossier: Option<JenkinsDossierEvidenceSettlementResponse>,
 }
 
 impl ProviderStreamUploadResponse {
@@ -203,6 +273,7 @@ impl ProviderStreamUploadResponse {
             object: record.key.clone(),
             size_bytes: record.size_bytes,
             sha256: record.checksum.clone(),
+            retained_dossier: None,
         }
     }
 }
@@ -222,6 +293,9 @@ impl ProviderStreamUploadOpenRequest {
             return Err(ProviderStreamValidationError::ChunkSizeOutOfBounds {
                 chunk_size_bytes: self.chunk_size_bytes,
             });
+        }
+        if let Some(retained_dossier) = &self.retained_dossier {
+            retained_dossier.validate(self)?;
         }
         Ok(())
     }
@@ -676,6 +750,9 @@ pub enum ProviderStreamValidationError {
     InvalidObjectKey,
     InvalidDelegatedActor(String),
     InvalidVerifiedSubject(String),
+    InvalidRetainedDossierAuthority,
+    InvalidRetainedDossierScope,
+    InvalidRetainedDossierDigest,
     InvalidMultipartPartNumber,
     InvalidMultipartPartSize,
     InvalidRange {
@@ -716,6 +793,15 @@ impl Display for ProviderStreamValidationError {
                     formatter,
                     "provider stream verified subject is invalid: {error}"
                 )
+            }
+            Self::InvalidRetainedDossierAuthority => {
+                formatter.write_str("Expedition retained-dossier authority is invalid")
+            }
+            Self::InvalidRetainedDossierScope => {
+                formatter.write_str("Expedition retained-dossier scope is invalid")
+            }
+            Self::InvalidRetainedDossierDigest => {
+                formatter.write_str("Expedition retained-dossier digest is invalid")
             }
             Self::InvalidMultipartPartNumber => {
                 formatter.write_str("multipart part number must be greater than zero")
@@ -828,6 +914,52 @@ mod tests {
                 "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
                     .to_string(),
             chunk_size_bytes: 4096,
+            retained_dossier: None,
+        }
+    }
+
+    fn retained_dossier() -> ExpeditionRetainedDossierWriteV1 {
+        ExpeditionRetainedDossierWriteV1 {
+            schema_version: EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA.to_owned(),
+            peer_identity: EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY.to_owned(),
+            authority_id: "authority-1".to_owned(),
+            authority_revision: 9,
+            session_id: "session-1".to_owned(),
+            principal_id: "principal-1".to_owned(),
+            entitlement_assignment_id: "assignment-1".to_owned(),
+            entitlement: "administer".to_owned(),
+            session_expires_at_utc: "2026-08-13T18:00:00Z".to_owned(),
+            capability: EXPEDITION_RETAINED_EVIDENCE_CAPABILITY.to_owned(),
+            canonical_prefix: "expedition/dossiers".to_owned(),
+            dossier_digest: format!("sha256:{}", "b".repeat(64)),
+            evidence_revision: 1,
+            authority_scope: dasobjectstore_core::AuthorityScopeV1 {
+                installation_id: "installation-1".to_owned(),
+                site_trust_domain_id: Some("site-1".to_owned()),
+                tenant_id: None,
+                project_id: None,
+            },
+        }
+    }
+
+    #[test]
+    fn retained_dossier_writer_is_exact_peer_grant_and_prefix_scoped() {
+        let mut request = upload_request();
+        request.object.object_id = "expedition/dossiers/dossier-1.json".to_owned();
+        request.retained_dossier = Some(retained_dossier());
+        request.validate().expect("exact retained dossier request");
+
+        for mutation in ["peer", "grant", "prefix", "digest"] {
+            let mut invalid = request.clone();
+            let authority = invalid.retained_dossier.as_mut().expect("authority");
+            match mutation {
+                "peer" => authority.peer_identity = "root".to_owned(),
+                "grant" => authority.capability = "dasobjectstore.admin".to_owned(),
+                "prefix" => authority.canonical_prefix = "other".to_owned(),
+                "digest" => authority.dossier_digest = "sha256:ABC".to_owned(),
+                _ => unreachable!(),
+            }
+            assert!(invalid.validate().is_err(), "{mutation} must fail closed");
         }
     }
 

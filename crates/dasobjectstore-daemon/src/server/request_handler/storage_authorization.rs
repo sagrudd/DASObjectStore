@@ -25,6 +25,62 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    /// Authorize only the packaged Base Camp peer for the narrow retained
+    /// dossier request. Serialized authority facts never substitute for the
+    /// Unix peer credential supplied by the daemon transport.
+    pub(super) fn authorize_expedition_retained_dossier_write(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &crate::api::ProviderStreamUploadOpenRequest,
+    ) -> Result<AuthorizedEndpointWrite, ObjectBrowserAccessFailure> {
+        let authority = request.retained_dossier.as_ref().ok_or(
+            ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "retained dossier authority is missing".to_owned(),
+            },
+        )?;
+        let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        if actor.username.as_deref() != Some("mnemosyne-expedition") {
+            return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
+                peer_actor: actor.display_name(),
+            });
+        }
+        request
+            .validate()
+            .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: error.to_string(),
+            })?;
+        let now = chrono::DateTime::parse_from_rfc3339(&self.clock.now_utc()).map_err(|_| {
+            ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "daemon clock is invalid".to_owned(),
+            }
+        })?;
+        let expires = chrono::DateTime::parse_from_rfc3339(&authority.session_expires_at_utc)
+            .map_err(|_| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "session expiry is invalid".to_owned(),
+            })?;
+        if expires <= now {
+            return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "verified Pistis session has expired".to_owned(),
+            });
+        }
+        let store_id = resolve_authorization_store_id(
+            &request.store_id,
+            &self.store_registry_path,
+            &self.subobject_registry_path,
+        )
+        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        if store_id != request.store_id {
+            return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "retained dossier writes require an exact ObjectStore".to_owned(),
+            });
+        }
+        Ok(AuthorizedEndpointWrite {
+            store_id,
+            subobject: None,
+            object_prefix: None,
+        })
+    }
+
     pub(super) fn authorize_ingest_files(
         &self,
         actor: &DaemonLocalActor,

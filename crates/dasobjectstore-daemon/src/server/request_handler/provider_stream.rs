@@ -427,7 +427,11 @@ where
         emit_response: &mut dyn FnMut(DaemonApiResponse) -> Result<(), UnixSocketDaemonServerError>,
     ) -> Result<(), UnixSocketDaemonServerError> {
         let mut request = request;
-        let authorized = match self.authorize_endpoint_write_scope(actor, &request.store_id) {
+        let authorized = match if request.retained_dossier.is_some() {
+            self.authorize_expedition_retained_dossier_write(actor, &request)
+        } else {
+            self.authorize_endpoint_write_scope(actor, &request.store_id)
+        } {
             Ok(authorized) => authorized,
             Err(error) => {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -477,7 +481,8 @@ where
             request.object.version,
         ) {
             Ok(Some(existing))
-                if existing.size_bytes == request.expected_size_bytes
+                if request.retained_dossier.is_none()
+                    && existing.size_bytes == request.expected_size_bytes
                     && existing
                         .checksum
                         .eq_ignore_ascii_case(&request.expected_sha256) =>
@@ -490,9 +495,15 @@ where
                         object: request.object,
                         size_bytes: existing.size_bytes,
                         sha256: existing.checksum,
+                        retained_dossier: None,
                     },
                 ));
             }
+            Ok(Some(existing))
+                if existing.size_bytes == request.expected_size_bytes
+                    && existing
+                        .checksum
+                        .eq_ignore_ascii_case(&request.expected_sha256) => {}
             Ok(Some(_)) => {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "provider_stream_object_conflict",
@@ -559,9 +570,17 @@ where
                         error,
                     )));
                 }
-                return emit_response(DaemonApiResponse::ProviderStreamUpload(
-                    ProviderStreamUploadResponse::from_record(request.upload_id, store_id, &record),
-                ));
+                let response = match retained_dossier_upload_response(
+                    &request,
+                    store_id,
+                    &backend,
+                    &record,
+                    &self.clock.now_utc(),
+                ) {
+                    Ok(response) => response,
+                    Err(response) => return emit_response(response),
+                };
+                return emit_response(DaemonApiResponse::ProviderStreamUpload(response));
             }
             Ok(_) => {
                 return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
@@ -615,9 +634,17 @@ where
                 error,
             )));
         }
-        emit_response(DaemonApiResponse::ProviderStreamUpload(
-            ProviderStreamUploadResponse::from_record(request.upload_id, store_id, &record),
-        ))
+        let response = match retained_dossier_upload_response(
+            &request,
+            store_id,
+            &backend,
+            &record,
+            &self.clock.now_utc(),
+        ) {
+            Ok(response) => response,
+            Err(response) => return emit_response(response),
+        };
+        emit_response(DaemonApiResponse::ProviderStreamUpload(response))
     }
 
     /// Open a catalogue-authoritative profile object for the Unix-socket
@@ -884,6 +911,59 @@ where
     }
 }
 
+fn retained_dossier_upload_response(
+    request: &ProviderStreamUploadOpenRequest,
+    store_id: StoreId,
+    backend: &FolderBackend,
+    record: &dasobjectstore_core::backend::BackendObjectRecord,
+    observed_at_utc: &str,
+) -> Result<ProviderStreamUploadResponse, DaemonApiResponse> {
+    let mut response =
+        ProviderStreamUploadResponse::from_record(request.upload_id.clone(), store_id, record);
+    let Some(authority) = request.retained_dossier.as_ref() else {
+        return Ok(response);
+    };
+    let projection = dasobjectstore_core::JenkinsDossierEvidenceProjectionV1 {
+        schema: dasobjectstore_core::JENKINS_DOSSIER_EVIDENCE_PROJECTION_V1_SCHEMA.to_owned(),
+        authority_scope: authority.authority_scope.clone(),
+        store_id: response.store_id.as_str().to_owned(),
+        object_id: response.object.object_id.clone(),
+        object_version: response.object.version,
+        size_bytes: response.size_bytes,
+        content_sha256: response.sha256.trim_start_matches("sha256:").to_owned(),
+        dossier_digest: authority.dossier_digest.clone(),
+        evidence_revision: authority.evidence_revision,
+    };
+    let evidence = projection.project().map_err(|error| {
+        DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "expedition_dossier_projection_failed",
+            error.to_string(),
+        ))
+    })?;
+    let mut reader = backend.read(&record.key).map_err(|error| {
+        DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "expedition_dossier_readback_failed",
+            error.to_string(),
+        ))
+    })?;
+    let readback = dasobjectstore_core::verify_jenkins_dossier_readback(evidence, &mut reader)
+        .map_err(|error| {
+            DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "expedition_dossier_readback_failed",
+                error.to_string(),
+            ))
+        })?;
+    response.retained_dossier = Some(crate::api::JenkinsDossierEvidenceSettlementResponse {
+        schema_version: crate::api::JENKINS_DOSSIER_EVIDENCE_SETTLEMENT_V1_SCHEMA.to_owned(),
+        request_id: request.request_id.clone(),
+        evidence: readback.evidence,
+        size_bytes: readback.size_bytes,
+        content_sha256: readback.content_sha256,
+        observed_at_utc: observed_at_utc.to_owned(),
+    });
+    Ok(response)
+}
+
 struct ProviderUploadReader<'a> {
     expected_size_bytes: u64,
     expected_sha256: String,
@@ -1007,6 +1087,7 @@ mod tests {
             expected_size_bytes,
             expected_sha256: expected_sha256.to_string(),
             chunk_size_bytes: 4,
+            retained_dossier: None,
         }
     }
 

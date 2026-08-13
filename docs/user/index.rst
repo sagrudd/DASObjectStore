@@ -7,6 +7,8 @@ stabilized in the current MVP.
 .. toctree::
    :maxdepth: 2
 
+   expedition-retained-dossiers
+
    getting-started
    local-docker
    service-boundary

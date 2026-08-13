@@ -254,13 +254,16 @@ pub use profile_s3::{
 };
 pub use provider_stream::{
     provider_stream_requires_upload_ready, read_provider_stream_frame, write_provider_stream_frame,
-    ProviderStreamCancellation, ProviderStreamChunkHeader, ProviderStreamCondition,
-    ProviderStreamFrameError, ProviderStreamMultipartPartUploadOpenRequest,
-    ProviderStreamMultipartPartUploadResponse, ProviderStreamOpenRequest, ProviderStreamRange,
-    ProviderStreamUploadOpenRequest, ProviderStreamUploadReadyResponse,
-    ProviderStreamUploadResponse, ProviderStreamValidationError, ProviderStreamVerificationError,
-    ProviderStreamVerifier, PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
-    PROVIDER_STREAM_SCHEMA_VERSION, PROVIDER_STREAM_SCHEMA_VERSION_V1,
+    ExpeditionRetainedDossierWriteV1, ProviderStreamCancellation, ProviderStreamChunkHeader,
+    ProviderStreamCondition, ProviderStreamFrameError,
+    ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
+    ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamUploadOpenRequest,
+    ProviderStreamUploadReadyResponse, ProviderStreamUploadResponse, ProviderStreamValidationError,
+    ProviderStreamVerificationError, ProviderStreamVerifier,
+    EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY, EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA,
+    EXPEDITION_RETAINED_EVIDENCE_CAPABILITY, PROVIDER_STREAM_MAX_CHUNK_BYTES,
+    PROVIDER_STREAM_MAX_HEADER_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
+    PROVIDER_STREAM_SCHEMA_VERSION_V1,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
