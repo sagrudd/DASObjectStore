@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.168.6 - 2026-08-13
+## 0.168.7 - 2026-08-13
 
 - Fail closed before opening the authoritative SQLite catalogue unless the
   configured SSD and every HDD are exact read-write mounts with the expected
@@ -13,6 +13,8 @@
   mergerfs only for isolated daemon-managed compute workspaces.
 - Add a daemon-owned, store-scoped recovery action that dry-runs or atomically
   retries only terminal ``needs_review`` HDD-destage and scheduler rows.
+- Accept the duplicate mount-table projection created by systemd service
+  namespaces while still verifying the exact underlying device identity.
 
 ## 0.168.4 - 2026-08-11
 

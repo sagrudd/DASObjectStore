@@ -99,7 +99,7 @@ cat >"$fake_bin/findmnt" <<'EOF'
 set -euo pipefail
 [[ ! -e "$TEST_STATE/missing-mount" ]] || exit 1
 path="$2"
-field="$5"
+field="${!#}"
 case "$field" in
   TARGET) printf '%s\n' "$path" ;;
   SOURCE) [[ "$path" == "$TEST_SSD" ]] && printf '/dev/ssd\n' || printf '/dev/hdd\n' ;;

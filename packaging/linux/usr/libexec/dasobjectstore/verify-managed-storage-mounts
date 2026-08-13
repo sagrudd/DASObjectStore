@@ -52,12 +52,15 @@ def verify(entry: dict[str, object], expected_role: str | None = None) -> None:
         fail(f"{path} role {role!r} does not match {expected_role!r}")
     if not path.is_absolute() or path == Path("/"):
         fail(f"{expected_role} path is not a managed absolute path: {path}")
-    target = command("findmnt", "--mountpoint", str(path), "--noheadings", "--output", "TARGET")
+    target = command(
+        "findmnt", "--mountpoint", str(path), "--first-only", "--noheadings", "--output", "TARGET"
+    )
     if target != str(path):
         fail(f"{path} is not an exact mountpoint")
-    source = command("findmnt", "--mountpoint", str(path), "--noheadings", "--output", "SOURCE")
-    filesystem = command("findmnt", "--mountpoint", str(path), "--noheadings", "--output", "FSTYPE")
-    options = command("findmnt", "--mountpoint", str(path), "--noheadings", "--output", "OPTIONS").split(",")
+    findmnt = ("findmnt", "--mountpoint", str(path), "--first-only", "--noheadings", "--output")
+    source = command(*findmnt, "SOURCE")
+    filesystem = command(*findmnt, "FSTYPE")
+    options = command(*findmnt, "OPTIONS").split(",")
     actual_uuid = command("blkid", "--output", "value", "--match-tag", "UUID", source)
     actual_label = command("blkid", "--output", "value", "--match-tag", "LABEL", source)
     if actual_uuid != values["uuid"]:
