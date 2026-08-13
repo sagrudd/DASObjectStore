@@ -92,8 +92,8 @@ pub use disk::{
     force_retire_disk, request_disk_retirement, DiskRetirementError, DiskRetirementReport,
 };
 pub use disk_capacity::{
-    acquire_disk_capacity_claims, read_disk_capacity_claims, read_healthy_disk_ids,
-    read_outstanding_disk_capacity, read_outstanding_disk_capacity_excluding,
+    acquire_disk_capacity_claims, read_disk_capacity_claims, read_outstanding_disk_capacity,
+    read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
     release_disk_capacity_claims, update_disk_capacity_claim_consumption, DiskCapacityClaim,
     DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
     DiskCapacityClaimRequest,

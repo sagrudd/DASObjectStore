@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.168.5 - 2026-08-13
+## 0.168.6 - 2026-08-13
 
 - Fail closed before opening the authoritative SQLite catalogue unless the
   configured SSD and every HDD are exact read-write mounts with the expected

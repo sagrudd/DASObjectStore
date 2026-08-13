@@ -8,8 +8,8 @@ use dasobjectstore_metadata::{
     acquire_disk_capacity_claims, backfill_destage_scheduler_jobs, claim_destage_for_scheduler,
     claim_next_scheduler_job, complete_scheduler_job, fail_destage, list_ssd_eviction_candidates,
     mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement, read_disk_capacity_claims,
-    read_healthy_disk_ids, read_outstanding_disk_capacity_excluding, read_ssd_placement,
-    renew_destage_and_scheduler_leases, retry_scheduler_job,
+    read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
+    read_ssd_placement, renew_destage_and_scheduler_leases, retry_scheduler_job,
     settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
     DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
     DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, SchedulerClaimRequest,
@@ -447,12 +447,12 @@ fn roots_for_held_claims(
             object_id: record.object_id.clone(),
         });
     }
-    let healthy_disk_ids = read_healthy_disk_ids(&config.live_sqlite_path)?;
+    let eligible_disk_ids = read_settlement_eligible_disk_ids(&config.live_sqlite_path)?;
     let discovered = discover_managed_hdd_roots(&config.hdd_root)?;
     claims
         .iter()
         .map(|claim| {
-            if !healthy_disk_ids.contains(&claim.disk_id) {
+            if !eligible_disk_ids.contains(&claim.disk_id) {
                 return Err(DurableDestageWorkerError::ReservedDiskIneligible {
                     disk_id: claim.disk_id.as_str().to_string(),
                 });
@@ -480,7 +480,7 @@ pub(crate) fn select_managed_hdd_roots_with_capacity(
     required_bytes: u64,
     excluded_destage_owner: Option<&str>,
 ) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
-    let healthy_disk_ids = read_healthy_disk_ids(live_sqlite_path)?;
+    let eligible_disk_ids = read_settlement_eligible_disk_ids(live_sqlite_path)?;
     let outstanding = read_outstanding_disk_capacity_excluding(
         live_sqlite_path,
         excluded_destage_owner.map(|owner| (DiskCapacityClaimKind::Destage, owner)),
@@ -488,7 +488,7 @@ pub(crate) fn select_managed_hdd_roots_with_capacity(
     select_hdd_roots_with_capacity(
         discover_managed_hdd_roots(hdd_root)?
             .into_iter()
-            .filter(|root| healthy_disk_ids.contains(&root.disk_id))
+            .filter(|root| eligible_disk_ids.contains(&root.disk_id))
             .collect(),
         required_copies,
         required_bytes,
@@ -841,7 +841,7 @@ impl Display for DurableDestageWorkerError {
                 write!(formatter, "reserved HDD disk {disk_id} is unavailable")
             }
             Self::ReservedDiskIneligible { disk_id } => {
-                write!(formatter, "reserved HDD disk {disk_id} is no longer Healthy")
+                write!(formatter, "reserved HDD disk {disk_id} is no longer placement-eligible")
             }
             Self::SchedulerJobMissingObject(job_id) => {
                 write!(formatter, "destage scheduler job {job_id} has no object identity")
@@ -972,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_destage_excludes_watch_and_unregistered_managed_roots() {
+    fn durable_destage_accepts_watch_but_excludes_unregistered_managed_roots() {
         let root = temporary_root("registry-health-selection");
         let hdd_root = root.join("hdd");
         for disk_id in ["disk-watch", "disk-healthy", "disk-unregistered"] {
@@ -1002,10 +1002,16 @@ mod tests {
         }
         drop(connection);
 
-        let selected = select_managed_hdd_roots_with_capacity(&database, &hdd_root, 1, 1, None)
-            .expect("healthy destination");
-        assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].disk_id.as_str(), "disk-healthy");
+        let selected = select_managed_hdd_roots_with_capacity(&database, &hdd_root, 2, 1, None)
+            .expect("placement-eligible destinations");
+        assert_eq!(selected.len(), 2);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|root| root.disk_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["disk-healthy", "disk-watch"]
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 
