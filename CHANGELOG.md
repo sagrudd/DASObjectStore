@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.172.1 - 2026-08-18
+
+- Correct Synoptikon projection settlement evidence to compare verified HDD
+  placement metadata using the raw SHA-256 representation written by the
+  durable destage path. The catalogue binding remains independently bound to
+  its canonical `sha256:`-prefixed provider checksum.
+- Freeze the projection transport at HTTP/1.1, including its pinned TLS
+  self-probe, and reject HTTP/1.0 or HTTP/2 before projection authorization or
+  daemon access so the signed literal `Host` authority cannot be substituted.
+
+## 0.172.0 - 2026-08-18
+
+- Add the fixed, parameter-free Synoptikon projection intent, bounded-byte
+  ingest, and settlement-bound readback routes to the existing TLS :3900
+  gateway. Requests require a dedicated purpose-scoped protected credential,
+  current SigV4 signatures, signed opaque authority identifiers, and exact
+  body digests; generic S3 credentials and selectors cannot enter this surface.
+  The package does not provision the shared service credential or client trust
+  input and does not enable or start the gateway. Activation remains a separate
+  reviewed operator transaction after a governed leaf certificate with the
+  exact `192.168.0.193` IP SAN, its independently delivered DER-leaf pin/CA,
+  both protected credentials, and storage readiness pass; localhost or `.192`
+  certificates are explicitly insufficient.
+
 ## 0.171.0 - 2026-08-18
 
 - Add the inactive daemon-owned Synoptikon projection prerequisite: the fixed

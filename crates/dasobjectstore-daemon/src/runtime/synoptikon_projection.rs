@@ -232,6 +232,20 @@ pub fn verify_projection_settlement(
     Ok(record)
 }
 
+pub fn projection_authority_record(
+    path: impl AsRef<Path>,
+    authority_id: &str,
+) -> Result<SynoptikonProjectionIntentRecord, DaemonServiceRuntimeError> {
+    let _guard = lock()?;
+    read(path.as_ref())?
+        .intents
+        .into_iter()
+        .find(|item| {
+            item.intent_id == authority_id || item.settlement_id.as_deref() == Some(authority_id)
+        })
+        .ok_or_else(|| invalid("projection authority is unavailable"))
+}
+
 fn projection_intent_by_settlement(
     path: impl AsRef<Path>,
     settlement_id: &str,

@@ -38,13 +38,28 @@ if [[ $# -eq 1 ]]; then
     grep -Fq "./usr/share/doc/dasobjectstore/contracts/synoptikon-projection/$name" <<<"$listing"
   done
   control="$(dpkg-deb -f "$deb")"
-  grep -Fq 'Version: 0.171.0' <<<"$control"
+  grep -Fq 'Version: 0.172.1' <<<"$control"
 fi
 
-grep -Fq 'SYNOPTIKON_PROJECTION_FIXED_PEER_USER: &str = "syno-plug-demo"' \
+grep -Fq 'SYNOPTIKON_PROJECTION_FIXED_PEER_USER: &str = "dasobjectstore"' \
   "$repo_root/crates/dasobjectstore-daemon/src/api/synoptikon_projection.rs"
 grep -Fq 'SYNOPTIKON_PROJECTION_MAX_BODY_BYTES: u64 = 1024 * 1024' \
   "$repo_root/crates/dasobjectstore-daemon/src/api/synoptikon_projection.rs"
+for route in intent bytes readback; do
+  grep -Fq "/v1/synoptikon-projection/$route" \
+    "$repo_root/crates/dasobjectstore-gui-api/src/s3_gateway.rs"
+done
+grep -Fq '"synoptikon_projection_v1"' \
+  "$repo_root/crates/dasobjectstore-gui-api/src/s3_gateway.rs"
+grep -Fq 'ReadOnlyPaths=-/etc/dasobjectstore/synoptikon-projection-credential.json' \
+  "$repo_root/packaging/linux/systemd/dasobjectstore-s3-gateway.service"
+grep -Fq 'exact `192.168.0.193` IP SAN' "$repo_root/CHANGELOG.md"
+grep -Fq 'localhost or `.192`' "$repo_root/CHANGELOG.md"
+if find "$repo_root/packaging" -type f -name 'synoptikon-projection-credential.json' -print \
+  | grep -q .; then
+  printf 'projection service secret must not be package-owned\n' >&2
+  exit 1
+fi
 grep -Fq '.join("projection-authority")' \
   "$repo_root/crates/dasobjectstore-daemon/src/runtime/synoptikon_projection.rs"
 grep -Fq 'd /var/lib/dasobjectstore/projection-authority 0700 dasobjectstore dasobjectstore -' \

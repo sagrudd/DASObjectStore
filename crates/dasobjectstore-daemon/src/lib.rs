@@ -9,6 +9,8 @@ pub mod development_self_signing;
 pub(crate) mod ergasterion_proof_verifier;
 pub mod runtime;
 pub mod server;
+#[cfg(feature = "test-support")]
+mod test_support;
 
 pub use api::DaemonIngestHddTransferPhase;
 pub use api::RemoteEasyconnectUploadCompletion;
@@ -215,6 +217,8 @@ pub use server::{
     SystemDaemonClock, UnixSocketAdmissionPolicy, UnixSocketDaemonServer,
     UnixSocketDaemonServerError,
 };
+#[cfg(feature = "test-support")]
+pub use test_support::{SynoptikonProjectionTestFixture, SynoptikonProjectionTestService};
 
 /// Returns the daemon crate version.
 pub fn version() -> &'static str {

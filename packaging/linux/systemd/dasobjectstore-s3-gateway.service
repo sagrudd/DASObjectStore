@@ -29,6 +29,7 @@ PrivateTmp=true
 ProtectHome=read-only
 ProtectSystem=strict
 ReadOnlyPaths=/opt/dasobjectstore/tls
+ReadOnlyPaths=-/etc/dasobjectstore/synoptikon-projection-credential.json
 ReadWritePaths=/run/dasobjectstore /var/lib/dasobjectstore /var/log/dasobjectstore
 
 # No install stanza: starting this listener is an explicit, manual

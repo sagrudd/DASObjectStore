@@ -113,10 +113,27 @@ pub(crate) async fn stream_profile_s3_put(
     request: ProviderStreamUploadOpenRequest,
     body: Body,
 ) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    stream_profile_s3_put_to_socket(
+        request,
+        body,
+        DaemonRuntimeConfig::default_packaged().socket_path,
+    )
+    .await
+}
+
+pub(crate) async fn stream_profile_s3_put_to_socket(
+    request: ProviderStreamUploadOpenRequest,
+    body: Body,
+    socket_path: std::path::PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
     let (sender, receiver) = mpsc::channel(UPLOAD_CHANNEL_CAPACITY);
     let (admitted_sender, admitted_receiver) = oneshot::channel();
-    let mut upload_task =
-        tokio::spawn(upload_to_daemon(request.clone(), admitted_sender, receiver));
+    let mut upload_task = tokio::spawn(upload_to_daemon(
+        request.clone(),
+        admitted_sender,
+        receiver,
+        socket_path,
+    ));
     tokio::select! {
         admitted = admitted_receiver => {
             if admitted.is_err() {
@@ -246,9 +263,9 @@ async fn upload_to_daemon(
     request: ProviderStreamUploadOpenRequest,
     admitted_sender: oneshot::Sender<()>,
     mut receiver: mpsc::Receiver<Result<(ProviderStreamChunkHeader, Vec<u8>), String>>,
+    socket_path: std::path::PathBuf,
 ) -> Result<DaemonApiResponse, crate::daemon_bridge::DaemonBridgeError> {
     let bridge = crate::daemon_bridge::DaemonBridge::shared_packaged();
-    let socket_path = DaemonRuntimeConfig::default_packaged().socket_path;
     bridge
         .call_message_with_deadline(UPLOAD_DAEMON_DEADLINE, move || {
             UnixSocketDaemonTransport::new(socket_path)
@@ -391,7 +408,7 @@ mod tests {
     fn actor() -> AuthenticatedGuiActor {
         AuthenticatedGuiActor {
             subject_id: "tester".to_string(),
-            authority: AuthenticatedActorAuthority::LocalStandalone,
+            authority: AuthenticatedActorAuthority::MonasStandalone,
             roles: Vec::new(),
             expires_at_unix_seconds: None,
             correlation_id: None,

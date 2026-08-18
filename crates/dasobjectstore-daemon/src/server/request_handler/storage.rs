@@ -37,6 +37,9 @@ where
         DaemonApiRequest::SettleSynoptikonProjection(request) => Ok(
             storage_synoptikon_projection::settle(handler, request, actor),
         ),
+        DaemonApiRequest::LookupSynoptikonProjection(request) => Ok(
+            storage_synoptikon_projection::lookup(handler, request, actor),
+        ),
         DaemonApiRequest::JenkinsDossierEvidenceSettlement(request) => {
             Ok(storage_jenkins_dossier::settle(handler, request, actor))
         }
