@@ -71,6 +71,10 @@ fn projection_replica_counts_are_coherent(
         && replica_count >= usize::from(required_copy_count)
 }
 
+fn projection_hdd_checksum_matches(stored: Option<&str>, expected_sha256: &str) -> bool {
+    stored == Some(expected_sha256)
+}
+
 fn exact_projection_ingress_receipt(
     connection: &Connection,
     intent_id: &str,
@@ -449,7 +453,7 @@ where
             if !placement_ids.insert(placement_id.clone())
                 || !disk_ids.insert(disk_id.clone())
                 || verified_at.is_none()
-                || checksum.as_deref() != Some(expected_provider_sha256.as_str())
+                || !projection_hdd_checksum_matches(checksum.as_deref(), &request.source_sha256)
                 || !hdd_target_has_capacity(
                     &self.hdd_root_path.join(&disk_id),
                     request.source_size_bytes,
@@ -1793,6 +1797,17 @@ mod tests {
             5,
             sha,
         ));
+    }
+
+    #[test]
+    fn synoptikon_hdd_evidence_uses_the_raw_destage_digest() {
+        let digest = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(projection_hdd_checksum_matches(Some(digest), digest));
+        assert!(!projection_hdd_checksum_matches(
+            Some(&format!("sha256:{digest}")),
+            digest,
+        ));
+        assert!(!projection_hdd_checksum_matches(None, digest));
     }
 
     #[test]

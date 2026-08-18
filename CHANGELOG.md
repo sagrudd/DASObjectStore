@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.172.1 - 2026-08-18
+
+- Correct Synoptikon projection settlement evidence to compare verified HDD
+  placement metadata using the raw SHA-256 representation written by the
+  durable destage path. The catalogue binding remains independently bound to
+  its canonical `sha256:`-prefixed provider checksum.
+
 ## 0.172.0 - 2026-08-18
 
 - Add the fixed, parameter-free Synoptikon projection intent, bounded-byte

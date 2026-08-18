@@ -38,7 +38,7 @@ if [[ $# -eq 1 ]]; then
     grep -Fq "./usr/share/doc/dasobjectstore/contracts/synoptikon-projection/$name" <<<"$listing"
   done
   control="$(dpkg-deb -f "$deb")"
-  grep -Fq 'Version: 0.172.0' <<<"$control"
+  grep -Fq 'Version: 0.172.1' <<<"$control"
 fi
 
 grep -Fq 'SYNOPTIKON_PROJECTION_FIXED_PEER_USER: &str = "dasobjectstore"' \

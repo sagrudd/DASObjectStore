@@ -4,7 +4,9 @@
 //! cannot contain it. The process must run as the real `dasobjectstore` user so
 //! the production Unix server derives the peer through unchanged SO_PEERCRED.
 
-use dasobjectstore_daemon::{SynoptikonProjectionTestFixture, UnixSocketDaemonServer};
+use dasobjectstore_daemon::{
+    runtime::DurableDestageOutcome, SynoptikonProjectionTestFixture, UnixSocketDaemonServer,
+};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::thread;
@@ -45,6 +47,7 @@ fn run() -> Result<(), String> {
         thread::sleep(Duration::from_millis(500));
         loop {
             match worker.settle_one_hdd_placement() {
+                Ok(DurableDestageOutcome::Settled { .. }) => break,
                 Ok(_) => {}
                 Err(error) => eprintln!("fixture destage deferred: {error}"),
             }
