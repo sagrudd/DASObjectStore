@@ -38,7 +38,23 @@ if [[ $# -eq 1 ]]; then
     grep -Fq "./usr/share/doc/dasobjectstore/contracts/synoptikon-projection/$name" <<<"$listing"
   done
   control="$(dpkg-deb -f "$deb")"
-  grep -Fq 'Version: 0.170.0' <<<"$control"
+  grep -Fq 'Version: 0.171.0' <<<"$control"
+fi
+
+grep -Fq 'SYNOPTIKON_PROJECTION_FIXED_PEER_USER: &str = "syno-plug-demo"' \
+  "$repo_root/crates/dasobjectstore-daemon/src/api/synoptikon_projection.rs"
+grep -Fq 'SYNOPTIKON_PROJECTION_MAX_BODY_BYTES: u64 = 1024 * 1024' \
+  "$repo_root/crates/dasobjectstore-daemon/src/api/synoptikon_projection.rs"
+grep -Fq '.join("projection-authority")' \
+  "$repo_root/crates/dasobjectstore-daemon/src/runtime/synoptikon_projection.rs"
+grep -Fq 'd /var/lib/dasobjectstore/projection-authority 0700 dasobjectstore dasobjectstore -' \
+  "$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
+grep -Fq 'ensure_owned_dir /var/lib/dasobjectstore/projection-authority 0700' \
+  "$repo_root/packaging/debian/postinst"
+if find "$repo_root/packaging/linux/systemd" -type f -iname '*synoptikon*' -print \
+  | grep -q .; then
+  printf 'synoptikon projection contract unexpectedly activates a unit\n' >&2
+  exit 1
 fi
 
 printf 'synoptikon projection package contract passed\n'

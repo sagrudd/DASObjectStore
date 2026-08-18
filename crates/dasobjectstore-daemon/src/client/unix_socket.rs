@@ -573,6 +573,7 @@ mod tests {
             delegated_actor: None,
             verified_subject: None,
             application_capability: None,
+            synoptikon_projection: None,
             range: None,
             condition: Default::default(),
             chunk_size_bytes: 1024,
@@ -651,6 +652,7 @@ mod tests {
                     .to_string(),
             chunk_size_bytes: 1024,
             retained_dossier: None,
+            synoptikon_projection: None,
         };
         let client = UnixSocketDaemonTransport::new(&socket_path);
         let mut next = Some((
@@ -717,6 +719,7 @@ mod tests {
                     .to_string(),
             chunk_size_bytes: 1024,
             retained_dossier: None,
+            synoptikon_projection: None,
         };
         let mut admitted = false;
         let mut body_requested = false;

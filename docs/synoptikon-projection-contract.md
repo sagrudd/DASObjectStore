@@ -1,6 +1,6 @@
 # Synoptikon demonstration projection contract
 
-Status: owner-side typed adapter foundation; inactive and not a live projection
+Status: owner-side local-daemon transport prerequisite; inactive and not a live projection
 
 `dasobjectstore.synoptikon_projection_request.v1` and its readiness and
 settlement records replace the rejected direct `/srv/dasobjectstore` bind.
@@ -11,11 +11,21 @@ or identity.
 
 The deployment slice is deliberately fixed from producer `syno_plug_demo` on
 `nuc-192-168-0-193` to consumer `oikodome` on `gb10-192-168-0-48`, using the
-reviewed TLS endpoint `https://192.168.0.193:3900`. A live adapter must use the
-existing scoped application identity, token, provider transfer, upload
-completion, catalogue snapshot/group-status, and provider read boundaries.
-This module does not provision credentials, start port 3900, or activate a
-service.
+reviewed TLS endpoint `https://192.168.0.193:3900`. The daemon now exposes a
+fixed-peer Unix-socket prerequisite: prepare derives the store, object,
+version, generation, nonce, and expiry; provider upload accepts at most 1 MiB
+of exact digest-bound bytes; settlement derives live catalogue and verified
+HDD evidence; and provider readback requires the opaque terminal settlement.
+The ledger is retained under the descriptor-protected
+`projection-authority` directory and advances its owner sequence durably before
+readiness publication. Exact prepare and terminal settlement retry return the
+same records after restart.
+
+This prerequisite is not the cross-host product transport. It does not add the
+parameter-free port-3900 intent/bytes/readback routes, provision or expose a
+projection-purpose credential, start port 3900, add an enabled unit, mount a
+Synoptikon route, or make upload/download/jobs available. Those remain a
+separately reviewed gateway and consumer integration gate.
 
 Admission accepts readiness only through an opaque proof created after a
 DAS-owned HMAC authenticates the canonical readiness record. The HMAC key is
@@ -46,12 +56,12 @@ logical key, size, and SHA-256. Requests and readiness records are bounded by a
 300-second lifetime, a 60-second observation age, a nonce, and a positive
 owner-issued sequence. The terminal settlement retains those bindings and the
 authenticated readiness observation time, and returns byte-identically on exact
-replay; changed replay is denied. This unmounted typed foundation does not claim
-to enforce sequence monotonicity: a future DAS daemon adapter must durably
-advance that sequence before it can expose an operational transport.
+replay; changed replay is denied. The local daemon ledger durably reserves each
+monotonic authority sequence before readiness can be published; a failed
+readiness observation consumes a sequence rather than allowing reuse.
 
 The returned `hdd_settled` record is path-free and digest-binds the canonical
 request and readiness records. Exact replay returns the same record; changed
 time, generation, source, object identity, or readiness conflicts. The fixture
-is a contract gate only and makes no claim that the NUC endpoint, Garage,
-Oikodome, Synoptikon, or the demonstration is running.
+and local-daemon tests make no claim that the NUC endpoint, Garage, Oikodome,
+Synoptikon, or the demonstration is running.

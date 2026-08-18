@@ -13,11 +13,203 @@ use dasobjectstore_metadata::{
     commit_verified_ssd_and_enqueue_with_capacity_claims, read_destage, DestageState,
     VerifiedSsdCommitRequest,
 };
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::io::{self, Read, Seek, SeekFrom};
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::time::{Duration, Instant};
 
 const AFTER_HDD_ACK_DEADLINE: Duration = Duration::from_secs(300);
 const AFTER_HDD_ACK_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+fn projection_runtime_error(message: impl Into<String>) -> DaemonServiceRuntimeError {
+    DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: format!("Synoptikon projection denied: {}", message.into()),
+    }
+}
+
+fn canonical_digest(value: &impl Serialize) -> Result<String, DaemonServiceRuntimeError> {
+    let bytes = serde_jcs::to_vec(value)
+        .map_err(|error| projection_runtime_error(format!("canonical encode failed: {error}")))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+#[cfg(unix)]
+fn hdd_target_has_capacity(path: &std::path::Path, bytes: u64) -> bool {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return false;
+    }
+    let stats = unsafe { stats.assume_init() };
+    (stats.f_bavail as u128).saturating_mul(stats.f_frsize as u128) >= bytes as u128
+        && stats.f_bavail != 0
+}
+
+#[cfg(not(unix))]
+fn hdd_target_has_capacity(_: &std::path::Path, _: u64) -> bool {
+    false
+}
+
+fn projection_replica_counts_are_coherent(
+    replica_count: usize,
+    unique_placement_count: usize,
+    unique_disk_count: usize,
+    required_copy_count: u8,
+    verified_copy_count: u8,
+) -> bool {
+    replica_count != 0
+        && replica_count == unique_placement_count
+        && replica_count == unique_disk_count
+        && replica_count == usize::from(verified_copy_count)
+        && replica_count >= usize::from(required_copy_count)
+}
+
+fn exact_projection_ingress_receipt(
+    connection: &Connection,
+    intent_id: &str,
+    store_id: &str,
+    object_id: &str,
+    size_bytes: u64,
+    sha256: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    let expected_upload_id = format!("ingest-direct-s3-{intent_id}");
+    connection
+        .query_row(
+            "SELECT ingest_job_id FROM ingest_jobs WHERE ingest_job_id=?1 AND store_id=?2 AND object_id=?3 AND state='ssd_accepted' AND expected_size_bytes=?4 AND received_bytes=?4 AND content_hash=?5 AND content_hash_algorithm='sha256'",
+            rusqlite::params![
+                expected_upload_id,
+                store_id,
+                object_id,
+                size_bytes,
+                sha256,
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+}
+
+fn projection_existing_bytes_match(
+    upload_admitted: bool,
+    existing_size: u64,
+    existing_sha256: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> bool {
+    upload_admitted
+        && existing_size == expected_size
+        && existing_sha256.eq_ignore_ascii_case(expected_sha256)
+}
+
+fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
+    use dasobjectstore_core::{
+        SYNOPTIKON_PROJECTION_ENDPOINT, SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH,
+        SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH,
+    };
+    let expected = read_protected_projection_file(
+        std::path::Path::new(SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH),
+        65,
+    )?;
+    let expected = std::str::from_utf8(&expected)
+        .map_err(|_| projection_runtime_error("TLS expectation is not UTF-8"))?
+        .trim();
+    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(projection_runtime_error("TLS expectation is invalid"));
+    }
+    let certificate = read_protected_projection_file(
+        std::path::Path::new(SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH),
+        128 * 1024,
+    )?;
+    let certificate_sha256 = dasobjectstore_core::synoptikon_tls_leaf_der_sha256(&certificate)
+        .map_err(|error| projection_runtime_error(format!("TLS leaf invalid: {error}")))?;
+    if certificate_sha256 != expected {
+        return Err(projection_runtime_error(
+            "TLS certificate differs from protected expectation",
+        ));
+    }
+    let certificate = reqwest::Certificate::from_pem(&certificate)
+        .map_err(|error| projection_runtime_error(format!("TLS certificate invalid: {error}")))?;
+    let client = reqwest::blocking::Client::builder()
+        .add_root_certificate(certificate)
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| projection_runtime_error(format!("TLS probe unavailable: {error}")))?;
+    let response = client
+        .get(format!(
+            "{SYNOPTIKON_PROJECTION_ENDPOINT}/.well-known/dasobjectstore/appliance-ca.pem"
+        ))
+        .send()
+        .map_err(|error| projection_runtime_error(format!("TLS endpoint unavailable: {error}")))?;
+    if !response.status().is_success()
+        || response
+            .headers()
+            .get("x-dasobjectstore-certificate-sha256")
+            .and_then(|value| value.to_str().ok())
+            != Some(expected)
+    {
+        return Err(projection_runtime_error(
+            "TLS endpoint identity was not proven",
+        ));
+    }
+    Ok(expected.to_ascii_lowercase())
+}
+
+#[cfg(unix)]
+fn read_protected_projection_file(
+    path: &std::path::Path,
+    max_len: u64,
+) -> Result<Vec<u8>, DaemonServiceRuntimeError> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| {
+            projection_runtime_error(format!("protected file unavailable: {error}"))
+        })?;
+    let metadata = file.metadata().map_err(|error| {
+        projection_runtime_error(format!("protected metadata unavailable: {error}"))
+    })?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.gid() != unsafe { libc::getegid() }
+        || metadata.mode() & 0o7777 != 0o600
+        || metadata.len() == 0
+        || metadata.len() > max_len
+    {
+        return Err(projection_runtime_error(
+            "protected file metadata is invalid",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(max_len + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            projection_runtime_error(format!("protected file read failed: {error}"))
+        })?;
+    if bytes.len() as u64 != metadata.len() {
+        return Err(projection_runtime_error("protected file length changed"));
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(unix))]
+fn read_protected_projection_file(
+    _: &std::path::Path,
+    _: u64,
+) -> Result<Vec<u8>, DaemonServiceRuntimeError> {
+    Err(projection_runtime_error(
+        "protected descriptors require Unix",
+    ))
+}
 
 #[derive(Clone)]
 pub(super) struct MultipartCompletionWorkerContext {
@@ -176,6 +368,215 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    pub(super) fn derive_synoptikon_projection_settlement(
+        &self,
+        request: &dasobjectstore_core::SynoptikonProjectionRequestV1,
+        authority_sequence: u64,
+        now: u64,
+    ) -> Result<dasobjectstore_core::SynoptikonProjectionSettlementV1, DaemonServiceRuntimeError>
+    {
+        use dasobjectstore_core::{
+            authenticate_das_owned_synoptikon_projection_readiness, settle_synoptikon_projection,
+            verify_das_owned_synoptikon_projection_readiness, DasCatalogueMappingEvidenceV1,
+            DasCatalogueObjectEvidenceV1, DasHddReplicaEvidenceV1,
+            DasProviderGroupStatusEvidenceV1, DasUploadCompletionEvidenceV1,
+            SynoptikonProjectionReadinessV1, SYNOPTIKON_PROJECTION_ENDPOINT,
+            SYNOPTIKON_PROJECTION_READINESS_V1_SCHEMA,
+        };
+        let store_id = StoreId::new(request.object_store_id.clone())
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        let binding = dasobjectstore_metadata::read_s3_object_binding(
+            &self.live_sqlite_path,
+            &store_id,
+            &request.object_key,
+            request.object_version,
+        )
+        .map_err(|error| projection_runtime_error(error.to_string()))?
+        .ok_or_else(|| projection_runtime_error("catalogue binding is absent"))?;
+        let expected_provider_sha256 = format!("sha256:{}", request.source_sha256);
+        if binding.object_id.as_str() != request.object_id
+            || binding.size_bytes != request.source_size_bytes
+            || !binding
+                .checksum
+                .eq_ignore_ascii_case(&expected_provider_sha256)
+        {
+            return Err(projection_runtime_error(
+                "catalogue binding differs from intent",
+            ));
+        }
+        let destage = read_destage(&self.live_sqlite_path, &binding.object_id)
+            .map_err(|error| projection_runtime_error(error.to_string()))?
+            .ok_or_else(|| projection_runtime_error("destage authority is absent"))?;
+        if destage.state != DestageState::HddCopyVerified
+            || destage.verified_copy_count < destage.required_copy_count
+        {
+            return Err(projection_runtime_error("HDD settlement is incomplete"));
+        }
+        let connection = Connection::open_with_flags(
+            &self.live_sqlite_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| projection_runtime_error(error.to_string()))?;
+        let upload_id = exact_projection_ingress_receipt(
+            &connection,
+            &request.projection_id,
+            store_id.as_str(),
+            binding.object_id.as_str(),
+            request.source_size_bytes,
+            &request.source_sha256,
+        )
+        .map_err(|error| projection_runtime_error(error.to_string()))?
+        .ok_or_else(|| projection_runtime_error("SSD ingress receipt is absent"))?;
+        let mut statement = connection
+            .prepare("SELECT placement_id,disk_id,content_hash,verified_at_utc FROM placements WHERE object_id=?1 ORDER BY placement_id")
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        let rows = statement
+            .query_map([binding.object_id.as_str()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        let mut replicas = Vec::new();
+        let mut placement_ids = std::collections::BTreeSet::new();
+        let mut disk_ids = std::collections::BTreeSet::new();
+        for row in rows {
+            let (placement_id, disk_id, checksum, verified_at) =
+                row.map_err(|error| projection_runtime_error(error.to_string()))?;
+            if !placement_ids.insert(placement_id.clone())
+                || !disk_ids.insert(disk_id.clone())
+                || verified_at.is_none()
+                || checksum.as_deref() != Some(expected_provider_sha256.as_str())
+                || !hdd_target_has_capacity(
+                    &self.hdd_root_path.join(&disk_id),
+                    request.source_size_bytes,
+                )
+            {
+                return Err(projection_runtime_error(
+                    "HDD placement is unhealthy or full",
+                ));
+            }
+            replicas.push(DasHddReplicaEvidenceV1 {
+                replica_id: placement_id.clone(),
+                placement_sha256: canonical_digest(&(
+                    placement_id,
+                    disk_id,
+                    checksum,
+                    verified_at,
+                ))?,
+                verified_size_bytes: request.source_size_bytes,
+                verified_sha256: request.source_sha256.clone(),
+                disposition: "hdd_verified".to_owned(),
+            });
+        }
+        if !projection_replica_counts_are_coherent(
+            replicas.len(),
+            placement_ids.len(),
+            disk_ids.len(),
+            destage.required_copy_count,
+            destage.verified_copy_count,
+        ) {
+            return Err(projection_runtime_error("verified HDD placement is absent"));
+        }
+        let ambiguous: u64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM logical_identity_reviews WHERE state='needs_review'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        if ambiguous != 0 {
+            return Err(projection_runtime_error(format!(
+                "catalogue has {ambiguous} ambiguous unmapped objects"
+            )));
+        }
+        let snapshot_sha256 = canonical_digest(&(
+            &request.object_store_id,
+            &request.object_id,
+            request.object_version,
+            &request.object_key,
+            request.source_size_bytes,
+            &request.source_sha256,
+            &replicas,
+            ambiguous,
+        ))?;
+        let tls_sha256 = probe_fixed_synoptikon_tls()?;
+        let upload_receipt_sha256 = canonical_digest(&(
+            upload_id.as_str(),
+            binding.object_id.as_str(),
+            request.source_size_bytes,
+            request.source_sha256.as_str(),
+        ))?;
+        let provider_status_sha256 = canonical_digest(&(
+            binding.object_id.as_str(),
+            destage.required_copy_count,
+            destage.verified_copy_count,
+            "hdd_settled",
+        ))?;
+        let settlement_reference = canonical_digest(&(
+            binding.object_id.as_str(),
+            &replicas,
+            provider_status_sha256.as_str(),
+        ))?;
+        let readiness = SynoptikonProjectionReadinessV1 {
+            schema_version: SYNOPTIKON_PROJECTION_READINESS_V1_SCHEMA.to_owned(),
+            projection_id: request.projection_id.clone(),
+            generation: request.generation,
+            source_sha256: request.source_sha256.clone(),
+            nonce: request.nonce.clone(),
+            authority_sequence,
+            endpoint_url: SYNOPTIKON_PROJECTION_ENDPOINT.to_owned(),
+            expected_tls_peer_certificate_sha256: tls_sha256.clone(),
+            observed_tls_peer_certificate_sha256: tls_sha256,
+            daemon_ready: true,
+            s3_endpoint_ready: true,
+            catalogue_current: true,
+            upload_completion: DasUploadCompletionEvidenceV1 {
+                receipt_id: upload_id.clone(),
+                receipt_sha256: upload_receipt_sha256,
+                upload_id,
+                source_size_bytes: request.source_size_bytes,
+                source_sha256: request.source_sha256.clone(),
+                disposition: "committed".to_owned(),
+            },
+            catalogue_object: DasCatalogueObjectEvidenceV1 {
+                snapshot_sha256: snapshot_sha256.clone(),
+                object_store_id: request.object_store_id.clone(),
+                object_id: request.object_id.clone(),
+                object_version: request.object_version,
+                object_key: request.object_key.clone(),
+                source_size_bytes: request.source_size_bytes,
+                source_sha256: request.source_sha256.clone(),
+            },
+            provider_group_status: DasProviderGroupStatusEvidenceV1 {
+                status_sha256: provider_status_sha256,
+                object_store_id: request.object_store_id.clone(),
+                object_id: request.object_id.clone(),
+                object_version: request.object_version,
+                settled: true,
+            },
+            hdd_replicas: replicas,
+            hdd_settlement_reference_sha256: settlement_reference,
+            catalogue_mapping: DasCatalogueMappingEvidenceV1 {
+                snapshot_sha256,
+                ambiguous_unmapped_objects: 0,
+                observed_at_unix_seconds: now,
+            },
+            mapping_exclusion: None,
+            observed_at_unix_seconds: now,
+            expires_at_unix_seconds: now.saturating_add(60).min(request.expires_at_unix_seconds),
+        };
+        let authenticated = authenticate_das_owned_synoptikon_projection_readiness(readiness)
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        let verified = verify_das_owned_synoptikon_projection_readiness(&authenticated)
+            .map_err(|error| projection_runtime_error(error.to_string()))?;
+        settle_synoptikon_projection(request, &verified, now, None)
+            .map(|outcome| outcome.settlement)
+            .map_err(|error| projection_runtime_error(error.to_string()))
+    }
     pub(super) fn publish_profile_s3_catalogue(
         &self,
         store_id: &StoreId,
@@ -429,6 +830,8 @@ where
         let mut request = request;
         let authorized = match if request.retained_dossier.is_some() {
             self.authorize_expedition_retained_dossier_write(actor, &request)
+        } else if request.synoptikon_projection.is_some() {
+            self.authorize_synoptikon_projection_write(actor, &request)
         } else {
             self.authorize_endpoint_write_scope(actor, &request.store_id)
         } {
@@ -442,6 +845,22 @@ where
         };
         request.object = authorized.qualify_object(&request.object);
         let store_id = authorized.store_id.clone();
+        let projection_upload_admitted = if request.synoptikon_projection.is_some() {
+            match crate::runtime::projection_intent(
+                &self.synoptikon_projection_ledger_path,
+                &request.upload_id,
+            ) {
+                Ok(intent) => intent.upload_admitted,
+                Err(error) => {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_intent_unavailable",
+                        error.to_string(),
+                    )))
+                }
+            }
+        } else {
+            false
+        };
         let binding =
             match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
                 Ok(Some(binding)) => binding,
@@ -482,6 +901,7 @@ where
         ) {
             Ok(Some(existing))
                 if request.retained_dossier.is_none()
+                    && request.synoptikon_projection.is_none()
                     && existing.size_bytes == request.expected_size_bytes
                     && existing
                         .checksum
@@ -490,6 +910,60 @@ where
                 return emit_response(DaemonApiResponse::ProviderStreamUpload(
                     ProviderStreamUploadResponse {
                         schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
+                        upload_id: request.upload_id,
+                        store_id,
+                        object: request.object,
+                        size_bytes: existing.size_bytes,
+                        sha256: existing.checksum,
+                        retained_dossier: None,
+                    },
+                ));
+            }
+            Ok(Some(existing)) if request.synoptikon_projection.is_some() => {
+                let receipt_matches = Connection::open_with_flags(
+                    &self.live_sqlite_path,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+                .ok()
+                .and_then(|connection| {
+                    exact_projection_ingress_receipt(
+                        &connection,
+                        &request.upload_id,
+                        store_id.as_str(),
+                        existing.object_id.as_str(),
+                        request.expected_size_bytes,
+                        request.expected_sha256.trim_start_matches("sha256:"),
+                    )
+                    .ok()
+                    .flatten()
+                })
+                .is_some();
+                if !receipt_matches
+                    || !projection_existing_bytes_match(
+                        projection_upload_admitted,
+                        existing.size_bytes,
+                        &existing.checksum,
+                        request.expected_size_bytes,
+                        &request.expected_sha256,
+                    )
+                {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_fresh_ingress_required",
+                        "existing catalogue object is not bound to this projection ingress",
+                    )));
+                }
+                if let Err(error) = crate::runtime::mark_projection_uploaded(
+                    &self.synoptikon_projection_ledger_path,
+                    &request.upload_id,
+                ) {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_receipt_commit_failed",
+                        error.to_string(),
+                    )));
+                }
+                return emit_response(DaemonApiResponse::ProviderStreamUpload(
+                    ProviderStreamUploadResponse {
+                        schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
                         upload_id: request.upload_id,
                         store_id,
                         object: request.object,
@@ -538,6 +1012,20 @@ where
                         .checksum
                         .eq_ignore_ascii_case(&request.expected_sha256) =>
             {
+                if request.synoptikon_projection.is_some()
+                    && !projection_existing_bytes_match(
+                        projection_upload_admitted,
+                        existing.size_bytes,
+                        &existing.checksum,
+                        request.expected_size_bytes,
+                        &request.expected_sha256,
+                    )
+                {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_fresh_ingress_required",
+                        "existing backend bytes lack this projection admission",
+                    )));
+                }
                 let record = match backend.records().and_then(|records| {
                     records
                         .into_iter()
@@ -580,6 +1068,19 @@ where
                     Ok(response) => response,
                     Err(response) => return emit_response(response),
                 };
+                if request.synoptikon_projection.is_some() {
+                    if let Err(error) = crate::runtime::mark_projection_uploaded(
+                        &self.synoptikon_projection_ledger_path,
+                        &request.upload_id,
+                    ) {
+                        return emit_response(DaemonApiResponse::Error(
+                            DaemonApiErrorResponse::new(
+                                "projection_receipt_commit_failed",
+                                error.to_string(),
+                            ),
+                        ));
+                    }
+                }
                 return emit_response(DaemonApiResponse::ProviderStreamUpload(response));
             }
             Ok(_) => {
@@ -602,6 +1103,17 @@ where
                 "provider stream upload requires daemon capacity admission",
             )));
         };
+        if request.synoptikon_projection.is_some() && !projection_upload_admitted {
+            if let Err(error) = crate::runtime::mark_projection_upload_admitted(
+                &self.synoptikon_projection_ledger_path,
+                &request.upload_id,
+            ) {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "projection_admission_commit_failed",
+                    error.to_string(),
+                )));
+            }
+        }
         let mut source = ProviderUploadReader::new(&request, read_frame);
         let record = crate::runtime::put_profile_object_with_capacity_scope(
             provider.as_ref(),
@@ -633,6 +1145,17 @@ where
                 "provider_stream_destage_publication_failed",
                 error,
             )));
+        }
+        if request.synoptikon_projection.is_some() {
+            if let Err(error) = crate::runtime::mark_projection_uploaded(
+                &self.synoptikon_projection_ledger_path,
+                &request.upload_id,
+            ) {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "projection_receipt_commit_failed",
+                    error.to_string(),
+                )));
+            }
         }
         let response = match retained_dossier_upload_response(
             &request,
@@ -1073,6 +1596,7 @@ impl Read for ProviderUploadReader<'_> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::os::unix::fs::{symlink, PermissionsExt};
 
     fn request(expected_size_bytes: u64, expected_sha256: &str) -> ProviderStreamUploadOpenRequest {
         ProviderStreamUploadOpenRequest {
@@ -1088,6 +1612,7 @@ mod tests {
             expected_sha256: expected_sha256.to_string(),
             chunk_size_bytes: 4,
             retained_dossier: None,
+            synoptikon_projection: None,
         }
     }
 
@@ -1133,6 +1658,141 @@ mod tests {
         let mut payload = Vec::new();
         reader.read_to_end(&mut payload).expect("verified payload");
         assert_eq!(payload, b"hello");
+    }
+
+    #[test]
+    fn synoptikon_projection_tls_file_rejects_symlink_hardlink_and_special_modes() {
+        let root = std::env::temp_dir().join(format!(
+            "das-projection-tls-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let certificate = root.join("peer.pem");
+        std::fs::write(&certificate, b"certificate").unwrap();
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            read_protected_projection_file(&certificate, 1024).unwrap(),
+            b"certificate"
+        );
+        let link = root.join("peer-hardlink.pem");
+        std::fs::hard_link(&certificate, &link).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::remove_file(link).unwrap();
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o4600)).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let target = root.join("target.pem");
+        std::fs::rename(&certificate, &target).unwrap();
+        symlink(&target, &certificate).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn synoptikon_projection_replica_count_requires_unique_disks_and_exact_verified_total() {
+        assert!(projection_replica_counts_are_coherent(2, 2, 2, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(2, 1, 2, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(2, 2, 1, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(1, 1, 1, 2, 1));
+        assert!(!projection_replica_counts_are_coherent(2, 2, 2, 1, 1));
+        assert!(!projection_replica_counts_are_coherent(0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn synoptikon_projection_requires_the_exact_ssd_ingress_receipt() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE ingest_jobs (
+                    ingest_job_id TEXT PRIMARY KEY NOT NULL,
+                    store_id TEXT NOT NULL,
+                    object_id TEXT,
+                    state TEXT NOT NULL,
+                    expected_size_bytes INTEGER,
+                    received_bytes INTEGER NOT NULL,
+                    content_hash TEXT,
+                    content_hash_algorithm TEXT
+                );",
+            )
+            .unwrap();
+        let insert = |job: &str, store: &str, object: &str, state: &str, size: u64, hash: &str| {
+            connection
+                .execute(
+                    "INSERT INTO ingest_jobs VALUES (?1,?2,?3,?4,?5,?5,?6,'sha256')",
+                    rusqlite::params![job, store, object, state, size, hash],
+                )
+                .unwrap();
+        };
+        insert(
+            "ingest-direct-s3-other-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            "ssd_accepted",
+            5,
+            &"ab".repeat(32),
+        );
+        assert_eq!(
+            exact_projection_ingress_receipt(
+                &connection,
+                "wanted-intent",
+                "synoptikon-demo",
+                "synoptikon-demo/demo.bin",
+                5,
+                &"ab".repeat(32),
+            )
+            .unwrap(),
+            None
+        );
+        insert(
+            "ingest-direct-s3-wanted-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            "ssd_accepted",
+            5,
+            &"ab".repeat(32),
+        );
+        assert_eq!(
+            exact_projection_ingress_receipt(
+                &connection,
+                "wanted-intent",
+                "synoptikon-demo",
+                "synoptikon-demo/demo.bin",
+                5,
+                &"ab".repeat(32),
+            )
+            .unwrap()
+            .as_deref(),
+            Some("ingest-direct-s3-wanted-intent")
+        );
+        assert!(exact_projection_ingress_receipt(
+            &connection,
+            "wanted-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            6,
+            &"ab".repeat(32),
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    #[test]
+    fn synoptikon_projection_crash_recovery_requires_prior_admission_and_exact_bytes() {
+        let sha = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(projection_existing_bytes_match(true, 5, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(false, 5, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(true, 6, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(
+            true,
+            5,
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            5,
+            sha,
+        ));
     }
 
     #[test]

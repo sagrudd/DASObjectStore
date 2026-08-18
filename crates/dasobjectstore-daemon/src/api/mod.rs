@@ -46,6 +46,7 @@ mod store_policy;
 mod store_repair;
 mod store_verify;
 mod stores;
+mod synoptikon_projection;
 mod workspace;
 
 pub use appliance_telemetry::{
@@ -259,11 +260,12 @@ pub use provider_stream::{
     ProviderStreamMultipartPartUploadOpenRequest, ProviderStreamMultipartPartUploadResponse,
     ProviderStreamOpenRequest, ProviderStreamRange, ProviderStreamUploadOpenRequest,
     ProviderStreamUploadReadyResponse, ProviderStreamUploadResponse, ProviderStreamValidationError,
-    ProviderStreamVerificationError, ProviderStreamVerifier,
-    EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY, EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA,
-    EXPEDITION_RETAINED_EVIDENCE_CAPABILITY, PROVIDER_STREAM_MAX_CHUNK_BYTES,
-    PROVIDER_STREAM_MAX_HEADER_BYTES, PROVIDER_STREAM_SCHEMA_VERSION,
-    PROVIDER_STREAM_SCHEMA_VERSION_V1,
+    ProviderStreamVerificationError, ProviderStreamVerifier, SynoptikonProjectionReadV1,
+    SynoptikonProjectionUploadV1, EXPEDITION_RETAINED_DOSSIER_PEER_IDENTITY,
+    EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA, EXPEDITION_RETAINED_EVIDENCE_CAPABILITY,
+    PROVIDER_STREAM_MAX_CHUNK_BYTES, PROVIDER_STREAM_MAX_HEADER_BYTES,
+    PROVIDER_STREAM_SCHEMA_VERSION, PROVIDER_STREAM_SCHEMA_VERSION_V1,
+    SYNOPTIKON_PROJECTION_READ_V1_SCHEMA, SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA,
 };
 pub use remote_easyconnect::{
     decide_remote_easyconnect_upload_admission, plan_remote_easyconnect_upload_handoff,
@@ -337,6 +339,13 @@ pub use store_repair::{
 };
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
+pub use synoptikon_projection::{
+    SynoptikonProjectionPrepareRequest, SynoptikonProjectionPrepareResponse,
+    SynoptikonProjectionSettleRequest, SynoptikonProjectionSettleResponse,
+    SYNOPTIKON_PROJECTION_FIXED_PEER_USER, SYNOPTIKON_PROJECTION_FIXED_STORE_ID,
+    SYNOPTIKON_PROJECTION_MAX_BODY_BYTES, SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
+};
 pub use workspace::{
     WorkspaceControlAction, WorkspaceControlRequest, WorkspaceControlResponse,
     WORKSPACE_CONTROL_SCHEMA_VERSION,
@@ -417,6 +426,8 @@ pub enum DaemonApiRequest {
     ObjectDownload(ObjectDownloadRequest),
     ObjectFolderDownload(ObjectFolderDownloadRequest),
     JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementRequest),
+    PrepareSynoptikonProjection(SynoptikonProjectionPrepareRequest),
+    SettleSynoptikonProjection(SynoptikonProjectionSettleRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     TestEndpointConnection(TestEndpointConnectionRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
@@ -504,6 +515,8 @@ impl DaemonApiRequest {
             Self::ObjectBrowser(_) => "object_browser",
             Self::RemoteObjectSnapshot(_) => "remote_object_snapshot",
             Self::RemoteObjectGroupStatus(_) => "remote_object_group_status",
+            Self::PrepareSynoptikonProjection(_) => "prepare_synoptikon_projection",
+            Self::SettleSynoptikonProjection(_) => "settle_synoptikon_projection",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
             Self::JenkinsDossierEvidenceSettlement(_) => "jenkins_dossier_evidence_settlement",
@@ -653,6 +666,37 @@ impl DaemonApiRequest {
                         message: error.to_string(),
                     })
             }
+            Self::PrepareSynoptikonProjection(request) => {
+                if request.schema_version == SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA
+                    && request.size_bytes > 0
+                    && request.size_bytes <= SYNOPTIKON_PROJECTION_MAX_BODY_BYTES
+                    && request.sha256.len() == 64
+                    && request
+                        .sha256
+                        .bytes()
+                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                    && !request.logical_name.is_empty()
+                    && request.logical_name.len() <= 200
+                    && request.logical_name.bytes().all(|byte| {
+                        byte.is_ascii_lowercase()
+                            || byte.is_ascii_digit()
+                            || matches!(byte, b'.' | b'_' | b'-')
+                    })
+                {
+                    Ok(())
+                } else {
+                    Err(DaemonRequestValidationError::InvalidPolicy {
+                        message: "invalid Synoptikon projection prepare request".to_owned(),
+                    })
+                }
+            }
+            Self::SettleSynoptikonProjection(request) => {
+                request
+                    .validate()
+                    .map_err(|message| DaemonRequestValidationError::InvalidPolicy {
+                        message: message.to_owned(),
+                    })
+            }
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
@@ -775,6 +819,8 @@ pub enum DaemonApiResponse {
     ObjectDownload(ObjectDownloadResponse),
     ObjectFolderDownload(ObjectFolderDownloadResponse),
     JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementResponse),
+    SynoptikonProjectionPrepared(SynoptikonProjectionPrepareResponse),
+    SynoptikonProjectionSettlement(SynoptikonProjectionSettleResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     TestEndpointConnection(TestEndpointConnectionResponse),
     CreateLocalGroup(CreateLocalGroupResponse),

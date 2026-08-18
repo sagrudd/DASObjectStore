@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.171.0 - 2026-08-18
+
+- Add the inactive daemon-owned Synoptikon projection prerequisite: the fixed
+  local service peer can prepare an owner-derived, path-free intent, upload
+  exact bounded bytes through the existing provider stream, settle only after
+  live catalogue and verified HDD evidence, and read back only the terminal
+  digest-bound object. The durable protected ledger makes prepare, settlement,
+  and restart replay idempotent and reserves every authority sequence before
+  readiness publication. No HTTP gateway, credential, unit activation, or
+  Synoptikon route is enabled by this release.
+
 ## 0.170.0 - 2026-08-18
 
 - Add the DAS-owned, path-free Synoptikon demonstration projection contract.

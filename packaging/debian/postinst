@@ -212,6 +212,7 @@ ensure_container_runtime_access
 install -d -o "$service_user" -g "$shared_monas_group" -m 0750 /run/dasobjectstore
 install -d -o "$service_user" -g "$shared_monas_group" -m 0750 /var/lib/dasobjectstore
 ensure_owned_dir /var/lib/dasobjectstore/object-service 0700
+ensure_owned_dir /var/lib/dasobjectstore/projection-authority 0700
 ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750
 ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750
 ensure_owned_dir /var/log/dasobjectstore 0750

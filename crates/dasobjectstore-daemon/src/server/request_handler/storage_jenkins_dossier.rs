@@ -31,6 +31,7 @@ where
         delegated_actor: None,
         verified_subject: Some(request.verified_subject.clone()),
         application_capability: None,
+        synoptikon_projection: None,
         range: None,
         condition: Default::default(),
         chunk_size_bytes: 64 * 1024,

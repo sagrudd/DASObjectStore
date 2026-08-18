@@ -25,6 +25,103 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    pub(super) fn authorize_synoptikon_projection_write(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &crate::api::ProviderStreamUploadOpenRequest,
+    ) -> Result<AuthorizedEndpointWrite, ObjectBrowserAccessFailure> {
+        let authority = request.synoptikon_projection.as_ref().ok_or(
+            ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "Synoptikon projection intent is missing".to_owned(),
+            },
+        )?;
+        let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        if actor.username.as_deref() != Some(crate::api::SYNOPTIKON_PROJECTION_FIXED_PEER_USER) {
+            return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
+                peer_actor: actor.display_name(),
+            });
+        }
+        let intent = crate::runtime::projection_intent(
+            &self.synoptikon_projection_ledger_path,
+            &authority.intent_id,
+        )
+        .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+            message: error.to_string(),
+        })?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(u64::MAX);
+        let expected_provider_sha256 = format!("sha256:{}", intent.projection.source_sha256);
+        if now >= intent.projection.expires_at_unix_seconds
+            || request.upload_id != intent.intent_id
+            || request.store_id.as_str() != intent.projection.object_store_id
+            || request.object.object_id != intent.projection.object_key
+            || request.object.version != intent.projection.object_version
+            || request.expected_size_bytes != intent.projection.source_size_bytes
+            || request.expected_sha256 != expected_provider_sha256
+        {
+            return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "upload differs from the durable Synoptikon intent".to_owned(),
+            });
+        }
+        let store_id = resolve_authorization_store_id(
+            &request.store_id,
+            &self.store_registry_path,
+            &self.subobject_registry_path,
+        )
+        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        if store_id != request.store_id {
+            return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "Synoptikon projection requires an exact ObjectStore".to_owned(),
+            });
+        }
+        Ok(AuthorizedEndpointWrite {
+            store_id,
+            subobject: None,
+            object_prefix: None,
+        })
+    }
+
+    pub(super) fn authorize_synoptikon_projection_read(
+        &self,
+        actor: Option<&DaemonLocalActor>,
+        request: &crate::api::ProviderStreamOpenRequest,
+    ) -> Result<StoreId, ObjectBrowserAccessFailure> {
+        let authority = request.synoptikon_projection.as_ref().ok_or(
+            ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "Synoptikon settlement is missing".to_owned(),
+            },
+        )?;
+        let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
+        if actor.username.as_deref() != Some(crate::api::SYNOPTIKON_PROJECTION_FIXED_PEER_USER) {
+            return Err(ObjectBrowserAccessFailure::DelegationNotAllowed {
+                peer_actor: actor.display_name(),
+            });
+        }
+        let intent = crate::runtime::verify_projection_settlement(
+            &self.synoptikon_projection_ledger_path,
+            &authority.settlement_id,
+        )
+        .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+            message: error.to_string(),
+        })?;
+        let expected_provider_sha256 = format!("sha256:{}", intent.projection.source_sha256);
+        if request.range.is_some()
+            || request.store_id.as_str() != intent.projection.object_store_id
+            || request.object.object_id != intent.projection.object_key
+            || request.object.version != intent.projection.object_version
+            || request.condition.if_match_sha256.as_deref()
+                != Some(expected_provider_sha256.as_str())
+            || request.condition.if_none_match_sha256.is_some()
+        {
+            return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
+                message: "readback differs from the terminal Synoptikon settlement".to_owned(),
+            });
+        }
+        Ok(request.store_id.clone())
+    }
+
     /// Authorize only the packaged Base Camp peer for the narrow retained
     /// dossier request. Serialized authority facts never substitute for the
     /// Unix peer credential supplied by the daemon transport.

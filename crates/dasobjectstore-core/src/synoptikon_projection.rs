@@ -35,6 +35,8 @@ pub const SYNOPTIKON_PROJECTION_OWNER_KEY_PATH: &str =
     "/var/lib/dasobjectstore/projection-authority/synoptikon-owner-hmac.key";
 pub const SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH: &str =
     "/etc/dasobjectstore/synoptikon-projection-peer.sha256";
+pub const SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH: &str =
+    "/etc/dasobjectstore/synoptikon-projection-peer.pem";
 pub const SYNOPTIKON_PROJECTION_MAX_LIFETIME_SECONDS: u64 = 300;
 pub const SYNOPTIKON_PROJECTION_MAX_READINESS_AGE_SECONDS: u64 = 60;
 pub const SYNOPTIKON_PROJECTION_MAX_HDD_REPLICAS: usize = 16;
@@ -177,6 +179,21 @@ pub fn verify_das_owned_synoptikon_projection_readiness(
     let owner_hmac_key = read_fixed_owner_key()?;
     let tls_expectation = read_fixed_tls_expectation()?;
     verify_readiness_with_owner_key(envelope, &owner_hmac_key, &tls_expectation)
+}
+
+/// Authenticate readiness assembled inside the DAS daemon with its fixed,
+/// descriptor-validated owner key. Callers cannot supply or select the key.
+pub fn authenticate_das_owned_synoptikon_projection_readiness(
+    readiness: SynoptikonProjectionReadinessV1,
+) -> Result<DasAuthenticatedProjectionReadinessV1, SynoptikonProjectionError> {
+    let owner_hmac_key = read_fixed_owner_key()?;
+    let bytes = serde_jcs::to_vec(&readiness)
+        .map_err(|_| SynoptikonProjectionError::OwnerAuthenticationDenied)?;
+    Ok(DasAuthenticatedProjectionReadinessV1 {
+        schema_version: DAS_AUTHENTICATED_PROJECTION_READINESS_V1_SCHEMA.to_owned(),
+        authentication_hmac_sha256: hmac_sha256(&owner_hmac_key, &bytes),
+        readiness,
+    })
 }
 
 fn verify_readiness_with_owner_key(
@@ -340,6 +357,9 @@ pub fn settle_synoptikon_projection(
 ) -> Result<SynoptikonProjectionSettlementOutcomeV1, SynoptikonProjectionError> {
     let readiness = &verified_readiness.readiness;
     validate_request(request)?;
+    if request.requested_at_unix_seconds > settled_at_unix_seconds {
+        return Err(SynoptikonProjectionError::InvalidRequest);
+    }
     validate_readiness(request, readiness, settled_at_unix_seconds)?;
     let request_sha256 = canonical_sha256(request)?;
     let readiness_sha256 = canonical_sha256(readiness)?;
@@ -437,6 +457,38 @@ fn validate_request(
         return Err(SynoptikonProjectionError::InvalidRequest);
     }
     Ok(())
+}
+
+/// Validate the canonical projection request at the daemon's trusted time.
+pub fn validate_synoptikon_projection_request(
+    request: &SynoptikonProjectionRequestV1,
+    now_unix_seconds: u64,
+) -> Result<(), SynoptikonProjectionError> {
+    validate_request(request)?;
+    if request.requested_at_unix_seconds > now_unix_seconds
+        || now_unix_seconds >= request.expires_at_unix_seconds
+    {
+        return Err(SynoptikonProjectionError::InvalidRequest);
+    }
+    Ok(())
+}
+
+/// Return the SHA-256 fingerprint of the single DER leaf certificate carried
+/// by a PEM document. A chain or non-certificate trailing data is rejected.
+pub fn synoptikon_tls_leaf_der_sha256(
+    pem_bytes: &[u8],
+) -> Result<String, SynoptikonProjectionError> {
+    let (remaining, pem) = x509_parser::pem::parse_x509_pem(pem_bytes)
+        .map_err(|_| SynoptikonProjectionError::TransportMismatch)?;
+    if !remaining.iter().all(u8::is_ascii_whitespace) || pem.label != "CERTIFICATE" {
+        return Err(SynoptikonProjectionError::TransportMismatch);
+    }
+    let (der_remaining, _) = x509_parser::parse_x509_certificate(&pem.contents)
+        .map_err(|_| SynoptikonProjectionError::TransportMismatch)?;
+    if !der_remaining.is_empty() {
+        return Err(SynoptikonProjectionError::TransportMismatch);
+    }
+    Ok(format!("{:x}", Sha256::digest(&pem.contents)))
 }
 
 fn validate_readiness(
@@ -557,6 +609,7 @@ fn validate_object_evidence(
         || !valid_sha256(&readiness.catalogue_mapping.snapshot_sha256)
         || readiness.catalogue_mapping.observed_at_unix_seconds
             != readiness.observed_at_unix_seconds
+        || catalogue.snapshot_sha256 != readiness.catalogue_mapping.snapshot_sha256
     {
         return Err(SynoptikonProjectionError::ObjectEvidenceMismatch);
     }
@@ -804,6 +857,35 @@ mod tests {
         readiness.endpoint_url = "https://192.168.0.192:3900".to_owned();
         assert_eq!(
             settle_synoptikon_projection(&request, &verified(readiness), NOW, None),
+            Err(SynoptikonProjectionError::TransportMismatch)
+        );
+    }
+
+    #[test]
+    fn tls_identity_hashes_the_der_leaf_not_pem_encoding() {
+        use base64::Engine;
+        let certified = rcgen::generate_simple_self_signed(vec!["192.168.0.193".to_owned()])
+            .expect("leaf certificate");
+        let pem = certified.cert.pem();
+        let fingerprint = synoptikon_tls_leaf_der_sha256(pem.as_bytes()).expect("DER fingerprint");
+        assert_eq!(
+            fingerprint,
+            format!("{:x}", Sha256::digest(certified.cert.der()))
+        );
+        assert_ne!(fingerprint, format!("{:x}", Sha256::digest(pem.as_bytes())));
+        let chained = format!("{pem}{pem}");
+        assert_eq!(
+            synoptikon_tls_leaf_der_sha256(chained.as_bytes()),
+            Err(SynoptikonProjectionError::TransportMismatch)
+        );
+        let mut trailing_der = certified.cert.der().to_vec();
+        trailing_der.extend_from_slice(b"forbidden-trailing-der");
+        let trailing_pem = format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            base64::engine::general_purpose::STANDARD.encode(trailing_der)
+        );
+        assert_eq!(
+            synoptikon_tls_leaf_der_sha256(trailing_pem.as_bytes()),
             Err(SynoptikonProjectionError::TransportMismatch)
         );
     }

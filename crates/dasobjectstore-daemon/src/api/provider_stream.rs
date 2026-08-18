@@ -70,6 +70,10 @@ pub struct ProviderStreamOpenRequest {
     pub verified_subject: Option<ObjectBrowserVerifiedSubject>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_capability: Option<super::OpaqueApplicationCapability>,
+    /// Fixed-peer Synoptikon readback authority. The daemon verifies this
+    /// exact settlement against its durable owner ledger before opening bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synoptikon_projection: Option<SynoptikonProjectionReadV1>,
     #[serde(default)]
     pub range: Option<ProviderStreamRange>,
     #[serde(default)]
@@ -97,6 +101,29 @@ pub struct ProviderStreamUploadOpenRequest {
     /// Present only for Expedition's fixed-peer retained-dossier transaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retained_dossier: Option<ExpeditionRetainedDossierWriteV1>,
+    /// Fixed-peer, path-free Synoptikon ingest. Object facts must exactly
+    /// match the canonical projection request and framed payload digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synoptikon_projection: Option<SynoptikonProjectionUploadV1>,
+}
+
+pub const SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA: &str =
+    "dasobjectstore.synoptikon_projection_upload.v1";
+pub const SYNOPTIKON_PROJECTION_READ_V1_SCHEMA: &str =
+    "dasobjectstore.synoptikon_projection_read.v1";
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SynoptikonProjectionUploadV1 {
+    pub schema_version: String,
+    pub intent_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SynoptikonProjectionReadV1 {
+    pub schema_version: String,
+    pub settlement_id: String,
 }
 
 pub const EXPEDITION_RETAINED_DOSSIER_WRITE_V1_SCHEMA: &str =
@@ -297,6 +324,17 @@ impl ProviderStreamUploadOpenRequest {
         if let Some(retained_dossier) = &self.retained_dossier {
             retained_dossier.validate(self)?;
         }
+        if self.retained_dossier.is_some() && self.synoptikon_projection.is_some() {
+            return Err(ProviderStreamValidationError::InvalidSynoptikonProjectionAuthority);
+        }
+        if let Some(authority) = &self.synoptikon_projection {
+            if authority.schema_version != SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA
+                || authority.intent_id.is_empty()
+                || authority.intent_id != self.upload_id
+            {
+                return Err(ProviderStreamValidationError::InvalidSynoptikonProjectionAuthority);
+            }
+        }
         Ok(())
     }
 }
@@ -322,10 +360,19 @@ impl ProviderStreamOpenRequest {
                     ProviderStreamValidationError::InvalidVerifiedSubject(error.to_string())
                 })?;
         }
+        if let Some(authority) = &self.synoptikon_projection {
+            if authority.schema_version != SYNOPTIKON_PROJECTION_READ_V1_SCHEMA
+                || authority.settlement_id.is_empty()
+                || authority.settlement_id.len() > 128
+            {
+                return Err(ProviderStreamValidationError::InvalidSynoptikonProjectionAuthority);
+            }
+        }
         let authority_forms = [
             self.delegated_actor.is_some(),
             self.verified_subject.is_some(),
             self.application_capability.is_some(),
+            self.synoptikon_projection.is_some(),
         ]
         .into_iter()
         .filter(|present| *present)
@@ -753,6 +800,7 @@ pub enum ProviderStreamValidationError {
     InvalidRetainedDossierAuthority,
     InvalidRetainedDossierScope,
     InvalidRetainedDossierDigest,
+    InvalidSynoptikonProjectionAuthority,
     InvalidMultipartPartNumber,
     InvalidMultipartPartSize,
     InvalidRange {
@@ -802,6 +850,9 @@ impl Display for ProviderStreamValidationError {
             }
             Self::InvalidRetainedDossierDigest => {
                 formatter.write_str("Expedition retained-dossier digest is invalid")
+            }
+            Self::InvalidSynoptikonProjectionAuthority => {
+                formatter.write_str("Synoptikon projection authority is invalid")
             }
             Self::InvalidMultipartPartNumber => {
                 formatter.write_str("multipart part number must be greater than zero")
@@ -887,6 +938,7 @@ mod tests {
             delegated_actor: None,
             verified_subject: None,
             application_capability: None,
+            synoptikon_projection: None,
             range: Some(ProviderStreamRange {
                 start: 0,
                 end_exclusive: Some(4096),
@@ -915,6 +967,7 @@ mod tests {
                     .to_string(),
             chunk_size_bytes: 4096,
             retained_dossier: None,
+            synoptikon_projection: None,
         }
     }
 
@@ -961,6 +1014,43 @@ mod tests {
             }
             assert!(invalid.validate().is_err(), "{mutation} must fail closed");
         }
+    }
+
+    #[test]
+    fn synoptikon_upload_authority_is_exact_and_exclusive() {
+        let mut request = upload_request();
+        request.upload_id = "syno-intent-1".to_owned();
+        request.synoptikon_projection = Some(SynoptikonProjectionUploadV1 {
+            schema_version: SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA.to_owned(),
+            intent_id: request.upload_id.clone(),
+        });
+        request.validate().expect("exact projection upload");
+
+        let mut mismatched = request.clone();
+        mismatched.synoptikon_projection.as_mut().unwrap().intent_id = "syno-intent-2".to_owned();
+        assert_eq!(
+            mismatched.validate(),
+            Err(ProviderStreamValidationError::InvalidSynoptikonProjectionAuthority)
+        );
+
+        let mut crossed = request;
+        crossed.retained_dossier = Some(retained_dossier());
+        assert!(crossed.validate().is_err());
+    }
+
+    #[test]
+    fn synoptikon_read_authority_cannot_cross_another_authority_surface() {
+        let mut request = request();
+        request.range = None;
+        request.synoptikon_projection = Some(SynoptikonProjectionReadV1 {
+            schema_version: SYNOPTIKON_PROJECTION_READ_V1_SCHEMA.to_owned(),
+            settlement_id: "syno-settlement-1".to_owned(),
+        });
+        request.validate().expect("exact projection read");
+
+        request.application_capability =
+            Some(crate::api::OpaqueApplicationCapability::new("x".repeat(32)).unwrap());
+        assert!(request.validate().is_err());
     }
 
     #[test]

@@ -63,6 +63,8 @@ use crate::api::{
     StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
     StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
     StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    SynoptikonProjectionPrepareRequest, SynoptikonProjectionPrepareResponse,
+    SynoptikonProjectionSettleRequest, SynoptikonProjectionSettleResponse,
     TestEndpointConnectionRequest, TestEndpointConnectionResponse,
     UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
@@ -145,6 +147,26 @@ where
         match self.send(DaemonApiRequest::JenkinsDossierEvidenceSettlement(request))? {
             DaemonApiResponse::JenkinsDossierEvidenceSettlement(response) => Ok(response),
             response => Err(unexpected("jenkins_dossier_evidence_settlement", response)),
+        }
+    }
+
+    pub fn prepare_synoptikon_projection(
+        &self,
+        request: SynoptikonProjectionPrepareRequest,
+    ) -> Result<SynoptikonProjectionPrepareResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::PrepareSynoptikonProjection(request))? {
+            DaemonApiResponse::SynoptikonProjectionPrepared(response) => Ok(response),
+            response => Err(unexpected("synoptikon_projection_prepared", response)),
+        }
+    }
+
+    pub fn settle_synoptikon_projection(
+        &self,
+        request: SynoptikonProjectionSettleRequest,
+    ) -> Result<SynoptikonProjectionSettleResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::SettleSynoptikonProjection(request))? {
+            DaemonApiResponse::SynoptikonProjectionSettlement(response) => Ok(response),
+            response => Err(unexpected("synoptikon_projection_settlement", response)),
         }
     }
 
@@ -985,6 +1007,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::JenkinsDossierEvidenceSettlement(_) => {
             "jenkins_dossier_evidence_settlement"
         }
+        DaemonApiResponse::SynoptikonProjectionPrepared(_) => "synoptikon_projection_prepared",
+        DaemonApiResponse::SynoptikonProjectionSettlement(_) => "synoptikon_projection_settlement",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::TestEndpointConnection(_) => "test_endpoint_connection",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",

@@ -181,6 +181,7 @@ async fn provider_stream_download_authorized(
         delegated_actor,
         verified_subject,
         application_capability,
+        synoptikon_projection: None,
         range,
         condition,
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
