@@ -356,10 +356,10 @@ pub use subobject_capacity_persistence::{
     SubObjectCapacityLedgerPersistenceError,
 };
 pub use synoptikon_projection::{
-    commit_projection_settlement, mark_projection_uploaded, prepare_synoptikon_projection_intent,
-    projection_intent, synoptikon_projection_ledger_path, verify_projection_settlement,
-    SynoptikonProjectionIntentRecord, SYNOPTIKON_PROJECTION_LEDGER_FILE_NAME,
-    SYNOPTIKON_PROJECTION_LEDGER_SCHEMA,
+    commit_projection_settlement, mark_projection_upload_admitted, mark_projection_uploaded,
+    prepare_synoptikon_projection_intent, projection_intent, synoptikon_projection_ledger_path,
+    verify_projection_settlement, SynoptikonProjectionIntentRecord,
+    SYNOPTIKON_PROJECTION_LEDGER_FILE_NAME, SYNOPTIKON_PROJECTION_LEDGER_SCHEMA,
 };
 pub use work_scheduler::{DaemonWorkClass, DaemonWorkSubmission, PersistentWorkScheduler};
 pub use workspace_checkpoint::{

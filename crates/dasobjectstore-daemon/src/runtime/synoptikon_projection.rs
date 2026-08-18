@@ -28,6 +28,8 @@ static LEDGER_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 pub struct SynoptikonProjectionIntentRecord {
     pub intent_id: String,
     pub projection: SynoptikonProjectionRequestV1,
+    #[serde(default)]
+    pub upload_admitted: bool,
     pub uploaded: bool,
     pub settlement_id: Option<String>,
     pub settlement: Option<SynoptikonProjectionSettlementV1>,
@@ -115,6 +117,7 @@ pub fn prepare_synoptikon_projection_intent(
     let record = SynoptikonProjectionIntentRecord {
         intent_id,
         projection,
+        upload_admitted: false,
         uploaded: false,
         settlement_id: None,
         settlement: None,
@@ -148,7 +151,29 @@ pub fn mark_projection_uploaded(
         .iter_mut()
         .find(|item| item.intent_id == intent_id)
         .ok_or_else(|| invalid("projection intent is unavailable"))?;
+    if !record.upload_admitted {
+        return Err(invalid("projection upload was not durably admitted"));
+    }
     record.uploaded = true;
+    write(path, &ledger)
+}
+
+pub fn mark_projection_upload_admitted(
+    path: impl AsRef<Path>,
+    intent_id: &str,
+) -> Result<(), DaemonServiceRuntimeError> {
+    let _guard = lock()?;
+    let path = path.as_ref();
+    let mut ledger = read(path)?;
+    let record = ledger
+        .intents
+        .iter_mut()
+        .find(|item| item.intent_id == intent_id)
+        .ok_or_else(|| invalid("projection intent is unavailable"))?;
+    if record.uploaded || record.settlement.is_some() {
+        return Err(invalid("projection intent is already terminal"));
+    }
+    record.upload_admitted = true;
     write(path, &ledger)
 }
 
@@ -287,6 +312,7 @@ fn read(path: &Path) -> Result<Ledger, DaemonServiceRuntimeError> {
                 )
             || record.projection.generation != record.projection.object_version
             || record.projection.nonce != expected_nonce
+            || (record.uploaded && !record.upload_admitted)
         {
             return Err(invalid("projection ledger contains conflicting records"));
         }
@@ -557,6 +583,12 @@ mod tests {
     fn authority_sequence_is_persisted_before_readiness_publication() {
         let (root, path) = fixture();
         let intent = prepare(&path);
+        mark_projection_upload_admitted(&path, &intent.intent_id).unwrap();
+        assert!(
+            projection_intent(&path, &intent.intent_id)
+                .expect("restart-visible admission")
+                .upload_admitted
+        );
         mark_projection_uploaded(&path, &intent.intent_id).unwrap();
         let denied = commit_projection_settlement(&path, &intent.intent_id, |_, sequence| {
             assert_eq!(sequence, 1);
@@ -619,6 +651,7 @@ mod tests {
         for mutation in ["identity", "nonce", "sequence"] {
             let (root, path) = fixture();
             let intent = prepare(&path);
+            mark_projection_upload_admitted(&path, &intent.intent_id).unwrap();
             mark_projection_uploaded(&path, &intent.intent_id).unwrap();
             commit_projection_settlement(&path, &intent.intent_id, |request, sequence| {
                 Ok(settlement(request, sequence))
@@ -709,6 +742,7 @@ mod tests {
                 &[],
             )
             .unwrap();
+        mark_projection_upload_admitted(&path, &intent.intent_id).unwrap();
         mark_projection_uploaded(&path, &intent.intent_id).unwrap();
         let (settlement_id, _, _) =
             commit_projection_settlement(&path, &intent.intent_id, |request, sequence| {

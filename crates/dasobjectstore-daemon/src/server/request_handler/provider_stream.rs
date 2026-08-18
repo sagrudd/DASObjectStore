@@ -95,6 +95,18 @@ fn exact_projection_ingress_receipt(
         .optional()
 }
 
+fn projection_existing_bytes_match(
+    upload_admitted: bool,
+    existing_size: u64,
+    existing_sha256: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> bool {
+    upload_admitted
+        && existing_size == expected_size
+        && existing_sha256.eq_ignore_ascii_case(expected_sha256)
+}
+
 fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
     use dasobjectstore_core::{
         SYNOPTIKON_PROJECTION_ENDPOINT, SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH,
@@ -833,6 +845,22 @@ where
         };
         request.object = authorized.qualify_object(&request.object);
         let store_id = authorized.store_id.clone();
+        let projection_upload_admitted = if request.synoptikon_projection.is_some() {
+            match crate::runtime::projection_intent(
+                &self.synoptikon_projection_ledger_path,
+                &request.upload_id,
+            ) {
+                Ok(intent) => intent.upload_admitted,
+                Err(error) => {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_intent_unavailable",
+                        error.to_string(),
+                    )))
+                }
+            }
+        } else {
+            false
+        };
         let binding =
             match read_profile_binding(&self.profile_binding_registry_path, store_id.as_str()) {
                 Ok(Some(binding)) => binding,
@@ -891,11 +919,59 @@ where
                     },
                 ));
             }
-            Ok(Some(_)) if request.synoptikon_projection.is_some() => {
-                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                    "projection_fresh_ingress_required",
-                    "Synoptikon projection cannot adopt an existing catalogue object",
-                )));
+            Ok(Some(existing)) if request.synoptikon_projection.is_some() => {
+                let receipt_matches = Connection::open_with_flags(
+                    &self.live_sqlite_path,
+                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                )
+                .ok()
+                .and_then(|connection| {
+                    exact_projection_ingress_receipt(
+                        &connection,
+                        &request.upload_id,
+                        store_id.as_str(),
+                        existing.object_id.as_str(),
+                        request.expected_size_bytes,
+                        request.expected_sha256.trim_start_matches("sha256:"),
+                    )
+                    .ok()
+                    .flatten()
+                })
+                .is_some();
+                if !receipt_matches
+                    || !projection_existing_bytes_match(
+                        projection_upload_admitted,
+                        existing.size_bytes,
+                        &existing.checksum,
+                        request.expected_size_bytes,
+                        &request.expected_sha256,
+                    )
+                {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_fresh_ingress_required",
+                        "existing catalogue object is not bound to this projection ingress",
+                    )));
+                }
+                if let Err(error) = crate::runtime::mark_projection_uploaded(
+                    &self.synoptikon_projection_ledger_path,
+                    &request.upload_id,
+                ) {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_receipt_commit_failed",
+                        error.to_string(),
+                    )));
+                }
+                return emit_response(DaemonApiResponse::ProviderStreamUpload(
+                    ProviderStreamUploadResponse {
+                        schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+                        upload_id: request.upload_id,
+                        store_id,
+                        object: request.object,
+                        size_bytes: existing.size_bytes,
+                        sha256: existing.checksum,
+                        retained_dossier: None,
+                    },
+                ));
             }
             Ok(Some(existing))
                 if existing.size_bytes == request.expected_size_bytes
@@ -936,10 +1012,18 @@ where
                         .checksum
                         .eq_ignore_ascii_case(&request.expected_sha256) =>
             {
-                if request.synoptikon_projection.is_some() {
+                if request.synoptikon_projection.is_some()
+                    && !projection_existing_bytes_match(
+                        projection_upload_admitted,
+                        existing.size_bytes,
+                        &existing.checksum,
+                        request.expected_size_bytes,
+                        &request.expected_sha256,
+                    )
+                {
                     return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                         "projection_fresh_ingress_required",
-                        "Synoptikon projection cannot adopt existing backend bytes",
+                        "existing backend bytes lack this projection admission",
                     )));
                 }
                 let record = match backend.records().and_then(|records| {
@@ -1019,6 +1103,17 @@ where
                 "provider stream upload requires daemon capacity admission",
             )));
         };
+        if request.synoptikon_projection.is_some() && !projection_upload_admitted {
+            if let Err(error) = crate::runtime::mark_projection_upload_admitted(
+                &self.synoptikon_projection_ledger_path,
+                &request.upload_id,
+            ) {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "projection_admission_commit_failed",
+                    error.to_string(),
+                )));
+            }
+        }
         let mut source = ProviderUploadReader::new(&request, read_frame);
         let record = crate::runtime::put_profile_object_with_capacity_scope(
             provider.as_ref(),
@@ -1683,6 +1778,21 @@ mod tests {
         )
         .unwrap()
         .is_none());
+    }
+
+    #[test]
+    fn synoptikon_projection_crash_recovery_requires_prior_admission_and_exact_bytes() {
+        let sha = "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        assert!(projection_existing_bytes_match(true, 5, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(false, 5, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(true, 6, sha, 5, sha));
+        assert!(!projection_existing_bytes_match(
+            true,
+            5,
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            5,
+            sha,
+        ));
     }
 
     #[test]
