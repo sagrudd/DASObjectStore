@@ -121,6 +121,16 @@ impl SynoptikonProjectionTestFixture {
             "role=hdd:fixture-disk-1\n",
         )
         .map_err(|error| error.to_string())?;
+        rusqlite::Connection::open(&report.live_sqlite_path)
+            .and_then(|connection| {
+                connection.execute(
+                    "INSERT INTO disks (
+                        disk_id,pool_id,role,state,created_at_utc,updated_at_utc
+                     ) VALUES (?1,?2,'hdd','Healthy',?3,?3)",
+                    rusqlite::params!["fixture-disk-1", "synoptikon-fixture-pool", &now_utc,],
+                )
+            })
+            .map_err(|error| error.to_string())?;
 
         let store_registry_path = root.join("stores.json");
         let subobject_registry_path = root.join("subobjects.json");
