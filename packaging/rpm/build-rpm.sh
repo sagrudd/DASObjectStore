@@ -224,6 +224,7 @@ usermod -aG "\$admin_group" "\$service_user"
 install -d -o "\$service_user" -g "\$shared_monas_group" -m 0750 /run/dasobjectstore
 install -d -o "\$service_user" -g "\$shared_monas_group" -m 0750 /var/lib/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectstore/object-service
+install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectstore/projection-authority
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/log/dasobjectstore

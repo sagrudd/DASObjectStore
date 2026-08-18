@@ -169,6 +169,7 @@ pub struct DaemonRequestHandler<S, C> {
     governed_binding_authority_path: PathBuf,
     application_capability_ledger_path: PathBuf,
     application_capability_master_key_path: PathBuf,
+    synoptikon_projection_ledger_path: PathBuf,
     live_status_registry: Arc<crate::runtime::LiveStatusRegistry>,
 }
 
@@ -223,6 +224,9 @@ where
             ),
             application_capability_master_key_path:
                 crate::runtime::application_capability_master_key_path(DEFAULT_DAEMON_STATE_DIR),
+            synoptikon_projection_ledger_path: crate::runtime::synoptikon_projection_ledger_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
@@ -276,6 +280,9 @@ where
             ),
             application_capability_master_key_path:
                 crate::runtime::application_capability_master_key_path(DEFAULT_DAEMON_STATE_DIR),
+            synoptikon_projection_ledger_path: crate::runtime::synoptikon_projection_ledger_path(
+                DEFAULT_DAEMON_STATE_DIR,
+            ),
             live_status_registry: Arc::new(crate::runtime::LiveStatusRegistry::default()),
         }
     }
@@ -286,6 +293,10 @@ where
     ) -> Self {
         self.store_registry_path = store_registry_path.into();
         self.subobject_registry_path = subobject_registry_path.into();
+        self
+    }
+    pub fn with_synoptikon_projection_ledger_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.synoptikon_projection_ledger_path = path.into();
         self
     }
     pub fn handle(
@@ -1336,6 +1347,7 @@ mod tests {
             }),
             verified_subject: None,
             application_capability: None,
+            synoptikon_projection: None,
             range: None,
             condition: Default::default(),
             chunk_size_bytes: 1024,
@@ -1616,6 +1628,7 @@ mod tests {
             delegated_actor: None,
             verified_subject: None,
             application_capability: None,
+            synoptikon_projection: None,
             range: Some(crate::api::ProviderStreamRange {
                 start: 10,
                 end_exclusive: Some(23),
@@ -1728,6 +1741,7 @@ mod tests {
             expected_sha256: checksum.to_string(),
             chunk_size_bytes: 1024,
             retained_dossier: None,
+            synoptikon_projection: None,
         };
         let frames = std::cell::RefCell::new(vec![
             (

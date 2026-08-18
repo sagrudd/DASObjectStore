@@ -16,6 +16,8 @@ mod storage_operations;
 mod storage_profile_requests;
 #[path = "storage_profiles.rs"]
 mod storage_profiles;
+#[path = "storage_synoptikon_projection.rs"]
+mod storage_synoptikon_projection;
 pub(super) fn request<S, C>(
     handler: &DaemonRequestHandler<S, C>,
     request: DaemonApiRequest,
@@ -29,6 +31,12 @@ where
     C: DaemonClock,
 {
     match request {
+        DaemonApiRequest::PrepareSynoptikonProjection(request) => Ok(
+            storage_synoptikon_projection::prepare(handler, request, actor),
+        ),
+        DaemonApiRequest::SettleSynoptikonProjection(request) => Ok(
+            storage_synoptikon_projection::settle(handler, request, actor),
+        ),
         DaemonApiRequest::JenkinsDossierEvidenceSettlement(request) => {
             Ok(storage_jenkins_dossier::settle(handler, request, actor))
         }

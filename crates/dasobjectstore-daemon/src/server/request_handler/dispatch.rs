@@ -92,6 +92,10 @@ where
         | DaemonApiRequest::JenkinsDossierEvidenceSettlement(_)) => {
             storage::request(handler, storage_request, actor, emit_progress)
         }
+        projection_request @ (DaemonApiRequest::PrepareSynoptikonProjection(_)
+        | DaemonApiRequest::SettleSynoptikonProjection(_)) => {
+            storage::request(handler, projection_request, actor, emit_progress)
+        }
         easyconnect_request @ (DaemonApiRequest::RemoteEasyconnectCreatePairing(_)
         | DaemonApiRequest::RemoteEasyconnectPairingStatus(_)
         | DaemonApiRequest::RemoteEasyconnectApprovePairing(_)

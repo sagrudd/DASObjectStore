@@ -52,6 +52,7 @@ mod service_reconciliation;
 mod staging_inventory;
 mod storage_assurance;
 mod subobject_capacity_persistence;
+mod synoptikon_projection;
 mod work_scheduler;
 mod workspace_checkpoint;
 mod workspace_cleanup;
@@ -353,6 +354,12 @@ pub use storage_assurance::{
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,
     SubObjectCapacityLedgerPersistenceError,
+};
+pub use synoptikon_projection::{
+    commit_projection_settlement, mark_projection_uploaded, prepare_synoptikon_projection_intent,
+    projection_intent, synoptikon_projection_ledger_path, verify_projection_settlement,
+    SynoptikonProjectionIntentRecord, SYNOPTIKON_PROJECTION_LEDGER_FILE_NAME,
+    SYNOPTIKON_PROJECTION_LEDGER_SCHEMA,
 };
 pub use work_scheduler::{DaemonWorkClass, DaemonWorkSubmission, PersistentWorkScheduler};
 pub use workspace_checkpoint::{

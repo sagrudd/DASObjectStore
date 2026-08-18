@@ -35,6 +35,8 @@ pub const SYNOPTIKON_PROJECTION_OWNER_KEY_PATH: &str =
     "/var/lib/dasobjectstore/projection-authority/synoptikon-owner-hmac.key";
 pub const SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH: &str =
     "/etc/dasobjectstore/synoptikon-projection-peer.sha256";
+pub const SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH: &str =
+    "/etc/dasobjectstore/synoptikon-projection-peer.pem";
 pub const SYNOPTIKON_PROJECTION_MAX_LIFETIME_SECONDS: u64 = 300;
 pub const SYNOPTIKON_PROJECTION_MAX_READINESS_AGE_SECONDS: u64 = 60;
 pub const SYNOPTIKON_PROJECTION_MAX_HDD_REPLICAS: usize = 16;
@@ -177,6 +179,21 @@ pub fn verify_das_owned_synoptikon_projection_readiness(
     let owner_hmac_key = read_fixed_owner_key()?;
     let tls_expectation = read_fixed_tls_expectation()?;
     verify_readiness_with_owner_key(envelope, &owner_hmac_key, &tls_expectation)
+}
+
+/// Authenticate readiness assembled inside the DAS daemon with its fixed,
+/// descriptor-validated owner key. Callers cannot supply or select the key.
+pub fn authenticate_das_owned_synoptikon_projection_readiness(
+    readiness: SynoptikonProjectionReadinessV1,
+) -> Result<DasAuthenticatedProjectionReadinessV1, SynoptikonProjectionError> {
+    let owner_hmac_key = read_fixed_owner_key()?;
+    let bytes = serde_jcs::to_vec(&readiness)
+        .map_err(|_| SynoptikonProjectionError::OwnerAuthenticationDenied)?;
+    Ok(DasAuthenticatedProjectionReadinessV1 {
+        schema_version: DAS_AUTHENTICATED_PROJECTION_READINESS_V1_SCHEMA.to_owned(),
+        authentication_hmac_sha256: hmac_sha256(&owner_hmac_key, &bytes),
+        readiness,
+    })
 }
 
 fn verify_readiness_with_owner_key(
@@ -340,6 +357,9 @@ pub fn settle_synoptikon_projection(
 ) -> Result<SynoptikonProjectionSettlementOutcomeV1, SynoptikonProjectionError> {
     let readiness = &verified_readiness.readiness;
     validate_request(request)?;
+    if request.requested_at_unix_seconds > settled_at_unix_seconds {
+        return Err(SynoptikonProjectionError::InvalidRequest);
+    }
     validate_readiness(request, readiness, settled_at_unix_seconds)?;
     let request_sha256 = canonical_sha256(request)?;
     let readiness_sha256 = canonical_sha256(readiness)?;
@@ -433,6 +453,20 @@ fn validate_request(
         || request.expires_at_unix_seconds <= request.requested_at_unix_seconds
         || request.expires_at_unix_seconds - request.requested_at_unix_seconds
             > SYNOPTIKON_PROJECTION_MAX_LIFETIME_SECONDS
+    {
+        return Err(SynoptikonProjectionError::InvalidRequest);
+    }
+    Ok(())
+}
+
+/// Validate the canonical projection request at the daemon's trusted time.
+pub fn validate_synoptikon_projection_request(
+    request: &SynoptikonProjectionRequestV1,
+    now_unix_seconds: u64,
+) -> Result<(), SynoptikonProjectionError> {
+    validate_request(request)?;
+    if request.requested_at_unix_seconds > now_unix_seconds
+        || now_unix_seconds >= request.expires_at_unix_seconds
     {
         return Err(SynoptikonProjectionError::InvalidRequest);
     }
@@ -557,6 +591,7 @@ fn validate_object_evidence(
         || !valid_sha256(&readiness.catalogue_mapping.snapshot_sha256)
         || readiness.catalogue_mapping.observed_at_unix_seconds
             != readiness.observed_at_unix_seconds
+        || catalogue.snapshot_sha256 != readiness.catalogue_mapping.snapshot_sha256
     {
         return Err(SynoptikonProjectionError::ObjectEvidenceMismatch);
     }

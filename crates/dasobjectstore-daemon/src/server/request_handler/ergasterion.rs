@@ -549,6 +549,16 @@ where
     S: DaemonServiceOrchestrator,
     C: DaemonClock,
 {
+    if request.synoptikon_projection.is_some() {
+        return handler
+            .authorize_synoptikon_projection_read(actor, request)
+            .map_err(|error| {
+                DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    error.code(),
+                    error.to_string(),
+                ))
+            });
+    }
     if let Some(capability) = request.application_capability.as_ref() {
         authorize_provider_read(
             handler,

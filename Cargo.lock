@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "chrono",
  "dasobjectstore-reference",
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "base64",
  "chrono",
@@ -816,6 +816,7 @@ dependencies = [
  "ring",
  "rusqlite",
  "serde",
+ "serde_jcs",
  "serde_json",
  "sha2",
  "uuid",
@@ -823,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "axum",
  "axum-server",
@@ -855,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -874,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -887,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "axum",
  "chrono",
@@ -911,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -920,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -930,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -939,7 +940,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "base64",
  "clap",
@@ -959,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -969,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.170.0"
+version = "0.171.0"
 dependencies = [
  "dasobjectstore-core",
  "libc",

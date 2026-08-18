@@ -93,7 +93,8 @@ pub use subobject_capacity::{
     SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use synoptikon_projection::{
-    settle_synoptikon_projection, verify_das_owned_synoptikon_projection_readiness,
+    authenticate_das_owned_synoptikon_projection_readiness, settle_synoptikon_projection,
+    validate_synoptikon_projection_request, verify_das_owned_synoptikon_projection_readiness,
     DasAuthenticatedProjectionReadinessV1, DasCatalogueMappingEvidenceV1,
     DasCatalogueObjectEvidenceV1, DasHddReplicaEvidenceV1, DasMappingExclusionSettlementV1,
     DasProviderGroupStatusEvidenceV1, DasUploadCompletionEvidenceV1,
@@ -106,7 +107,7 @@ pub use synoptikon_projection::{
     SYNOPTIKON_PROJECTION_OWNER_KEY_PATH, SYNOPTIKON_PROJECTION_PRODUCER_HOST,
     SYNOPTIKON_PROJECTION_PRODUCER_PRODUCT, SYNOPTIKON_PROJECTION_READINESS_V1_SCHEMA,
     SYNOPTIKON_PROJECTION_REQUEST_V1_SCHEMA, SYNOPTIKON_PROJECTION_SETTLEMENT_V1_SCHEMA,
-    SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH,
+    SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH, SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH,
 };
 pub use synthetic_scoped_readback::{
     verify_synthetic_scoped_readback, MonasScopedReadCapabilityV1,

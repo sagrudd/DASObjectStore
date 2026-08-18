@@ -297,6 +297,7 @@ fn provider_stream_rejects_mixed_application_and_delegated_authority() {
         application_capability: Some(
             OpaqueApplicationCapability::new(TOKEN_PROBE).expect("capability"),
         ),
+        synoptikon_projection: None,
         range: None,
         condition: ProviderStreamCondition::default(),
         chunk_size_bytes: 64 * 1024,
