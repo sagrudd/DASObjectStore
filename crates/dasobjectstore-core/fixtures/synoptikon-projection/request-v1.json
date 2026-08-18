@@ -1,0 +1,18 @@
+{
+  "schema_version": "dasobjectstore.synoptikon_projection_request.v1",
+  "projection_id": "syno-demo-projection-0001",
+  "producer_product": "syno_plug_demo",
+  "producer_host": "nuc-192-168-0-193",
+  "consumer_product": "oikodome",
+  "consumer_host": "gb10-192-168-0-48",
+  "object_store_id": "synoptikon-demo",
+  "object_id": "syno-demo-object-0001",
+  "object_version": 1,
+  "object_key": "syno_plug_demo/input/sample.txt",
+  "generation": 1,
+  "source_size_bytes": 21,
+  "source_sha256": "81c4f2fb0ce868d3e0258cc9c6e158e8e8f74d8d53e179e75b1862cd33813c85",
+  "nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "requested_at_unix_seconds": 1787039900,
+  "expires_at_unix_seconds": 1787040200
+}

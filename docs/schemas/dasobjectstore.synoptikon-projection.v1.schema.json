@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnemosyne.example/schemas/dasobjectstore.synoptikon-projection.v1.schema.json",
+  "title": "DASObjectStore Synoptikon projection v1",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/authenticated_readiness" },
+    { "$ref": "#/$defs/settlement" }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?:[a-z0-9]|[a-z0-9][a-z0-9._/-]*[a-z0-9])$"
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "projection_id", "producer_product", "producer_host", "consumer_product", "consumer_host", "object_store_id", "object_id", "object_version", "object_key", "generation", "source_size_bytes", "source_sha256", "nonce", "requested_at_unix_seconds", "expires_at_unix_seconds"],
+      "properties": {
+        "schema_version": { "const": "dasobjectstore.synoptikon_projection_request.v1" },
+        "projection_id": { "$ref": "#/$defs/identifier" },
+        "producer_product": { "const": "syno_plug_demo" },
+        "producer_host": { "const": "nuc-192-168-0-193" },
+        "consumer_product": { "const": "oikodome" },
+        "consumer_host": { "const": "gb10-192-168-0-48" },
+        "object_store_id": { "$ref": "#/$defs/identifier" },
+        "object_id": { "$ref": "#/$defs/identifier" },
+        "object_version": { "type": "integer", "minimum": 1 },
+        "object_key": { "$ref": "#/$defs/identifier" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "source_size_bytes": { "type": "integer", "minimum": 1 },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "nonce": { "$ref": "#/$defs/sha256" },
+        "requested_at_unix_seconds": { "type": "integer", "minimum": 1 },
+        "expires_at_unix_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "mapping_exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "projection_id", "generation", "source_sha256", "excluded_object_count", "authority_evidence_sha256", "catalogue_snapshot_sha256", "excluded_set_sha256", "settled_at_unix_seconds"],
+      "properties": {
+        "schema_version": { "const": "dasobjectstore.mapping_exclusion_settlement.v1" },
+        "projection_id": { "$ref": "#/$defs/identifier" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "excluded_object_count": { "type": "integer", "minimum": 1 },
+        "authority_evidence_sha256": { "$ref": "#/$defs/sha256" },
+        "catalogue_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "excluded_set_sha256": { "$ref": "#/$defs/sha256" },
+        "settled_at_unix_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "projection_id", "generation", "source_sha256", "nonce", "authority_sequence", "endpoint_url", "expected_tls_peer_certificate_sha256", "observed_tls_peer_certificate_sha256", "daemon_ready", "s3_endpoint_ready", "catalogue_current", "upload_completion", "catalogue_object", "provider_group_status", "hdd_replicas", "hdd_settlement_reference_sha256", "catalogue_mapping", "mapping_exclusion", "observed_at_unix_seconds", "expires_at_unix_seconds"],
+      "properties": {
+        "schema_version": { "const": "dasobjectstore.synoptikon_projection_readiness.v1" },
+        "projection_id": { "$ref": "#/$defs/identifier" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "nonce": { "$ref": "#/$defs/sha256" },
+        "authority_sequence": { "type": "integer", "minimum": 1 },
+        "endpoint_url": { "const": "https://192.168.0.193:3900" },
+        "expected_tls_peer_certificate_sha256": { "$ref": "#/$defs/sha256" },
+        "observed_tls_peer_certificate_sha256": { "$ref": "#/$defs/sha256" },
+        "daemon_ready": { "const": true },
+        "s3_endpoint_ready": { "const": true },
+        "catalogue_current": { "const": true },
+        "upload_completion": { "$ref": "#/$defs/upload_completion" },
+        "catalogue_object": { "$ref": "#/$defs/catalogue_object" },
+        "provider_group_status": { "$ref": "#/$defs/provider_group_status" },
+        "hdd_replicas": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/hdd_replica" } },
+        "hdd_settlement_reference_sha256": { "$ref": "#/$defs/sha256" },
+        "catalogue_mapping": { "$ref": "#/$defs/catalogue_mapping" },
+        "mapping_exclusion": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/mapping_exclusion" }] },
+        "observed_at_unix_seconds": { "type": "integer", "minimum": 1 },
+        "expires_at_unix_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "upload_completion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receipt_id", "receipt_sha256", "upload_id", "source_size_bytes", "source_sha256", "disposition"],
+      "properties": { "receipt_id": { "$ref": "#/$defs/identifier" }, "receipt_sha256": { "$ref": "#/$defs/sha256" }, "upload_id": { "$ref": "#/$defs/identifier" }, "source_size_bytes": { "type": "integer", "minimum": 1 }, "source_sha256": { "$ref": "#/$defs/sha256" }, "disposition": { "const": "committed" } }
+    },
+    "catalogue_object": {
+      "type": "object", "additionalProperties": false,
+      "required": ["snapshot_sha256", "object_store_id", "object_id", "object_version", "object_key", "source_size_bytes", "source_sha256"],
+      "properties": { "snapshot_sha256": { "$ref": "#/$defs/sha256" }, "object_store_id": { "$ref": "#/$defs/identifier" }, "object_id": { "$ref": "#/$defs/identifier" }, "object_version": { "type": "integer", "minimum": 1 }, "object_key": { "$ref": "#/$defs/identifier" }, "source_size_bytes": { "type": "integer", "minimum": 1 }, "source_sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "provider_group_status": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status_sha256", "object_store_id", "object_id", "object_version", "settled"],
+      "properties": { "status_sha256": { "$ref": "#/$defs/sha256" }, "object_store_id": { "$ref": "#/$defs/identifier" }, "object_id": { "$ref": "#/$defs/identifier" }, "object_version": { "type": "integer", "minimum": 1 }, "settled": { "const": true } }
+    },
+    "hdd_replica": {
+      "type": "object", "additionalProperties": false,
+      "required": ["replica_id", "placement_sha256", "verified_size_bytes", "verified_sha256", "disposition"],
+      "properties": { "replica_id": { "$ref": "#/$defs/identifier" }, "placement_sha256": { "$ref": "#/$defs/sha256" }, "verified_size_bytes": { "type": "integer", "minimum": 1 }, "verified_sha256": { "$ref": "#/$defs/sha256" }, "disposition": { "const": "hdd_verified" } }
+    },
+    "catalogue_mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["snapshot_sha256", "ambiguous_unmapped_objects", "observed_at_unix_seconds"],
+      "properties": { "snapshot_sha256": { "$ref": "#/$defs/sha256" }, "ambiguous_unmapped_objects": { "type": "integer", "minimum": 0 }, "observed_at_unix_seconds": { "type": "integer", "minimum": 1 } }
+    },
+    "authenticated_readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "readiness", "authentication_hmac_sha256"],
+      "properties": {
+        "schema_version": { "const": "dasobjectstore.authenticated_synoptikon_projection_readiness.v1" },
+        "readiness": { "$ref": "#/$defs/readiness" },
+        "authentication_hmac_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "settlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "projection_id", "request_sha256", "readiness_sha256", "generation", "source_sha256", "object_store_id", "object_id", "object_version", "nonce", "authority_sequence", "upload_completion_receipt_sha256", "catalogue_snapshot_sha256", "provider_group_status_sha256", "hdd_settlement_reference_sha256", "hdd_replica_count", "disposition", "settled_at_unix_seconds"],
+      "properties": {
+        "schema_version": { "const": "dasobjectstore.synoptikon_projection_settlement.v1" },
+        "projection_id": { "$ref": "#/$defs/identifier" },
+        "request_sha256": { "$ref": "#/$defs/sha256" },
+        "readiness_sha256": { "$ref": "#/$defs/sha256" },
+        "generation": { "type": "integer", "minimum": 1 },
+        "source_sha256": { "$ref": "#/$defs/sha256" },
+        "object_store_id": { "$ref": "#/$defs/identifier" },
+        "object_id": { "$ref": "#/$defs/identifier" },
+        "object_version": { "type": "integer", "minimum": 1 },
+        "nonce": { "$ref": "#/$defs/sha256" },
+        "authority_sequence": { "type": "integer", "minimum": 1 },
+        "upload_completion_receipt_sha256": { "$ref": "#/$defs/sha256" },
+        "catalogue_snapshot_sha256": { "$ref": "#/$defs/sha256" },
+        "provider_group_status_sha256": { "$ref": "#/$defs/sha256" },
+        "hdd_settlement_reference_sha256": { "$ref": "#/$defs/sha256" },
+        "hdd_replica_count": { "type": "integer", "minimum": 1 },
+        "disposition": { "const": "hdd_settled" },
+        "settled_at_unix_seconds": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "schema_version": "dasobjectstore.synoptikon_projection_readiness.v1",
+  "projection_id": "syno-demo-projection-0001",
+  "generation": 1,
+  "source_sha256": "81c4f2fb0ce868d3e0258cc9c6e158e8e8f74d8d53e179e75b1862cd33813c85",
+  "nonce": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "authority_sequence": 1,
+  "endpoint_url": "https://192.168.0.193:3900",
+  "expected_tls_peer_certificate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_tls_peer_certificate_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "daemon_ready": true,
+  "s3_endpoint_ready": true,
+  "catalogue_current": true,
+  "upload_completion": {
+    "receipt_id": "upload-receipt-0001",
+    "receipt_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "upload_id": "syno-upload-0001",
+    "source_size_bytes": 21,
+    "source_sha256": "81c4f2fb0ce868d3e0258cc9c6e158e8e8f74d8d53e179e75b1862cd33813c85",
+    "disposition": "committed"
+  },
+  "catalogue_object": {
+    "snapshot_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "object_store_id": "synoptikon-demo",
+    "object_id": "syno-demo-object-0001",
+    "object_version": 1,
+    "object_key": "syno_plug_demo/input/sample.txt",
+    "source_size_bytes": 21,
+    "source_sha256": "81c4f2fb0ce868d3e0258cc9c6e158e8e8f74d8d53e179e75b1862cd33813c85"
+  },
+  "provider_group_status": {
+    "status_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "object_store_id": "synoptikon-demo",
+    "object_id": "syno-demo-object-0001",
+    "object_version": 1,
+    "settled": true
+  },
+  "hdd_replicas": [{
+    "replica_id": "hdd-replica-0001",
+    "placement_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "verified_size_bytes": 21,
+    "verified_sha256": "81c4f2fb0ce868d3e0258cc9c6e158e8e8f74d8d53e179e75b1862cd33813c85",
+    "disposition": "hdd_verified"
+  }],
+  "hdd_settlement_reference_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "catalogue_mapping": {
+    "snapshot_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "ambiguous_unmapped_objects": 0,
+    "observed_at_unix_seconds": 1787040000
+  },
+  "mapping_exclusion": null,
+  "observed_at_unix_seconds": 1787040000,
+  "expires_at_unix_seconds": 1787040060
+}

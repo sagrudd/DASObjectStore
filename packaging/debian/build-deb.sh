@@ -57,7 +57,7 @@ install -d \
   "$build_root/usr/libexec/dasobjectstore" \
   "$build_root/usr/lib/sysusers.d" \
   "$build_root/usr/lib/tmpfiles.d" \
-  "$build_root/usr/share/doc/$package_name"
+  "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection"
 install -m 0755 "$repo_root/target/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
@@ -86,6 +86,12 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integ
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
   "$build_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
+install -m 0644 "$repo_root/docs/schemas/dasobjectstore.synoptikon-projection.v1.schema.json" \
+  "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection/schema-v1.json"
+install -m 0644 "$repo_root/crates/dasobjectstore-core/fixtures/synoptikon-projection/request-v1.json" \
+  "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection/request-v1.json"
+install -m 0644 "$repo_root/crates/dasobjectstore-core/fixtures/synoptikon-projection/readiness-v1.json" \
+  "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection/readiness-v1.json"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$build_root/etc/dasobjectstore/daemon.json"
 install -m 0640 "$packaging_linux/etc/dasobjectstore/managed-storage.v1.json" \
