@@ -142,7 +142,7 @@ impl SynoptikonProjectionTestFixture {
             &store_registry_path,
             StoreServiceDefinition {
                 store_id: store_id.clone(),
-                policy,
+                policy: policy.clone(),
                 bucket_name: Some("synoptikon-demo".to_owned()),
                 reader_group: None,
                 writer_group: None,
@@ -155,7 +155,7 @@ impl SynoptikonProjectionTestFixture {
             BackendProfileBinding {
                 manifest: ObjectStoreManifest {
                     schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
-                    store_id,
+                    store_id: store_id.clone(),
                     deployment_profile: DeploymentProfile::Folder,
                     host_mode: HostMode::PerUser,
                     protection: ProtectionPolicy::LocalOnly,
@@ -167,6 +167,17 @@ impl SynoptikonProjectionTestFixture {
                 ssd_staging_root: None,
             },
         )
+        .map_err(|error| error.to_string())?;
+        FileBackedCapacityAdmissionProvider::new(
+            &store_registry_path,
+            root.join("capacity-ledgers"),
+            &hdd_root,
+            &backend_root,
+            StatvfsCapacitySpaceProbe,
+        )
+        .with_subobject_registry_path(&subobject_registry_path)
+        .with_profile_binding_registry_path(&profile_binding_registry_path)
+        .initialize_store(&store_id, policy.capacity.clone())
         .map_err(|error| error.to_string())?;
         Ok(Self {
             root,
