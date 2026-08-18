@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.170.0 - 2026-08-18
+
+- Add the DAS-owned, path-free Synoptikon demonstration projection contract.
+  It fixes the NUC producer, GB10 Oikodome consumer, and TLS endpoint identities;
+  binds generation and source digest; requires daemon, catalogue, and port 3900
+  readiness; accepts peer identity and mapping exclusions only in a canonical
+  DAS-HMAC-authenticated opaque readiness proof; denies ambiguous mappings
+  unless covered by exact owner evidence; and emits digest-bound, exact-replay
+  HDD-settlement evidence. It does not activate a service or expose managed
+  storage paths.
+
 ## 0.169.1 - 2026-08-13
 
 - Restore the S3 gateway's provider-stream request constructors after the

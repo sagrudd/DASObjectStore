@@ -28,6 +28,7 @@ pub mod retained_dossier_prerequisite;
 pub mod risk;
 pub mod store;
 pub mod subobject_capacity;
+pub mod synoptikon_projection;
 pub mod synthetic_scoped_readback;
 pub mod utc;
 pub mod workspace;
@@ -90,6 +91,22 @@ pub use subobject_capacity::{
     ExpiredSubObjectCapacityReservation, SubObjectCapacityError, SubObjectCapacityLedger,
     SubObjectCapacityLedgerSnapshot, SubObjectCapacityReservationScope,
     SUBOBJECT_CAPACITY_SNAPSHOT_SCHEMA_VERSION,
+};
+pub use synoptikon_projection::{
+    settle_synoptikon_projection, verify_das_owned_synoptikon_projection_readiness,
+    DasAuthenticatedProjectionReadinessV1, DasCatalogueMappingEvidenceV1,
+    DasCatalogueObjectEvidenceV1, DasHddReplicaEvidenceV1, DasMappingExclusionSettlementV1,
+    DasProviderGroupStatusEvidenceV1, DasUploadCompletionEvidenceV1,
+    SynoptikonProjectionDispositionV1, SynoptikonProjectionError, SynoptikonProjectionReadinessV1,
+    SynoptikonProjectionRequestV1, SynoptikonProjectionSettlementOutcomeV1,
+    SynoptikonProjectionSettlementV1, VerifiedSynoptikonProjectionReadinessV1,
+    SYNOPTIKON_PROJECTION_CONSUMER_HOST, SYNOPTIKON_PROJECTION_CONSUMER_PRODUCT,
+    SYNOPTIKON_PROJECTION_ENDPOINT, SYNOPTIKON_PROJECTION_MAX_HDD_REPLICAS,
+    SYNOPTIKON_PROJECTION_MAX_LIFETIME_SECONDS, SYNOPTIKON_PROJECTION_MAX_READINESS_AGE_SECONDS,
+    SYNOPTIKON_PROJECTION_OWNER_KEY_PATH, SYNOPTIKON_PROJECTION_PRODUCER_HOST,
+    SYNOPTIKON_PROJECTION_PRODUCER_PRODUCT, SYNOPTIKON_PROJECTION_READINESS_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_REQUEST_V1_SCHEMA, SYNOPTIKON_PROJECTION_SETTLEMENT_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH,
 };
 pub use synthetic_scoped_readback::{
     verify_synthetic_scoped_readback, MonasScopedReadCapabilityV1,
