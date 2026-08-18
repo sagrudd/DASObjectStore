@@ -17,7 +17,7 @@ use crate::s3_gateway_auth::{
 use crate::s3_multipart_listing::{render_multipart_upload_listing, MultipartListingQuery};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, OriginalUri, Path, State};
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{header, HeaderMap, Method, StatusCode, Version};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -146,6 +146,16 @@ fn reject_synoptikon_projection_query() -> Response {
         "InvalidProjectionRoute",
         "projection routes do not accept query selectors",
     )
+}
+
+fn reject_non_http11_projection(version: Version) -> Option<Response> {
+    (version != Version::HTTP_11).then(|| {
+        s3_error(
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+            "InvalidRequest",
+            "projection routes require HTTP/1.1",
+        )
+    })
 }
 
 const SYNOPTIKON_PROJECTION_CREDENTIAL_SCHEMA: &str =
@@ -342,10 +352,14 @@ fn projection_daemon_client(socket_path: PathBuf) -> DaemonClient<UnixSocketDaem
 async fn synoptikon_projection_intent(
     State(state): State<S3GatewayState>,
     OriginalUri(uri): OriginalUri,
+    version: Version,
     method: Method,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Some(response) = reject_non_http11_projection(version) {
+        return response;
+    }
     if uri.query().is_some() {
         return reject_synoptikon_projection_query();
     }
@@ -470,10 +484,14 @@ fn projection_byte_disposition_from_state(
 async fn synoptikon_projection_bytes(
     State(state): State<S3GatewayState>,
     OriginalUri(uri): OriginalUri,
+    version: Version,
     method: Method,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Some(response) = reject_non_http11_projection(version) {
+        return response;
+    }
     if uri.query().is_some() {
         return reject_synoptikon_projection_query();
     }
@@ -633,10 +651,14 @@ async fn synoptikon_projection_bytes(
 async fn synoptikon_projection_readback(
     State(state): State<S3GatewayState>,
     OriginalUri(uri): OriginalUri,
+    version: Version,
     method: Method,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
+    if let Some(response) = reject_non_http11_projection(version) {
+        return response;
+    }
     if uri.query().is_some() {
         return reject_synoptikon_projection_query();
     }
@@ -1614,6 +1636,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn projection_routes_reject_non_http11_before_authority_access() {
+        let root = std::env::temp_dir().join(format!(
+            "das-projection-http-version-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state = S3GatewayState::with_registry(root.join("generic.json"), 1);
+        let router = s3_gateway_router_with_state(state);
+        for version in [Version::HTTP_10, Version::HTTP_2] {
+            for (method, path) in [
+                (Method::POST, "/v1/synoptikon-projection/intent"),
+                (Method::PUT, "/v1/synoptikon-projection/bytes"),
+                (Method::POST, "/v1/synoptikon-projection/readback"),
+            ] {
+                let response = router
+                    .clone()
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .version(version)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::HTTP_VERSION_NOT_SUPPORTED);
+            }
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 

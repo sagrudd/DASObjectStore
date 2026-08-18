@@ -21,11 +21,13 @@ The ledger is retained under the descriptor-protected
 readiness publication. Exact prepare and terminal settlement retry return the
 same records after restart.
 
-This prerequisite is not the cross-host product transport. It does not add the
-parameter-free port-3900 intent/bytes/readback routes, provision or expose a
-projection-purpose credential, start port 3900, add an enabled unit, mount a
-Synoptikon route, or make upload/download/jobs available. Those remain a
-separately reviewed gateway and consumer integration gate.
+The separately packaged gateway adds fixed, parameter-free port-3900
+intent/bytes/readback routes. The projection wire protocol is explicitly
+HTTP/1.1 only because SigV4 binds the literal fixed `Host` header; HTTP/1.0 and
+HTTP/2 are rejected before credential, body, or daemon processing. The package
+does not provision the projection-purpose credential or client trust inputs,
+start port 3900, add an enabled unit, mount a Synoptikon route, or make jobs
+available. Those remain a separately reviewed consumer and activation gate.
 
 Admission accepts readiness only through an opaque proof created after a
 DAS-owned HMAC authenticates the canonical readiness record. The HMAC key is

@@ -6,6 +6,9 @@
   placement metadata using the raw SHA-256 representation written by the
   durable destage path. The catalogue binding remains independently bound to
   its canonical `sha256:`-prefixed provider checksum.
+- Freeze the projection transport at HTTP/1.1, including its pinned TLS
+  self-probe, and reject HTTP/1.0 or HTTP/2 before projection authorization or
+  daemon access so the signed literal `Host` authority cannot be substituted.
 
 ## 0.172.0 - 2026-08-18
 

@@ -142,6 +142,7 @@ fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
     let client = reqwest::blocking::Client::builder()
         .add_root_certificate(certificate)
         .redirect(reqwest::redirect::Policy::none())
+        .http1_only()
         .connect_timeout(Duration::from_secs(3))
         .timeout(Duration::from_secs(5))
         .build()
@@ -151,7 +152,9 @@ fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
             "{SYNOPTIKON_PROJECTION_ENDPOINT}/.well-known/dasobjectstore/appliance-ca.pem"
         ))
         .send()
-        .map_err(|error| projection_runtime_error(format!("TLS endpoint unavailable: {error}")))?;
+        .map_err(|error| {
+            projection_runtime_error(format!("TLS endpoint unavailable: {error:?}"))
+        })?;
     if !response.status().is_success()
         || response
             .headers()

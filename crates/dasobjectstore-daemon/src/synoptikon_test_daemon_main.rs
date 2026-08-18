@@ -36,10 +36,19 @@ fn run() -> Result<(), String> {
         .next()
         .and_then(|value| value.into_string().ok())
         .ok_or_else(|| "fixture UTC timestamp argument is required".to_owned())?;
+    let reuse = match args.next().and_then(|value| value.into_string().ok()) {
+        None => false,
+        Some(value) if value == "--reuse" => true,
+        Some(_) => return Err("unexpected fixture argument".to_owned()),
+    };
     if args.next().is_some() {
         return Err("unexpected fixture argument".to_owned());
     }
-    let fixture = SynoptikonProjectionTestFixture::new(&root, now_utc)?;
+    let fixture = if reuse {
+        SynoptikonProjectionTestFixture::open_existing(&root, now_utc)?
+    } else {
+        SynoptikonProjectionTestFixture::new(&root, now_utc)?
+    };
     let worker = fixture.clone();
     thread::spawn(move || {
         // Let the real upload transaction publish its SSD receipt and queue

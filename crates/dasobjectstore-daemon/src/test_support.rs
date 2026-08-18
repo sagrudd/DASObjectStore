@@ -209,6 +209,43 @@ impl SynoptikonProjectionTestFixture {
         })
     }
 
+    /// Reopen the exact disposable fixture after a daemon-process restart.
+    /// This is feature-gated test support and cannot select production paths.
+    pub fn open_existing(
+        root: impl AsRef<Path>,
+        now_utc: impl Into<String>,
+    ) -> Result<Self, String> {
+        let root = root.as_ref().to_path_buf();
+        let fixture = Self {
+            store_registry_path: root.join("stores.json"),
+            subobject_registry_path: root.join("subobjects.json"),
+            profile_binding_registry_path: root.join("profile-bindings.json"),
+            live_sqlite_path: root.join("ssd/.dasobjectstore/live.sqlite"),
+            ssd_root: root.join("ssd"),
+            backend_root: root.join("ssd/synoptikon-backend"),
+            hdd_root: root.join("hdd"),
+            projection_ledger_path: root.join("projection-authority/ledger.json"),
+            root,
+            now_utc: now_utc.into(),
+        };
+        for required in [
+            &fixture.store_registry_path,
+            &fixture.profile_binding_registry_path,
+            &fixture.live_sqlite_path,
+            &fixture.backend_root,
+            &fixture.hdd_root,
+            &fixture.projection_ledger_path,
+        ] {
+            if !required.exists() {
+                return Err(format!(
+                    "existing fixture is missing {}",
+                    required.display()
+                ));
+            }
+        }
+        Ok(fixture)
+    }
+
     pub fn handler(
         &self,
     ) -> DaemonRequestHandler<SynoptikonProjectionTestService, FixedDaemonClock> {
