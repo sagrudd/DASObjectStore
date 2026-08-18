@@ -24,6 +24,7 @@ use dasobjectstore_object_service::{
     upsert_store_definition, ObjectServiceProviderId, ServiceState, StoreServiceDefinition,
 };
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -123,6 +124,12 @@ impl SynoptikonProjectionTestFixture {
         let subobject_registry_path = root.join("subobjects.json");
         let profile_binding_registry_path = root.join("profile-bindings.json");
         let projection_ledger_path = root.join("projection-authority/ledger.json");
+        let projection_authority_dir = projection_ledger_path
+            .parent()
+            .ok_or_else(|| "projection authority directory is unavailable".to_owned())?;
+        fs::create_dir_all(projection_authority_dir).map_err(|error| error.to_string())?;
+        fs::set_permissions(projection_authority_dir, fs::Permissions::from_mode(0o700))
+            .map_err(|error| error.to_string())?;
         let store_id = StoreId::new("synoptikon-demo").map_err(|error| error.to_string())?;
         let mut policy = StorePolicy::defaults_for(StoreClass::GeneratedData);
         policy.acknowledgement_policy = AcknowledgementPolicy::AfterHddPlacement;
@@ -238,10 +245,13 @@ mod tests {
                 |_| Ok(()),
             )
             .expect("prepare handled");
-        assert!(matches!(
-            response,
-            DaemonApiResponse::SynoptikonProjectionPrepared(_)
-        ));
+        assert!(
+            matches!(
+                &response,
+                DaemonApiResponse::SynoptikonProjectionPrepared(_)
+            ),
+            "unexpected prepare response: {response:?}"
+        );
         std::fs::remove_dir_all(root).expect("cleanup fixture");
     }
 }
