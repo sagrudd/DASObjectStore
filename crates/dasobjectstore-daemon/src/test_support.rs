@@ -326,8 +326,6 @@ mod tests {
         assert!(fixture.live_sqlite_path.is_file());
         assert!(fixture.store_registry_path.is_file());
         assert!(fixture.profile_binding_registry_path.is_file());
-        SynoptikonProjectionTestFixture::open_existing(&root, "2026-08-18T10:00:01Z")
-            .expect("marked fixture reopens");
         let response = fixture
             .handler()
             .handle_with_progress_for_actor(
@@ -349,6 +347,8 @@ mod tests {
             ),
             "unexpected prepare response: {response:?}"
         );
+        SynoptikonProjectionTestFixture::open_existing(&root, "2026-08-18T10:00:01Z")
+            .expect("marked initialized fixture reopens");
         std::fs::remove_dir_all(root).expect("cleanup fixture");
     }
 
