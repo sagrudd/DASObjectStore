@@ -53,7 +53,7 @@ fn run() -> Result<(), String> {
     thread::spawn(move || {
         // Let the real upload transaction publish its SSD receipt and queue
         // before the disposable worker begins contending for live metadata.
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_secs(2));
         loop {
             match worker.settle_one_hdd_placement() {
                 Ok(DurableDestageOutcome::Settled { .. }) => break,
