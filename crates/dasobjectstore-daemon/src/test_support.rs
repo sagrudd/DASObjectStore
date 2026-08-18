@@ -241,7 +241,7 @@ impl SynoptikonProjectionTestFixture {
         run_one_durable_destage(
             &DurableDestageWorkerConfig {
                 live_sqlite_path: self.live_sqlite_path.clone(),
-                ssd_root: self.ssd_root.clone(),
+                ssd_root: self.backend_root.clone(),
                 hdd_root: self.hdd_root.clone(),
                 worker_id: "synoptikon-test-destage".to_owned(),
             },
