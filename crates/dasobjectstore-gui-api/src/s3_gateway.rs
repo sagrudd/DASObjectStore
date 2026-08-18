@@ -695,6 +695,7 @@ async fn s3_put_object(
         expected_sha256: expected_sha256.clone(),
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
         retained_dossier: None,
+        synoptikon_projection: None,
     };
     let result = stream_profile_s3_put(request, body).await;
     drop(permit);

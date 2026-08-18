@@ -96,6 +96,7 @@ async fn profile_s3_put(
         expected_sha256,
         chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
         retained_dossier: None,
+        synoptikon_projection: None,
     };
     request.validate().map_err(|error| {
         route_error(
