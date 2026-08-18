@@ -473,6 +473,21 @@ pub fn validate_synoptikon_projection_request(
     Ok(())
 }
 
+/// Return the SHA-256 fingerprint of the single DER leaf certificate carried
+/// by a PEM document. A chain or non-certificate trailing data is rejected.
+pub fn synoptikon_tls_leaf_der_sha256(
+    pem_bytes: &[u8],
+) -> Result<String, SynoptikonProjectionError> {
+    let (remaining, pem) = x509_parser::pem::parse_x509_pem(pem_bytes)
+        .map_err(|_| SynoptikonProjectionError::TransportMismatch)?;
+    if !remaining.iter().all(u8::is_ascii_whitespace) || pem.label != "CERTIFICATE" {
+        return Err(SynoptikonProjectionError::TransportMismatch);
+    }
+    x509_parser::parse_x509_certificate(&pem.contents)
+        .map_err(|_| SynoptikonProjectionError::TransportMismatch)?;
+    Ok(format!("{:x}", Sha256::digest(&pem.contents)))
+}
+
 fn validate_readiness(
     request: &SynoptikonProjectionRequestV1,
     readiness: &SynoptikonProjectionReadinessV1,
@@ -839,6 +854,24 @@ mod tests {
         readiness.endpoint_url = "https://192.168.0.192:3900".to_owned();
         assert_eq!(
             settle_synoptikon_projection(&request, &verified(readiness), NOW, None),
+            Err(SynoptikonProjectionError::TransportMismatch)
+        );
+    }
+
+    #[test]
+    fn tls_identity_hashes_the_der_leaf_not_pem_encoding() {
+        let certified = rcgen::generate_simple_self_signed(vec!["192.168.0.193".to_owned()])
+            .expect("leaf certificate");
+        let pem = certified.cert.pem();
+        let fingerprint = synoptikon_tls_leaf_der_sha256(pem.as_bytes()).expect("DER fingerprint");
+        assert_eq!(
+            fingerprint,
+            format!("{:x}", Sha256::digest(certified.cert.der()))
+        );
+        assert_ne!(fingerprint, format!("{:x}", Sha256::digest(pem.as_bytes())));
+        let chained = format!("{pem}{pem}");
+        assert_eq!(
+            synoptikon_tls_leaf_der_sha256(chained.as_bytes()),
             Err(SynoptikonProjectionError::TransportMismatch)
         );
     }

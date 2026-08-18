@@ -72,6 +72,7 @@ pub fn prepare_synoptikon_projection_intent(
         item.projection.object_key == logical_name
             && item.projection.source_size_bytes == size_bytes
             && item.projection.source_sha256 == sha256
+            && (item.settlement.is_some() || item.projection.expires_at_unix_seconds > now)
     }) {
         return Ok((existing.clone(), true));
     }
@@ -251,14 +252,68 @@ fn read(path: &Path) -> Result<Ledger, DaemonServiceRuntimeError> {
     }
     let mut identities = BTreeSet::new();
     let mut nonces = BTreeSet::new();
+    let mut authority_sequences = BTreeSet::new();
     for record in &ledger.intents {
+        validate_synoptikon_projection_request(
+            &record.projection,
+            record.projection.requested_at_unix_seconds,
+        )
+        .map_err(|error| invalid(format!("projection ledger request is invalid: {error}")))?;
+        let expected_intent = format!(
+            "syno-{}",
+            &canonical_sha256(&(
+                record.projection.object_key.as_str(),
+                record.projection.source_size_bytes,
+                record.projection.source_sha256.as_str(),
+                record.projection.object_version,
+            ))?[..48]
+        );
+        let expected_nonce = canonical_sha256(&(
+            expected_intent.as_str(),
+            record.projection.source_sha256.as_str(),
+            record.projection.requested_at_unix_seconds,
+        ))?;
         if !identities.insert((
             record.projection.projection_id.as_str(),
             record.projection.generation,
         )) || !nonces.insert(record.projection.nonce.as_str())
             || record.settlement_id.is_some() != record.settlement.is_some()
+            || record.intent_id != expected_intent
+            || record.projection.projection_id != record.intent_id
+            || record.projection.object_id
+                != format!(
+                    "{}/{}",
+                    record.projection.object_store_id, record.projection.object_key
+                )
+            || record.projection.generation != record.projection.object_version
+            || record.projection.nonce != expected_nonce
         {
             return Err(invalid("projection ledger contains conflicting records"));
+        }
+        if let Some(settlement) = &record.settlement {
+            let expected_settlement_id =
+                format!("syno-set-{}", &canonical_sha256(settlement)?[..48]);
+            if record.settlement_id.as_deref() != Some(expected_settlement_id.as_str())
+                || settlement.schema_version
+                    != dasobjectstore_core::SYNOPTIKON_PROJECTION_SETTLEMENT_V1_SCHEMA
+                || settlement.projection_id != record.projection.projection_id
+                || settlement.request_sha256 != canonical_sha256(&record.projection)?
+                || settlement.generation != record.projection.generation
+                || settlement.source_sha256 != record.projection.source_sha256
+                || settlement.object_store_id != record.projection.object_store_id
+                || settlement.object_id != record.projection.object_id
+                || settlement.object_version != record.projection.object_version
+                || settlement.nonce != record.projection.nonce
+                || settlement.authority_sequence == 0
+                || settlement.authority_sequence > ledger.authority_sequence
+                || !authority_sequences.insert(settlement.authority_sequence)
+                || !record.uploaded
+                || settlement.hdd_replica_count == 0
+                || settlement.disposition
+                    != dasobjectstore_core::SynoptikonProjectionDispositionV1::HddSettled
+            {
+                return Err(invalid("projection ledger settlement is not cross-bound"));
+            }
         }
     }
     Ok(ledger)
@@ -433,7 +488,7 @@ mod tests {
             schema_version: dasobjectstore_core::SYNOPTIKON_PROJECTION_SETTLEMENT_V1_SCHEMA
                 .to_owned(),
             projection_id: request.projection_id.clone(),
-            request_sha256: "01".repeat(32),
+            request_sha256: canonical_sha256(request).unwrap(),
             readiness_sha256: "02".repeat(32),
             generation: request.generation,
             source_sha256: request.source_sha256.clone(),
@@ -479,6 +534,22 @@ mod tests {
         .expect("next generation");
         assert!(!next.1);
         assert_eq!(next.0.projection.object_version, 2);
+
+        let expired =
+            prepare_synoptikon_projection_intent(&path, "expired.bin", 4, &"ef".repeat(32), NOW)
+                .expect("expired intent")
+                .0;
+        let replacement = prepare_synoptikon_projection_intent(
+            &path,
+            "expired.bin",
+            4,
+            &"ef".repeat(32),
+            expired.projection.expires_at_unix_seconds,
+        )
+        .expect("fresh replacement");
+        assert!(!replacement.1);
+        assert_eq!(replacement.0.projection.object_version, 2);
+        assert_ne!(replacement.0.intent_id, expired.intent_id);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -540,6 +611,134 @@ mod tests {
             NOW,
         )
         .is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ledger_rejects_rewritten_identity_nonce_and_sequence_bindings() {
+        for mutation in ["identity", "nonce", "sequence"] {
+            let (root, path) = fixture();
+            let intent = prepare(&path);
+            mark_projection_uploaded(&path, &intent.intent_id).unwrap();
+            commit_projection_settlement(&path, &intent.intent_id, |request, sequence| {
+                Ok(settlement(request, sequence))
+            })
+            .unwrap();
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            match mutation {
+                "identity" => {
+                    value["intents"][0]["projection"]["object_id"] =
+                        serde_json::json!("synoptikon-demo/substituted.bin")
+                }
+                "nonce" => {
+                    value["intents"][0]["projection"]["nonce"] = serde_json::json!("99".repeat(32))
+                }
+                "sequence" => value["authority_sequence"] = serde_json::json!(0),
+                _ => unreachable!(),
+            }
+            std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            assert!(
+                projection_intent(&path, &intent.intent_id).is_err(),
+                "{mutation}"
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn exact_prepare_upload_settle_and_read_contract_uses_provider_digest_encoding() {
+        use crate::api::{
+            ProviderStreamChunkHeader, ProviderStreamCondition, ProviderStreamOpenRequest,
+            ProviderStreamUploadOpenRequest, ProviderStreamVerifier, SynoptikonProjectionReadV1,
+            SynoptikonProjectionUploadV1, PROVIDER_STREAM_SCHEMA_VERSION,
+            SYNOPTIKON_PROJECTION_READ_V1_SCHEMA, SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA,
+        };
+        let (root, path) = fixture();
+        let raw_sha = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let provider_sha = format!("sha256:{raw_sha}");
+        let intent = prepare_synoptikon_projection_intent(&path, "hello.txt", 5, raw_sha, NOW)
+            .expect("prepare")
+            .0;
+        let upload = ProviderStreamUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+            request_id: "projection-upload-1".to_owned(),
+            upload_id: intent.intent_id.clone(),
+            store_id: intent.projection.object_store_id.parse().unwrap(),
+            object: dasobjectstore_core::backend::BackendObjectKey {
+                object_id: intent.projection.object_key.clone(),
+                version: intent.projection.object_version,
+            },
+            expected_size_bytes: 5,
+            expected_sha256: provider_sha.clone(),
+            chunk_size_bytes: 5,
+            retained_dossier: None,
+            synoptikon_projection: Some(SynoptikonProjectionUploadV1 {
+                schema_version: SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA.to_owned(),
+                intent_id: intent.intent_id.clone(),
+            }),
+        };
+        upload.validate().expect("upload envelope");
+        let mut verifier = ProviderStreamVerifier::new(upload.request_id.clone()).unwrap();
+        verifier
+            .push(
+                &ProviderStreamChunkHeader {
+                    schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+                    request_id: upload.request_id.clone(),
+                    offset: 0,
+                    payload_len: 5,
+                    final_chunk: false,
+                    total_size: None,
+                    sha256: None,
+                },
+                b"hello",
+            )
+            .unwrap();
+        verifier
+            .finish(
+                &ProviderStreamChunkHeader {
+                    schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+                    request_id: upload.request_id.clone(),
+                    offset: 5,
+                    payload_len: 0,
+                    final_chunk: true,
+                    total_size: Some(5),
+                    sha256: Some(provider_sha.clone()),
+                },
+                &[],
+            )
+            .unwrap();
+        mark_projection_uploaded(&path, &intent.intent_id).unwrap();
+        let (settlement_id, _, _) =
+            commit_projection_settlement(&path, &intent.intent_id, |request, sequence| {
+                Ok(settlement(request, sequence))
+            })
+            .expect("settlement");
+        let read = ProviderStreamOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+            request_id: "projection-read-1".to_owned(),
+            store_id: intent.projection.object_store_id.parse().unwrap(),
+            object: dasobjectstore_core::backend::BackendObjectKey {
+                object_id: intent.projection.object_key,
+                version: intent.projection.object_version,
+            },
+            delegated_actor: None,
+            verified_subject: None,
+            application_capability: None,
+            synoptikon_projection: Some(SynoptikonProjectionReadV1 {
+                schema_version: SYNOPTIKON_PROJECTION_READ_V1_SCHEMA.to_owned(),
+                settlement_id: settlement_id.clone(),
+            }),
+            range: None,
+            condition: ProviderStreamCondition {
+                if_match_sha256: Some(provider_sha),
+                if_none_match_sha256: None,
+            },
+            chunk_size_bytes: 5,
+        };
+        read.validate().expect("read envelope");
+        verify_projection_settlement(&path, &settlement_id).expect("terminal read authority");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

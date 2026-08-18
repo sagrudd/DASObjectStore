@@ -118,7 +118,16 @@ async fn appliance_ca_certificate(State(state): State<S3GatewayState>) -> Respon
             )
         }
     };
-    let fingerprint = format!("{:x}", Sha256::digest(&certificate));
+    let fingerprint = match dasobjectstore_core::synoptikon_tls_leaf_der_sha256(&certificate) {
+        Ok(fingerprint) => fingerprint,
+        Err(_) => {
+            return s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "appliance leaf certificate is invalid",
+            )
+        }
+    };
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/x-pem-file")
@@ -940,8 +949,10 @@ mod tests {
         std::fs::create_dir_all(&root).expect("test root");
         let mut state = S3GatewayState::with_registry(registry, 1);
         state.appliance_certificate_path = root.join("server.crt");
-        let pem = b"-----BEGIN CERTIFICATE-----\nZmFrZQ==\n-----END CERTIFICATE-----\n";
-        std::fs::write(&state.appliance_certificate_path, pem).expect("certificate");
+        let certified =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificate");
+        let pem = certified.cert.pem();
+        std::fs::write(&state.appliance_certificate_path, pem.as_bytes()).expect("certificate");
 
         let response = appliance_ca_certificate(State(state)).await;
         assert_eq!(response.status(), StatusCode::OK);
@@ -958,12 +969,12 @@ mod tests {
                 .headers()
                 .get("x-dasobjectstore-certificate-sha256")
                 .unwrap(),
-            format!("{:x}", Sha256::digest(pem)).as_str()
+            format!("{:x}", Sha256::digest(certified.cert.der())).as_str()
         );
         let body = to_bytes(response.into_body(), 4_096)
             .await
             .expect("certificate body");
-        assert_eq!(body.as_ref(), pem);
+        assert_eq!(body.as_ref(), pem.as_bytes());
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

@@ -52,13 +52,14 @@ where
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_secs())
             .unwrap_or(u64::MAX);
+        let expected_provider_sha256 = format!("sha256:{}", intent.projection.source_sha256);
         if now >= intent.projection.expires_at_unix_seconds
             || request.upload_id != intent.intent_id
             || request.store_id.as_str() != intent.projection.object_store_id
             || request.object.object_id != intent.projection.object_key
             || request.object.version != intent.projection.object_version
             || request.expected_size_bytes != intent.projection.source_size_bytes
-            || request.expected_sha256 != intent.projection.source_sha256
+            || request.expected_sha256 != expected_provider_sha256
         {
             return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
                 message: "upload differs from the durable Synoptikon intent".to_owned(),
@@ -105,12 +106,13 @@ where
         .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
             message: error.to_string(),
         })?;
+        let expected_provider_sha256 = format!("sha256:{}", intent.projection.source_sha256);
         if request.range.is_some()
             || request.store_id.as_str() != intent.projection.object_store_id
             || request.object.object_id != intent.projection.object_key
             || request.object.version != intent.projection.object_version
             || request.condition.if_match_sha256.as_deref()
-                != Some(intent.projection.source_sha256.as_str())
+                != Some(expected_provider_sha256.as_str())
             || request.condition.if_none_match_sha256.is_some()
         {
             return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {

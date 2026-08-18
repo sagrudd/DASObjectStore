@@ -794,10 +794,12 @@ dependencies = [
  "chrono",
  "dasobjectstore-reference",
  "libc",
+ "rcgen",
  "serde",
  "serde_jcs",
  "serde_json",
  "sha2",
+ "x509-parser",
 ]
 
 [[package]]

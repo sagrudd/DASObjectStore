@@ -17,6 +17,8 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::{self, Read, Seek, SeekFrom};
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::time::{Duration, Instant};
 
 const AFTER_HDD_ACK_DEADLINE: Duration = Duration::from_secs(300);
@@ -55,24 +57,41 @@ fn hdd_target_has_capacity(_: &std::path::Path, _: u64) -> bool {
     false
 }
 
+fn projection_replica_counts_are_coherent(
+    replica_count: usize,
+    unique_placement_count: usize,
+    unique_disk_count: usize,
+    required_copy_count: u8,
+    verified_copy_count: u8,
+) -> bool {
+    replica_count != 0
+        && replica_count == unique_placement_count
+        && replica_count == unique_disk_count
+        && replica_count == usize::from(verified_copy_count)
+        && replica_count >= usize::from(required_copy_count)
+}
+
 fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
     use dasobjectstore_core::{
         SYNOPTIKON_PROJECTION_ENDPOINT, SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH,
         SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH,
     };
-    let expected =
-        std::fs::read_to_string(SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH).map_err(|error| {
-            projection_runtime_error(format!("TLS expectation unavailable: {error}"))
-        })?;
-    let expected = expected.trim();
+    let expected = read_protected_projection_file(
+        std::path::Path::new(SYNOPTIKON_PROJECTION_TLS_EXPECTATION_PATH),
+        65,
+    )?;
+    let expected = std::str::from_utf8(&expected)
+        .map_err(|_| projection_runtime_error("TLS expectation is not UTF-8"))?
+        .trim();
     if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(projection_runtime_error("TLS expectation is invalid"));
     }
-    let certificate =
-        std::fs::read(SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH).map_err(|error| {
-            projection_runtime_error(format!("TLS certificate unavailable: {error}"))
-        })?;
-    let certificate_sha256 = format!("{:x}", Sha256::digest(&certificate));
+    let certificate = read_protected_projection_file(
+        std::path::Path::new(SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH),
+        128 * 1024,
+    )?;
+    let certificate_sha256 = dasobjectstore_core::synoptikon_tls_leaf_der_sha256(&certificate)
+        .map_err(|error| projection_runtime_error(format!("TLS leaf invalid: {error}")))?;
     if certificate_sha256 != expected {
         return Err(projection_runtime_error(
             "TLS certificate differs from protected expectation",
@@ -105,6 +124,55 @@ fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
         ));
     }
     Ok(expected.to_ascii_lowercase())
+}
+
+#[cfg(unix)]
+fn read_protected_projection_file(
+    path: &std::path::Path,
+    max_len: u64,
+) -> Result<Vec<u8>, DaemonServiceRuntimeError> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| {
+            projection_runtime_error(format!("protected file unavailable: {error}"))
+        })?;
+    let metadata = file.metadata().map_err(|error| {
+        projection_runtime_error(format!("protected metadata unavailable: {error}"))
+    })?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.gid() != unsafe { libc::getegid() }
+        || metadata.mode() & 0o7777 != 0o600
+        || metadata.len() == 0
+        || metadata.len() > max_len
+    {
+        return Err(projection_runtime_error(
+            "protected file metadata is invalid",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(max_len + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            projection_runtime_error(format!("protected file read failed: {error}"))
+        })?;
+    if bytes.len() as u64 != metadata.len() {
+        return Err(projection_runtime_error("protected file length changed"));
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(unix))]
+fn read_protected_projection_file(
+    _: &std::path::Path,
+    _: u64,
+) -> Result<Vec<u8>, DaemonServiceRuntimeError> {
+    Err(projection_runtime_error(
+        "protected descriptors require Unix",
+    ))
 }
 
 #[derive(Clone)]
@@ -289,11 +357,12 @@ where
         )
         .map_err(|error| projection_runtime_error(error.to_string()))?
         .ok_or_else(|| projection_runtime_error("catalogue binding is absent"))?;
+        let expected_provider_sha256 = format!("sha256:{}", request.source_sha256);
         if binding.object_id.as_str() != request.object_id
             || binding.size_bytes != request.source_size_bytes
             || !binding
                 .checksum
-                .eq_ignore_ascii_case(&request.source_sha256)
+                .eq_ignore_ascii_case(&expected_provider_sha256)
         {
             return Err(projection_runtime_error(
                 "catalogue binding differs from intent",
@@ -335,11 +404,15 @@ where
             })
             .map_err(|error| projection_runtime_error(error.to_string()))?;
         let mut replicas = Vec::new();
+        let mut placement_ids = std::collections::BTreeSet::new();
+        let mut disk_ids = std::collections::BTreeSet::new();
         for row in rows {
             let (placement_id, disk_id, checksum, verified_at) =
                 row.map_err(|error| projection_runtime_error(error.to_string()))?;
-            if verified_at.is_none()
-                || checksum.as_deref() != Some(request.source_sha256.as_str())
+            if !placement_ids.insert(placement_id.clone())
+                || !disk_ids.insert(disk_id.clone())
+                || verified_at.is_none()
+                || checksum.as_deref() != Some(expected_provider_sha256.as_str())
                 || !hdd_target_has_capacity(
                     &self.hdd_root_path.join(&disk_id),
                     request.source_size_bytes,
@@ -362,7 +435,13 @@ where
                 disposition: "hdd_verified".to_owned(),
             });
         }
-        if replicas.is_empty() {
+        if !projection_replica_counts_are_coherent(
+            replicas.len(),
+            placement_ids.len(),
+            disk_ids.len(),
+            destage.required_copy_count,
+            destage.verified_copy_count,
+        ) {
             return Err(projection_runtime_error("verified HDD placement is absent"));
         }
         let ambiguous: u64 = connection
@@ -1397,6 +1476,7 @@ impl Read for ProviderUploadReader<'_> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+    use std::os::unix::fs::{symlink, PermissionsExt};
 
     fn request(expected_size_bytes: u64, expected_sha256: &str) -> ProviderStreamUploadOpenRequest {
         ProviderStreamUploadOpenRequest {
@@ -1458,6 +1538,48 @@ mod tests {
         let mut payload = Vec::new();
         reader.read_to_end(&mut payload).expect("verified payload");
         assert_eq!(payload, b"hello");
+    }
+
+    #[test]
+    fn synoptikon_projection_tls_file_rejects_symlink_hardlink_and_special_modes() {
+        let root = std::env::temp_dir().join(format!(
+            "das-projection-tls-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let certificate = root.join("peer.pem");
+        std::fs::write(&certificate, b"certificate").unwrap();
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            read_protected_projection_file(&certificate, 1024).unwrap(),
+            b"certificate"
+        );
+        let link = root.join("peer-hardlink.pem");
+        std::fs::hard_link(&certificate, &link).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::remove_file(link).unwrap();
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o4600)).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::set_permissions(&certificate, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let target = root.join("target.pem");
+        std::fs::rename(&certificate, &target).unwrap();
+        symlink(&target, &certificate).unwrap();
+        assert!(read_protected_projection_file(&certificate, 1024).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn synoptikon_projection_replica_count_requires_unique_disks_and_exact_verified_total() {
+        assert!(projection_replica_counts_are_coherent(2, 2, 2, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(2, 1, 2, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(2, 2, 1, 2, 2));
+        assert!(!projection_replica_counts_are_coherent(1, 1, 1, 2, 1));
+        assert!(!projection_replica_counts_are_coherent(2, 2, 2, 1, 1));
+        assert!(!projection_replica_counts_are_coherent(0, 0, 0, 0, 0));
     }
 
     #[test]
