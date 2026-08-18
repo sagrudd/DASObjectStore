@@ -17,6 +17,11 @@ test-support = []
 name = "dasobjectstored"
 path = "src/main.rs"
 
+[[bin]]
+name = "dasobjectstore-synoptikon-test-daemon"
+path = "src/synoptikon_test_daemon_main.rs"
+required-features = ["test-support"]
+
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
