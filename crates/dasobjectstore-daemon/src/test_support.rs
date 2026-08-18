@@ -124,6 +124,12 @@ impl SynoptikonProjectionTestFixture {
         rusqlite::Connection::open(&report.live_sqlite_path)
             .and_then(|connection| {
                 connection.execute(
+                    "INSERT INTO stores (
+                        store_id,pool_id,class,policy_json,created_at_utc,updated_at_utc
+                     ) VALUES (?1,?2,'generated_data','{}',?3,?3)",
+                    rusqlite::params!["synoptikon-demo", "synoptikon-fixture-pool", &now_utc,],
+                )?;
+                connection.execute(
                     "INSERT INTO disks (
                         disk_id,pool_id,role,state,created_at_utc,updated_at_utc
                      ) VALUES (?1,?2,'hdd','Healthy',?3,?3)",
