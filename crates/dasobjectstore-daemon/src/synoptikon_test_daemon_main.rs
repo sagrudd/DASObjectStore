@@ -39,12 +39,17 @@ fn run() -> Result<(), String> {
     }
     let fixture = SynoptikonProjectionTestFixture::new(&root, now_utc)?;
     let worker = fixture.clone();
-    thread::spawn(move || loop {
-        match worker.settle_one_hdd_placement() {
-            Ok(_) => {}
-            Err(error) => eprintln!("fixture destage deferred: {error}"),
+    thread::spawn(move || {
+        // Let the real upload transaction publish its SSD receipt and queue
+        // before the disposable worker begins contending for live metadata.
+        thread::sleep(Duration::from_millis(500));
+        loop {
+            match worker.settle_one_hdd_placement() {
+                Ok(_) => {}
+                Err(error) => eprintln!("fixture destage deferred: {error}"),
+            }
+            thread::sleep(Duration::from_millis(100));
         }
-        thread::sleep(Duration::from_millis(25));
     });
     let server = UnixSocketDaemonServer::new(socket, fixture.handler());
     server.serve_forever().map_err(|error| error.to_string())
