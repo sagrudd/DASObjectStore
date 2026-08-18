@@ -71,6 +71,30 @@ fn projection_replica_counts_are_coherent(
         && replica_count >= usize::from(required_copy_count)
 }
 
+fn exact_projection_ingress_receipt(
+    connection: &Connection,
+    intent_id: &str,
+    store_id: &str,
+    object_id: &str,
+    size_bytes: u64,
+    sha256: &str,
+) -> Result<Option<String>, rusqlite::Error> {
+    let expected_upload_id = format!("ingest-direct-s3-{intent_id}");
+    connection
+        .query_row(
+            "SELECT ingest_job_id FROM ingest_jobs WHERE ingest_job_id=?1 AND store_id=?2 AND object_id=?3 AND state='ssd_accepted' AND expected_size_bytes=?4 AND received_bytes=?4 AND content_hash=?5 AND content_hash_algorithm='sha256'",
+            rusqlite::params![
+                expected_upload_id,
+                store_id,
+                object_id,
+                size_bytes,
+                sha256,
+            ],
+            |row| row.get(0),
+        )
+        .optional()
+}
+
 fn probe_fixed_synoptikon_tls() -> Result<String, DaemonServiceRuntimeError> {
     use dasobjectstore_core::{
         SYNOPTIKON_PROJECTION_ENDPOINT, SYNOPTIKON_PROJECTION_TLS_CERTIFICATE_PATH,
@@ -381,15 +405,16 @@ where
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(|error| projection_runtime_error(error.to_string()))?;
-        let upload_id: String = connection
-            .query_row(
-                "SELECT ingest_job_id FROM ingest_jobs WHERE object_id=?1 AND state IN ('completed','hdd_copy_verified') ORDER BY rowid DESC LIMIT 1",
-                [binding.object_id.as_str()],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|error| projection_runtime_error(error.to_string()))?
-            .ok_or_else(|| projection_runtime_error("SSD ingress receipt is absent"))?;
+        let upload_id = exact_projection_ingress_receipt(
+            &connection,
+            &request.projection_id,
+            store_id.as_str(),
+            binding.object_id.as_str(),
+            request.source_size_bytes,
+            &request.source_sha256,
+        )
+        .map_err(|error| projection_runtime_error(error.to_string()))?
+        .ok_or_else(|| projection_runtime_error("SSD ingress receipt is absent"))?;
         let mut statement = connection
             .prepare("SELECT placement_id,disk_id,content_hash,verified_at_utc FROM placements WHERE object_id=?1 ORDER BY placement_id")
             .map_err(|error| projection_runtime_error(error.to_string()))?;
@@ -848,24 +873,12 @@ where
         ) {
             Ok(Some(existing))
                 if request.retained_dossier.is_none()
+                    && request.synoptikon_projection.is_none()
                     && existing.size_bytes == request.expected_size_bytes
                     && existing
                         .checksum
                         .eq_ignore_ascii_case(&request.expected_sha256) =>
             {
-                if request.synoptikon_projection.is_some() {
-                    if let Err(error) = crate::runtime::mark_projection_uploaded(
-                        &self.synoptikon_projection_ledger_path,
-                        &request.upload_id,
-                    ) {
-                        return emit_response(DaemonApiResponse::Error(
-                            DaemonApiErrorResponse::new(
-                                "projection_receipt_commit_failed",
-                                error.to_string(),
-                            ),
-                        ));
-                    }
-                }
                 return emit_response(DaemonApiResponse::ProviderStreamUpload(
                     ProviderStreamUploadResponse {
                         schema_version: crate::api::PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
@@ -877,6 +890,12 @@ where
                         retained_dossier: None,
                     },
                 ));
+            }
+            Ok(Some(_)) if request.synoptikon_projection.is_some() => {
+                return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "projection_fresh_ingress_required",
+                    "Synoptikon projection cannot adopt an existing catalogue object",
+                )));
             }
             Ok(Some(existing))
                 if existing.size_bytes == request.expected_size_bytes
@@ -917,6 +936,12 @@ where
                         .checksum
                         .eq_ignore_ascii_case(&request.expected_sha256) =>
             {
+                if request.synoptikon_projection.is_some() {
+                    return emit_response(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                        "projection_fresh_ingress_required",
+                        "Synoptikon projection cannot adopt existing backend bytes",
+                    )));
+                }
                 let record = match backend.records().and_then(|records| {
                     records
                         .into_iter()
@@ -1580,6 +1605,84 @@ mod tests {
         assert!(!projection_replica_counts_are_coherent(1, 1, 1, 2, 1));
         assert!(!projection_replica_counts_are_coherent(2, 2, 2, 1, 1));
         assert!(!projection_replica_counts_are_coherent(0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn synoptikon_projection_requires_the_exact_ssd_ingress_receipt() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE ingest_jobs (
+                    ingest_job_id TEXT PRIMARY KEY NOT NULL,
+                    store_id TEXT NOT NULL,
+                    object_id TEXT,
+                    state TEXT NOT NULL,
+                    expected_size_bytes INTEGER,
+                    received_bytes INTEGER NOT NULL,
+                    content_hash TEXT,
+                    content_hash_algorithm TEXT
+                );",
+            )
+            .unwrap();
+        let insert = |job: &str, store: &str, object: &str, state: &str, size: u64, hash: &str| {
+            connection
+                .execute(
+                    "INSERT INTO ingest_jobs VALUES (?1,?2,?3,?4,?5,?5,?6,'sha256')",
+                    rusqlite::params![job, store, object, state, size, hash],
+                )
+                .unwrap();
+        };
+        insert(
+            "ingest-direct-s3-other-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            "ssd_accepted",
+            5,
+            &"ab".repeat(32),
+        );
+        assert_eq!(
+            exact_projection_ingress_receipt(
+                &connection,
+                "wanted-intent",
+                "synoptikon-demo",
+                "synoptikon-demo/demo.bin",
+                5,
+                &"ab".repeat(32),
+            )
+            .unwrap(),
+            None
+        );
+        insert(
+            "ingest-direct-s3-wanted-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            "ssd_accepted",
+            5,
+            &"ab".repeat(32),
+        );
+        assert_eq!(
+            exact_projection_ingress_receipt(
+                &connection,
+                "wanted-intent",
+                "synoptikon-demo",
+                "synoptikon-demo/demo.bin",
+                5,
+                &"ab".repeat(32),
+            )
+            .unwrap()
+            .as_deref(),
+            Some("ingest-direct-s3-wanted-intent")
+        );
+        assert!(exact_projection_ingress_receipt(
+            &connection,
+            "wanted-intent",
+            "synoptikon-demo",
+            "synoptikon-demo/demo.bin",
+            6,
+            &"ab".repeat(32),
+        )
+        .unwrap()
+        .is_none());
     }
 
     #[test]

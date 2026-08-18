@@ -19,4 +19,5 @@ x509-parser.workspace = true
 dasobjectstore-reference.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 rcgen.workspace = true

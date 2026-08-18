@@ -791,6 +791,7 @@ dependencies = [
 name = "dasobjectstore-core"
 version = "0.171.0"
 dependencies = [
+ "base64",
  "chrono",
  "dasobjectstore-reference",
  "libc",

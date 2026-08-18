@@ -483,8 +483,11 @@ pub fn synoptikon_tls_leaf_der_sha256(
     if !remaining.iter().all(u8::is_ascii_whitespace) || pem.label != "CERTIFICATE" {
         return Err(SynoptikonProjectionError::TransportMismatch);
     }
-    x509_parser::parse_x509_certificate(&pem.contents)
+    let (der_remaining, _) = x509_parser::parse_x509_certificate(&pem.contents)
         .map_err(|_| SynoptikonProjectionError::TransportMismatch)?;
+    if !der_remaining.is_empty() {
+        return Err(SynoptikonProjectionError::TransportMismatch);
+    }
     Ok(format!("{:x}", Sha256::digest(&pem.contents)))
 }
 
@@ -860,6 +863,7 @@ mod tests {
 
     #[test]
     fn tls_identity_hashes_the_der_leaf_not_pem_encoding() {
+        use base64::Engine;
         let certified = rcgen::generate_simple_self_signed(vec!["192.168.0.193".to_owned()])
             .expect("leaf certificate");
         let pem = certified.cert.pem();
@@ -872,6 +876,16 @@ mod tests {
         let chained = format!("{pem}{pem}");
         assert_eq!(
             synoptikon_tls_leaf_der_sha256(chained.as_bytes()),
+            Err(SynoptikonProjectionError::TransportMismatch)
+        );
+        let mut trailing_der = certified.cert.der().to_vec();
+        trailing_der.extend_from_slice(b"forbidden-trailing-der");
+        let trailing_pem = format!(
+            "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+            base64::engine::general_purpose::STANDARD.encode(trailing_der)
+        );
+        assert_eq!(
+            synoptikon_tls_leaf_der_sha256(trailing_pem.as_bytes()),
             Err(SynoptikonProjectionError::TransportMismatch)
         );
     }
