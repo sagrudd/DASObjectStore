@@ -29,6 +29,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+const SYNOPTIKON_TEST_FIXTURE_MARKER: &str =
+    "dasobjectstore.synoptikon_projection_test_fixture.v1\n";
+
 pub struct SynoptikonProjectionTestService {
     capacity: Arc<FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe>>,
 }
@@ -95,6 +98,11 @@ impl SynoptikonProjectionTestFixture {
             return Err("fixture root must not already exist".to_owned());
         }
         fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+        let marker_path = root.join(".synoptikon-test-fixture");
+        fs::write(&marker_path, SYNOPTIKON_TEST_FIXTURE_MARKER)
+            .map_err(|error| error.to_string())?;
+        fs::set_permissions(&marker_path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
         let ssd_root = root.join("ssd");
         let report = initialize_pool(&PoolInitOptions::new(
             &ssd_root,
@@ -216,6 +224,12 @@ impl SynoptikonProjectionTestFixture {
         now_utc: impl Into<String>,
     ) -> Result<Self, String> {
         let root = root.as_ref().to_path_buf();
+        let marker_path = root.join(".synoptikon-test-fixture");
+        let marker = fs::read_to_string(&marker_path)
+            .map_err(|_| "existing fixture marker is absent".to_owned())?;
+        if marker != SYNOPTIKON_TEST_FIXTURE_MARKER {
+            return Err("existing fixture marker is invalid".to_owned());
+        }
         let fixture = Self {
             store_registry_path: root.join("stores.json"),
             subobject_registry_path: root.join("subobjects.json"),
@@ -312,6 +326,8 @@ mod tests {
         assert!(fixture.live_sqlite_path.is_file());
         assert!(fixture.store_registry_path.is_file());
         assert!(fixture.profile_binding_registry_path.is_file());
+        SynoptikonProjectionTestFixture::open_existing(&root, "2026-08-18T10:00:01Z")
+            .expect("marked fixture reopens");
         let response = fixture
             .handler()
             .handle_with_progress_for_actor(
@@ -334,5 +350,22 @@ mod tests {
             "unexpected prepare response: {response:?}"
         );
         std::fs::remove_dir_all(root).expect("cleanup fixture");
+    }
+
+    #[test]
+    fn fixture_reopen_rejects_an_unmarked_existing_root() {
+        let root = std::env::temp_dir().join(format!(
+            "das-synoptikon-unmarked-test-support-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).expect("unmarked root");
+        assert!(
+            SynoptikonProjectionTestFixture::open_existing(&root, "2026-08-18T10:00:01Z").is_err()
+        );
+        std::fs::remove_dir_all(root).expect("cleanup unmarked root");
     }
 }
