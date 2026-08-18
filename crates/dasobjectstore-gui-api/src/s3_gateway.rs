@@ -8,21 +8,27 @@
 use crate::auth_routes::profile_multipart::{
     complete_profile_s3_multipart, stream_profile_s3_multipart_part,
 };
-use crate::auth_routes::profile_upload::stream_profile_s3_put;
+use crate::auth_routes::profile_upload::{stream_profile_s3_put, stream_profile_s3_put_to_socket};
 use crate::auth_routes::provider_stream_download;
-use crate::s3_gateway_auth::{verify_s3_sigv4, S3Credential, S3SigV4Request};
+use crate::s3_gateway_auth::{
+    verify_required_sigv4_signed_headers, verify_s3_sigv4, verify_sigv4_freshness, S3Credential,
+    S3SigV4Request,
+};
 use crate::s3_multipart_listing::{render_multipart_upload_listing, MultipartListingQuery};
 use axum::body::Body;
-use axum::extract::{OriginalUri, Path, State};
+use axum::extract::{DefaultBodyLimit, OriginalUri, Path, State};
 use axum::http::{header, HeaderMap, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::Router;
+use axum::routing::{get, post, put};
+use axum::{Json, Router};
 use dasobjectstore_core::backend::BackendObjectKey;
 use dasobjectstore_daemon::api::{
     ProfileS3MultipartAbortRequest, ProfileS3MultipartCompletionRequest,
     ProfileS3MultipartPartRequest, ProfileS3MultipartUploadsRequest,
-    ProviderStreamMultipartPartUploadOpenRequest,
+    ProviderStreamMultipartPartUploadOpenRequest, SynoptikonProjectionLookupRequest,
+    SynoptikonProjectionPrepareRequest, SynoptikonProjectionSettleRequest,
+    SynoptikonProjectionUploadV1, SYNOPTIKON_PROJECTION_LOOKUP_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_MAX_BODY_BYTES, SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
 };
 use dasobjectstore_daemon::runtime::{
     remote_easyconnect_session_store_path, FileBackedRemoteEasyconnectPairedSessionStore,
@@ -36,6 +42,7 @@ use dasobjectstore_daemon::{
 use dasobjectstore_object_service::{
     default_garage_credential_registry_path, read_managed_credential_registry,
 };
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,6 +53,8 @@ pub struct S3GatewayState {
     credential_registry_path: PathBuf,
     session_registry_path: PathBuf,
     appliance_certificate_path: PathBuf,
+    synoptikon_credential_path: PathBuf,
+    daemon_socket_path: PathBuf,
     upload_permits: Arc<Semaphore>,
 }
 
@@ -59,6 +68,10 @@ impl S3GatewayState {
             appliance_certificate_path: crate::StandaloneServerConfig::default_localhost()
                 .tls
                 .certificate_path,
+            synoptikon_credential_path: PathBuf::from(
+                "/etc/dasobjectstore/synoptikon-projection-credential.json",
+            ),
+            daemon_socket_path: DaemonRuntimeConfig::default_packaged().socket_path,
             upload_permits: Arc::new(Semaphore::new(max_concurrent_uploads)),
         }
     }
@@ -68,9 +81,12 @@ impl S3GatewayState {
         let session_registry_path = path.with_file_name("remote-easyconnect-sessions.json");
         let appliance_certificate_path = path.with_file_name("appliance-ca.pem");
         Self {
-            credential_registry_path: path,
+            credential_registry_path: path.clone(),
             session_registry_path,
             appliance_certificate_path,
+            synoptikon_credential_path: path
+                .with_file_name("synoptikon-projection-credential.json"),
+            daemon_socket_path: path.with_file_name("dasobjectstored.sock"),
             upload_permits: Arc::new(Semaphore::new(max_concurrent_uploads)),
         }
     }
@@ -86,6 +102,24 @@ fn s3_gateway_router_with_state(state: S3GatewayState) -> Router {
             "/.well-known/dasobjectstore/appliance-ca.pem",
             get(appliance_ca_certificate),
         )
+        .route(
+            "/v1/synoptikon-projection/intent",
+            post(synoptikon_projection_intent),
+        )
+        .route(
+            "/v1/synoptikon-projection/bytes",
+            put(synoptikon_projection_bytes).layer(DefaultBodyLimit::max(
+                SYNOPTIKON_PROJECTION_MAX_BODY_BYTES as usize,
+            )),
+        )
+        .route(
+            "/v1/synoptikon-projection/readback",
+            post(synoptikon_projection_readback),
+        )
+        .route(
+            "/v1/synoptikon-projection/{*remainder}",
+            axum::routing::any(reject_synoptikon_projection_selector),
+        )
         .route("/{bucket}", get(s3_list_objects))
         .route(
             "/{bucket}/{*key}",
@@ -96,6 +130,584 @@ fn s3_gateway_router_with_state(state: S3GatewayState) -> Router {
                 .delete(s3_delete_object),
         )
         .with_state(state)
+}
+
+async fn reject_synoptikon_projection_selector() -> Response {
+    s3_error(
+        StatusCode::NOT_FOUND,
+        "NoSuchProjectionRoute",
+        "projection routes do not accept path selectors",
+    )
+}
+
+fn reject_synoptikon_projection_query() -> Response {
+    s3_error(
+        StatusCode::BAD_REQUEST,
+        "InvalidProjectionRoute",
+        "projection routes do not accept query selectors",
+    )
+}
+
+const SYNOPTIKON_PROJECTION_CREDENTIAL_SCHEMA: &str =
+    "dasobjectstore.synoptikon_projection_credential.v1";
+const SYNOPTIKON_PROJECTION_CREDENTIAL_PURPOSE: &str = "synoptikon_projection_v1";
+const SYNOPTIKON_PROJECTION_INTENT_HEADER: &str = "x-das-synoptikon-intent-id";
+const SYNOPTIKON_PROJECTION_SETTLEMENT_HEADER: &str = "x-das-synoptikon-settlement-id";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SynoptikonProjectionCredentialFile {
+    schema_version: String,
+    purpose: String,
+    store_id: dasobjectstore_core::ids::StoreId,
+    bucket_name: String,
+    credential_reference: String,
+    access_key_id: String,
+    secret_access_key: String,
+}
+
+fn read_synoptikon_projection_credential(path: &std::path::Path) -> Result<S3Credential, Response> {
+    let bytes = read_protected_gateway_file(path, 16 * 1024).map_err(|_| {
+        s3_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "projection credential authority is unavailable",
+        )
+    })?;
+    let credential: SynoptikonProjectionCredentialFile =
+        serde_json::from_slice(&bytes).map_err(|_| {
+            s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "projection credential authority is invalid",
+            )
+        })?;
+    if credential.schema_version != SYNOPTIKON_PROJECTION_CREDENTIAL_SCHEMA
+        || credential.purpose != SYNOPTIKON_PROJECTION_CREDENTIAL_PURPOSE
+        || credential.store_id.as_str()
+            != dasobjectstore_daemon::api::SYNOPTIKON_PROJECTION_FIXED_STORE_ID
+        || credential.bucket_name
+            != dasobjectstore_daemon::api::SYNOPTIKON_PROJECTION_FIXED_STORE_ID
+        || credential.credential_reference.is_empty()
+        || credential.credential_reference.len() > 128
+        || !credential
+            .credential_reference
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':' | b'.'))
+        || !(8..=128).contains(&credential.access_key_id.len())
+        || !credential
+            .access_key_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric())
+        || !(32..=256).contains(&credential.secret_access_key.len())
+        || !credential
+            .secret_access_key
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(s3_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "projection credential scope is invalid",
+        ));
+    }
+    Ok(S3Credential {
+        store_id: credential.store_id,
+        bucket_name: credential.bucket_name,
+        credential_reference: credential.credential_reference,
+        access_key_id: credential.access_key_id,
+        secret_access_key: credential.secret_access_key,
+        session_token: None,
+        can_read: true,
+        can_write: true,
+    })
+}
+
+#[cfg(unix)]
+fn protected_gateway_metadata_valid(
+    is_file: bool,
+    nlink: u64,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    len: u64,
+    max_len: u64,
+) -> bool {
+    is_file
+        && nlink == 1
+        && uid == unsafe { libc::geteuid() }
+        && gid == unsafe { libc::getegid() }
+        && mode & 0o7777 == 0o600
+        && len != 0
+        && len <= max_len
+}
+
+#[cfg(unix)]
+fn read_protected_gateway_file(path: &std::path::Path, max_len: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !protected_gateway_metadata_valid(
+        metadata.is_file(),
+        metadata.nlink(),
+        metadata.uid(),
+        metadata.gid(),
+        metadata.mode(),
+        metadata.len(),
+        max_len,
+    ) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "protected projection credential metadata mismatch",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(max_len + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > max_len {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "protected projection credential length mismatch",
+        ));
+    }
+    Ok(bytes)
+}
+
+#[cfg(not(unix))]
+fn read_protected_gateway_file(_: &std::path::Path, _: u64) -> std::io::Result<Vec<u8>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "protected projection credentials require Unix",
+    ))
+}
+
+async fn verified_synoptikon_credential(
+    state: &S3GatewayState,
+    uri: &axum::http::Uri,
+    method: &Method,
+    headers: &HeaderMap,
+    required_signed_headers: &[&str],
+) -> Result<crate::s3_gateway_auth::VerifiedS3Credential, Response> {
+    verify_required_sigv4_signed_headers(headers, required_signed_headers).map_err(|_| {
+        s3_error(
+            StatusCode::UNAUTHORIZED,
+            "AccessDenied",
+            "projection authority headers are not signed",
+        )
+    })?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| {
+            s3_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "ServiceUnavailable",
+                "trusted time unavailable",
+            )
+        })?
+        .as_secs() as i64;
+    verify_sigv4_freshness(headers, now, 300).map_err(|_| {
+        s3_error(
+            StatusCode::UNAUTHORIZED,
+            "RequestExpired",
+            "projection request timestamp is not current",
+        )
+    })?;
+    let credential = read_synoptikon_projection_credential(&state.synoptikon_credential_path)?;
+    verify_s3_sigv4(
+        S3SigV4Request {
+            method,
+            raw_path: uri.path(),
+            raw_query: uri.query(),
+            headers,
+            bucket: dasobjectstore_daemon::api::SYNOPTIKON_PROJECTION_FIXED_STORE_ID,
+        },
+        &[credential],
+    )
+    .map_err(|_| {
+        s3_error(
+            StatusCode::UNAUTHORIZED,
+            "AccessDenied",
+            "projection authorization denied",
+        )
+    })
+}
+
+fn projection_daemon_client(socket_path: PathBuf) -> DaemonClient<UnixSocketDaemonTransport> {
+    DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(socket_path))
+}
+
+async fn synoptikon_projection_intent(
+    State(state): State<S3GatewayState>,
+    OriginalUri(uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if uri.query().is_some() {
+        return reject_synoptikon_projection_query();
+    }
+    if let Err(response) =
+        verified_synoptikon_credential(&state, &uri, &method, &headers, &[]).await
+    {
+        return response;
+    }
+    let declared_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok());
+    let Some(declared_sha256) = headers
+        .get("x-amz-content-sha256")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "signed payload digest is required",
+        );
+    };
+    let bytes = match axum::body::to_bytes(body, 16 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return s3_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "EntityTooLarge",
+                "projection intent is too large",
+            )
+        }
+    };
+    if declared_length != Some(bytes.len())
+        || format!("{:x}", Sha256::digest(&bytes)) != declared_sha256
+    {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "BadDigest",
+            "projection intent bytes differ from signed digest",
+        );
+    }
+    let request: SynoptikonProjectionPrepareRequest = match serde_json::from_slice(&bytes) {
+        Ok(request) => request,
+        Err(_) => {
+            return s3_error(
+                StatusCode::BAD_REQUEST,
+                "InvalidRequest",
+                "projection intent JSON is invalid",
+            )
+        }
+    };
+    let socket_path = state.daemon_socket_path;
+    match tokio::task::spawn_blocking(move || {
+        projection_daemon_client(socket_path).prepare_synoptikon_projection(request)
+    })
+    .await
+    {
+        Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
+        _ => s3_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "projection intent unavailable",
+        ),
+    }
+}
+
+async fn projection_lookup(
+    state: &S3GatewayState,
+    authority_id: String,
+) -> Result<dasobjectstore_daemon::api::SynoptikonProjectionLookupResponse, Response> {
+    let socket_path = state.daemon_socket_path.clone();
+    tokio::task::spawn_blocking(move || {
+        projection_daemon_client(socket_path).lookup_synoptikon_projection(
+            SynoptikonProjectionLookupRequest {
+                schema_version: SYNOPTIKON_PROJECTION_LOOKUP_V1_SCHEMA.to_owned(),
+                authority_id,
+            },
+        )
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .ok_or_else(|| {
+        s3_error(
+            StatusCode::NOT_FOUND,
+            "NoSuchProjection",
+            "projection authority unavailable",
+        )
+    })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectionByteDisposition {
+    Upload,
+    Settle,
+    Replay,
+}
+
+fn projection_byte_disposition(
+    lookup: &dasobjectstore_daemon::api::SynoptikonProjectionLookupResponse,
+) -> Result<ProjectionByteDisposition, ()> {
+    projection_byte_disposition_from_state(
+        lookup.uploaded,
+        lookup.settlement_id.is_some(),
+        lookup.settlement.is_some(),
+    )
+}
+
+fn projection_byte_disposition_from_state(
+    uploaded: bool,
+    settlement_id: bool,
+    settlement: bool,
+) -> Result<ProjectionByteDisposition, ()> {
+    match (uploaded, settlement_id, settlement) {
+        (false, false, false) => Ok(ProjectionByteDisposition::Upload),
+        (true, false, false) => Ok(ProjectionByteDisposition::Settle),
+        (true, true, true) => Ok(ProjectionByteDisposition::Replay),
+        _ => Err(()),
+    }
+}
+
+async fn synoptikon_projection_bytes(
+    State(state): State<S3GatewayState>,
+    OriginalUri(uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if uri.query().is_some() {
+        return reject_synoptikon_projection_query();
+    }
+    if let Err(response) = verified_synoptikon_credential(
+        &state,
+        &uri,
+        &method,
+        &headers,
+        &[SYNOPTIKON_PROJECTION_INTENT_HEADER],
+    )
+    .await
+    {
+        return response;
+    }
+    let Some(intent_id) = headers
+        .get(SYNOPTIKON_PROJECTION_INTENT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "projection intent is required",
+        );
+    };
+    let lookup = match projection_lookup(&state, intent_id.clone()).await {
+        Ok(lookup) => lookup,
+        Err(_) => {
+            return s3_error(
+                StatusCode::CONFLICT,
+                "Conflict",
+                "projection intent is unavailable",
+            )
+        }
+    };
+    let declared_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    let declared_sha = headers
+        .get("x-amz-content-sha256")
+        .and_then(|v| v.to_str().ok());
+    if declared_length != Some(lookup.projection.source_size_bytes)
+        || declared_sha != Some(lookup.projection.source_sha256.as_str())
+        || lookup.projection.source_size_bytes > SYNOPTIKON_PROJECTION_MAX_BODY_BYTES
+    {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "projection body facts differ from intent",
+        );
+    }
+    let disposition = match projection_byte_disposition(&lookup) {
+        Ok(disposition) => disposition,
+        Err(()) => {
+            return s3_error(
+                StatusCode::CONFLICT,
+                "Conflict",
+                "projection intent state is incoherent",
+            )
+        }
+    };
+    if disposition != ProjectionByteDisposition::Upload {
+        let replay_bytes =
+            match axum::body::to_bytes(body, SYNOPTIKON_PROJECTION_MAX_BODY_BYTES as usize).await {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return s3_error(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "EntityTooLarge",
+                        "projection replay body is too large",
+                    )
+                }
+            };
+        if replay_bytes.len() as u64 != lookup.projection.source_size_bytes
+            || format!("{:x}", Sha256::digest(&replay_bytes)) != lookup.projection.source_sha256
+        {
+            return s3_error(
+                StatusCode::BAD_REQUEST,
+                "BadDigest",
+                "projection replay bytes differ from intent",
+            );
+        }
+        if disposition == ProjectionByteDisposition::Replay {
+            let (Some(settlement_id), Some(settlement)) = (lookup.settlement_id, lookup.settlement)
+            else {
+                unreachable!("replay disposition requires complete settlement")
+            };
+            return (
+                StatusCode::OK,
+                Json(
+                    dasobjectstore_daemon::api::SynoptikonProjectionSettleResponse {
+                        schema_version: SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA.to_owned(),
+                        settlement_id,
+                        settlement,
+                        exact_replay: true,
+                    },
+                ),
+            )
+                .into_response();
+        }
+    } else {
+        let request = ProviderStreamUploadOpenRequest {
+            schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+            request_id: intent_id.clone(),
+            upload_id: intent_id.clone(),
+            store_id: match lookup.projection.object_store_id.parse() {
+                Ok(store_id) => store_id,
+                Err(_) => {
+                    return s3_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "ServiceUnavailable",
+                        "projection store is invalid",
+                    )
+                }
+            },
+            object: BackendObjectKey {
+                object_id: lookup.projection.object_key,
+                version: lookup.projection.object_version,
+            },
+            expected_size_bytes: lookup.projection.source_size_bytes,
+            expected_sha256: format!("sha256:{}", lookup.projection.source_sha256),
+            chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
+            retained_dossier: None,
+            synoptikon_projection: Some(SynoptikonProjectionUploadV1 {
+                schema_version: dasobjectstore_daemon::api::SYNOPTIKON_PROJECTION_UPLOAD_V1_SCHEMA
+                    .to_owned(),
+                intent_id: intent_id.clone(),
+            }),
+        };
+        let upload =
+            stream_profile_s3_put_to_socket(request, body, state.daemon_socket_path.clone()).await;
+        if let Err((status, error)) = upload {
+            return s3_error(status, &error.0.code, &error.0.message);
+        }
+    }
+    let socket_path = state.daemon_socket_path;
+    match tokio::task::spawn_blocking(move || {
+        projection_daemon_client(socket_path).settle_synoptikon_projection(
+            SynoptikonProjectionSettleRequest {
+                schema_version: SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA.to_owned(),
+                intent_id,
+            },
+        )
+    })
+    .await
+    {
+        Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
+        _ => s3_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ServiceUnavailable",
+            "projection settlement unavailable",
+        ),
+    }
+}
+
+async fn synoptikon_projection_readback(
+    State(state): State<S3GatewayState>,
+    OriginalUri(uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if uri.query().is_some() {
+        return reject_synoptikon_projection_query();
+    }
+    if let Err(response) = verified_synoptikon_credential(
+        &state,
+        &uri,
+        &method,
+        &headers,
+        &[SYNOPTIKON_PROJECTION_SETTLEMENT_HEADER],
+    )
+    .await
+    {
+        return response;
+    }
+    let empty_sha256 = format!("{:x}", Sha256::digest([]));
+    if headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        != Some("0")
+        || headers
+            .get("x-amz-content-sha256")
+            .and_then(|value| value.to_str().ok())
+            != Some(empty_sha256.as_str())
+    {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "BadDigest",
+            "readback requires an exactly signed empty body",
+        );
+    }
+    match axum::body::to_bytes(body, 1).await {
+        Ok(bytes) if bytes.is_empty() => {}
+        _ => {
+            return s3_error(
+                StatusCode::BAD_REQUEST,
+                "BadDigest",
+                "readback body must be empty",
+            )
+        }
+    }
+    let Some(settlement_id) = headers
+        .get(SYNOPTIKON_PROJECTION_SETTLEMENT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+    else {
+        return s3_error(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            "projection settlement is required",
+        );
+    };
+    let lookup = match projection_lookup(&state, settlement_id.clone()).await {
+        Ok(lookup) if lookup.uploaded && lookup.settlement.is_some() => lookup,
+        _ => {
+            return s3_error(
+                StatusCode::CONFLICT,
+                "Conflict",
+                "projection settlement is not readable",
+            )
+        }
+    };
+    match crate::auth_routes::synoptikon_provider_stream_download(
+        lookup,
+        settlement_id,
+        state.daemon_socket_path,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err((status, error)) => s3_error(status, &error.0.code, &error.0.message),
+    }
 }
 
 async fn appliance_ca_certificate(State(state): State<S3GatewayState>) -> Response {
@@ -888,6 +1500,122 @@ fn percent_decode_query(value: &str) -> String {
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[test]
+    fn projection_byte_retry_state_is_exact_and_fail_closed() {
+        assert_eq!(
+            projection_byte_disposition_from_state(false, false, false),
+            Ok(ProjectionByteDisposition::Upload)
+        );
+        assert_eq!(
+            projection_byte_disposition_from_state(true, false, false),
+            Ok(ProjectionByteDisposition::Settle)
+        );
+        assert_eq!(
+            projection_byte_disposition_from_state(true, true, true),
+            Ok(ProjectionByteDisposition::Replay)
+        );
+        assert!(projection_byte_disposition_from_state(false, true, true).is_err());
+        assert!(projection_byte_disposition_from_state(true, true, false).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn projection_credential_is_purpose_scoped_and_descriptor_protected() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = std::env::temp_dir().join(format!(
+            "das-projection-credential-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("credential.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":"dasobjectstore.synoptikon_projection_credential.v1","purpose":"synoptikon_projection_v1","store_id":"synoptikon-demo","bucket_name":"synoptikon-demo","credential_reference":"projection:1","access_key_id":"PROJECTIONACCESS1","secret_access_key":"projection-secret-material-1234567890"}"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let credential =
+            read_synoptikon_projection_credential(&path).expect("protected credential");
+        assert_eq!(credential.store_id.as_str(), "synoptikon-demo");
+        let wrong_purpose = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("synoptikon_projection_v1", "direct_s3");
+        std::fs::write(&path, wrong_purpose).unwrap();
+        assert!(read_synoptikon_projection_credential(&path).is_err());
+        std::fs::write(
+            &path,
+            r#"{"schema_version":"dasobjectstore.synoptikon_projection_credential.v1","purpose":"synoptikon_projection_v1","store_id":"synoptikon-demo","bucket_name":"synoptikon-demo","credential_reference":"projection:1","access_key_id":"PROJECTIONACCESS1","secret_access_key":"projection-secret-material-1234567890"}"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(read_synoptikon_projection_credential(&path).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o4600)).unwrap();
+        assert!(read_synoptikon_projection_credential(&path).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let hardlink = root.join("credential-hardlink.json");
+        std::fs::hard_link(&path, &hardlink).unwrap();
+        assert!(read_synoptikon_projection_credential(&path).is_err());
+        std::fs::remove_file(hardlink).unwrap();
+        let link = root.join("credential-link.json");
+        symlink(&path, &link).unwrap();
+        assert!(read_synoptikon_projection_credential(&link).is_err());
+        assert!(!protected_gateway_metadata_valid(
+            true,
+            1,
+            unsafe { libc::geteuid() }.wrapping_add(1),
+            unsafe { libc::getegid() },
+            0o100600,
+            1,
+            16 * 1024,
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn projection_routes_are_fixed_method_bounded_and_fail_closed_without_authority() {
+        let root =
+            std::env::temp_dir().join(format!("das-projection-routes-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let state = S3GatewayState::with_registry(root.join("generic.json"), 1);
+        let router = s3_gateway_router_with_state(state);
+        for (method, path) in [
+            (Method::POST, "/v1/synoptikon-projection/intent"),
+            (Method::PUT, "/v1/synoptikon-projection/bytes"),
+            (Method::POST, "/v1/synoptikon-projection/readback"),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/synoptikon-projection/intent/selector")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn xml_errors_escape_untrusted_text_and_are_s3_xml() {

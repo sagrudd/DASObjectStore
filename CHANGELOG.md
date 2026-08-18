@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.172.0 - 2026-08-18
+
+- Add the fixed, parameter-free Synoptikon projection intent, bounded-byte
+  ingest, and settlement-bound readback routes to the existing TLS :3900
+  gateway. Requests require a dedicated purpose-scoped protected credential,
+  current SigV4 signatures, signed opaque authority identifiers, and exact
+  body digests; generic S3 credentials and selectors cannot enter this surface.
+  The package does not provision the shared service credential or client trust
+  input and does not enable or start the gateway. Activation remains a separate
+  reviewed operator transaction after a governed leaf certificate with the
+  exact `192.168.0.193` IP SAN, its independently delivered DER-leaf pin/CA,
+  both protected credentials, and storage readiness pass; localhost or `.192`
+  certificates are explicitly insufficient.
+
 ## 0.171.0 - 2026-08-18
 
 - Add the inactive daemon-owned Synoptikon projection prerequisite: the fixed

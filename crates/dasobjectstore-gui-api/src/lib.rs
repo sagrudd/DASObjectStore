@@ -48,6 +48,12 @@ pub use auth_guard::{
     AuthGuardError, AuthGuardRejection, AuthenticatedActorAuthority, AuthenticatedGuiActor,
     FederatedHostSessionResponse,
 };
+// Legacy standalone-route fixtures still compile against these test-only
+// names while production exports remain removed by the host-authority cutover.
+#[cfg(test)]
+pub const STANDALONE_USERNAME_HEADER: &str = "x-dasobjectstore-username";
+#[cfg(test)]
+pub const STANDALONE_SESSION_TOKEN_HEADER: &str = "x-dasobjectstore-session-token";
 pub use auth_routes::{
     easyconnect_public_router, easyconnect_public_router_with_config,
     easyconnect_public_router_with_config_and_daemon, easyconnect_public_router_with_s3_descriptor,

@@ -22,7 +22,7 @@ pub(crate) struct VerifiedS3Credential {
     pub access_key_id: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub(crate) struct S3Credential {
     pub store_id: StoreId,
     pub bucket_name: String,
@@ -32,6 +32,43 @@ pub(crate) struct S3Credential {
     pub session_token: Option<String>,
     pub can_read: bool,
     pub can_write: bool,
+}
+
+pub(crate) fn verify_required_sigv4_signed_headers(
+    headers: &HeaderMap,
+    required: &[&str],
+) -> Result<(), S3SigV4Error> {
+    reject_duplicate_header(headers, "authorization")?;
+    let parsed = parse_authorization(required_header(headers, "authorization")?)?;
+    if required
+        .iter()
+        .any(|required| !parsed.signed_headers.iter().any(|name| name == required))
+    {
+        return Err(S3SigV4Error::MissingRequiredSignedHeader(
+            "projection-authority",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn verify_sigv4_freshness(
+    headers: &HeaderMap,
+    now_unix_seconds: i64,
+    max_age_seconds: i64,
+) -> Result<(), S3SigV4Error> {
+    reject_duplicate_header(headers, "x-amz-date")?;
+    let value = required_header(headers, "x-amz-date")?;
+    let signed = chrono::NaiveDateTime::parse_from_str(value, "%Y%m%dT%H%M%SZ")
+        .map_err(|_| S3SigV4Error::InvalidAmzDate)?
+        .and_utc()
+        .timestamp();
+    let age = now_unix_seconds
+        .checked_sub(signed)
+        .ok_or(S3SigV4Error::InvalidAmzDate)?;
+    if age < 0 || age > max_age_seconds {
+        return Err(S3SigV4Error::InvalidAmzDate);
+    }
+    Ok(())
 }
 
 pub(crate) struct S3SigV4Request<'a> {
@@ -478,6 +515,53 @@ mod tests {
     const SECRET: &str = "example-secret-that-is-never-rendered";
     const DATE: &str = "20260719T120000Z";
     const PAYLOAD_HASH: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    #[test]
+    fn projection_authority_header_must_be_in_the_signed_header_set() {
+        let mut headers = base_headers();
+        headers.insert(
+            "x-das-synoptikon-intent-id",
+            HeaderValue::from_static("intent-1"),
+        );
+        sign(
+            &mut headers,
+            &Method::PUT,
+            "/v1/synoptikon-projection/bytes",
+            "",
+            "host;x-amz-content-sha256;x-amz-date",
+        );
+        assert!(matches!(
+            verify_required_sigv4_signed_headers(&headers, &["x-das-synoptikon-intent-id"]),
+            Err(S3SigV4Error::MissingRequiredSignedHeader(_))
+        ));
+        sign(
+            &mut headers,
+            &Method::PUT,
+            "/v1/synoptikon-projection/bytes",
+            "",
+            "host;x-amz-content-sha256;x-amz-date;x-das-synoptikon-intent-id",
+        );
+        verify_required_sigv4_signed_headers(&headers, &["x-das-synoptikon-intent-id"])
+            .expect("authority header signed");
+    }
+
+    #[test]
+    fn projection_timestamp_rejects_future_and_stale_requests() {
+        let headers = base_headers();
+        let signed = chrono::NaiveDateTime::parse_from_str(DATE, "%Y%m%dT%H%M%SZ")
+            .unwrap()
+            .and_utc()
+            .timestamp();
+        verify_sigv4_freshness(&headers, signed, 300).expect("current request");
+        assert_eq!(
+            verify_sigv4_freshness(&headers, signed - 1, 300),
+            Err(S3SigV4Error::InvalidAmzDate)
+        );
+        assert_eq!(
+            verify_sigv4_freshness(&headers, signed + 301, 300),
+            Err(S3SigV4Error::InvalidAmzDate)
+        );
+    }
 
     #[test]
     fn verifies_bound_bucket_and_canonical_query() {

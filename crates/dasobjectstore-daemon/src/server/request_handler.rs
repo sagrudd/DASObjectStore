@@ -299,6 +299,24 @@ where
         self.synoptikon_projection_ledger_path = path.into();
         self
     }
+    #[cfg(feature = "test-support")]
+    pub fn with_synoptikon_test_paths(
+        mut self,
+        store_registry_path: impl Into<PathBuf>,
+        subobject_registry_path: impl Into<PathBuf>,
+        profile_binding_registry_path: impl Into<PathBuf>,
+        live_sqlite_path: impl Into<PathBuf>,
+        hdd_root_path: impl Into<PathBuf>,
+        projection_ledger_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.store_registry_path = store_registry_path.into();
+        self.subobject_registry_path = subobject_registry_path.into();
+        self.profile_binding_registry_path = profile_binding_registry_path.into();
+        self.live_sqlite_path = live_sqlite_path.into();
+        self.hdd_root_path = hdd_root_path.into();
+        self.synoptikon_projection_ledger_path = projection_ledger_path.into();
+        self
+    }
     pub fn handle(
         &self,
         request: DaemonApiRequest,

@@ -340,11 +340,12 @@ pub use store_repair::{
 pub use store_verify::{StoreVerifyReport, StoreVerifyRequest, StoreVerifyResponse};
 pub use stores::{StoreInventoryItem, StoreInventoryRequest, StoreInventoryResponse};
 pub use synoptikon_projection::{
+    SynoptikonProjectionLookupRequest, SynoptikonProjectionLookupResponse,
     SynoptikonProjectionPrepareRequest, SynoptikonProjectionPrepareResponse,
     SynoptikonProjectionSettleRequest, SynoptikonProjectionSettleResponse,
     SYNOPTIKON_PROJECTION_FIXED_PEER_USER, SYNOPTIKON_PROJECTION_FIXED_STORE_ID,
-    SYNOPTIKON_PROJECTION_MAX_BODY_BYTES, SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA,
-    SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_LOOKUP_V1_SCHEMA, SYNOPTIKON_PROJECTION_MAX_BODY_BYTES,
+    SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA, SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
 };
 pub use workspace::{
     WorkspaceControlAction, WorkspaceControlRequest, WorkspaceControlResponse,
@@ -428,6 +429,7 @@ pub enum DaemonApiRequest {
     JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementRequest),
     PrepareSynoptikonProjection(SynoptikonProjectionPrepareRequest),
     SettleSynoptikonProjection(SynoptikonProjectionSettleRequest),
+    LookupSynoptikonProjection(SynoptikonProjectionLookupRequest),
     UpsertEndpointInventory(UpsertEndpointInventoryRequest),
     TestEndpointConnection(TestEndpointConnectionRequest),
     CreateLocalGroup(CreateLocalGroupRequest),
@@ -517,6 +519,7 @@ impl DaemonApiRequest {
             Self::RemoteObjectGroupStatus(_) => "remote_object_group_status",
             Self::PrepareSynoptikonProjection(_) => "prepare_synoptikon_projection",
             Self::SettleSynoptikonProjection(_) => "settle_synoptikon_projection",
+            Self::LookupSynoptikonProjection(_) => "lookup_synoptikon_projection",
             Self::ObjectDownload(_) => "object_download",
             Self::ObjectFolderDownload(_) => "object_folder_download",
             Self::JenkinsDossierEvidenceSettlement(_) => "jenkins_dossier_evidence_settlement",
@@ -697,6 +700,13 @@ impl DaemonApiRequest {
                         message: message.to_owned(),
                     })
             }
+            Self::LookupSynoptikonProjection(request) => {
+                request
+                    .validate()
+                    .map_err(|message| DaemonRequestValidationError::InvalidPolicy {
+                        message: message.to_owned(),
+                    })
+            }
             Self::UpsertEndpointInventory(request) => request
                 .validate()
                 .map_err(endpoint_inventory_validation_error),
@@ -821,6 +831,7 @@ pub enum DaemonApiResponse {
     JenkinsDossierEvidenceSettlement(JenkinsDossierEvidenceSettlementResponse),
     SynoptikonProjectionPrepared(SynoptikonProjectionPrepareResponse),
     SynoptikonProjectionSettlement(SynoptikonProjectionSettleResponse),
+    SynoptikonProjectionLookup(SynoptikonProjectionLookupResponse),
     UpsertEndpointInventory(UpsertEndpointInventoryResponse),
     TestEndpointConnection(TestEndpointConnectionResponse),
     CreateLocalGroup(CreateLocalGroupResponse),

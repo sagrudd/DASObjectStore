@@ -140,6 +140,56 @@ pub(crate) async fn provider_stream_download(
     .await
 }
 
+pub(crate) async fn synoptikon_provider_stream_download(
+    lookup: dasobjectstore_daemon::api::SynoptikonProjectionLookupResponse,
+    settlement_id: String,
+    socket_path: PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let store_id = lookup
+        .projection
+        .object_store_id
+        .parse::<dasobjectstore_core::ids::StoreId>()
+        .map_err(|error| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "synoptikon_projection_store_invalid",
+                error.to_string(),
+            )
+        })?;
+    let expected_sha256 = format!("sha256:{}", lookup.projection.source_sha256);
+    let request = ProviderStreamOpenRequest {
+        schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_owned(),
+        request_id: uuid::Uuid::new_v4().to_string(),
+        store_id,
+        object: dasobjectstore_core::backend::BackendObjectKey {
+            object_id: lookup.projection.object_key,
+            version: lookup.projection.object_version,
+        },
+        delegated_actor: None,
+        verified_subject: None,
+        application_capability: None,
+        synoptikon_projection: Some(dasobjectstore_daemon::api::SynoptikonProjectionReadV1 {
+            schema_version: dasobjectstore_daemon::api::SYNOPTIKON_PROJECTION_READ_V1_SCHEMA
+                .to_owned(),
+            settlement_id,
+        }),
+        range: None,
+        condition: ProviderStreamCondition {
+            if_match_sha256: Some(expected_sha256),
+            if_none_match_sha256: None,
+        },
+        chunk_size_bytes: PROVIDER_STREAM_MAX_CHUNK_BYTES,
+    };
+    request.validate().map_err(|error| {
+        route_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "synoptikon_projection_read_invalid",
+            error.to_string(),
+        )
+    })?;
+    provider_stream_download_request(request, socket_path).await
+}
+
 pub(crate) async fn application_provider_stream_download(
     store_id: dasobjectstore_core::ids::StoreId,
     object_id: String,
@@ -194,6 +244,14 @@ async fn provider_stream_download_authorized(
         )
     })?;
 
+    provider_stream_download_request(request, socket_path).await
+}
+
+async fn provider_stream_download_request(
+    request: ProviderStreamOpenRequest,
+    socket_path: PathBuf,
+) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
+    let range = request.range.clone();
     let (sender, receiver) = mpsc::channel(DOWNLOAD_CHANNEL_CAPACITY);
     let (ready_sender, ready_receiver) = oneshot::channel::<Result<(), DownloadStartError>>();
     tokio::spawn(stream_from_daemon(

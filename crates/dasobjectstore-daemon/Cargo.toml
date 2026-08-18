@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [features]
 default = []
 development-self-signing = ["dep:rcgen"]
+test-support = []
 
 [[bin]]
 name = "dasobjectstored"

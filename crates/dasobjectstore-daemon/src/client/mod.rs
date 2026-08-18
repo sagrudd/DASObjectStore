@@ -63,6 +63,7 @@ use crate::api::{
     StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest, StoreDrainResponse,
     StoreInventoryRequest, StoreInventoryResponse, StoreRepairRequest, StoreRepairResponse,
     StoreVerifyRequest, StoreVerifyResponse, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+    SynoptikonProjectionLookupRequest, SynoptikonProjectionLookupResponse,
     SynoptikonProjectionPrepareRequest, SynoptikonProjectionPrepareResponse,
     SynoptikonProjectionSettleRequest, SynoptikonProjectionSettleResponse,
     TestEndpointConnectionRequest, TestEndpointConnectionResponse,
@@ -167,6 +168,16 @@ where
         match self.send(DaemonApiRequest::SettleSynoptikonProjection(request))? {
             DaemonApiResponse::SynoptikonProjectionSettlement(response) => Ok(response),
             response => Err(unexpected("synoptikon_projection_settlement", response)),
+        }
+    }
+
+    pub fn lookup_synoptikon_projection(
+        &self,
+        request: SynoptikonProjectionLookupRequest,
+    ) -> Result<SynoptikonProjectionLookupResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::LookupSynoptikonProjection(request))? {
+            DaemonApiResponse::SynoptikonProjectionLookup(response) => Ok(response),
+            response => Err(unexpected("synoptikon_projection_lookup", response)),
         }
     }
 
@@ -1009,6 +1020,7 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         }
         DaemonApiResponse::SynoptikonProjectionPrepared(_) => "synoptikon_projection_prepared",
         DaemonApiResponse::SynoptikonProjectionSettlement(_) => "synoptikon_projection_settlement",
+        DaemonApiResponse::SynoptikonProjectionLookup(_) => "synoptikon_projection_lookup",
         DaemonApiResponse::UpsertEndpointInventory(_) => "upsert_endpoint_inventory",
         DaemonApiResponse::TestEndpointConnection(_) => "test_endpoint_connection",
         DaemonApiResponse::CreateLocalGroup(_) => "create_local_group",

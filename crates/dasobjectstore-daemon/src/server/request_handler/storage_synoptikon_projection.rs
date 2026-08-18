@@ -1,9 +1,10 @@
 use super::*;
 use crate::api::{
+    SynoptikonProjectionLookupRequest, SynoptikonProjectionLookupResponse,
     SynoptikonProjectionPrepareRequest, SynoptikonProjectionPrepareResponse,
     SynoptikonProjectionSettleRequest, SynoptikonProjectionSettleResponse,
-    SYNOPTIKON_PROJECTION_FIXED_PEER_USER, SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA,
-    SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_FIXED_PEER_USER, SYNOPTIKON_PROJECTION_LOOKUP_V1_SCHEMA,
+    SYNOPTIKON_PROJECTION_PREPARE_V1_SCHEMA, SYNOPTIKON_PROJECTION_SETTLE_V1_SCHEMA,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,6 +14,39 @@ fn fixed_peer(actor: Option<&DaemonLocalActor>) -> Result<(), DaemonApiResponse>
         return Err(denied("projection_peer_mismatch"));
     }
     Ok(())
+}
+
+pub(super) fn lookup<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    request: SynoptikonProjectionLookupRequest,
+    actor: Option<&DaemonLocalActor>,
+) -> DaemonApiResponse
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    if let Err(response) = fixed_peer(actor) {
+        return response;
+    }
+    match crate::runtime::projection_authority_record(
+        &handler.synoptikon_projection_ledger_path,
+        &request.authority_id,
+    ) {
+        Ok(record) => {
+            DaemonApiResponse::SynoptikonProjectionLookup(SynoptikonProjectionLookupResponse {
+                schema_version: SYNOPTIKON_PROJECTION_LOOKUP_V1_SCHEMA.to_owned(),
+                intent_id: record.intent_id,
+                projection: record.projection,
+                uploaded: record.uploaded,
+                settlement_id: record.settlement_id,
+                settlement: record.settlement,
+            })
+        }
+        Err(error) => DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "projection_lookup_denied",
+            error.to_string(),
+        )),
+    }
 }
 
 fn denied(code: &str) -> DaemonApiResponse {

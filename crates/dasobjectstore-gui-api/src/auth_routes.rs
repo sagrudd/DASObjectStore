@@ -141,8 +141,8 @@ use profile_catalogue::{
     standalone_profile_catalogue_import,
 };
 use profile_delete::standalone_profile_s3_delete;
-pub(crate) use profile_download::provider_stream_download;
 use profile_download::standalone_profile_s3_get;
+pub(crate) use profile_download::{provider_stream_download, synoptikon_provider_stream_download};
 use profile_multipart::{
     standalone_profile_s3_multipart_complete, standalone_profile_s3_multipart_part,
     standalone_profile_s3_multipart_status,
