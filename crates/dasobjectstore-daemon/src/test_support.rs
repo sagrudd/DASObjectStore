@@ -6,8 +6,9 @@ use crate::api::{
     DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
 };
 use crate::runtime::{
-    upsert_profile_binding, BackendProfileBinding, CapacityAdmissionProvider,
-    DaemonServiceRuntimeError, FileBackedCapacityAdmissionProvider, StatvfsCapacitySpaceProbe,
+    run_one_durable_destage, upsert_profile_binding, BackendProfileBinding,
+    CapacityAdmissionProvider, DaemonServiceRuntimeError, DurableDestageOutcome,
+    DurableDestageWorkerConfig, FileBackedCapacityAdmissionProvider, StatvfsCapacitySpaceProbe,
 };
 use crate::{DaemonRequestHandler, DaemonServiceOrchestrator, FixedDaemonClock};
 use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
@@ -80,6 +81,7 @@ pub struct SynoptikonProjectionTestFixture {
     pub subobject_registry_path: PathBuf,
     pub profile_binding_registry_path: PathBuf,
     pub live_sqlite_path: PathBuf,
+    pub ssd_root: PathBuf,
     pub backend_root: PathBuf,
     pub hdd_root: PathBuf,
     pub projection_ledger_path: PathBuf,
@@ -172,6 +174,7 @@ impl SynoptikonProjectionTestFixture {
             subobject_registry_path,
             profile_binding_registry_path,
             live_sqlite_path: report.live_sqlite_path,
+            ssd_root,
             backend_root,
             hdd_root,
             projection_ledger_path,
@@ -205,6 +208,20 @@ impl SynoptikonProjectionTestFixture {
             &self.hdd_root,
             &self.projection_ledger_path,
         )
+    }
+
+    pub fn settle_one_hdd_placement(&self) -> Result<DurableDestageOutcome, String> {
+        run_one_durable_destage(
+            &DurableDestageWorkerConfig {
+                live_sqlite_path: self.live_sqlite_path.clone(),
+                ssd_root: self.ssd_root.clone(),
+                hdd_root: self.hdd_root.clone(),
+                worker_id: "synoptikon-test-destage".to_owned(),
+            },
+            &self.now_utc,
+            None,
+        )
+        .map_err(|error| error.to_string())
     }
 }
 

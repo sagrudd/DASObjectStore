@@ -29,8 +29,6 @@ pub struct UnixSocketDaemonServer<H> {
     socket_path: PathBuf,
     handler: H,
     admission_policy: UnixSocketAdmissionPolicy,
-    #[cfg(feature = "test-support")]
-    test_actor: Option<DaemonLocalActor>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,21 +66,11 @@ where
             socket_path: socket_path.into(),
             handler,
             admission_policy: UnixSocketAdmissionPolicy::default(),
-            #[cfg(feature = "test-support")]
-            test_actor: None,
         }
     }
 
     pub fn with_admission_policy(mut self, admission_policy: UnixSocketAdmissionPolicy) -> Self {
         self.admission_policy = admission_policy;
-        self
-    }
-
-    /// Override peer credentials only in disposable integration-test builds.
-    /// Normal package builds do not contain this field or method.
-    #[cfg(feature = "test-support")]
-    pub fn with_test_actor(mut self, actor: DaemonLocalActor) -> Self {
-        self.test_actor = Some(actor);
         self
     }
 
@@ -103,13 +91,9 @@ where
         thread::scope(|scope| {
             for stream in listener.incoming() {
                 let stream = stream.map_err(UnixSocketDaemonServerError::Accept)?;
-                let Some(mut pending) = receive_stream(stream)? else {
+                let Some(pending) = receive_stream(stream)? else {
                     continue;
                 };
-                #[cfg(feature = "test-support")]
-                if let Some(actor) = &self.test_actor {
-                    pending.actor = Some(actor.clone());
-                }
                 let active_connections = match pending.request.connection_class() {
                     RequestConnectionClass::OrdinaryIngest => (
                         &ordinary_ingest_connections,
@@ -155,21 +139,7 @@ where
     }
 
     pub fn handle_stream(&self, stream: UnixStream) -> Result<(), UnixSocketDaemonServerError> {
-        let Some(mut pending) = receive_stream(stream)? else {
-            return Ok(());
-        };
-        #[cfg(feature = "test-support")]
-        if let Some(actor) = &self.test_actor {
-            pending.actor = Some(actor.clone());
-        }
-        let result = handle_pending_stream(pending, &self.handler);
-        if result
-            .as_ref()
-            .is_err_and(UnixSocketDaemonServerError::is_client_disconnect)
-        {
-            return Ok(());
-        }
-        result
+        handle_stream(stream, &self.handler)
     }
 }
 
@@ -625,7 +595,6 @@ fn bind_listener(socket_path: &Path) -> Result<UnixListener, UnixSocketDaemonSer
     Ok(listener)
 }
 
-#[cfg_attr(feature = "test-support", allow(dead_code))]
 fn handle_stream(
     stream: UnixStream,
     handler: &impl DaemonApiHandler,
@@ -1009,58 +978,6 @@ mod tests {
     use std::sync::{mpsc, Mutex};
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    #[cfg(feature = "test-support")]
-    #[test]
-    fn test_support_actor_override_is_explicit_and_socket_local() {
-        struct ActorHandler;
-        impl DaemonApiHandler for ActorHandler {
-            fn handle_api_request(
-                &self,
-                _request: DaemonApiRequest,
-            ) -> Result<DaemonApiResponse, super::UnixSocketDaemonServerError> {
-                panic!("actor-aware handler required")
-            }
-
-            fn handle_api_request_streaming_for_actor(
-                &self,
-                _request: DaemonApiRequest,
-                actor: Option<&crate::auth::DaemonLocalActor>,
-                emit_response: &mut dyn FnMut(
-                    DaemonApiResponse,
-                )
-                    -> Result<(), super::UnixSocketDaemonServerError>,
-            ) -> Result<(), super::UnixSocketDaemonServerError> {
-                assert_eq!(
-                    actor.and_then(|actor| actor.username.as_deref()),
-                    Some("dasobjectstore")
-                );
-                emit_response(DaemonApiResponse::Error(
-                    crate::api::DaemonApiErrorResponse::new("test_complete", "accepted"),
-                ))
-            }
-        }
-
-        let (mut client, server_stream) = UnixStream::pair().expect("socket pair");
-        let server = UnixSocketDaemonServer::new("unused", ActorHandler).with_test_actor(
-            crate::auth::DaemonLocalActor::new(4242).with_username("dasobjectstore"),
-        );
-        let join = thread::spawn(move || server.handle_stream(server_stream));
-        serde_json::to_writer(
-            &mut client,
-            &DaemonApiRequest::ServiceStatus(crate::api::DaemonServiceStatusRequest {
-                include_detail: false,
-            }),
-        )
-        .expect("request");
-        client.write_all(b"\n").expect("request delimiter");
-        let response: DaemonApiResponse =
-            serde_json::from_reader(BufReader::new(client)).expect("response");
-        assert!(
-            matches!(response, DaemonApiResponse::Error(error) if error.code == "test_complete")
-        );
-        join.join().expect("server joins").expect("server handles");
-    }
 
     #[test]
     fn classifies_cancellation_as_priority_control() {
