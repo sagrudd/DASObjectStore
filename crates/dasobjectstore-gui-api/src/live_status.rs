@@ -1,5 +1,11 @@
 //! Privacy-preserving GUI projection of the daemon live-ingest snapshot.
 
+//! Public live-status view types are retained as a compatibility schema while
+//! the host-composed Pistis dashboard owns the mounted status routes. The
+//! legacy aggregation helpers remain available to downstream adapters but are
+//! intentionally not wired into a local-authority route.
+#![allow(dead_code)]
+
 use crate::daemon_bridge::{DaemonBridge, DaemonBridgeError};
 use dasobjectstore_daemon::{
     DaemonClient, DaemonIngestHddTransferPhase, DaemonIngestStage, DaemonRuntimeConfig,

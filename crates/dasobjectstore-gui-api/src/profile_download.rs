@@ -45,32 +45,6 @@ pub(super) struct ProfileDownloadQuery {
     pub version: Option<u64>,
 }
 
-pub(super) async fn standalone_profile_s3_get(
-    Path((store_id, object_id)): Path<(String, String)>,
-    Query(query): Query<ProfileDownloadQuery>,
-    headers: HeaderMap,
-    _actor: AuthenticatedGuiActor,
-) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    let store_id = store_id
-        .parse::<dasobjectstore_core::ids::StoreId>()
-        .map_err(|error| {
-            route_error(
-                StatusCode::BAD_REQUEST,
-                "profile_s3_invalid_store_id",
-                error.to_string(),
-            )
-        })?;
-    provider_stream_download(
-        store_id,
-        object_id,
-        query.version.unwrap_or(1),
-        None,
-        headers,
-        DaemonRuntimeConfig::default_packaged().socket_path,
-    )
-    .await
-}
-
 /// Open a provider-backed profile object only with a verified Pistis viewer
 /// and a session-bound ObjectStore/prefix grant. The resulting daemon request
 /// carries the fixed-peer `ObjectBrowserVerifiedSubject`; it never falls back

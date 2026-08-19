@@ -1713,9 +1713,7 @@ mod tests {
                 .with_live_sqlite_path(&live_sqlite)
                 .with_hdd_root_path(&hdd_root)
                 .with_profile_binding_registry_path(&profile_registry);
-        let actor = DaemonLocalActor::new(0)
-            .with_username("root")
-            .with_groups(["mnemosyne", "writers"]);
+        let actor = preverified_host_service_actor();
         let mut binding_request =
             profile_binding_request_for_auth_test("upload-store", backend_root.clone());
         binding_request.store_definition = Some(store_definitions[0].clone());
@@ -1863,7 +1861,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
-                        verified_subject: None,
+                        verified_subject: Some(verified_pistis_subject().subject_id),
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -1965,7 +1963,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
-                    verified_subject: None,
+                    verified_subject: Some(verified_pistis_subject().subject_id),
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -2006,7 +2004,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
-                    verified_subject: None,
+                    verified_subject: Some(verified_pistis_subject().subject_id),
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -2079,7 +2077,7 @@ mod tests {
                         s3_prefix: None,
                         s3_expectation: None,
                         idempotency_key: None,
-                        verified_subject: None,
+                        verified_subject: Some(verified_pistis_subject().subject_id),
                     }),
                     Some(&actor),
                     |_| Ok(()),
@@ -2117,7 +2115,7 @@ mod tests {
                     dry_run: false,
                     allow_store_delete: true,
                     confirmation_marker: crate::api::STORE_DELETE_CONFIRMATION.to_string(),
-                    verified_subject: None,
+                    verified_subject: Some(verified_pistis_subject().subject_id),
                 }),
                 Some(&actor),
                 |_| Ok(()),
@@ -2188,7 +2186,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("claim-order".to_string()),
             administrator_actor: Some("codex".to_string()),
-            verified_subject: None,
+            verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2197,7 +2195,7 @@ mod tests {
         )
         .with_profile_binding_registry_path(&profile_registry);
 
-        let actor = DaemonLocalActor::new(0).with_username("codex");
+        let actor = preverified_host_service_actor();
         let result = handler.handle_with_progress_for_actor(
             DaemonApiRequest::RegisterProfileBinding(request),
             Some(&actor),
@@ -2251,7 +2249,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("rollback-publication".to_string()),
             administrator_actor: None,
-            verified_subject: None,
+            verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2264,7 +2262,7 @@ mod tests {
         let error = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(request),
-                Some(&DaemonLocalActor::new(0).with_username("root")),
+                Some(&preverified_host_service_actor()),
                 |_| Ok(()),
             )
             .expect_err("store publication must fail");
@@ -2326,7 +2324,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some("folder-create".to_string()),
             administrator_actor: Some("codex".to_string()),
-            verified_subject: None,
+            verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
         let handler = DaemonRequestHandler::new(
@@ -2337,7 +2335,7 @@ mod tests {
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
 
-        let actor = DaemonLocalActor::new(0).with_username("codex");
+        let actor = preverified_host_service_actor();
         let first_response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(request.clone()),
@@ -3181,7 +3179,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "administrator_authentication_required"
+                if error.code == "preverified_host_authority_required"
         ));
         let definitions = read_store_registry(&store_registry_path).expect("registry readable");
         assert_eq!(
@@ -3218,7 +3216,7 @@ mod tests {
         assert!(matches!(
             response,
             DaemonApiResponse::Error(error)
-                if error.code == "preverified_host_authority_required"
+                if error.code == "administrator_authentication_required"
         ));
         cleanup(&root);
     }
@@ -3534,7 +3532,7 @@ mod tests {
         .with_registry_paths(&store_registry_path, &subobject_registry_path)
         .with_live_sqlite_path(live_sqlite.clone())
         .with_hdd_root_path(hdd_root);
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let mut progress_events = Vec::new();
 
         let response = handler
@@ -3547,7 +3545,7 @@ mod tests {
                     s3_prefix: Some("incoming".to_string()),
                     s3_expectation: None,
                     idempotency_key: None,
-                    verified_subject: None,
+                    verified_subject: Some(verified_pistis_subject().subject_id),
                 }),
                 Some(&actor),
                 |event| {
@@ -4632,10 +4630,11 @@ mod tests {
         let mut binding_request =
             profile_binding_request_for_auth_test("ena", backend_root.clone());
         binding_request.store_definition = Some(store_definitions[0].clone());
+        let service_peer = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request.clone()),
-                Some(&DaemonLocalActor::new(0).with_username("root")),
+                Some(&service_peer),
                 |_| Ok(()),
             )
             .expect("profile binding");
@@ -5546,7 +5545,7 @@ mod tests {
             dry_run: false,
             client_request_id: Some(format!("{store_id}-auth")),
             administrator_actor: Some("spoofed-request-actor".to_string()),
-            verified_subject: None,
+            verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         }
     }
@@ -5710,7 +5709,7 @@ mod tests {
         .with_profile_binding_registry_path(&registry)
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let response = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
@@ -5724,7 +5723,10 @@ mod tests {
         let DaemonApiResponse::RegisterProfileBinding(response) = response else {
             panic!("expected profile binding response");
         };
-        assert_eq!(response.administrator_actor.as_deref(), Some("root"));
+        assert_eq!(
+            response.administrator_actor.as_deref(),
+            Some("pistis:operator-1")
+        );
         let serialized = serde_json::to_string(&response).expect("response serializes");
         assert!(!serialized.contains("backend_root"));
         assert!(!serialized.contains("ssd_staging_root"));
@@ -6238,7 +6240,7 @@ mod tests {
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
         let binding_request = profile_binding_request_for_auth_test("inspect", backend);
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(binding_request),
@@ -6294,7 +6296,7 @@ mod tests {
         .with_profile_binding_registry_path(&registry)
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
@@ -6340,7 +6342,7 @@ mod tests {
         .with_profile_binding_registry_path(&registry)
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
@@ -6391,11 +6393,7 @@ mod tests {
         .with_registry_paths(store_registry, subobject_registry)
         .with_profile_binding_registry_path(&profile_registry)
         .with_live_sqlite_path(root.join("live.sqlite"));
-        let actor = DaemonLocalActor::new(0).with_username("root").with_groups([
-            "users",
-            "mnemosyne",
-            "writers",
-        ]);
+        let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::RegisterProfileBinding(profile_binding_request_for_auth_test(
@@ -6466,7 +6464,7 @@ mod tests {
         .with_profile_binding_registry_path(&registry)
         .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
         .with_live_sqlite_path(root.join("live.sqlite"));
-        let actor = DaemonLocalActor::new(0).with_username("root");
+        let actor = preverified_host_service_actor();
         let mut request = profile_binding_request_for_auth_test("adopt", backend.clone());
         request.operation = ProfileBindingOperation::Adopt;
 

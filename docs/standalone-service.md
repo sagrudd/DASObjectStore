@@ -92,18 +92,16 @@ dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config
 dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config --json
 ```
 
-The server owns local standalone authentication, local audit posture, and the
-standalone GUI/API surface. Storage-mutating routes call `dasobjectstored`
-rather than writing managed storage directly. It does not own Synoptikon login,
-Synoptikon session cookies, tenant selection, entitlement checks, or Synoptikon
-public TLS.
+The server owns the standalone GUI/API surface and validates the Monas Pistis
+host context. It does not own local login, password storage, PAM, browser
+session issuance, Synoptikon login, Synoptikon session cookies, tenant
+selection, entitlement checks, or Synoptikon public TLS. Storage-mutating
+routes call `dasobjectstored` rather than writing managed storage directly.
 
-Standalone appliance administrator authority is OS-local. A host user with sudo
-rights is a DASObjectStore administrator, and host group membership authorizes
-ordinary store writer/admin job submission. The product-local auth store is a
-transitional Web session layer until OS-local actor discovery is implemented; it
-must not supersede sudo-derived administrator status. The full decision is
-recorded in [Standalone Authentication Decision](standalone-auth.md).
+Standalone appliance human authority is Monas/Pistis. OS-local groups may
+remain daemon policy inputs for ordinary writer-job submission, but they are
+not administrator authority or a replacement for a verified host subject. The
+full decision is recorded in [Standalone Authentication Decision](standalone-auth.md).
 
 ## Web Assets
 

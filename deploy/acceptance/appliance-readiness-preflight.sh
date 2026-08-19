@@ -11,7 +11,8 @@ usage: appliance-readiness-preflight.sh
 
 Run as root on a Linux DASObjectStore standalone appliance. The preflight only
 reads package, configuration, service, authority, socket, and storage state.
-It exits non-zero unless the current local-user appliance profile is ready.
+It exits non-zero unless the current Monas/Synoptikon Pistis appliance profile
+is ready.
 EOF
 }
 
@@ -150,7 +151,7 @@ except (OSError, json.JSONDecodeError):
 authentication = value.get("authentication")
 if not isinstance(authentication, dict):
     raise SystemExit(1)
-if authentication.get("authority") != "local_user":
+if authentication.get("authority") not in {"monas", "synoptikon"}:
     raise SystemExit(1)
 if not isinstance(authentication.get("session_ttl_seconds"), int):
     raise SystemExit(1)
@@ -160,7 +161,7 @@ PY
     then
         pass "authentication_authority"
     else
-        fail "authentication_authority" "local-user authority configuration is absent or invalid"
+        fail "authentication_authority" "Monas/Synoptikon Pistis authority configuration is absent or invalid"
     fi
 }
 
@@ -250,7 +251,6 @@ fi
 
 daemon_config="$(root_path /etc/dasobjectstore/daemon.json)"
 web_config="$(root_path /opt/dasobjectstore/config.json)"
-pam_config="$(root_path /etc/pam.d/dasobjectstore)"
 certificate="$(root_path /opt/dasobjectstore/tls/server.crt)"
 private_key="$(root_path /opt/dasobjectstore/tls/server.key)"
 store_registry="$(root_path /var/lib/dasobjectstore/stores.json)"
@@ -274,13 +274,6 @@ if "$(root_path /usr/bin/dasobjectstore-server)" --config "$web_config" --check-
     pass "web_config_validation"
 else
     fail "web_config_validation" "Web server rejected the installed configuration"
-fi
-if [ -L "$pam_config" ] || [ ! -f "$pam_config" ]; then
-    fail "pam_local_user_authority" "PAM local-user authority configuration is absent or unsafe"
-elif grep -Fq 'pam_unix.so' "$pam_config" 2>/dev/null; then
-    pass "pam_local_user_authority"
-else
-    fail "pam_local_user_authority" "PAM local-user authority is not configured"
 fi
 require_regular_file "tls_certificate" "$certificate"
 require_regular_file "tls_private_key" "$private_key"

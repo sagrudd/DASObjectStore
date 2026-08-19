@@ -34,16 +34,6 @@ pub(crate) struct ProfileUploadQuery {
     pub version: Option<u64>,
 }
 
-pub(super) async fn standalone_profile_s3_put(
-    Path((store_id, object_id)): Path<(String, String)>,
-    Query(query): Query<ProfileUploadQuery>,
-    headers: HeaderMap,
-    _actor: AuthenticatedGuiActor,
-    body: Body,
-) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    profile_s3_put(store_id, object_id, query, headers, body).await
-}
-
 /// Upload a profile object for an actor that Monas or Synoptikon has already
 /// verified with Pistis.
 ///
@@ -386,57 +376,6 @@ pub(super) fn required_header(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AuthenticatedActorAuthority;
-
-    fn actor() -> AuthenticatedGuiActor {
-        AuthenticatedGuiActor {
-            subject_id: "tester".to_string(),
-            authority: AuthenticatedActorAuthority::LocalStandalone,
-            roles: Vec::new(),
-            expires_at_unix_seconds: None,
-            correlation_id: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn rejects_missing_content_length_before_daemon_dispatch() {
-        let result = standalone_profile_s3_put(
-            Path(("store".to_string(), "objects/file".to_string())),
-            Query(ProfileUploadQuery::default()),
-            HeaderMap::new(),
-            actor(),
-            Body::from("hello"),
-        )
-        .await;
-        assert_eq!(
-            result.expect_err("missing length").0,
-            StatusCode::LENGTH_REQUIRED
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_invalid_checksum_before_daemon_dispatch() {
-        let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_LENGTH, "5".parse().expect("length"));
-        headers.insert("x-das-upload-id", "upload-1".parse().expect("upload id"));
-        headers.insert("x-das-request-id", "request-1".parse().expect("request id"));
-        headers.insert(
-            "x-das-sha256",
-            "sha256:not-a-digest".parse().expect("checksum"),
-        );
-        let result = standalone_profile_s3_put(
-            Path(("store".to_string(), "objects/file".to_string())),
-            Query(ProfileUploadQuery::default()),
-            headers,
-            actor(),
-            Body::from("hello"),
-        )
-        .await;
-        assert_eq!(
-            result.expect_err("invalid checksum").0,
-            StatusCode::BAD_REQUEST
-        );
-    }
 
     #[test]
     fn preserves_daemon_server_busy_as_retryable_service_unavailable() {

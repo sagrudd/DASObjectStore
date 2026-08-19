@@ -17,8 +17,9 @@ DASObjectStore SHALL be implemented as both:
 - a formal Mnemosyne/Synoptikon product plugin registered through the product
   catalogue and product UI bootstrap conventions.
 
-Standalone mode owns local runtime state, local authentication, local audit, and
-direct hardware workflows. Synoptikon-integrated mode SHALL use the common
+Standalone mode owns local runtime state, daemon-backed audit, and direct
+hardware workflows while Monas owns human authentication through Pistis.
+Synoptikon-integrated mode SHALL use the common
 Mnemosyne account, entitlement, audit, correlation, and storage-binding context
 provided by the host.
 
@@ -65,28 +66,17 @@ appliance binding rules are defined in
 The server SHALL use `axum` for HTTP/API routing and SHALL support two host
 modes:
 
-- `standalone`: local login, logout, session validation, and local user storage;
-- `synoptikon_integrated`: no product-owned login endpoints; the host supplies
-  authenticated user context, roles, entitlement, correlation ID, and audit
+- `standalone`: Monas/Pistis host authentication; no product-owned login,
+  logout, password, PAM, or session-issuer endpoints;
+- `synoptikon_integrated`: Synoptikon/Pistis host authentication; the host
+  supplies verified user context, roles, entitlement, correlation ID, and audit
   authority.
 
-Standalone appliance administrator authority SHALL be OS-local: a host user with
-sudo rights is an appliance administrator, and host group membership authorizes
-ordinary store writer/admin job submission. The product-local auth store is a
-transitional Web session layer until OS-local actor discovery is implemented; it
-does not supersede sudo-derived administrator status. The decision is recorded
-in [Standalone Authentication Decision](standalone-auth.md).
-
-The transitional standalone local authentication store SHOULD follow the
-Mnematikon pattern:
-
-- local users and sessions stored under `/opt/dasobjectstore`;
-- password hashes, registration tokens, and session token hashes persisted
-  outside the Web bundle;
-- default session TTL of one hour, configurable later;
-- startup may revoke stale local sessions where required for safety;
-- risky operations still require operation-specific confirmation even after
-  login.
+Standalone appliance human authority SHALL be Monas/Pistis. OS-local group
+membership may still be used by the daemon for ordinary writer-job policy, but
+it does not authenticate a person, establish an administrator session, or
+override the verified host context. The decision is recorded in [Standalone
+Authentication Decision](standalone-auth.md).
 
 Integrated authentication SHALL treat Synoptikon as authoritative. Product API
 handlers SHALL reject mutating actions when required host context, entitlement,
@@ -113,7 +103,7 @@ API and submit a request or job. Product code SHALL NOT write managed SSD/HDD
 roots, edit live portable metadata, settle objects, drain disks, retire disks,
 or change store policy by touching DAS filesystems directly.
 
-Standalone mode maps local sessions and local user groups into daemon actor
+Standalone mode maps the verified Monas/Pistis host context into daemon actor
 claims. Synoptikon-integrated mode maps host-provided account, role,
 entitlement, project, governance-domain, correlation ID, and audit context into
 the same daemon request envelope. The daemon enforces storage permissions and

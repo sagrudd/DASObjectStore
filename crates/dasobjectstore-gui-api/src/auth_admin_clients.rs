@@ -2,31 +2,6 @@
 
 use super::*;
 
-pub(super) trait LocalUserAuthorityProvider: Send + Sync {
-    fn local_user(
-        &self,
-        username: &str,
-    ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError>;
-}
-
-pub(super) struct SystemLocalUserAuthorityProvider;
-
-impl LocalUserAuthorityProvider for SystemLocalUserAuthorityProvider {
-    fn local_user(
-        &self,
-        username: &str,
-    ) -> Result<crate::LocalUserMetadata, crate::LocalUserDiscoveryError> {
-        crate::discover_local_user(username)
-    }
-}
-
-pub(super) trait StandaloneLocalGroupAdminClient: Send + Sync {
-    fn submit_local_group_operation(
-        &self,
-        request: StandaloneLocalGroupAdminDaemonRequest,
-    ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError>;
-}
-
 pub(super) trait StandaloneEnclosureAdminClient: Send + Sync {
     fn submit_prepare_enclosure(
         &self,
@@ -99,17 +74,6 @@ pub(super) trait StandaloneEnclosureAdminClient: Send + Sync {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct StandaloneLocalGroupAdminDaemonRequest {
-    pub(super) operation: StandaloneLocalGroupOperation,
-    pub(super) group_name: String,
-    pub(super) username: Option<String>,
-    pub(super) dry_run: bool,
-    pub(super) client_request_id: Option<String>,
-    pub(super) administrator_actor: Option<String>,
-    pub(super) confirmation_marker: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct StandaloneEnclosurePrepareDaemonRequest {
     pub(super) ssd_device: String,
     pub(super) hdd_devices: Vec<PrepareEnclosureHddDeviceRequest>,
@@ -145,64 +109,8 @@ pub(super) struct StandaloneIngestControlDaemonRequest {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct StandaloneLocalGroupAdminClientError {
-    pub(super) message: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct StandaloneEnclosureAdminClientError {
     pub(super) message: String,
-}
-
-pub(super) struct DaemonStandaloneLocalGroupAdminClient {
-    client: DaemonClient<UnixSocketDaemonTransport>,
-}
-
-impl DaemonStandaloneLocalGroupAdminClient {
-    pub(super) fn default_packaged() -> Self {
-        Self {
-            client: DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
-                DaemonRuntimeConfig::default_packaged().socket_path,
-            )),
-        }
-    }
-}
-
-impl StandaloneLocalGroupAdminClient for DaemonStandaloneLocalGroupAdminClient {
-    fn submit_local_group_operation(
-        &self,
-        request: StandaloneLocalGroupAdminDaemonRequest,
-    ) -> Result<StandaloneLocalGroupAdminResponse, StandaloneLocalGroupAdminClientError> {
-        match request.operation {
-            StandaloneLocalGroupOperation::CreateGroup => self
-                .client
-                .create_local_group(DaemonCreateLocalGroupRequest {
-                    group_name: request.group_name,
-                    dry_run: request.dry_run,
-                    client_request_id: request.client_request_id,
-                    administrator_actor: request.administrator_actor,
-                    confirmation_marker: request.confirmation_marker,
-                })
-                .map(create_local_group_response_from_daemon)
-                .map_err(standalone_admin_client_error),
-            StandaloneLocalGroupOperation::AddUserToGroup => self
-                .client
-                .assign_local_user_to_local_group(DaemonAssignLocalUserToLocalGroupRequest {
-                    username: request.username.ok_or_else(|| {
-                        StandaloneLocalGroupAdminClientError {
-                            message: "username is required".to_string(),
-                        }
-                    })?,
-                    group_name: request.group_name,
-                    dry_run: request.dry_run,
-                    client_request_id: request.client_request_id,
-                    administrator_actor: request.administrator_actor,
-                    confirmation_marker: request.confirmation_marker,
-                })
-                .map(assign_local_user_to_group_response_from_daemon)
-                .map_err(standalone_admin_client_error),
-        }
-    }
 }
 
 pub(super) struct DaemonStandaloneEnclosureAdminClient {

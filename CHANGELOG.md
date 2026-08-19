@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.171.1 - 2026-08-19
+
+- Complete the PAM retirement boundary: packages, container/runtime images,
+  acceptance fixtures, and operator documentation no longer install or expect
+  a PAM authority. Monas/Synoptikon Pistis is now the default host authority,
+  and legacy ``local_user`` configurations fail closed during validation.
+
 ## 0.171.0 - 2026-08-18
 
 - Add the inactive daemon-owned Synoptikon projection prerequisite: the fixed

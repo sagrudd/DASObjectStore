@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) const DEFAULT_GROUPS_REGISTRY_PATH: &str = "/opt/dasobjectstore/groups.json";
 pub(crate) const GROUPS_REGISTRY_ENV: &str = "DASOBJECTSTORE_GROUPS_PATH";
 
+#[allow(dead_code)]
 static GROUPS_REGISTRY_WRITE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,6 +77,7 @@ pub(crate) fn read_storage_groups_for_user(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn upsert_storage_group(
     path: &Path,
     group_name: &str,
@@ -141,6 +143,7 @@ enum StorageGroupRegistryError {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum StorageGroupRegistryWriteError {
     BlankGroupName,
     Read(io::Error),
@@ -209,6 +212,7 @@ enum StorageGroupEntry {
 }
 
 impl StorageGroupEntry {
+    #[allow(dead_code)]
     fn group_name(&self) -> Option<&str> {
         match self {
             Self::Name(group_name) => Some(group_name),
@@ -236,6 +240,7 @@ impl StorageGroupEntry {
     }
 }
 
+#[allow(dead_code)]
 fn write_storage_group_entries(
     path: &Path,
     entries: Vec<StorageGroupEntry>,

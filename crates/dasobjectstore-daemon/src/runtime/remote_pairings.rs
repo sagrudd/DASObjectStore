@@ -976,9 +976,9 @@ mod tests {
                     .to_string(),
             requested_object_store: Some("requested-store".to_string()),
             requested_session_lifetime_seconds: None,
-            client_request_id: Some("request-1".to_string()),
-            created_at_utc: "2026-07-28T10:00:00Z".to_string(),
-            expires_at_utc: "2026-07-28T10:05:00Z".to_string(),
+            client_request_id: Some(format!("request-{pairing_id}")),
+            created_at_utc: "2099-07-28T10:00:00Z".to_string(),
+            expires_at_utc: "2099-07-28T10:05:00Z".to_string(),
             approval: None,
             exchanged_at_utc: None,
         }
@@ -1002,11 +1002,11 @@ mod tests {
                     control_operations: remote_easyconnect_control_operations(true),
                     allowed_prefixes: vec![REMOTE_EASYCONNECT_DEFAULT_CONTROL_PREFIX.to_string()],
                 }],
-                host_session_expires_at_utc: "2026-07-28T10:04:00Z".to_string(),
+                host_session_expires_at_utc: "2099-07-28T10:04:00Z".to_string(),
                 correlation_id: "correlation-1".to_string(),
                 audit_identity: "pistis:principal-1".to_string(),
             },
-            approval_expires_at_utc: "2026-07-28T10:03:00Z".to_string(),
+            approval_expires_at_utc: "2099-07-28T10:03:00Z".to_string(),
             exchange_code: "exchange-secret".to_string(),
         }
     }

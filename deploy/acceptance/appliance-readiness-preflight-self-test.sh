@@ -12,7 +12,6 @@ mkdir -p \
     "$BIN" \
     "$ROOT/usr/bin" \
     "$ROOT/etc/dasobjectstore" \
-    "$ROOT/etc/pam.d" \
     "$ROOT/opt/dasobjectstore/tls" \
     "$ROOT/var/lib/dasobjectstore" \
     "$ROOT/srv/dasobjectstore/ssd" \
@@ -32,14 +31,13 @@ cat >"$ROOT/etc/dasobjectstore/daemon.json" <<'EOF'
 EOF
 cat >"$ROOT/opt/dasobjectstore/config.json" <<'EOF'
 {
-  "authentication": {"authority":"local_user","session_ttl_seconds":3600},
+  "authentication": {"authority":"monas","session_ttl_seconds":3600},
   "tls": {
     "certificate_path":"/opt/dasobjectstore/tls/server.crt",
     "private_key_path":"/opt/dasobjectstore/tls/server.key"
   }
 }
 EOF
-printf 'auth required pam_unix.so\n' >"$ROOT/etc/pam.d/dasobjectstore"
 printf 'certificate fixture\n' >"$ROOT/opt/dasobjectstore/tls/server.crt"
 printf 'private-key fixture\n' >"$ROOT/opt/dasobjectstore/tls/server.key"
 printf '[{"store_id":"CODEX"}]\n' >"$ROOT/var/lib/dasobjectstore/stores.json"
@@ -120,7 +118,7 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 value = json.loads(path.read_text())
-value["authentication"]["authority"] = "local_user"
+value["authentication"]["authority"] = "monas"
 value["tls"]["certificate_path"] = "/unapproved/tls/server.crt"
 path.write_text(json.dumps(value))
 PY

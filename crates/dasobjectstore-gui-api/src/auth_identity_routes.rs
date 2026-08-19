@@ -395,30 +395,6 @@ fn remote_auth_bridge_error(
     }
 }
 
-pub(super) async fn easyconnect_auth_context(
-    actor: AuthenticatedGuiActor,
-) -> Result<Json<StandaloneEasyconnectAuthContextResponse>, (StatusCode, Json<AuthRouteError>)> {
-    if !actor.authority.uses_local_os_policy() {
-        return Err(route_error(
-            StatusCode::FORBIDDEN,
-            "local_os_policy_identity_required",
-            "easyconnect standalone authentication requires an appliance-local or Monas-authenticated OS identity",
-        ));
-    }
-
-    Ok(Json(StandaloneEasyconnectAuthContextResponse {
-        schema_version: "dasobjectstore.remote_easyconnect.auth_context.v1".to_string(),
-        auth_provider: RemoteEasyconnectAuthProvider::StandaloneLocalUser,
-        subject_id: actor.subject_id,
-        session_expires_at_unix_seconds: actor.expires_at_unix_seconds,
-        supported_auth_providers: vec![RemoteEasyconnectAuthProvider::StandaloneLocalUser],
-        future_auth_providers: vec![
-            RemoteEasyconnectAuthProvider::Synoptikon,
-            RemoteEasyconnectAuthProvider::Mneion,
-        ],
-    }))
-}
-
 pub(super) async fn easyconnect_create_pairing(
     State(state): State<EasyconnectPublicRouteState>,
     Json(request): Json<RemoteEasyconnectCreatePairingRequest>,

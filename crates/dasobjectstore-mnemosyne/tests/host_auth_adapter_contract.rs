@@ -528,7 +528,10 @@ async fn monas_exposes_only_pairing_create_and_exchange_without_a_session() {
         )
         .await
         .expect("request completes");
-    assert_eq!(approval.status(), StatusCode::UNAUTHORIZED);
+    // Approval is intentionally not part of the unauthenticated Monas API
+    // composition. It is mounted only by a host-authenticated Pistis
+    // composition that can supply the approval resolver and S3 descriptor.
+    assert_eq!(approval.status(), StatusCode::METHOD_NOT_ALLOWED);
     cleanup(&root);
 }
 
@@ -742,7 +745,7 @@ async fn assert_monas_product_api_accepts(
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/api/v1/remote/easyconnect/discovery")
+                .uri("/api/v1/host-session")
                 .header(COOKIE, cookie)
                 .body(Body::empty())
                 .expect("request builds"),

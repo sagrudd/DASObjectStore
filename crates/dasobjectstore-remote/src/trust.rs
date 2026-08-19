@@ -743,7 +743,7 @@ fn parse_fingerprint(value: &str) -> Result<Vec<u8>, TrustError> {
 }
 
 fn formatted_sha256(bytes: &[u8]) -> String {
-    canonical_fingerprint(Sha256::digest(bytes).as_slice())
+    canonical_fingerprint(&Sha256::digest(bytes))
 }
 
 pub fn formatted_certificate_sha256(bytes: &[u8]) -> String {

@@ -601,7 +601,7 @@ mod tests {
         )
         .oneshot(
             Request::builder()
-                .uri("/api/v1/remote/easyconnect/discovery")
+                .uri("/products/dasobjectstore/api/v1/remote/easyconnect/discovery")
                 .body(Body::empty())
                 .expect("request builds"),
         )

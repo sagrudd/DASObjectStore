@@ -1,58 +1,58 @@
 # Standalone Authentication Decision
 
-Status: Draft  
+Status: Superseded by the Pistis-only host authentication contract
 Scope: standalone appliance host mode and administrator authority
 
 ## Decision
 
-Standalone DASObjectStore appliances SHALL use OS-local identity as the
-administrator authority.
+Standalone DASObjectStore appliances use Monas as their host authentication
+authority. Monas establishes the operator identity through Pistis and
+Prosopikon; DASObjectStore receives only the verified, credential-free host
+context. Synoptikon-integrated deployments use the same contract with
+Synoptikon as the host authority.
 
-An OS-local user with sudo rights is a DASObjectStore administrator. OS-local
-group membership, such as membership in `mnemosyne` or a store-specific writer
-group, authorizes daemon job submission for ordinary storage work. Neither sudo
-membership nor writer-group membership grants direct write access to managed DAS
-roots; all storage mutation still goes through `dasobjectstored`.
+OS-local users and groups remain transport, ownership, and ordinary writer-job
+policy inputs where required by the daemon. They are not human authentication,
+administrator authority, or a substitute for a verified Pistis subject.
+Neither sudo membership nor writer-group membership grants direct write access
+to managed DAS roots; all storage mutation still goes through
+`dasobjectstored`.
 
-The current product-local auth store remains a transitional Web session layer
-for standalone development and early appliance UI work. It is not the durable
-administrator authority for standalone appliances. Before broader standalone
-administrator workflows are exposed, the Web/API layer should discover the
-current OS user, map sudo-derived administrator status, expose current-user
-metadata, and pass that actor context to the daemon.
+The retired product-local login/session store, password helper, and PAM service
+are not part of the standalone package or runtime authority surface. The
+`local_user` configuration value is retained only as a decode-only migration
+marker and is rejected by validation; it cannot re-enable the old authority.
 
 ## Rationale
 
-DASObjectStore is an appliance that manages disks, mounts, services, and
-long-running storage jobs on a host. Binding administrator authority to the host
-OS keeps package behavior, sudo policy, service ownership, and daemon
-authorization aligned. It also avoids creating a second local administrator
-database that can drift from the host's real privilege model.
+DASObjectStore manages disks, mounts, services, and long-running storage jobs
+on a host. Human authority belongs to the host's Pistis ceremony, while
+storage mutation remains daemon-owned. This avoids creating a second local
+administrator database that can drift from the site's authoritative identity
+and entitlement state.
 
-Product-local sessions are still useful as browser sessions, but they must not
-be confused with root-equivalent authority. A browser login proves access to the
-standalone UI. Sudo-derived OS status proves appliance administration.
+Pistis authentication proves the operator's host identity and roles. It does
+not by itself grant storage access: the daemon still evaluates ObjectStore
+policy, entitlement, writer scope, and operation-specific confirmation.
 
 ## Boundary
 
 - `dasobjectstored` remains the final storage authorization point.
 - The standalone Axum API and Yew UI are clients of the daemon for all
   storage-mutating work.
-- OS-local sudo status authorizes administrator workflows such as store
-  management, disk preparation, disk retirement, and service administration.
-- OS-local writer groups authorize store write job submission.
-- Product-local sessions may gate browser access while OS-local actor discovery
-  is implemented, but they do not supersede OS-local authority.
-- Synoptikon-integrated mode is unchanged: Synoptikon remains authoritative for
-  account, entitlement, audit, correlation, and governance-domain context.
+- Monas or Synoptikon Pistis roles authorize the explicitly exposed host
+  workflows.
+- OS-local writer groups may authorize ordinary daemon job submission after
+  the host route has established its verified actor context.
+- Local cookies, passwords, PAM results, and claimed OS identities never
+  create a DASObjectStore human session.
+- Synoptikon-integrated mode remains authoritative for account, entitlement,
+  audit, correlation, and governance-domain context.
 
 ## Implementation Implications
 
-Next implementation slices should add:
-
-- local-user discovery for the standalone API;
-- sudo-rights administrator detection;
-- current-user metadata in protected API responses;
-- tests for administrator and non-administrator OS-local actors;
-- clear permission-denied responses when an authenticated browser session lacks
-  OS-local authority for an administrator action.
+The implementation must keep the Monas/Synoptikon host adapter, Pistis session
+freshness checks, CSRF binding, and daemon-side storage authorization in one
+contract. Package installation must leave the service ready for the attended
+host onboarding flow without requiring a second DASObjectStore login or manual
+PAM configuration.

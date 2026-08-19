@@ -22,6 +22,7 @@ use dasobjectstore_daemon::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOrchestrator,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
     DaemonServiceStatusResponse, FixedDaemonClock, InProcessDaemonTransport,
+    DEFAULT_DAEMON_SERVICE_USER,
 };
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use sha2::{Digest, Sha256};
@@ -46,7 +47,7 @@ fn application_credentials_rotate_exchange_revoke_and_audit_end_to_end() {
     .with_application_identity_registry_path(&identity_registry)
     .with_application_key_registry_path(&key_registry)
     .with_application_audit_log_path(&audit_path);
-    let actor = DaemonLocalActor::new(0).with_username("release-acceptance");
+    let actor = DaemonLocalActor::new(997).with_username(DEFAULT_DAEMON_SERVICE_USER);
     let client = DaemonClient::new(InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
@@ -62,7 +63,7 @@ fn application_credentials_rotate_exchange_revoke_and_audit_end_to_end() {
     assert_eq!(registered.identity.application_id, application_id);
     assert_eq!(
         registered.administrator_actor.as_deref(),
-        Some("release-acceptance")
+        Some("pistis:release-acceptance")
     );
 
     let first_signing_key = signing_key(11);
@@ -179,7 +180,7 @@ fn mtls_mapping_is_rechecked_after_certificate_revocation() {
     .with_application_identity_registry_path(root.join("application-identities.json"))
     .with_application_key_registry_path(root.join("application-keys.json"))
     .with_application_audit_log_path(&audit_path);
-    let actor = DaemonLocalActor::new(0).with_username("release-acceptance");
+    let actor = DaemonLocalActor::new(997).with_username(DEFAULT_DAEMON_SERVICE_USER);
     let client = DaemonClient::new(InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
@@ -213,7 +214,7 @@ fn mtls_mapping_is_rechecked_after_certificate_revocation() {
             },
             dry_run: false,
             client_request_id: Some("mneion-mtls-certificate".to_string()),
-            administrator_actor: None,
+            administrator_actor: Some("pistis:release-acceptance".to_string()),
             confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
         })
         .expect("certificate mapping registers");
@@ -284,7 +285,7 @@ fn identity_registration(identity: ApplicationIdentity) -> ApplicationIdentityRe
         client_request_id: Some(format!("{}-identity", identity.application_id)),
         identity,
         dry_run: false,
-        administrator_actor: None,
+        administrator_actor: Some("pistis:release-acceptance".to_string()),
         confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
     }
 }
@@ -313,7 +314,7 @@ fn key_registration(
         },
         dry_run: false,
         client_request_id: Some(format!("{application_id}-{key_id}")),
-        administrator_actor: None,
+        administrator_actor: Some("pistis:release-acceptance".to_string()),
         confirmation_marker: APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION.to_string(),
     }
 }
@@ -351,7 +352,7 @@ fn revocation(
         reason: reason.to_string(),
         dry_run: false,
         client_request_id: Some(format!("{application_id}-revoke")),
-        administrator_actor: None,
+        administrator_actor: Some("pistis:release-acceptance".to_string()),
         confirmation_marker: APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION.to_string(),
     }
 }

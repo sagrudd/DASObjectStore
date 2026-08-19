@@ -2,45 +2,6 @@
 
 use super::*;
 
-pub(super) fn validate_create_local_group_request(
-    request: CreateLocalGroupRequest,
-) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
-    let group_name = required_field("group_name", request.group_name)?;
-    validate_client_request_id(request.client_request_id.as_deref())?;
-    let confirmation_marker =
-        validate_confirmation_marker(request.dry_run, request.confirmation_marker.as_deref())?;
-
-    Ok(StandaloneLocalGroupAdminDaemonRequest {
-        operation: StandaloneLocalGroupOperation::CreateGroup,
-        group_name,
-        username: None,
-        dry_run: request.dry_run,
-        client_request_id: request.client_request_id,
-        administrator_actor: None,
-        confirmation_marker,
-    })
-}
-
-pub(super) fn validate_assign_local_user_to_group_request(
-    request: AssignLocalUserToGroupRequest,
-) -> Result<StandaloneLocalGroupAdminDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
-    let group_name = required_field("group_name", request.group_name)?;
-    let username = required_field("username", request.username)?;
-    validate_client_request_id(request.client_request_id.as_deref())?;
-    let confirmation_marker =
-        validate_confirmation_marker(request.dry_run, request.confirmation_marker.as_deref())?;
-
-    Ok(StandaloneLocalGroupAdminDaemonRequest {
-        operation: StandaloneLocalGroupOperation::AddUserToGroup,
-        group_name,
-        username: Some(username),
-        dry_run: request.dry_run,
-        client_request_id: request.client_request_id,
-        administrator_actor: None,
-        confirmation_marker,
-    })
-}
-
 pub(super) fn validate_prepare_enclosure_request(
     request: PrepareEnclosureRequest,
 ) -> Result<StandaloneEnclosurePrepareDaemonRequest, (StatusCode, Json<AuthRouteError>)> {
@@ -501,30 +462,6 @@ pub(super) fn validate_client_request_id(
         ));
     }
     Ok(())
-}
-
-pub(super) fn validate_confirmation_marker(
-    dry_run: bool,
-    confirmation_marker: Option<&str>,
-) -> Result<String, (StatusCode, Json<AuthRouteError>)> {
-    let confirmation_marker = confirmation_marker
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if dry_run {
-        return Ok(confirmation_marker
-            .unwrap_or(LOCAL_ADMIN_CONFIRMATION_MARKER)
-            .to_string());
-    }
-
-    if confirmation_marker == Some(LOCAL_ADMIN_CONFIRMATION_MARKER) {
-        return Ok(LOCAL_ADMIN_CONFIRMATION_MARKER.to_string());
-    }
-
-    Err(route_error(
-        StatusCode::BAD_REQUEST,
-        "confirmation_required",
-        format!("confirmation_marker must be `{LOCAL_ADMIN_CONFIRMATION_MARKER}`"),
-    ))
 }
 
 pub(super) fn validate_prepare_enclosure_confirmation_marker(
