@@ -13,11 +13,11 @@ use crate::cli::{
     ServiceRenderComposeArgs, StoreAcknowledgementPolicyArgs, StoreAdoptArgs,
     StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
     StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
-    StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBindingOperation,
-    StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
-    StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
-    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
-    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs, TrustCommand,
+    StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBrowserArgs,
+    StoreProfileHeadArgs, StoreProfileHealthArgs, StoreProfileInspectionArgs,
+    StoreProfileMigrationArgs, StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs,
+    StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
+    SubobjectCreateArgs, TrustCommand,
 };
 mod application_auth;
 mod command_handlers;
@@ -168,7 +168,6 @@ use self::subobject::run_subobject;
 use dasobjectstore_core::health::{HealthScore, HealthSignals};
 use dasobjectstore_core::ids::{DiskId, ObjectId, StoreId};
 use dasobjectstore_core::lifecycle::PoolState;
-use dasobjectstore_core::manifest::ObjectStoreManifest;
 use dasobjectstore_core::placement::{
     plan_copy_count_for_store, PerformanceClass, PlacementCandidate, PlacementRequest, WriteLoad,
 };
@@ -186,10 +185,9 @@ use dasobjectstore_daemon::{
     ObjectPutRequest as DaemonObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest,
     PrepareEnclosureFilesystem as DaemonPrepareEnclosureFilesystem,
     PrepareEnclosureHddDevice as DaemonPrepareEnclosureHddDevice,
-    PrepareEnclosureRequest as DaemonPrepareEnclosureRequest, ProfileBindingOperation,
-    ProfileBindingRequest, ProfileBrowserRequest, ProfileDiagnosticsRequest,
-    ProfileInspectionRequest, ProfileReadinessRequest, ProfileS3HeadRequest,
-    ProfileS3HealthRequest, ProfileS3VerifyRequest,
+    PrepareEnclosureRequest as DaemonPrepareEnclosureRequest, ProfileBrowserRequest,
+    ProfileDiagnosticsRequest, ProfileInspectionRequest, ProfileReadinessRequest,
+    ProfileS3HeadRequest, ProfileS3HealthRequest, ProfileS3VerifyRequest,
     StoreDeduplicateRequest as DaemonStoreDeduplicateRequest, StoreDeleteCommandReport,
     StoreDeleteRequest as DaemonStoreDeleteRequest, StoreDrainRequest as DaemonStoreDrainRequest,
     StoreInventoryRequest, StoreRepairRequest as DaemonStoreRepairRequest,

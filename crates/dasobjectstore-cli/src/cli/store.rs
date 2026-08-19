@@ -122,6 +122,7 @@ pub(crate) struct StoreProfileBindingArgs {
     json: bool,
 }
 
+#[allow(dead_code)]
 impl StoreProfileBindingArgs {
     pub(crate) fn manifest(&self) -> &Path {
         &self.manifest
@@ -171,6 +172,7 @@ pub(crate) struct StoreProfileMigrationArgs {
     json: bool,
 }
 
+#[allow(dead_code)]
 impl StoreProfileMigrationArgs {
     pub(crate) fn migration_id(&self) -> &str {
         &self.migration_id

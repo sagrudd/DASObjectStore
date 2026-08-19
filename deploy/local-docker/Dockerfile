@@ -7,7 +7,6 @@ RUN apt-get update \
         build-essential \
         clang \
         libclang-dev \
-        libpam0g-dev \
         pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,10 +15,10 @@ COPY DASObjectStore /src/DASObjectStore
 COPY prosopikon /src/prosopikon
 WORKDIR /src/DASObjectStore
 RUN grep -Fqx \
-        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "dba0716e787e1be6c10d982a0b4b572c57a21bd1" }' \
+        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "aa52ea9b1fc145d0aa47e944b602cf58188cedd7" }' \
         Cargo.toml \
     && sed -i \
-        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "dba0716e787e1be6c10d982a0b4b572c57a21bd1" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
+        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "aa52ea9b1fc145d0aa47e944b602cf58188cedd7" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
         Cargo.toml \
     && grep -Fqx \
         'prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }' \
@@ -46,7 +45,6 @@ RUN microdnf install -y \
         ca-certificates \
         libstdc++ \
         openssl-libs \
-        pam \
         zlib \
     && microdnf clean all
 COPY --from=builder /src/DASObjectStore/target/release/dasobjectstore /usr/local/bin/dasobjectstore

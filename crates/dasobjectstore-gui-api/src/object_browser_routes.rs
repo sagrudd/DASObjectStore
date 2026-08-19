@@ -1,7 +1,6 @@
 use crate::{
     daemon_bridge::{DaemonBridge, DaemonBridgeError},
-    discover_local_user, AuthRouteError, AuthenticatedGuiActor, LocalAuthStore,
-    LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostAuthenticatedContext,
+    AuthRouteError, AuthenticatedGuiActor, VerifiedHostAuthenticatedContext,
     VerifiedHostObjectPrefixScope, VerifiedHostStoreScope,
 };
 use axum::{
@@ -22,15 +21,14 @@ use dasobjectstore_daemon::api::{
     OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
 };
 use dasobjectstore_daemon::{
-    DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserDelegatedActor,
-    ObjectBrowserPageRequest, ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort,
-    ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderDownloadRequest,
-    ObjectFolderDownloadResponse, UnixSocketDaemonTransport,
+    DaemonClient, DaemonClientError, DaemonRuntimeConfig, ObjectBrowserPageRequest,
+    ObjectBrowserRequest, ObjectBrowserResponse, ObjectBrowserSort, ObjectDownloadRequest,
+    ObjectDownloadResponse, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
+    UnixSocketDaemonTransport,
 };
 use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, Semaphore};
 use tokio_stream::wrappers::ReceiverStream;
@@ -124,12 +122,6 @@ fn archive_worker_semaphore() -> &'static Arc<Semaphore> {
     ARCHIVE_WORKERS.get_or_init(|| Arc::new(Semaphore::new(MAX_ARCHIVE_WORKERS)))
 }
 
-pub fn standalone_object_browser_router(auth_store: LocalAuthStore) -> Router {
-    standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState::system(
-        auth_store,
-    ))
-}
-
 /// Host-composed Object Browser routes.  Unlike the appliance-only router,
 /// these routes receive the already verified Pistis actor and exact store
 /// scope from Monas.  They never resolve a POSIX user or emit a legacy
@@ -159,49 +151,6 @@ pub(crate) fn preverified_host_object_browser_router_with_state(
         .with_state(state)
 }
 
-pub(crate) fn standalone_object_browser_router_with_state(
-    state: StandaloneObjectBrowserRouteState,
-) -> Router {
-    Router::new()
-        .route(
-            "/api/v1/object-stores/{endpoint}/browser",
-            get(object_store_browser),
-        )
-        .route(
-            "/api/v1/object-stores/{endpoint}/objects/download/{*object_id}",
-            get(object_store_object_download),
-        )
-        .route(
-            "/api/v1/object-stores/{endpoint}/folders/download/{*prefix}",
-            get(object_store_folder_download),
-        )
-        .layer(Extension(state.auth_store.clone()))
-        .with_state(state)
-}
-
-#[derive(Clone)]
-pub(crate) struct StandaloneObjectBrowserRouteState {
-    auth_store: LocalAuthStore,
-    object_browser_client: Option<Arc<dyn StandaloneObjectBrowserClient>>,
-    local_user_provider: Arc<dyn ObjectBrowserLocalUserProvider>,
-    daemon_bridge: Arc<DaemonBridge>,
-    provider_stream_socket_path: PathBuf,
-}
-
-impl StandaloneObjectBrowserRouteState {
-    fn system(auth_store: LocalAuthStore) -> Self {
-        Self {
-            auth_store,
-            object_browser_client: Some(Arc::new(
-                DaemonStandaloneObjectBrowserClient::default_packaged(),
-            )),
-            local_user_provider: Arc::new(SystemObjectBrowserLocalUserProvider),
-            daemon_bridge: Arc::new(DaemonBridge::packaged()),
-            provider_stream_socket_path: DaemonRuntimeConfig::default_packaged().socket_path,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub(crate) struct PreverifiedHostObjectBrowserRouteState {
     object_browser_client: Arc<dyn StandaloneObjectBrowserClient>,
@@ -214,18 +163,6 @@ impl PreverifiedHostObjectBrowserRouteState {
             object_browser_client: Arc::new(DaemonStandaloneObjectBrowserClient::default_packaged()),
             daemon_bridge: Arc::new(DaemonBridge::packaged()),
         }
-    }
-}
-
-trait ObjectBrowserLocalUserProvider: Send + Sync {
-    fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError>;
-}
-
-struct SystemObjectBrowserLocalUserProvider;
-
-impl ObjectBrowserLocalUserProvider for SystemObjectBrowserLocalUserProvider {
-    fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
-        discover_local_user(username)
     }
 }
 
@@ -258,15 +195,6 @@ impl StandaloneObjectBrowserClientError {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "daemon_bridge_client_failed".to_string(),
-            message: message.into(),
-        }
-    }
-
-    #[cfg(test)]
-    fn forbidden(message: impl Into<String>) -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "daemon_object_browser_denied".to_string(),
             message: message.into(),
         }
     }
@@ -323,38 +251,6 @@ struct ObjectBrowserQuery {
     cursor: Option<String>,
     limit: Option<u16>,
     include_placement: Option<bool>,
-}
-
-async fn object_store_browser(
-    State(state): State<StandaloneObjectBrowserRouteState>,
-    actor: AuthenticatedGuiActor,
-    Path(endpoint): Path<String>,
-    Query(query): Query<ObjectBrowserQuery>,
-) -> Result<Json<ObjectBrowserResponse>, (StatusCode, Json<AuthRouteError>)> {
-    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
-    let request = object_browser_request(endpoint, query, Some(delegated_actor))?;
-    request.validate().map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_browser_request",
-            err.to_string(),
-        )
-    })?;
-
-    let client = state.object_browser_client.as_ref().ok_or_else(|| {
-        route_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "daemon_object_browser_unavailable",
-            "daemon ObjectStore browser contract is not available",
-        )
-    })?;
-    let client = Arc::clone(client);
-    state
-        .daemon_bridge
-        .call(move || client.object_browser(request))
-        .await
-        .map(Json)
-        .map_err(daemon_bridge_route_error)
 }
 
 /// List an ObjectStore only after the embedding Monas route has supplied a
@@ -418,83 +314,6 @@ async fn preverified_host_object_store_browser(
         .await
         .map(Json)
         .map_err(daemon_bridge_route_error)
-}
-
-async fn object_store_object_download(
-    State(state): State<StandaloneObjectBrowserRouteState>,
-    actor: AuthenticatedGuiActor,
-    Path((endpoint, object_id)): Path<(String, String)>,
-    headers: HeaderMap,
-) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
-    let request = object_download_request(endpoint, object_id, Some(delegated_actor))?;
-    request.validate().map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_download_request",
-            err.to_string(),
-        )
-    })?;
-    let provider_request = request.clone();
-    let client = state.object_browser_client.as_ref().ok_or_else(|| {
-        route_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "daemon_object_download_unavailable",
-            "daemon ObjectStore download contract is not available",
-        )
-    })?;
-    let client = Arc::clone(client);
-    let download = match state
-        .daemon_bridge
-        .call(move || client.object_download(request))
-        .await
-    {
-        Ok(download) => download,
-        Err(DaemonBridgeError::Client(error)) if error.code == "object_download_unavailable" => {
-            let file_name = provider_request
-                .object_id
-                .as_str()
-                .rsplit('/')
-                .find(|segment| !segment.is_empty())
-                .unwrap_or("download.bin")
-                .to_string();
-            let mut response = crate::auth_routes::provider_stream_download(
-                provider_request.endpoint,
-                provider_request.object_id.as_str().to_string(),
-                1,
-                provider_request.delegated_actor,
-                headers,
-                state.provider_stream_socket_path.clone(),
-            )
-            .await?;
-            response.headers_mut().insert(
-                CONTENT_DISPOSITION,
-                HeaderValue::from_str(&content_disposition(&file_name)).map_err(|err| {
-                    route_error(
-                        StatusCode::BAD_GATEWAY,
-                        "invalid_object_download_response",
-                        err.to_string(),
-                    )
-                })?,
-            );
-            return Ok(response);
-        }
-        Err(error) => return Err(daemon_bridge_route_error(error)),
-    };
-
-    let file = tokio::fs::File::open(&download.source_path)
-        .await
-        .map_err(|err| {
-            route_error(
-                StatusCode::CONFLICT,
-                "object_download_unavailable",
-                format!("object download source could not be opened: {err}"),
-            )
-        })?;
-    let body = Body::from_stream(ReaderStream::new(file));
-    let mut response = Response::new(body);
-    *response.headers_mut() = object_download_headers(&download)?;
-    Ok(response)
 }
 
 /// Download one object only through the verified Pistis subject envelope.
@@ -645,57 +464,6 @@ async fn preverified_host_object_store_folder_download(
     Ok(response)
 }
 
-async fn object_store_folder_download(
-    State(state): State<StandaloneObjectBrowserRouteState>,
-    actor: AuthenticatedGuiActor,
-    Path((endpoint, prefix)): Path<(String, String)>,
-) -> Result<Response, (StatusCode, Json<AuthRouteError>)> {
-    let delegated_actor = delegated_object_browser_actor(&state, &actor)?;
-    let request = object_folder_download_request(endpoint, prefix, Some(delegated_actor))?;
-    request.validate().map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_folder_download_request",
-            err.to_string(),
-        )
-    })?;
-    let client = state.object_browser_client.as_ref().ok_or_else(|| {
-        route_error(
-            StatusCode::NOT_IMPLEMENTED,
-            "daemon_object_folder_download_unavailable",
-            "daemon ObjectStore folder download contract is not available",
-        )
-    })?;
-    let client = Arc::clone(client);
-    let download = state
-        .daemon_bridge
-        .call(move || client.object_folder_download(request))
-        .await
-        .map_err(daemon_bridge_route_error)?;
-
-    let headers = object_folder_download_headers(&download)?;
-    let archive_download = download.clone();
-    let archive_permit = archive_worker_semaphore()
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| {
-            route_error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "archive_worker_busy",
-                "folder archive capacity is saturated; retry shortly",
-            )
-        })?;
-    let (sender, receiver) = mpsc::channel::<Result<Bytes, io::Error>>(4);
-    tokio::task::spawn_blocking(move || {
-        let _archive_permit = archive_permit;
-        stream_folder_archive(archive_download, sender);
-    });
-    let body = Body::from_stream(ReceiverStream::new(receiver));
-    let mut response = Response::new(body);
-    *response.headers_mut() = headers;
-    Ok(response)
-}
-
 fn daemon_bridge_route_error(error: DaemonBridgeError) -> (StatusCode, Json<AuthRouteError>) {
     match error {
         DaemonBridgeError::Client(error) => route_error(error.status, error.code, error.message),
@@ -720,118 +488,6 @@ fn daemon_bridge_route_error(error: DaemonBridgeError) -> (StatusCode, Json<Auth
             message,
         ),
     }
-}
-
-fn object_browser_request(
-    endpoint: String,
-    query: ObjectBrowserQuery,
-    delegated_actor: Option<ObjectBrowserDelegatedActor>,
-) -> Result<ObjectBrowserRequest, (StatusCode, Json<AuthRouteError>)> {
-    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_browser_request",
-            err.to_string(),
-        )
-    })?;
-    Ok(ObjectBrowserRequest {
-        endpoint,
-        prefix: query.prefix,
-        search: query.search,
-        sort: parse_object_browser_sort(query.sort.as_deref())?,
-        page: ObjectBrowserPageRequest {
-            cursor: query.cursor,
-            limit: query
-                .limit
-                .unwrap_or_else(|| ObjectBrowserPageRequest::default().limit),
-        },
-        include_placement: query.include_placement.unwrap_or(false),
-        delegated_actor,
-        verified_subject: None,
-    })
-}
-
-fn object_download_request(
-    endpoint: String,
-    object_id: String,
-    delegated_actor: Option<ObjectBrowserDelegatedActor>,
-) -> Result<ObjectDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
-    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_download_request",
-            err.to_string(),
-        )
-    })?;
-    let object_id = ObjectId::new(required_field(
-        "object_id",
-        object_id.trim_start_matches('/').to_string(),
-    )?)
-    .map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_download_request",
-            err.to_string(),
-        )
-    })?;
-    Ok(ObjectDownloadRequest {
-        endpoint,
-        object_id,
-        delegated_actor,
-        verified_subject: None,
-    })
-}
-
-fn object_folder_download_request(
-    endpoint: String,
-    prefix: String,
-    delegated_actor: Option<ObjectBrowserDelegatedActor>,
-) -> Result<ObjectFolderDownloadRequest, (StatusCode, Json<AuthRouteError>)> {
-    let endpoint = StoreId::new(required_field("endpoint", endpoint)?).map_err(|err| {
-        route_error(
-            StatusCode::BAD_REQUEST,
-            "invalid_object_folder_download_request",
-            err.to_string(),
-        )
-    })?;
-    Ok(ObjectFolderDownloadRequest {
-        endpoint,
-        prefix: required_field("prefix", prefix.trim_start_matches('/').to_string())?,
-        delegated_actor,
-        verified_subject: None,
-    })
-}
-
-fn delegated_object_browser_actor(
-    state: &StandaloneObjectBrowserRouteState,
-    actor: &AuthenticatedGuiActor,
-) -> Result<ObjectBrowserDelegatedActor, (StatusCode, Json<AuthRouteError>)> {
-    if !actor.authority.uses_local_os_policy() {
-        return Err(route_error(
-            StatusCode::FORBIDDEN,
-            "local_os_policy_identity_required",
-            "ObjectStore browser access requires an appliance-local or Monas-authenticated OS identity",
-        ));
-    }
-    let local_user = state
-        .local_user_provider
-        .local_user(&actor.subject_id)
-        .map_err(|err| {
-            route_error(
-                StatusCode::FORBIDDEN,
-                "local_user_discovery_failed",
-                format!(
-                    "ObjectStore browser access could not resolve local user {}: {err}",
-                    actor.subject_id
-                ),
-            )
-        })?;
-    Ok(ObjectBrowserDelegatedActor {
-        username: local_user.username,
-        uid: None,
-        primary_gid: None,
-        groups: local_user.groups,
-    })
 }
 
 fn object_download_headers(
@@ -1067,19 +723,16 @@ fn route_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        preverified_host_object_browser_router_with_state,
-        standalone_object_browser_router_with_state, verified_object_browser_subject,
+        preverified_host_object_browser_router_with_state, verified_object_browser_subject,
         verified_object_browser_subject_for_prefix_scope, write_folder_archive,
-        ObjectBrowserLocalUserProvider, PreverifiedHostObjectBrowserRouteState,
-        StandaloneObjectBrowserClient, StandaloneObjectBrowserClientError,
-        StandaloneObjectBrowserRouteState,
+        PreverifiedHostObjectBrowserRouteState, StandaloneObjectBrowserClient,
+        StandaloneObjectBrowserClientError,
     };
     use crate::{
         accept_host_authenticated_context, daemon_bridge::DaemonBridge,
         AuthenticatedActorAuthority, AuthenticatedGuiActor, HostAuthenticatedContext,
-        HostAuthenticationAuthority, HostAuthenticationContextVerifier, LocalAuthStore,
-        LocalUserDiscoveryError, LocalUserMetadata, VerifiedHostObjectPrefixScope,
-        VerifiedHostStoreScope, STANDALONE_SESSION_TOKEN_HEADER, STANDALONE_USERNAME_HEADER,
+        HostAuthenticationAuthority, HostAuthenticationContextVerifier,
+        VerifiedHostObjectPrefixScope, VerifiedHostStoreScope,
     };
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
@@ -1088,26 +741,18 @@ mod tests {
     use dasobjectstore_core::lifecycle::ObjectState;
     use dasobjectstore_core::object_type::ObjectType;
     use dasobjectstore_daemon::{
-        DaemonApiErrorResponse, DaemonApiHandler, DaemonApiRequest, DaemonApiResponse,
-        ObjectBrowserDelegatedActor, ObjectBrowserFileNode, ObjectBrowserPageRequest,
-        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserResponse,
-        ObjectBrowserSort, ObjectDownloadRequest, ObjectDownloadResponse, ObjectFolderArchiveEntry,
-        ObjectFolderDownloadRequest, ObjectFolderDownloadResponse, ProviderStreamChunkHeader,
-        ProviderStreamOpenRequest, UnixSocketDaemonServer, UnixSocketDaemonServerError,
-        PROVIDER_STREAM_SCHEMA_VERSION,
+        ObjectBrowserFileNode, ObjectBrowserReadinessState, ObjectBrowserRequest,
+        ObjectBrowserResponse, ObjectDownloadRequest, ObjectDownloadResponse,
+        ObjectFolderArchiveEntry, ObjectFolderDownloadRequest, ObjectFolderDownloadResponse,
     };
     use flate2::read::GzDecoder;
     use std::fs;
     use std::io::Read;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
-    use std::thread;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::sync::Semaphore;
     use tower::ServiceExt;
-
-    #[cfg(unix)]
-    use std::os::unix::net::UnixListener;
 
     #[test]
     fn archive_worker_capacity_is_bounded() {
@@ -1541,510 +1186,6 @@ mod tests {
         assert!(client.folder_download_requests().is_empty());
     }
 
-    #[tokio::test]
-    async fn object_browser_route_requires_session() {
-        let root = temp_root("object-browser-auth");
-        let auth_store = registered_auth_store(&root);
-        let app = test_router(auth_store, recording_browser_client());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/browser")
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_browser_route_forwards_typed_request_to_daemon_client() {
-        let root = temp_root("object-browser-forward");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = recording_browser_client();
-        let app = test_router(auth_store, client.clone());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/browser?prefix=ENA%2FXeno&search=vervet&sort=size_desc&cursor=25&limit=50&include_placement=true")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["endpoint"], "ena");
-        assert_eq!(encoded["files"][0]["name"], "metadata.tsv");
-        assert_eq!(
-            client.requests(),
-            vec![ObjectBrowserRequest {
-                endpoint: StoreId::new("ena").expect("store id"),
-                prefix: Some("ENA/Xeno".to_string()),
-                search: Some("vervet".to_string()),
-                sort: ObjectBrowserSort::SizeDesc,
-                page: ObjectBrowserPageRequest {
-                    cursor: Some("25".to_string()),
-                    limit: 50,
-                },
-                include_placement: true,
-                delegated_actor: Some(expected_delegated_actor("admin")),
-                verified_subject: None,
-            }]
-        );
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_browser_route_fails_fast_when_daemon_bridge_is_saturated() {
-        let root = temp_root("object-browser-saturated");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = recording_browser_client();
-        let bridge = Arc::new(DaemonBridge::with_capacity_and_deadline(
-            1,
-            std::time::Duration::from_secs(1),
-        ));
-        let (entered_sender, entered_receiver) = tokio::sync::oneshot::channel();
-        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
-        let saturated_bridge = bridge.clone();
-        let worker = tokio::spawn(async move {
-            saturated_bridge
-                .call_message(move || {
-                    entered_sender.send(()).expect("saturation signal sent");
-                    let _ = release_receiver.blocking_recv();
-                    Ok::<_, String>(())
-                })
-                .await
-        });
-        entered_receiver.await.expect("daemon bridge saturated");
-
-        let app = test_router_with_bridge(auth_store, client.clone(), bridge);
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/browser")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "daemon_bridge_busy");
-        assert!(client.requests().is_empty());
-
-        release_sender.send(()).expect("daemon worker released");
-        worker
-            .await
-            .expect("daemon worker joins")
-            .expect("daemon bridge call succeeds");
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_browser_route_rejects_invalid_query_before_daemon() {
-        let root = temp_root("object-browser-invalid");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = recording_browser_client();
-        let app = test_router(auth_store, client.clone());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/browser?sort=random")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "invalid_object_browser_request");
-        assert!(client.requests().is_empty());
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_browser_route_surfaces_daemon_permission_denial() {
-        let root = temp_root("object-browser-denied");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = Arc::new(RecordingObjectBrowserClient::with_error(
-            StandaloneObjectBrowserClientError::forbidden(
-                "current user cannot read ObjectStore ena",
-            ),
-        ));
-        let app = test_router(auth_store, client);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/browser")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "daemon_object_browser_denied");
-        assert!(encoded["message"]
-            .as_str()
-            .expect("message")
-            .contains("cannot read"));
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_download_route_streams_authorized_daemon_source() {
-        let root = temp_root("object-download");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let source_path = root.join("objects").join("payload");
-        fs::create_dir_all(source_path.parent().expect("source parent")).expect("source parent");
-        fs::write(&source_path, b"download payload").expect("write source");
-        let client = recording_browser_client();
-        client.set_download(ObjectDownloadResponse {
-            endpoint: StoreId::new("ena").expect("store id"),
-            store_id: StoreId::new("ena").expect("store id"),
-            object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
-            file_name: "metadata.tsv".to_string(),
-            source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a").expect("disk id"),
-            source_path,
-            size_bytes: b"download payload".len() as u64,
-        });
-        let app = test_router(auth_store, client.clone());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers()["content-disposition"],
-            "attachment; filename=\"metadata.tsv\""
-        );
-        assert_eq!(response.headers()["content-length"], "16");
-        assert_eq!(
-            client.download_requests(),
-            vec![ObjectDownloadRequest {
-                endpoint: StoreId::new("ena").expect("store id"),
-                object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
-                delegated_actor: Some(expected_delegated_actor("admin")),
-                verified_subject: None,
-            }]
-        );
-        let body = to_bytes(response.into_body(), 64 * 1024)
-            .await
-            .expect("body bytes");
-        assert_eq!(&body[..], b"download payload");
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_download_route_surfaces_daemon_permission_denial() {
-        let root = temp_root("object-download-denied");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = Arc::new(RecordingObjectBrowserClient::with_error(
-            StandaloneObjectBrowserClientError::forbidden(
-                "current user cannot read ObjectStore ena",
-            ),
-        ));
-        let app = test_router(auth_store, client);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "daemon_object_browser_denied");
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_download_route_surfaces_unavailable_degraded_source() {
-        let root = temp_root("object-download-unavailable");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = Arc::new(RecordingObjectBrowserClient::with_error(
-            StandaloneObjectBrowserClientError {
-                status: StatusCode::CONFLICT,
-                code: "object_download_unavailable".to_string(),
-                message: "object `ENA/Xeno/degraded.fastq.gz` has no verified placement on a managed HDD root"
-                    .to_string(),
-            },
-        ));
-        let app = test_router(auth_store, client);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/degraded.fastq.gz")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "profile_s3_download_failed");
-
-        cleanup(&root);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn object_download_falls_back_to_authorized_bounded_provider_stream() {
-        let root = temp_root("object-download-provider-fallback");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = Arc::new(RecordingObjectBrowserClient::with_error(
-            StandaloneObjectBrowserClientError {
-                status: StatusCode::CONFLICT,
-                code: "object_download_unavailable".to_string(),
-                message: "no verified managed placement".to_string(),
-            },
-        ));
-        let captured = Arc::new(Mutex::new(None));
-        let socket_path = PathBuf::from(format!(
-            "/tmp/dos-provider-{}-{}.sock",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time")
-                .as_nanos()
-        ));
-        let listener = UnixListener::bind(&socket_path).expect("provider listener binds");
-        let server = UnixSocketDaemonServer::new(
-            &socket_path,
-            ProviderFallbackHandler {
-                captured: Arc::clone(&captured),
-            },
-        );
-        let server_thread = thread::spawn(move || {
-            let (stream, _) = listener.accept().expect("HTTP bridge connects");
-            server
-                .handle_stream(stream)
-                .expect("provider stream handled");
-        });
-        let app = standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState {
-            auth_store,
-            object_browser_client: Some(client),
-            local_user_provider: Arc::new(FixedObjectBrowserLocalUserProvider),
-            daemon_bridge: Arc::new(DaemonBridge::packaged()),
-            provider_stream_socket_path: socket_path.clone(),
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/objects/download/ENA/Xeno/metadata.tsv")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers()["content-disposition"],
-            "attachment; filename=\"metadata.tsv\""
-        );
-        let body = to_bytes(response.into_body(), 64 * 1024)
-            .await
-            .expect("provider body");
-        assert_eq!(&body[..], b"provider payload");
-        server_thread.join().expect("server joins");
-        let request = captured
-            .lock()
-            .expect("capture lock")
-            .clone()
-            .expect("request");
-        assert_eq!(request.store_id, StoreId::new("ena").expect("store"));
-        assert_eq!(request.object.object_id, "ENA/Xeno/metadata.tsv");
-        assert_eq!(
-            request.delegated_actor,
-            Some(expected_delegated_actor("admin"))
-        );
-        let _ = fs::remove_file(socket_path);
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_folder_download_route_streams_tar_gz_archive() {
-        let root = temp_root("object-folder-download");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let metadata_path = write_test_file(&root, "objects/metadata.tsv", b"metadata");
-        let reads_path = write_test_file(&root, "objects/reads.fastq.gz", b"reads");
-        let client = recording_browser_client();
-        client.set_folder_download(ObjectFolderDownloadResponse {
-            endpoint: StoreId::new("ena").expect("store id"),
-            store_id: StoreId::new("ena").expect("store id"),
-            prefix: "ENA/Xeno".to_string(),
-            archive_name: "Xeno.tar.gz".to_string(),
-            total_files: 2,
-            total_source_bytes: b"metadata".len() as u64 + b"reads".len() as u64,
-            entries: vec![
-                ObjectFolderArchiveEntry {
-                    object_id: ObjectId::new("ENA/Xeno/metadata.tsv").expect("object id"),
-                    archive_path: "metadata.tsv".to_string(),
-                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
-                        .expect("disk id"),
-                    source_path: metadata_path,
-                    size_bytes: b"metadata".len() as u64,
-                },
-                ObjectFolderArchiveEntry {
-                    object_id: ObjectId::new("ENA/Xeno/reads.fastq.gz").expect("object id"),
-                    archive_path: "reads.fastq.gz".to_string(),
-                    source_disk_id: dasobjectstore_core::ids::DiskId::new("disk-a")
-                        .expect("disk id"),
-                    source_path: reads_path,
-                    size_bytes: b"reads".len() as u64,
-                },
-            ],
-        });
-        let app = test_router(auth_store, client.clone());
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/folders/download/ENA/Xeno")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers()["content-disposition"],
-            "attachment; filename=\"Xeno.tar.gz\""
-        );
-        assert_eq!(response.headers()["x-dasobjectstore-archive-files"], "2");
-        assert_eq!(
-            client.folder_download_requests(),
-            vec![ObjectFolderDownloadRequest {
-                endpoint: StoreId::new("ena").expect("store id"),
-                prefix: "ENA/Xeno".to_string(),
-                delegated_actor: Some(expected_delegated_actor("admin")),
-                verified_subject: None,
-            }]
-        );
-        let body = to_bytes(response.into_body(), 1024 * 1024)
-            .await
-            .expect("body bytes");
-        assert_eq!(
-            tar_gz_members(&body),
-            vec![
-                ("metadata.tsv".to_string(), b"metadata".to_vec()),
-                ("reads.fastq.gz".to_string(), b"reads".to_vec()),
-            ]
-        );
-
-        cleanup(&root);
-    }
-
-    #[tokio::test]
-    async fn object_folder_download_route_surfaces_unavailable_archive_source() {
-        let root = temp_root("object-folder-download-unavailable");
-        let auth_store = registered_auth_store(&root);
-        let login = auth_store.login("admin", "secret").expect("login succeeds");
-        let client = Arc::new(RecordingObjectBrowserClient::with_error(
-            StandaloneObjectBrowserClientError {
-                status: StatusCode::CONFLICT,
-                code: "object_folder_download_unavailable".to_string(),
-                message: "object `ENA/Xeno/degraded.fastq.gz` has no verified placement on a managed HDD root"
-                    .to_string(),
-            },
-        ));
-        let app = test_router(auth_store, client);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri("/api/v1/object-stores/ena/folders/download/ENA/Xeno")
-                    .header(STANDALONE_USERNAME_HEADER, "admin")
-                    .header(STANDALONE_SESSION_TOKEN_HEADER, login.session_token)
-                    .body(Body::empty())
-                    .expect("request builds"),
-            )
-            .await
-            .expect("request completes");
-
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-        let encoded = response_json(response).await;
-        assert_eq!(encoded["code"], "object_folder_download_unavailable");
-        assert!(encoded["message"]
-            .as_str()
-            .expect("message")
-            .contains("no verified placement"));
-
-        cleanup(&root);
-    }
-
     #[test]
     fn folder_archive_stream_stops_when_receiver_is_interrupted() {
         let root = temp_root("object-folder-download-interrupted");
@@ -2078,131 +1219,8 @@ mod tests {
         cleanup(&root);
     }
 
-    fn test_router(
-        auth_store: LocalAuthStore,
-        client: Arc<RecordingObjectBrowserClient>,
-    ) -> axum::Router {
-        test_router_with_bridge(auth_store, client, Arc::new(DaemonBridge::packaged()))
-    }
-
-    fn test_router_with_bridge(
-        auth_store: LocalAuthStore,
-        client: Arc<RecordingObjectBrowserClient>,
-        daemon_bridge: Arc<DaemonBridge>,
-    ) -> axum::Router {
-        let provider_stream_socket_path = root_socket_path(&auth_store);
-        standalone_object_browser_router_with_state(StandaloneObjectBrowserRouteState {
-            auth_store,
-            object_browser_client: Some(client),
-            local_user_provider: Arc::new(FixedObjectBrowserLocalUserProvider),
-            daemon_bridge,
-            provider_stream_socket_path,
-        })
-    }
-
-    fn root_socket_path(auth_store: &LocalAuthStore) -> PathBuf {
-        auth_store.root().join("provider-stream.sock")
-    }
-
-    fn registered_auth_store(root: &Path) -> LocalAuthStore {
-        let auth_store = LocalAuthStore::new(root);
-        auth_store.create_user("admin").expect("user created");
-        let token = auth_store
-            .issue_registration_token("admin", Some(3_600))
-            .expect("token issued");
-        auth_store
-            .register_with_token("admin", &token, "secret")
-            .expect("registered");
-        auth_store
-    }
-
     fn recording_browser_client() -> Arc<RecordingObjectBrowserClient> {
         Arc::new(RecordingObjectBrowserClient::default())
-    }
-
-    struct FixedObjectBrowserLocalUserProvider;
-
-    #[cfg(unix)]
-    struct ProviderFallbackHandler {
-        captured: Arc<Mutex<Option<ProviderStreamOpenRequest>>>,
-    }
-
-    #[cfg(unix)]
-    impl DaemonApiHandler for ProviderFallbackHandler {
-        fn handle_api_request(
-            &self,
-            _request: DaemonApiRequest,
-        ) -> Result<DaemonApiResponse, UnixSocketDaemonServerError> {
-            Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
-                "not_implemented",
-                "provider fallback test handler only",
-            )))
-        }
-
-        fn handle_provider_stream_open_for_actor(
-            &self,
-            request: ProviderStreamOpenRequest,
-            _actor: Option<&dasobjectstore_daemon::DaemonLocalActor>,
-            _emit_response: &mut dyn FnMut(
-                DaemonApiResponse,
-            ) -> Result<(), UnixSocketDaemonServerError>,
-            emit_frame: &mut dyn FnMut(
-                &ProviderStreamChunkHeader,
-                &[u8],
-            ) -> Result<(), UnixSocketDaemonServerError>,
-        ) -> Result<(), UnixSocketDaemonServerError> {
-            *self.captured.lock().expect("capture lock") = Some(request.clone());
-            let payload = b"provider payload";
-            emit_frame(
-                &ProviderStreamChunkHeader {
-                    schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
-                    request_id: request.request_id.clone(),
-                    offset: 0,
-                    payload_len: payload.len() as u32,
-                    final_chunk: false,
-                    total_size: None,
-                    sha256: None,
-                },
-                payload,
-            )?;
-            emit_frame(
-                &ProviderStreamChunkHeader {
-                    schema_version: PROVIDER_STREAM_SCHEMA_VERSION.to_string(),
-                    request_id: request.request_id,
-                    offset: payload.len() as u64,
-                    payload_len: 0,
-                    final_chunk: true,
-                    total_size: Some(payload.len() as u64),
-                    sha256: Some(
-                        "sha256:d8dbe49c7aadb1268d03a82460a11ed2b525b1e5baacf42961e53668d9fd15ca"
-                            .to_string(),
-                    ),
-                },
-                &[],
-            )
-        }
-    }
-
-    impl ObjectBrowserLocalUserProvider for FixedObjectBrowserLocalUserProvider {
-        fn local_user(&self, username: &str) -> Result<LocalUserMetadata, LocalUserDiscoveryError> {
-            Ok(LocalUserMetadata::from_username_and_groups(
-                username,
-                vec!["mnemosyne".to_string(), "users".to_string()],
-            ))
-        }
-    }
-
-    fn expected_delegated_actor(username: &str) -> ObjectBrowserDelegatedActor {
-        let user = LocalUserMetadata::from_username_and_groups(
-            username,
-            vec!["mnemosyne".to_string(), "users".to_string()],
-        );
-        ObjectBrowserDelegatedActor {
-            username: user.username,
-            uid: None,
-            primary_gid: None,
-            groups: user.groups,
-        }
     }
 
     #[derive(Default)]
@@ -2216,17 +1234,6 @@ mod tests {
     }
 
     impl RecordingObjectBrowserClient {
-        fn with_error(error: StandaloneObjectBrowserClientError) -> Self {
-            Self {
-                requests: Mutex::new(Vec::new()),
-                download_requests: Mutex::new(Vec::new()),
-                folder_download_requests: Mutex::new(Vec::new()),
-                download: Mutex::new(None),
-                folder_download: Mutex::new(None),
-                error: Some(error),
-            }
-        }
-
         fn requests(&self) -> Vec<ObjectBrowserRequest> {
             self.requests.lock().expect("requests lock").clone()
         }
@@ -2335,18 +1342,6 @@ mod tests {
                     message: "test folder download response not configured".to_string(),
                 })
         }
-    }
-
-    async fn response_json(response: axum::response::Response) -> serde_json::Value {
-        let body = to_bytes(response.into_body(), 64 * 1024)
-            .await
-            .expect("body bytes");
-        serde_json::from_slice(&body).unwrap_or_else(|err| {
-            panic!(
-                "response decodes as JSON: {err}; body={}",
-                String::from_utf8_lossy(&body)
-            )
-        })
     }
 
     fn temp_root(name: &str) -> PathBuf {

@@ -69,14 +69,6 @@ pub struct RemoteUploadObjectStoreView {
     pub warnings: Vec<DashboardWarning>,
 }
 
-pub(crate) fn live_remote_upload_workspace_for_user(
-    username: String,
-    groups: Vec<String>,
-    sudo_administrator: bool,
-) -> RemoteUploadWorkspaceView {
-    live_remote_upload_workspace_for_user_targeted(username, groups, sudo_administrator, None)
-}
-
 pub(crate) fn live_remote_upload_workspace_for_user_targeted(
     username: String,
     groups: Vec<String>,

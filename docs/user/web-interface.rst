@@ -57,7 +57,7 @@ the developer placeholder page. Prepare a packaging host with:
 
 .. code-block:: console
 
-   sudo apt-get install dpkg clang libclang-dev libpam0g-dev
+   sudo apt-get install dpkg clang libclang-dev
    rustup target add wasm32-unknown-unknown
    cargo install trunk
 
@@ -65,53 +65,33 @@ On AlmaLinux or RHEL package builders, install the native build tools with:
 
 .. code-block:: console
 
-   sudo dnf install rpm-build cargo rust clang clang-devel pam-devel
+   sudo dnf install rpm-build cargo rust clang clang-devel
 
 If the Web page says to install the Trunk WebAssembly toolchain, the installed
 package contains the developer fallback page and should be rebuilt from a
 toolchain-complete checkout.
 
-The packaged standalone configuration also declares the authentication
-authority. The DAS appliance default is local user authentication:
+The packaged configuration declares the host authentication authority. The
+DAS appliance default is Monas/Pistis authority:
 
 .. code-block:: json
 
    {
      "authentication": {
-       "authority": "local_user",
+       "authority": "monas",
        "session_ttl_seconds": 3600
      }
    }
 
-``local_user`` enables the standalone login, session validation, and logout
-routes under ``/products/dasobjectstore/api``. ``synoptikon`` and ``monas`` are
-external authority modes; those deployments should mount DASObjectStore behind
-the host product surface so account, entitlement, audit, and correlation context
-come from that host.
+``local_user`` is retired and rejected by configuration validation. The host
+product owns login, session validation, logout, entitlement, audit, and
+correlation through Pistis/Prosopikon. DASObjectStore receives only the
+verified host context and does not ship a PAM service, password helper, or
+product-local browser session issuer.
 
-Standalone login verifies the supplied username and password against the
-appliance OS through PAM using the packaged ``dasobjectstore`` PAM service. The
-product-local file under ``/opt/dasobjectstore/users.json`` stores only
-DASObjectStore browser session tokens; users do not need to be pre-created in
-that file before logging in. OS-local sudo status and daemon policy remain the
-authority for administrative storage mutation.
-
-Standalone browser sessions are intentionally process-scoped. When
-``dasobjectstore-server`` starts, it revokes existing browser session tokens so
-a restarted Web service requires a fresh sign-in. The browser also checks the
-active session periodically: invalid or expired sessions are cleared from local
-browser storage and the user is returned to the login page. If the Web server is
-temporarily unreachable, the browser clears the active session, shows a
-disconnection message, and polls the public health route until the interface can
-reach the server again.
-
-Packaged appliances keep the Web service unprivileged and perform the PAM check
-through ``/usr/libexec/dasobjectstore/dasobjectstore-local-auth-helper``. The
-helper must be owned by ``root:dasobjectstore`` with mode ``4750`` so
-``pam_unix`` can verify local OS passwords without running the whole Web server
-as root. The packaged ``dasobjectstore-server.service`` therefore sets
-``NoNewPrivileges=false``; otherwise Linux would block the helper's setuid
-transition and PAM would report valid local users as failed logins.
+The daemon still owns storage policy and mutation. Local Unix groups may be
+used as a storage-policy or device-ownership input, but they are not an
+authentication mechanism and cannot create or elevate a Pistis session.
 
 The server can also be started manually with explicit overrides:
 
@@ -165,11 +145,10 @@ The primary navigation is:
    active task rows and queue summaries reported by the API.
 
 ``Users/Groups``
-   Standalone appliance identity and writer-policy view. It is shown in primary
-   navigation when the DASObjectStore host mode uses local-user authentication
-   and reports OS authority, product-local browser users, local groups, writer
-   groups, administrator readiness, and warnings. The page is users-first: the
-   inventory table is the primary surface and group policy is secondary.
+   Host-authority and writer-policy view. It reports the verified Pistis actor,
+   scoped DASObjectStore entitlements, daemon-owned writer policy, and any
+   local group policy used for storage operations. It does not register users,
+   verify passwords, or manage a browser login session.
 
 ``Bioinformatics``
    Workflow-readiness view for common sequencing and analysis object families.
@@ -235,16 +214,15 @@ experience. The active Web console surfaces are:
   readiness;
 * ``Activity`` for daemon job categories, active task rows, ingest queue, and
   destage queue state;
-* ``Users/Groups`` for standalone local-user authority, writer-policy
-  readiness, and administrator capability when host mode permits it; and
+* ``Users/Groups`` for host-authority context and daemon-owned writer-policy
+  readiness when the host product exposes that surface; and
 * ``Bioinformatics`` for object-type workflow-readiness cards and handoff
   metadata expectations.
 
 Legacy ``workspaces/stores`` remains a compatibility API endpoint only. The
-``workspaces/users-groups`` route is now consumed by the first-class
-``Users/Groups`` page in standalone local-user host mode; Synoptikon or Monas
-integrated deployments should continue to omit this page until the host product
-supplies the authority surface. Milestone 20 continues with concrete
+``workspaces/users-groups`` remains a daemon-policy compatibility route. The
+host product owns human identity and entitlement; Monas and Synoptikon do not
+fall back to a local-user login surface. Milestone 20 continues with concrete
 bioinformatics workflow-readiness cards.
 
 Home Dashboard
@@ -434,10 +412,11 @@ transport submission, including absolute device paths and duplicate HDD
 rejection, so browser and API callers do not pass raw shell fragments or write
 directly to managed roots.
 
-Standalone Web deployments expose the authenticated submission route at
-``/api/v1/workspaces/enclosures/prepare``. The route requires a valid local Web
-session and a sudo-derived local administrator account before forwarding the
-request to ``dasobjectstored``. Missing sessions, non-admin users, empty HDD
+Host-authenticated Web deployments expose the submission route at
+``/api/v1/workspaces/enclosures/prepare``. The route requires a valid host Web
+session and a Pistis actor with the required DASObjectStore entitlement before
+forwarding the request to ``dasobjectstored``. Missing sessions, insufficient
+entitlements, empty HDD
 selections, missing destructive format allowance, missing existing-data
 acknowledgement, and daemon submission errors are returned as explicit Web API
 errors. The browser wizard displays accepted daemon job metadata when submission
@@ -734,9 +713,9 @@ payload data.
 
 The browser posts the selected JSON artifact to
 ``/products/dasobjectstore/api/v1/workspaces/activity/reporting/performance-report``
-using the authenticated Web session headers. Standalone appliances require the
-logged-in local user to have sudo-derived DASObjectStore administrator authority
-before report rendering is attempted. The API validates the JSON schema
+using the authenticated Web session headers. The host-authenticated actor must
+have the required DASObjectStore administrator entitlement before report
+rendering is attempted. The API validates the JSON schema
 ``dasobjectstore.performance_test.recommendation.v1``, writes the artifact into
 a host-visible rebuild directory under
 ``/var/lib/dasobjectstore/report-rebuild``, invokes
@@ -868,15 +847,15 @@ summary.
 Users/Groups Workspace
 ----------------------
 
-Users/group state is surfaced through the coherent product console rather than
-a second standalone holder page. In standalone local-user host mode, the
-``Users/Groups`` primary navigation entry loads
+Users/group policy is surfaced through the coherent product console rather than
+a second standalone holder page. When the host product exposes the
+``Users/Groups`` navigation entry, it loads
 ``/products/dasobjectstore/api/v1/workspaces/users-groups`` and presents the
-current OS authority, product-local users, local group memberships,
-administrator capability, and daemon-submitted group-management operations. The
+verified Pistis actor, scoped entitlement, local group memberships used for
+storage policy, and daemon-submitted group-management operations. The
 same server-side groups registry used by the ObjectStores dashboard is included
 as ``writer_groups`` so operators can see which managed writer groups exist and
-whether the current local user is a member.
+whether the current actor is mapped to the applicable storage policy.
 
 Administrator sessions can use the Users/Groups page to create a local writer
 or administrator group, or assign a local user to a managed writer group. Both
@@ -901,7 +880,7 @@ Remote Upload Page
 ------------------
 
 The ``Remote Upload`` navigation item is the browser side of the easyconnect
-upload workflow. It is reached after a local-user Web login and requests
+upload workflow. It is reached after a Monas/Synoptikon Pistis session and requests
 ``/products/dasobjectstore/api/v1/workspaces/remote-upload`` through the same
 authenticated session as the rest of the standalone console.
 
@@ -1057,11 +1036,10 @@ The currently documented Web administrator workflows are:
 Permission Boundaries
 ---------------------
 
-Standalone appliances authenticate Web sessions through local OS users and PAM.
-The Web session proves who is using the browser; it does not by itself grant
-storage mutation authority. Administrator workflows additionally require
-sudo-derived local administrator status as reported by the server-side
-authority check.
+Standalone appliances authenticate Web sessions through Monas/Pistis. The
+verified host session proves the actor context; it does not by itself grant
+storage mutation authority. The daemon applies the scoped DASObjectStore
+entitlements and storage-policy checks for every operation.
 
 Non-administrator users should still receive useful inventory. The UI should
 show unavailable administrator controls with explicit blocked reasons rather
@@ -1070,10 +1048,10 @@ missing sessions, expired sessions, non-admin users, missing confirmation
 phrases, unsupported hardware, invalid policy vocabulary, and daemon transport
 failures with clear messages that the browser can display.
 
-Integrated Synoptikon or Monas deployments should not expose standalone local
-login as the authority surface. In those modes, account identity, entitlement,
-audit correlation, and governance context are supplied by the host product and
-DASObjectStore remains an embedded storage surface.
+Monas and Synoptikon deployments must not expose a standalone local login. In
+both modes, account identity, entitlement, audit correlation, and governance
+context are supplied by the host product and DASObjectStore remains an embedded
+storage surface.
 
 Audit Expectations
 ------------------
@@ -1166,11 +1144,11 @@ host-product-owned orchestration paths.
 Login and Footer Branding
 -------------------------
 
-The standalone login screen and application footer should make the product
-identity clear while preserving the Mnemosyne family branding used by sibling
-surfaces. Operators should see that they are signing in to DASObjectStore, that
-local appliance authentication is being used in standalone mode, and that the
-surface belongs to the Mnemosyne Biosciences product family.
+The application entry surface and footer should make the product identity clear
+while preserving the Mnemosyne family branding used by sibling surfaces.
+Operators should see that DASObjectStore is being opened through the Monas or
+Synoptikon Pistis authority and that the surface belongs to the Mnemosyne
+Biosciences product family.
 
 The Web application uses the shared ``DasObjectStoreFooter`` component on both
 the login page and authenticated console pages. The footer uses the Mnemosyne
@@ -1265,9 +1243,8 @@ running listener:
    dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config
    dasobjectstore-server --config /opt/dasobjectstore/config.json --check-config --json
 
-The JSON output includes ``auth_host_mode`` so operators can confirm whether the
-server is exposing local standalone auth routes or expecting an integrated host
-authority.
+The JSON output includes ``auth_host_mode`` so operators can confirm that the
+server expects the configured Monas or Synoptikon host authority.
 
 Self-signed TLS assets may be generated for standalone bootstrap when both the
 certificate and private key are missing:

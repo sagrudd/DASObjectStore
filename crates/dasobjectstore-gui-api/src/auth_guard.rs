@@ -13,14 +13,6 @@ pub enum AuthenticatedActorAuthority {
     SynoptikonIntegrated,
 }
 
-impl AuthenticatedActorAuthority {
-    /// Compatibility marker for legacy handlers.  It does not authorise an
-    /// appliance-local identity: all actors are supplied by a verified host.
-    pub(crate) fn uses_local_os_policy(self) -> bool {
-        matches!(self, Self::MonasStandalone)
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AuthenticatedGuiActor {
     pub subject_id: String,

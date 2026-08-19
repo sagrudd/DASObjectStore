@@ -322,6 +322,9 @@ pub struct StandaloneAuthenticationConfig {
 
 impl StandaloneAuthenticationConfig {
     pub fn validate(&self) -> Result<(), StandaloneServerConfigError> {
+        if self.authority == StandaloneAuthenticationAuthority::LocalUser {
+            return Err(StandaloneServerConfigError::DeprecatedLocalUserAuthority);
+        }
         if self.session_ttl_seconds <= 0 {
             return Err(StandaloneServerConfigError::InvalidSessionTtlSeconds {
                 session_ttl_seconds: self.session_ttl_seconds,
@@ -332,9 +335,9 @@ impl StandaloneAuthenticationConfig {
 
     pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
         match self.authority {
-            StandaloneAuthenticationAuthority::LocalUser => GuiApiHostMode::Standalone,
-            StandaloneAuthenticationAuthority::Synoptikon
-            | StandaloneAuthenticationAuthority::Monas => GuiApiHostMode::SynoptikonIntegrated,
+            StandaloneAuthenticationAuthority::LocalUser
+            | StandaloneAuthenticationAuthority::Monas => GuiApiHostMode::Standalone,
+            StandaloneAuthenticationAuthority::Synoptikon => GuiApiHostMode::SynoptikonIntegrated,
         }
     }
 }
@@ -342,7 +345,7 @@ impl StandaloneAuthenticationConfig {
 impl Default for StandaloneAuthenticationConfig {
     fn default() -> Self {
         Self {
-            authority: StandaloneAuthenticationAuthority::LocalUser,
+            authority: StandaloneAuthenticationAuthority::Monas,
             session_ttl_seconds: default_session_ttl_seconds(),
         }
     }
@@ -351,6 +354,8 @@ impl Default for StandaloneAuthenticationConfig {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StandaloneAuthenticationAuthority {
+    /// Decode-only legacy value. It is rejected by configuration validation;
+    /// human authentication is supplied by Monas/Synoptikon Pistis authority.
     LocalUser,
     Synoptikon,
     Monas,
@@ -358,7 +363,7 @@ pub enum StandaloneAuthenticationAuthority {
 
 impl Default for StandaloneAuthenticationAuthority {
     fn default() -> Self {
-        Self::LocalUser
+        Self::Monas
     }
 }
 
@@ -378,6 +383,7 @@ pub enum StandaloneServerConfigError {
         path: PathBuf,
     },
     DuplicateTlsAssetPath,
+    DeprecatedLocalUserAuthority,
     InvalidSessionTtlSeconds {
         session_ttl_seconds: i64,
     },
@@ -434,6 +440,9 @@ impl Display for StandaloneServerConfigError {
                     "TLS certificate_path and private_key_path must be distinct"
                 )
             }
+            Self::DeprecatedLocalUserAuthority => formatter.write_str(
+                "local_user authority is retired; configure Monas or Synoptikon Pistis authority",
+            ),
             Self::InvalidSessionTtlSeconds {
                 session_ttl_seconds,
             } => {
@@ -591,7 +600,7 @@ mod tests {
         assert_eq!(config.product_root, PathBuf::from(DEFAULT_PRODUCT_ROOT));
         assert_eq!(
             config.authentication.authority,
-            super::StandaloneAuthenticationAuthority::LocalUser
+            super::StandaloneAuthenticationAuthority::Monas
         );
         assert_eq!(
             config.socket_addr().expect("socket address"),
@@ -666,7 +675,7 @@ mod tests {
             encoded["tls"]["certificate_path"],
             "/opt/dasobjectstore/tls/server.crt"
         );
-        assert_eq!(encoded["authentication"]["authority"], "local_user");
+        assert_eq!(encoded["authentication"]["authority"], "monas");
         assert_eq!(encoded["authentication"]["session_ttl_seconds"], 3600);
         assert_eq!(encoded["application_mtls"]["enabled"], false);
         assert_eq!(encoded["application_mtls"]["https_port"], 8449);
@@ -685,7 +694,16 @@ mod tests {
     }
 
     #[test]
-    fn defaults_partial_authentication_config_to_local_user() {
+    fn maps_monas_authentication_to_standalone_host_mode() {
+        let config = StandaloneServerConfig::default();
+        assert_eq!(
+            config.gui_api_host_mode(),
+            crate::GuiApiHostMode::Standalone
+        );
+    }
+
+    #[test]
+    fn defaults_partial_authentication_config_to_monas() {
         let config: StandaloneServerConfig = serde_json::from_value(serde_json::json!({
             "bind_address": "127.0.0.1",
             "https_port": 8448,
@@ -701,7 +719,7 @@ mod tests {
 
         assert_eq!(
             config.authentication.authority,
-            super::StandaloneAuthenticationAuthority::LocalUser
+            super::StandaloneAuthenticationAuthority::Monas
         );
         assert_eq!(config.authentication.session_ttl_seconds, 3600);
     }
@@ -710,7 +728,7 @@ mod tests {
     fn rejects_non_positive_session_ttl() {
         let config = StandaloneServerConfig {
             authentication: super::StandaloneAuthenticationConfig {
-                authority: super::StandaloneAuthenticationAuthority::LocalUser,
+                authority: super::StandaloneAuthenticationAuthority::Monas,
                 session_ttl_seconds: 0,
             },
             ..StandaloneServerConfig::default()
@@ -721,6 +739,17 @@ mod tests {
             StandaloneServerConfigError::InvalidSessionTtlSeconds {
                 session_ttl_seconds: 0
             }
+        );
+    }
+
+    #[test]
+    fn rejects_retired_local_user_authority() {
+        let mut config = StandaloneServerConfig::default();
+        config.authentication.authority = super::StandaloneAuthenticationAuthority::LocalUser;
+
+        assert_eq!(
+            config.validate().expect_err("retired authority rejected"),
+            StandaloneServerConfigError::DeprecatedLocalUserAuthority
         );
     }
 
@@ -850,6 +879,7 @@ mod tests {
     #[test]
     fn external_gateway_rejects_local_user_authority() {
         let mut config = StandaloneServerConfig::default();
+        config.authentication.authority = super::StandaloneAuthenticationAuthority::LocalUser;
         config.s3_ingress.mode = super::StandaloneS3IngressMode::ExternalGateway;
         config.s3_ingress.public_endpoint_url =
             Some("https://objects.lab.example:3900".to_string());
@@ -858,7 +888,7 @@ mod tests {
 
         assert_eq!(
             config.validate().expect_err("local authority rejected"),
-            StandaloneServerConfigError::ExternalGatewayRequiresIntegratedAuthority
+            StandaloneServerConfigError::DeprecatedLocalUserAuthority
         );
     }
 

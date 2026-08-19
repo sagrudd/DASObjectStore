@@ -2,32 +2,6 @@
 
 use super::*;
 
-pub(super) fn create_local_group_response_from_daemon(
-    response: DaemonCreateLocalGroupResponse,
-) -> StandaloneLocalGroupAdminResponse {
-    let client_request_id = response.accepted.client_request_id.clone();
-    StandaloneLocalGroupAdminResponse {
-        accepted: standalone_accepted_response_from_daemon(response.accepted),
-        operation: StandaloneLocalGroupOperation::CreateGroup,
-        group_name: response.group_name,
-        username: None,
-        client_request_id,
-    }
-}
-
-pub(super) fn assign_local_user_to_group_response_from_daemon(
-    response: DaemonAssignLocalUserToLocalGroupResponse,
-) -> StandaloneLocalGroupAdminResponse {
-    let client_request_id = response.accepted.client_request_id.clone();
-    StandaloneLocalGroupAdminResponse {
-        accepted: standalone_accepted_response_from_daemon(response.accepted),
-        operation: StandaloneLocalGroupOperation::AddUserToGroup,
-        group_name: response.group_name,
-        username: Some(response.username),
-        client_request_id,
-    }
-}
-
 pub(super) fn enclosure_prepare_response_from_daemon(
     response: DaemonPrepareEnclosureResponse,
 ) -> StandaloneEnclosurePrepareResponse {
@@ -258,32 +232,6 @@ fn admin_job_state_label(state: DaemonJobState) -> &'static str {
         DaemonJobState::Complete => "complete",
         DaemonJobState::Failed => "failed",
         DaemonJobState::Cancelled => "cancelled",
-    }
-}
-
-fn standalone_accepted_response_from_daemon(
-    accepted: dasobjectstore_daemon::DaemonLocalAdminAcceptedResponse,
-) -> StandaloneLocalGroupAdminAcceptedResponse {
-    StandaloneLocalGroupAdminAcceptedResponse {
-        job_id: accepted.job_id.to_string(),
-        kind: standalone_accepted_kind(accepted.command).to_string(),
-        accepted_at_utc: accepted.accepted_at_utc,
-        dry_run: accepted.dry_run,
-    }
-}
-
-fn standalone_accepted_kind(command: DaemonLocalAdminCommand) -> &'static str {
-    match command {
-        DaemonLocalAdminCommand::CreateLocalGroup
-        | DaemonLocalAdminCommand::AssignLocalUserToLocalGroup => "system_administration",
-    }
-}
-
-pub(super) fn standalone_admin_client_error(
-    err: dasobjectstore_daemon::DaemonClientError,
-) -> StandaloneLocalGroupAdminClientError {
-    StandaloneLocalGroupAdminClientError {
-        message: err.to_string(),
     }
 }
 

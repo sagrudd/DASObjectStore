@@ -25,14 +25,6 @@ pub(crate) struct ProfileDeleteQuery {
     pub version: Option<u64>,
 }
 
-pub(super) async fn standalone_profile_s3_delete(
-    Path((store_id, object_id)): Path<(String, String)>,
-    Query(query): Query<ProfileDeleteQuery>,
-    _actor: AuthenticatedGuiActor,
-) -> Result<Json<ProfileS3DeleteResponse>, (StatusCode, Json<AuthRouteError>)> {
-    delete_profile_s3_object(store_id, object_id, query).await
-}
-
 /// Delete a profile object for an actor that Monas or Synoptikon has already
 /// verified with Pistis.
 ///

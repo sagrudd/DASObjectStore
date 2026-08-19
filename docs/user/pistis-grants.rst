@@ -80,7 +80,10 @@ registries.
 
 Approval fails closed for a missing, inactive, read-only, duplicate,
 stale-revision, wrong-authority, wrong-principal, substituted, unknown, or
-non-S3-exported grant. Existing standalone PAM/OS policy remains independent.
+non-S3-exported grant. Legacy standalone PAM/OS authentication is retired and
+is not an authority source. Current human authority comes from the
+Monas/Synoptikon Pistis session; daemon-owned local group policy remains a
+separate storage-policy input and cannot authenticate an operator.
 
 Bare-earth evaluation
 ---------------------

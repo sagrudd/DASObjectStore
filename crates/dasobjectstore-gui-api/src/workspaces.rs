@@ -940,7 +940,7 @@ mod tests {
             Some(LocalUserAuthorityView {
                 username: "operator".to_string(),
                 groups: vec!["mnemosyne".to_string(), "sudo".to_string()],
-                sudo_administrator: true,
+                sudo_administrator: false,
             })
         );
         assert_eq!(
@@ -967,7 +967,7 @@ mod tests {
                 LocalGroupMembershipView {
                     group_name: "sudo".to_string(),
                     current_user_member: true,
-                    sudo_administrator_group: true,
+                    sudo_administrator_group: false,
                 }
             ]
         );
@@ -977,11 +977,12 @@ mod tests {
             view.capabilities,
             UsersGroupsCapabilitiesView {
                 product_local_user_registration: true,
-                os_local_user_management: true,
-                os_local_group_management: true,
-                administrator_actions_enabled: true,
+                os_local_user_management: false,
+                os_local_group_management: false,
+                administrator_actions_enabled: false,
             }
         );
+        assert_eq!(view.warnings[0].code, "standalone_admin_authority_missing");
         assert_eq!(
             view.operations,
             vec![
@@ -989,19 +990,24 @@ mod tests {
                     kind: LocalGroupOperationKindView::CreateLocalGroup,
                     label: "Create local writer/admin group".to_string(),
                     requires_sudo_administrator: true,
-                    enabled: true,
-                    blocked_reason: None,
+                    enabled: false,
+                    blocked_reason: Some(
+                        "Current OS user must be a sudo-derived DASObjectStore administrator."
+                            .to_string(),
+                    ),
                 },
                 LocalGroupOperationView {
                     kind: LocalGroupOperationKindView::AssignLocalUserToGroup,
                     label: "Assign local user to group".to_string(),
                     requires_sudo_administrator: true,
-                    enabled: true,
-                    blocked_reason: None,
+                    enabled: false,
+                    blocked_reason: Some(
+                        "Current OS user must be a sudo-derived DASObjectStore administrator."
+                            .to_string(),
+                    ),
                 }
             ]
         );
-        assert!(view.warnings.is_empty());
     }
 
     #[test]
