@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.171.4 - 2026-08-20
+
+- Align the DEB/RPM package preflight with the pinned Pistis git dependency:
+  release builds now reject stale local patch overrides instead of requiring
+  a sibling checkout override that is incompatible with the reviewed source.
+
 ## 0.171.3 - 2026-08-20
 
 - Permit the reviewed `mnemosyne-monas` peer to read readiness for the exact
