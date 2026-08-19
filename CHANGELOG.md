@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.171.2 - 2026-08-19
+
+- Add the explicit reviewed `mnemosyne-monas` host peer to the preverified
+  Pistis profile-binding boundary. Monas must present the matching
+  `mnemosyne-monas` subject identity over its service-owned Unix socket; the
+  existing DAS GUI peer remains separately bound to its own service account.
+
 ## 0.171.1 - 2026-08-19
 
 - Complete the PAM retirement boundary: packages, container/runtime images,
