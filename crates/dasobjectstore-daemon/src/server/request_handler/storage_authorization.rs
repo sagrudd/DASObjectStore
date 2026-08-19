@@ -1,6 +1,8 @@
 use super::*;
 use dasobjectstore_core::backend::BackendObjectKey;
 
+const MONAS_PHOREUS_STORE_ID: &str = "phoreus";
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct AuthorizedEndpointWrite {
     pub store_id: StoreId,
@@ -287,7 +289,10 @@ where
         // adapter has already bound the request to one authenticated bucket
         // credential. It is the only peer permitted to delegate end-user
         // actors, so this does not introduce a new trust principal.
-        if actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER) {
+        if actor.username.as_deref() == Some(DEFAULT_DAEMON_SERVICE_USER)
+            || (actor.username.as_deref() == Some("mnemosyne-monas")
+                && store_id.as_str() == MONAS_PHOREUS_STORE_ID)
+        {
             return Ok(store_id);
         }
 

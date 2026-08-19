@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.171.2"
+version = "0.171.3"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -81,8 +81,3 @@ wasm-bindgen-futures = "0.4.76"
 web-sys = "0.3.82"
 x509-parser = "0.18.0"
 yew = { version = "0.23.0", features = ["csr"] }
-
-[patch."https://github.com/sagrudd/pistis.git"]
-pistis-cose = { path = "../pistis/crates/pistis-cose" }
-pistis-crypto = { path = "../pistis/crates/pistis-crypto" }
-pistis-protocol = { path = "../pistis/crates/pistis-protocol" }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.171.3 - 2026-08-20
+
+- Permit the reviewed `mnemosyne-monas` peer to read readiness for the exact
+  `phoreus` profile after Monas has authenticated the request through Pistis.
+  The peer remains unable to read other stores or perform storage mutations
+  through this read gate.
+
 ## 0.171.2 - 2026-08-19
 
 - Add the explicit reviewed `mnemosyne-monas` host peer to the preverified
