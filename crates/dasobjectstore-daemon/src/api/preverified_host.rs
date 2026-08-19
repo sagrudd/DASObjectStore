@@ -13,6 +13,9 @@ pub const PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION: &str =
 /// Identity asserted by the reviewed DAS GUI/API host adapter.
 pub const PREVERIFIED_HOST_GUI_API_PEER_IDENTITY: &str = "dasobjectstore-gui-api";
 
+/// Identity asserted by the reviewed Monas product host adapter.
+pub const PREVERIFIED_HOST_MONAS_PEER_IDENTITY: &str = "mnemosyne-monas";
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PreverifiedHostSubject {
@@ -32,7 +35,10 @@ impl PreverifiedHostSubject {
                 ),
             );
         }
-        if self.peer_identity != PREVERIFIED_HOST_GUI_API_PEER_IDENTITY {
+        if !matches!(
+            self.peer_identity.as_str(),
+            PREVERIFIED_HOST_GUI_API_PEER_IDENTITY | PREVERIFIED_HOST_MONAS_PEER_IDENTITY
+        ) {
             return Err(
                 PreverifiedHostSubjectValidationError::UnsupportedPeerIdentity(
                     self.peer_identity.clone(),
@@ -98,7 +104,8 @@ impl std::error::Error for PreverifiedHostSubjectValidationError {}
 mod tests {
     use super::{
         PreverifiedHostSubject, PreverifiedHostSubjectValidationError,
-        PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+        PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_MONAS_PEER_IDENTITY,
+        PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
     };
 
     fn subject() -> PreverifiedHostSubject {
@@ -114,6 +121,13 @@ mod tests {
     #[test]
     fn accepts_versioned_non_secret_subject_identifiers() {
         assert!(subject().validate().is_ok());
+    }
+
+    #[test]
+    fn accepts_the_separate_monas_host_identity() {
+        let mut value = subject();
+        value.peer_identity = PREVERIFIED_HOST_MONAS_PEER_IDENTITY.to_string();
+        assert!(value.validate().is_ok());
     }
 
     #[test]

@@ -40,6 +40,7 @@ use crate::api::{
     UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreAcknowledgementPolicyResponse,
     UpdateObjectStoreIngestPolicyRequest, UpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+    PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_MONAS_PEER_IDENTITY,
     PROFILE_BROWSER_SCHEMA_VERSION, PROFILE_S3_SCHEMA_VERSION,
 };
 use crate::auth::{
@@ -532,11 +533,16 @@ pub(super) fn require_verified_pistis_host_authority(
             format!("{operation} require the fixed preverified host service peer"),
         ));
     };
-    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+    let expected_peer_identity = match actor.username.as_deref() {
+        Some(DEFAULT_DAEMON_SERVICE_USER) => PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+        Some("mnemosyne-monas") => PREVERIFIED_HOST_MONAS_PEER_IDENTITY,
+        _ => "",
+    };
+    if expected_peer_identity.is_empty() {
         return Err(DaemonApiErrorResponse::new(
             "preverified_host_authority_required",
             format!(
-                "{operation} reject direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service"
+                "{operation} reject unrecognised socket peers; submit through the reviewed GUI or Monas host service"
             ),
         ));
     }
@@ -546,6 +552,12 @@ pub(super) fn require_verified_pistis_host_authority(
             format!("{operation} require a verified Pistis subject"),
         ));
     };
+    if verified_subject.peer_identity != expected_peer_identity {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            format!("{operation} subject does not match the authenticated host peer"),
+        ));
+    }
     verified_subject.validate().map_err(|error| {
         DaemonApiErrorResponse::new(
             "preverified_host_subject_invalid",

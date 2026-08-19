@@ -204,7 +204,8 @@ pub use object_store::{
 };
 pub use preverified_host::{
     PreverifiedHostSubject, PreverifiedHostSubjectValidationError,
-    PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+    PREVERIFIED_HOST_GUI_API_PEER_IDENTITY, PREVERIFIED_HOST_MONAS_PEER_IDENTITY,
+    PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
 };
 pub use profile_binding::{
     ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
