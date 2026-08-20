@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.171.5 - 2026-08-20
+
+- Include the packaged Monas access-boundary helper in the RPM file manifest,
+  keeping RPM and DEB payloads aligned for the native DAS service boundary.
+
 ## 0.171.4 - 2026-08-20
 
 - Align the DEB/RPM package preflight with the pinned Pistis git dependency:
