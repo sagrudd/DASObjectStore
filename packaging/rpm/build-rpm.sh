@@ -426,6 +426,7 @@ fi
 /usr/libexec/dasobjectstore/configure-external-mount-policy
 /usr/libexec/dasobjectstore/verify-managed-storage-mounts
 /usr/libexec/dasobjectstore/migrate-monas-integrated-config
+/usr/libexec/dasobjectstore/manage-monas-access-boundary
 /usr/lib/systemd/system/dasobjectstore-storage-ready.service
 /usr/lib/systemd/system/dasobjectstore-garage.service
 /usr/lib/systemd/system/dasobjectstored.service
