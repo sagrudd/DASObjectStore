@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.171.7 - 2026-08-20
+
+- Update the direct `pistis-canonical` dependency to the merged Pistis
+  maintenance revision `51ba52d504eff3ebd67b9b7d6e948a3f9b84d958`, removing
+  the retired duplicate source from the locked workspace dependency graph.
+
 ## 0.171.6 - 2026-08-20
 
 - Update the direct Prosopikon integration pins to maintenance line merge
