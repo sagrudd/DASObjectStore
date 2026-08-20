@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "base64",
  "chrono",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "base64",
  "chrono",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "axum",
  "axum-server",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "axum",
  "chrono",
@@ -902,7 +902,7 @@ dependencies = [
  "dasobjectstore-object-service",
  "libc",
  "p256",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2)",
  "prosopikon-core",
  "serde",
  "serde_jcs",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "base64",
  "clap",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.171.5"
+version = "0.171.6"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -2610,11 +2610,16 @@ version = "0.1.0"
 source = "git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2#3bb6e96948734fbc6e7d6cf20b7805ff88011af2"
 
 [[package]]
+name = "pistis-canonical"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958#51ba52d504eff3ebd67b9b7d6e948a3f9b84d958"
+
+[[package]]
 name = "pistis-cose"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2#3bb6e96948734fbc6e7d6cf20b7805ff88011af2"
+source = "git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958#51ba52d504eff3ebd67b9b7d6e948a3f9b84d958"
 dependencies = [
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958)",
  "pistis-crypto",
  "pistis-domain",
  "serde",
@@ -2624,7 +2629,7 @@ dependencies = [
 [[package]]
 name = "pistis-crypto"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2#3bb6e96948734fbc6e7d6cf20b7805ff88011af2"
+source = "git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958#51ba52d504eff3ebd67b9b7d6e948a3f9b84d958"
 dependencies = [
  "p256",
  "pistis-domain",
@@ -2635,7 +2640,7 @@ dependencies = [
 [[package]]
 name = "pistis-domain"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2#3bb6e96948734fbc6e7d6cf20b7805ff88011af2"
+source = "git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958#51ba52d504eff3ebd67b9b7d6e948a3f9b84d958"
 dependencies = [
  "serde",
 ]
@@ -2643,10 +2648,10 @@ dependencies = [
 [[package]]
 name = "pistis-protocol"
 version = "0.2.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=3bb6e96948734fbc6e7d6cf20b7805ff88011af2#3bb6e96948734fbc6e7d6cf20b7805ff88011af2"
+source = "git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958#51ba52d504eff3ebd67b9b7d6e948a3f9b84d958"
 dependencies = [
  "getrandom 0.3.4",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958)",
  "pistis-cose",
  "pistis-crypto",
  "pistis-domain",
@@ -2768,8 +2773,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.27.0"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=aa52ea9b1fc145d0aa47e944b602cf58188cedd7#aa52ea9b1fc145d0aa47e944b602cf58188cedd7"
+version = "0.27.1"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=73bde0ecfc4bfa8e45e684a530085869e3d59db4#73bde0ecfc4bfa8e45e684a530085869e3d59db4"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2782,7 +2787,7 @@ dependencies = [
  "hmac",
  "p256",
  "parking_lot",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=51ba52d504eff3ebd67b9b7d6e948a3f9b84d958)",
  "pistis-cose",
  "pistis-crypto",
  "pistis-protocol",
@@ -2801,7 +2806,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=aa52ea9b1fc145d0aa47e944b602cf58188cedd7#aa52ea9b1fc145d0aa47e944b602cf58188cedd7"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=73bde0ecfc4bfa8e45e684a530085869e3d59db4#73bde0ecfc4bfa8e45e684a530085869e3d59db4"
 dependencies = [
  "prosopikon-core",
  "web-sys",

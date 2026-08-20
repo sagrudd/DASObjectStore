@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.171.6 - 2026-08-20
+
+- Update the direct Prosopikon integration pins to maintenance line merge
+  `73bde0ecfc4bfa8e45e684a530085869e3d59db4` (Prosopikon 0.27.1).
+
 ## 0.171.5 - 2026-08-20
 
 - Include the packaged Monas access-boundary helper in the RPM file manifest,
