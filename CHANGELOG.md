@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.171.8 - 2026-08-21
+
+- Align the direct `pistis-canonical` source pin with the Kanon-resolved
+  Pistis relay correction so owner-built DEB/RPM artefacts cannot reject the
+  verified Terraform closure.
+
 ## 0.171.7 - 2026-08-20
 
 - Update the direct `pistis-canonical` dependency to the merged Pistis
