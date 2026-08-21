@@ -202,6 +202,57 @@ This file defines working rules for AI coding agents contributing to DASObjectSt
 - If live Kanon services are unavailable, use a verified pinned Kanon snapshot
   or lockset. Do not bypass identity or compatibility validation to make a
   release proceed.
+## Authoritative release graph: Kanon -> Terraform -> artefact
+
+Kanon at `https://github.com/sagrudd/kanon` is the sole authority for this
+component's permanent identity, release version, source repository and revision,
+package/container/binary coordinates, dependencies, compatibility, lifecycle,
+aliases, deprecation/replacement, supported host modes and lockset membership.
+
+A local manifest, `sources.lock`, Terraform catalogue or TOML projection,
+package metadata, existing DEB/RPM file, branch name or working checkout is
+never a second authority. Do not invent, copy, or override Kanon values locally
+to make a build or installation pass.
+
+Any identity, version, dependency, packaging, support or provenance change must
+start with a coordinated Kanon registry change. If resolved content changes,
+create a new immutable Kanon lockset; never rewrite or republish a historical
+lockset. Record the linked Kanon change and exact lockset ID and content digest
+in the component and Terraform delivery.
+
+Terraform must consume that exact Kanon lockset through the Kanon resolver and
+regenerate its compatibility projection, catalogue, adapters, package
+descriptions and dependency metadata. Do not hand-edit generated projections or
+maintain a second annotation point. The Terraform source pins and the lockset's
+source revisions must agree exactly.
+
+A build, install or release is invalid unless Kanon, Terraform, the checkout,
+DEB/RPM control metadata and provenance agree on lockset ID and digest,
+component identity, version, source revision, architecture, adapter and the
+complete declared dependency closure. Any mismatch is a hard failure.
+
+An existing DEB/RPM may be reused only when its exact identity, version,
+architecture, lockset/source provenance and dependency closure match the
+currently verified lockset. A same-name or same-version artefact without that
+match is stale and must not be installed, published or used to satisfy a
+dependency.
+
+Kanon lock validation, Terraform projection/catalogue validation, adapter and
+package-metadata tests, and stale-artefact checks are release gates for
+`make deb`, `make rpm`, `make install`, Jenkins and customer releases.
+If Kanon or its pinned lockset cannot be verified, the supported build and
+installation path fails closed; there is no silent fallback to local metadata.
+
+Adding a component such as Phoreus, Ergasterion, Mnematikon, Tameion or
+Logistes requires Kanon registration, dependency closure, lockset resolution,
+Terraform projection, adapter validation and DEB/RPM metadata tests before it
+can be described as supported. A pending or unsupported identity cannot be
+declared supported locally.
+
+Before completing a change, run the repository's Kanon/lockset and package
+gates and record the exact lockset ID, digest and source revisions in the
+change or pull request. If a required Kanon or Terraform change is not
+available, report that as a blocker rather than shipping stale content.
 ## Programme Governance
 
 This repository participates in the Mnemosyne Programme.
