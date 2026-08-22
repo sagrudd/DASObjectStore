@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.171.10 - 2026-08-22
+
+- Escape the UDisks `$UID` placeholder as a literal in generated udev rules,
+  keeping removable non-POSIX media policy valid with current systemd-udevd.
+- Declare `smartmontools` as an appliance runtime dependency so health probes
+  inspect real SMART data instead of reporting a missing-probe warning.
+
 ## 0.171.9 - 2026-08-22
 
 - Prevent the Web and S3 gateway units from taking ownership of the daemon's

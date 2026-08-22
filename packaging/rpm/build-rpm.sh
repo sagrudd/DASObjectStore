@@ -162,6 +162,7 @@ Requires:       mergerfs
 Requires:       nfs-utils
 Requires:       python3
 Requires:       quota
+Requires:       smartmontools
 Requires:       systemd
 Requires:       udisks2
 Requires(post): coreutils

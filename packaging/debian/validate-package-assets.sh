@@ -188,6 +188,8 @@ require_text "$workspace_host_socket" "SocketMode=0660"
 require_text "$workspace_host_config" '"schema_version": 1'
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_EXFAT_DEFAULTS'
 require_text "$mount_policy_helper" 'UDISKS_MOUNT_OPTIONS_NTFS_DEFAULTS'
+require_text "$mount_policy_helper" 'uid=\$\$UID,gid='
+require_absent "$mount_policy_helper" 'uid=\$UID,gid='
 
 require_text "$sysusers" "u dasobjectstore"
 require_text "$sysusers" "g dasobjectstore"
@@ -295,7 +297,7 @@ require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
 require_text "$build_deb" 'DEBIAN/prerm'
 require_text "$build_deb" 'DEBIAN/postrm'
-require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin'
+require_text "$build_deb" 'Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin'
 require_text "$build_deb" 'migrate-monas-integrated-config'
 require_text "$build_rpm" 'migrate-monas-integrated-config'
 require_text "$build_rpm" 'manage-monas-access-boundary'
@@ -315,6 +317,7 @@ require_text "$build_deb" 'target/release/dasobjectstore-workspace-host'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-workspace-host.socket'
 require_text "$build_deb" 'Recommends: awscli'
 require_text "$build_rpm" 'Requires:       udisks2'
+require_text "$build_rpm" 'Requires:       smartmontools'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-control.slice'

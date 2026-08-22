@@ -27,6 +27,9 @@ const MONAS_CONFIG_MIGRATION: &str = include_str!(
 const MONAS_ACCESS_BOUNDARY: &str = include_str!(
     "../../../packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 );
+const EXTERNAL_MOUNT_POLICY: &str = include_str!(
+    "../../../packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
+);
 const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
@@ -45,7 +48,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
 const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
     "Provides: dasobjectstore-remote",
     "Conflicts: dasobjectstore-remote",
@@ -115,6 +118,14 @@ fn packages_fail_closed_monas_access_boundary() {
     }
     assert_not_contains(MONAS_ACCESS_BOUNDARY, "users.json");
     assert_not_contains(POSTINST, "auth/users.json");
+}
+
+#[test]
+fn external_mount_policy_escapes_the_udisks_uid_placeholder_for_udev() {
+    assert_contains(EXTERNAL_MOUNT_POLICY, r"uid=\$\$UID,gid=");
+    assert_not_contains(EXTERNAL_MOUNT_POLICY, r"uid=\$UID,gid=");
+    assert_contains(BUILD_DEB, "smartmontools");
+    assert_contains(BUILD_RPM, "Requires:       smartmontools");
 }
 
 #[test]

@@ -149,7 +149,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
 Provides: dasobjectstore-remote
 Conflicts: dasobjectstore-remote
 Replaces: dasobjectstore-remote
