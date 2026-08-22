@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.1 - 2026-08-22
+
+- Recover historical EasyConnect ingest-queue rows whose ``object_type`` was
+  written as an ObjectStore retention class. Read-only CLI and Web activity
+  inspection now applies the same canonical ``naive`` compatibility mapping
+  as durable destage and object inspection, without rewriting live metadata.
+
 ## 0.173.0 - 2026-08-22
 
 - Add Garage 2.3 native multi-HDD rendering with explicit per-directory

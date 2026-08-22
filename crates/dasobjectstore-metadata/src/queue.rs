@@ -469,13 +469,25 @@ fn read_ingest_queue_job(row: &rusqlite::Row<'_>) -> Result<IngestQueueJob, rusq
 }
 
 fn parse_object_type(value: String) -> Result<ObjectType, rusqlite::Error> {
-    value.parse().map_err(|source| {
-        rusqlite::Error::FromSqlConversionFailure(
+    match value.parse() {
+        Ok(object_type) => Ok(object_type),
+        Err(_)
+            if value
+                .parse::<dasobjectstore_core::store::StoreClass>()
+                .is_ok() =>
+        {
+            // EasyConnect S3 builds before 0.126.4 wrote the store retention
+            // class into this object-format column. The destage worker and
+            // object inspector already recover these arbitrary payloads as
+            // the canonical naive type; queue inspection must do the same.
+            Ok(ObjectType::Naive)
+        }
+        Err(source) => Err(rusqlite::Error::FromSqlConversionFailure(
             3,
             Type::Text,
             Box::new(IngestQueueReadError::InvalidObjectType { value, source }),
-        )
-    })
+        )),
+    }
 }
 
 fn parse_id<T>(field: &'static str, value: String) -> Result<T, rusqlite::Error>
@@ -697,6 +709,51 @@ mod tests {
         assert_eq!(snapshot.jobs[0].priority, 20);
         assert_eq!(snapshot.jobs[0].received_bytes, 64);
         assert_eq!(snapshot.jobs[1].ingest_job_id.as_str(), "job-low");
+
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn reads_legacy_store_class_queue_values_as_naive_without_rewriting_metadata() {
+        let root = temp_root("ingest-queue-legacy-store-class");
+        fs::create_dir_all(&root).expect("create temp root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("open sqlite");
+        connection
+            .execute_batch(LIVE_SCHEMA_SQL)
+            .expect("schema applies");
+        insert_store(&connection);
+        insert_job(
+            &connection,
+            "job-legacy",
+            "ssd_accepted",
+            0,
+            "2026-01-01T00:00:00Z",
+            1024,
+        );
+        connection
+            .execute(
+                "UPDATE ingest_jobs
+                 SET object_type = 'generated_data'
+                 WHERE ingest_job_id = 'job-legacy'",
+                [],
+            )
+            .expect("legacy queue fixture applies");
+        drop(connection);
+
+        let snapshot = read_ingest_queue(&live_sqlite_path).expect("legacy queue reads");
+
+        assert_eq!(snapshot.jobs.len(), 1);
+        assert_eq!(snapshot.jobs[0].object_type, ObjectType::Naive);
+        let connection = Connection::open(&live_sqlite_path).expect("reopen sqlite");
+        let stored_type: String = connection
+            .query_row(
+                "SELECT object_type FROM ingest_jobs WHERE ingest_job_id = 'job-legacy'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("stored object type reads");
+        assert_eq!(stored_type, "generated_data");
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
