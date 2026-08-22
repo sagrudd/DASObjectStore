@@ -469,6 +469,8 @@ mod tests {
         let cli = ServerCli::try_parse_from([
             "dasobjectstore-server",
             "--check-config",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
             "--generate-missing-tls",
             "--product-root",
             root.to_str().expect("root path"),

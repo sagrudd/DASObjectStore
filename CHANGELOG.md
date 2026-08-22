@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.4 - 2026-08-23
+
+- Isolate standalone-server CLI fixtures from an installed appliance's
+  root-only production configuration, keeping the unprivileged Linux release
+  gate hermetic without weakening production file custody.
+
 ## 0.173.3 - 2026-08-23
 
 - Correct daemon capacity admission and Web/CLI capacity status for managed

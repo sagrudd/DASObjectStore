@@ -125,6 +125,8 @@ mod tests {
         let cli = ServerCli::try_parse_from([
             "dasobjectstore-server",
             "--check-config",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
             "--bind-address",
             "0.0.0.0",
         ])
@@ -142,6 +144,8 @@ mod tests {
         let cli = ServerCli::try_parse_from([
             "dasobjectstore-server",
             "--check-config",
+            "--config",
+            "/nonexistent/dasobjectstore-test-server.json",
             "--tls-certificate-path",
             "/tmp/dasobjectstore/server.crt",
             "--tls-private-key-path",
