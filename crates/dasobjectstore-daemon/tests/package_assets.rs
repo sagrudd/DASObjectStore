@@ -132,6 +132,8 @@ fn packaged_s3_gateway_is_manual_and_fail_closed() {
     );
     assert_contains(S3_GATEWAY_SERVICE, "Requires=dasobjectstored.service");
     assert_contains(S3_GATEWAY_SERVICE, "NoNewPrivileges=true");
+    assert_not_contains(S3_GATEWAY_SERVICE, "RuntimeDirectory=dasobjectstore");
+    assert_not_contains(S3_GATEWAY_SERVICE, "StateDirectory=dasobjectstore");
     assert_contains(
         S3_GATEWAY_SERVICE,
         "ExecStart=/usr/bin/dasobjectstore-s3-gateway --config /etc/dasobjectstore/s3-gateway.json",
@@ -380,6 +382,8 @@ fn web_systemd_service_uses_packaged_config_and_identity() {
     assert_contains(WEB_SERVICE, &format!("User={DEFAULT_DAEMON_SERVICE_USER}"));
     assert_contains(WEB_SERVICE, &format!("Group={DEFAULT_DAEMON_GROUP}"));
     assert_contains(WEB_SERVICE, "NoNewPrivileges=false");
+    assert_not_contains(WEB_SERVICE, "RuntimeDirectory=dasobjectstore");
+    assert_not_contains(WEB_SERVICE, "StateDirectory=dasobjectstore");
     assert_contains(
         WEB_SERVICE,
         "ExecStart=/usr/bin/dasobjectstore-server --config /opt/dasobjectstore/config.json --generate-missing-tls",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.171.9 - 2026-08-22
+
+- Prevent the Web and S3 gateway units from taking ownership of the daemon's
+  shared Monas runtime and state directories. Starting either listener now
+  preserves the `mnemosyne-pistis-das` group on `stores.json` and the daemon
+  socket, so the fail-closed access boundary remains restartable.
+- Align the local-container Prosopikon source check with the Kanon-resolved
+  revision so the package-asset release gate validates the same source closure.
+
 ## 0.171.8 - 2026-08-21
 
 - Align the direct `pistis-canonical` source pin with the Kanon-resolved
