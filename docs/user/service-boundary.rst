@@ -221,6 +221,14 @@ an on-media identity stops the daemon, Web/API, S3 gateway, workspace broker,
 and retained Garage provider together. They remain stopped until the complete
 manifest verifies again.
 
+Daemon capacity admission and the Web/CLI capacity status use the same
+manifest as their physical pool boundary. For an appliance store without a
+more specific registered profile, available HDD capacity is the checked sum
+of all declared HDD mountpoints, never the free space of the unmounted parent
+directory on the system disk. A missing, malformed, duplicated, or overflowing
+capacity observation is unavailable rather than silently falling back to
+``/``.
+
 Garage container restart is deliberately disabled in generated Compose
 configuration. Systemd owns its lifecycle and starts it only after the same
 storage gate succeeds. This prevents the container runtime from restarting a

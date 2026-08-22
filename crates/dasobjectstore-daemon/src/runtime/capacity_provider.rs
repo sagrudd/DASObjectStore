@@ -23,6 +23,7 @@ use dasobjectstore_object_service::{
     read_subobject_registry,
 };
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::ffi::CString;
 use std::fs;
 use std::os::raw::c_char;
@@ -60,6 +61,115 @@ impl CapacitySpaceProbe for StatvfsCapacitySpaceProbe {
                     .and_then(|size| available.checked_mul(size))
             })
             .ok_or_else(|| format!("capacity probe overflow for {}", path.to_string_lossy()))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ManagedPoolCapacitySpaceProbe<P = StatvfsCapacitySpaceProbe> {
+    manifest_path: PathBuf,
+    backend_root: PathBuf,
+    probe: P,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManagedStorageManifestV1 {
+    schema_version: u64,
+    ssd: ManagedStorageMemberV1,
+    hdds: Vec<ManagedStorageMemberV1>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManagedStorageMemberV1 {
+    device: String,
+    filesystem: String,
+    label: String,
+    path: PathBuf,
+    role: String,
+    uuid: String,
+}
+
+impl<P> ManagedPoolCapacitySpaceProbe<P> {
+    pub fn new(
+        manifest_path: impl Into<PathBuf>,
+        backend_root: impl Into<PathBuf>,
+        probe: P,
+    ) -> Self {
+        Self {
+            manifest_path: manifest_path.into(),
+            backend_root: backend_root.into(),
+            probe,
+        }
+    }
+
+    fn hdd_roots(&self) -> Result<Vec<PathBuf>, String> {
+        let bytes = fs::read(&self.manifest_path).map_err(|error| {
+            format!(
+                "managed storage capacity manifest {} is unavailable: {error}",
+                self.manifest_path.display()
+            )
+        })?;
+        let manifest: ManagedStorageManifestV1 =
+            serde_json::from_slice(&bytes).map_err(|error| {
+                format!(
+                    "managed storage capacity manifest {} is invalid: {error}",
+                    self.manifest_path.display()
+                )
+            })?;
+        if manifest.schema_version != 1
+            || manifest.hdds.is_empty()
+            || !valid_managed_member(&manifest.ssd)
+            || manifest.ssd.role != "ssd"
+        {
+            return Err("managed storage capacity manifest does not satisfy schema v1".to_string());
+        }
+        let mut seen = HashSet::new();
+        let mut seen_uuids = HashSet::new();
+        let mut roots = Vec::with_capacity(manifest.hdds.len());
+        for hdd in manifest.hdds {
+            if !valid_managed_member(&hdd)
+                || !hdd.role.starts_with("hdd:")
+                || !hdd.path.starts_with(&self.backend_root)
+                || !seen.insert(hdd.path.clone())
+                || !seen_uuids.insert(hdd.uuid.clone())
+            {
+                return Err(
+                    "managed storage capacity manifest contains an invalid HDD identity"
+                        .to_string(),
+                );
+            }
+            roots.push(hdd.path);
+        }
+        Ok(roots)
+    }
+}
+
+fn valid_managed_member(member: &ManagedStorageMemberV1) -> bool {
+    member.path.is_absolute()
+        && member.path != Path::new("/")
+        && !member.device.trim().is_empty()
+        && !member.filesystem.trim().is_empty()
+        && !member.label.trim().is_empty()
+        && !member.uuid.trim().is_empty()
+}
+
+impl<P> CapacitySpaceProbe for ManagedPoolCapacitySpaceProbe<P>
+where
+    P: CapacitySpaceProbe,
+{
+    fn free_bytes(&self, path: &Path) -> Result<u64, String> {
+        if path != self.backend_root {
+            return self.probe.free_bytes(path);
+        }
+        self.hdd_roots()?
+            .into_iter()
+            .try_fold(0_u64, |total, root| {
+                let available = self.probe.free_bytes(&root)?;
+                total.checked_add(available).ok_or_else(|| {
+                    "managed storage aggregate free-space observation overflowed".to_string()
+                })
+            })
     }
 }
 
@@ -219,7 +329,7 @@ pub trait CapacityAdmissionProvider: Send + Sync {
     }
 }
 
-pub struct FileBackedCapacityAdmissionProvider<P = StatvfsCapacitySpaceProbe> {
+pub struct FileBackedCapacityAdmissionProvider<P = ManagedPoolCapacitySpaceProbe> {
     store_registry_path: PathBuf,
     subobject_registry_path: PathBuf,
     ledger_directory: PathBuf,
@@ -259,14 +369,22 @@ impl StoreCapacityLedger {
     }
 }
 
-impl FileBackedCapacityAdmissionProvider<StatvfsCapacitySpaceProbe> {
+impl FileBackedCapacityAdmissionProvider<ManagedPoolCapacitySpaceProbe> {
     pub fn for_daemon(state_dir: impl AsRef<Path>) -> Self {
+        let backend_root = crate::runtime::default_hdd_root();
+        let manifest_path = env::var_os("DASOBJECTSTORE_MANAGED_STORAGE_MANIFEST")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/etc/dasobjectstore/managed-storage.v1.json"));
         Self::new(
             default_store_registry_path(),
             state_dir.as_ref().join("capacity-ledgers"),
-            crate::runtime::default_hdd_root(),
+            backend_root.clone(),
             crate::runtime::default_ssd_root(),
-            StatvfsCapacitySpaceProbe,
+            ManagedPoolCapacitySpaceProbe::new(
+                manifest_path,
+                backend_root,
+                StatvfsCapacitySpaceProbe,
+            ),
         )
         .with_subobject_registry_path(default_subobject_registry_path())
         .with_profile_binding_registry_path(profile_binding_registry_path(state_dir))
@@ -1276,6 +1394,7 @@ fn remove_active_reservation(
 mod tests {
     use super::{
         CapacityAdmissionProvider, CapacitySpaceProbe, FileBackedCapacityAdmissionProvider,
+        ManagedPoolCapacitySpaceProbe,
     };
     use crate::api::{
         CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
@@ -1327,6 +1446,20 @@ mod tests {
                 Ok(3_333)
             } else {
                 Ok(111)
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct ManagedPathProbe;
+
+    impl CapacitySpaceProbe for ManagedPathProbe {
+        fn free_bytes(&self, path: &Path) -> Result<u64, String> {
+            match path.file_name().and_then(|name| name.to_str()) {
+                Some("hdd-a") => Ok(400),
+                Some("hdd-b") => Ok(600),
+                Some("ssd") => Ok(300),
+                _ => Ok(50),
             }
         }
     }
@@ -1775,6 +1908,110 @@ mod tests {
             .expect("profile status");
         assert_eq!(status.backend_free_bytes, 2_222);
         assert_eq!(status.ssd_available_bytes, Some(3_333));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn daemon_pool_capacity_sums_verified_managed_hdd_mounts() {
+        let root = root("managed-pool-capacity");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let ledger =
+            CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
+        save_capacity_ledger(ledger_dir.join("codex.json"), &ledger).expect("ledger seed");
+        let backend_root = root.join("hdd");
+        let ssd_root = root.join("ssd");
+        let manifest = root.join("managed-storage.v1.json");
+        std::fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "ssd": {
+                    "device": "/dev/ssd",
+                    "filesystem": "ext4",
+                    "label": "SSD",
+                    "path": ssd_root,
+                    "role": "ssd",
+                    "uuid": "ssd-uuid"
+                },
+                "hdds": [
+                    {
+                        "device": "/dev/hdd-a",
+                        "filesystem": "ext4",
+                        "label": "HDD_A",
+                        "path": backend_root.join("hdd-a"),
+                        "role": "hdd:hdd-a",
+                        "uuid": "hdd-a-uuid"
+                    },
+                    {
+                        "device": "/dev/hdd-b",
+                        "filesystem": "ext4",
+                        "label": "HDD_B",
+                        "path": backend_root.join("hdd-b"),
+                        "role": "hdd:hdd-b",
+                        "uuid": "hdd-b-uuid"
+                    }
+                ]
+            }))
+            .expect("manifest JSON"),
+        )
+        .expect("manifest");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            backend_root.clone(),
+            ssd_root,
+            ManagedPoolCapacitySpaceProbe::new(manifest, backend_root, ManagedPathProbe),
+        );
+
+        let status = provider
+            .status(CapacityStatusRequest {
+                store_id: "codex".to_string(),
+            })
+            .expect("managed pool status");
+
+        assert_eq!(status.backend_free_bytes, 1_000);
+        assert_eq!(status.ssd_available_bytes, Some(300));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn managed_pool_capacity_rejects_duplicate_hdd_mounts() {
+        let root = root("managed-pool-duplicate");
+        std::fs::create_dir_all(&root).expect("root");
+        let backend_root = root.join("hdd");
+        let repeated = backend_root.join("hdd-a");
+        let manifest = root.join("managed-storage.v1.json");
+        std::fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "ssd": {
+                    "device": "/dev/ssd", "filesystem": "ext4", "label": "SSD",
+                    "path": root.join("ssd"), "role": "ssd", "uuid": "ssd-uuid"
+                },
+                "hdds": [
+                    {
+                        "device": "/dev/hdd-a", "filesystem": "ext4", "label": "HDD_A",
+                        "path": repeated, "role": "hdd:hdd-a", "uuid": "hdd-a-uuid"
+                    },
+                    {
+                        "device": "/dev/hdd-b", "filesystem": "ext4", "label": "HDD_B",
+                        "path": repeated, "role": "hdd:hdd-b", "uuid": "hdd-b-uuid"
+                    }
+                ]
+            }))
+            .expect("manifest JSON"),
+        )
+        .expect("manifest");
+        let probe =
+            ManagedPoolCapacitySpaceProbe::new(manifest, backend_root.clone(), ManagedPathProbe);
+
+        let error = probe
+            .free_bytes(&backend_root)
+            .expect_err("duplicate mount must fail closed");
+
+        assert!(error.contains("invalid HDD identity"));
         let _ = std::fs::remove_dir_all(root);
     }
 

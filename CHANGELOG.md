@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.3 - 2026-08-23
+
+- Correct daemon capacity admission and Web/CLI capacity status for managed
+  multi-HDD appliances. The unbound appliance profile now sums the strictly
+  validated HDD mountpoints from ``managed-storage.v1.json`` instead of
+  probing the unmounted parent directory on the system disk; malformed,
+  missing, duplicate, or overflowing pool observations fail closed.
+
 ## 0.173.2 - 2026-08-22
 
 - Extend the atomic Monas-integrated configuration migration to project the
