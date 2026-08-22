@@ -94,8 +94,9 @@ pub use disk::{
 pub use disk_capacity::{
     acquire_disk_capacity_claims, read_disk_capacity_claims, read_outstanding_disk_capacity,
     read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
-    release_disk_capacity_claims, update_disk_capacity_claim_consumption, DiskCapacityClaim,
-    DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+    reconcile_abandoned_ingest_disk_capacity_claims_at_startup, release_disk_capacity_claims,
+    update_disk_capacity_claim_consumption, AbandonedIngestCapacityClaimRecoveryReport,
+    DiskCapacityClaim, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
     DiskCapacityClaimRequest,
 };
 pub use drain::{

@@ -197,6 +197,15 @@ client is told that its source copy may be released. Claims remain associated
 with the durable work across retry and are released only after verified
 promotion or an explicit safe terminal transition.
 
+Direct ``AfterHddPlacement`` imports use shorter-lived, process-owned claims
+while their HDD writers are active. A normal failure releases those claims in
+the same daemon process. On restart, the daemon also releases only older
+direct-ingest claims whose generated job, object, request, copy-count, and byte
+identities all agree. It never treats durable destage claims or unfamiliar
+claim records as abandoned. Reconciliation changes reservation metadata only;
+it does not remove a payload or placement, and filesystem free-space probes
+continue to account for any bytes written before an interruption.
+
 Empty files remain valid immutable objects. Their catalogue size and checksum
 describe the exact zero-byte payload, while capacity claims and scheduler
 admission use a one-byte accounting floor so the positive-reservation

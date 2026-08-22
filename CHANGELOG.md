@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.171.11 - 2026-08-22
+
+- Reconcile structurally verified direct-ingest capacity claims left by a
+  stopped daemon before accepting new work. Durable destage and unfamiliar
+  claims remain fail-closed, while abandoned reservations can no longer hide
+  real free space from background storage normalization.
+- Release direct-ingest disk claims when settlement, metadata publication, or
+  the requesting connection fails, preventing the same leak during a running
+  daemon process.
+
 ## 0.171.10 - 2026-08-22
 
 - Escape the UDisks `$UID` placeholder as a literal in generated udev rules,

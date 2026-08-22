@@ -1,5 +1,6 @@
 use crate::schema::LIVE_SCHEMA_SQL;
-use dasobjectstore_core::ids::DiskId;
+use dasobjectstore_core::ids::{DiskId, IngestJobId, ObjectId};
+use dasobjectstore_core::utc::parse_canonical_utc_timestamp_seconds;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,6 +60,25 @@ pub struct DiskCapacityClaim {
     pub reserved_bytes: u64,
     pub consumed_bytes: u64,
     pub state: String,
+}
+
+/// Startup-only recovery of claims owned by the direct file-ingest pipeline.
+///
+/// These claims protect writes performed by threads in one daemon process and
+/// are deliberately distinct from durable destage claims. A daemon restart
+/// proves that a claim created by an earlier process can no longer have an
+/// active writer. Only claims whose generated identity is internally
+/// consistent and whose last update predates this process are released;
+/// leased, current, or unfamiliar claims remain untouched.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AbandonedIngestCapacityClaimRecoveryReport {
+    pub owners_scanned: u64,
+    pub owners_released: u64,
+    pub claims_released: u64,
+    pub reclaimed_bytes: u64,
+    pub current_owners_retained: u64,
+    pub leased_owners_retained: u64,
+    pub unrecognized_owners_retained: u64,
 }
 
 #[derive(Debug)]
@@ -321,6 +341,185 @@ pub fn release_disk_capacity_claims(
     Ok(changed)
 }
 
+pub fn reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+    live_sqlite_path: impl AsRef<Path>,
+    startup_at_utc: &str,
+) -> Result<AbandonedIngestCapacityClaimRecoveryReport, DiskCapacityClaimError> {
+    let startup_seconds =
+        parse_canonical_utc_timestamp_seconds(startup_at_utc).ok_or_else(|| {
+            DiskCapacityClaimError::InvalidRequest {
+                field: "startup_at_utc",
+                reason: "must be a canonical UTC timestamp".to_string(),
+            }
+        })?;
+    let mut connection = open(live_sqlite_path.as_ref())?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let rows = {
+        let mut statement = transaction.prepare(
+            "SELECT claim_id, owner_id, request_id, request_digest, disk_id,
+                    reserved_bytes, consumed_bytes, lease_owner,
+                    lease_expires_at_utc, created_at_utc, updated_at_utc
+             FROM disk_capacity_claims
+             WHERE claim_kind='ingest' AND state='active'
+               AND released_at_utc IS NULL
+             ORDER BY owner_id, disk_id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(AbandonedIngestClaimRow {
+                    claim_id: row.get(0)?,
+                    owner_id: row.get(1)?,
+                    request_id: row.get(2)?,
+                    request_digest: row.get(3)?,
+                    disk_id: row.get(4)?,
+                    reserved_bytes: row.get(5)?,
+                    consumed_bytes: row.get(6)?,
+                    lease_owner: row.get(7)?,
+                    lease_expires_at_utc: row.get(8)?,
+                    created_at_utc: row.get(9)?,
+                    updated_at_utc: row.get(10)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows
+    };
+    let mut by_owner = BTreeMap::<String, Vec<AbandonedIngestClaimRow>>::new();
+    for row in rows {
+        by_owner.entry(row.owner_id.clone()).or_default().push(row);
+    }
+
+    let mut report = AbandonedIngestCapacityClaimRecoveryReport {
+        owners_scanned: by_owner.len() as u64,
+        ..AbandonedIngestCapacityClaimRecoveryReport::default()
+    };
+    for (owner_id, claims) in by_owner {
+        if claims
+            .iter()
+            .any(|claim| claim.lease_expires_at_utc.is_some())
+        {
+            report.leased_owners_retained += 1;
+            continue;
+        }
+        let updated_seconds = claims
+            .iter()
+            .map(|claim| parse_canonical_utc_timestamp_seconds(&claim.updated_at_utc))
+            .collect::<Option<Vec<_>>>();
+        let created_seconds = claims
+            .iter()
+            .map(|claim| parse_canonical_utc_timestamp_seconds(&claim.created_at_utc))
+            .collect::<Option<Vec<_>>>();
+        let Some(updated_seconds) = updated_seconds else {
+            report.unrecognized_owners_retained += 1;
+            continue;
+        };
+        let Some(created_seconds) = created_seconds else {
+            report.unrecognized_owners_retained += 1;
+            continue;
+        };
+        if updated_seconds
+            .iter()
+            .any(|updated| *updated >= startup_seconds)
+        {
+            report.current_owners_retained += 1;
+            continue;
+        }
+        if created_seconds
+            .iter()
+            .zip(updated_seconds.iter())
+            .any(|(created, updated)| created > updated)
+            || !recognized_direct_ingest_claim_group(&owner_id, &claims)
+        {
+            report.unrecognized_owners_retained += 1;
+            continue;
+        }
+
+        let changed = transaction.execute(
+            "UPDATE disk_capacity_claims
+             SET state='released', released_at_utc=?1, updated_at_utc=?1,
+                 lease_owner=NULL, lease_expires_at_utc=NULL
+             WHERE claim_kind='ingest' AND owner_id=?2 AND state='active'
+               AND released_at_utc IS NULL",
+            params![startup_at_utc, owner_id],
+        )?;
+        if changed != claims.len() {
+            return Err(DiskCapacityClaimError::RequestConflict {
+                kind: DiskCapacityClaimKind::Ingest,
+                owner_id,
+            });
+        }
+        report.owners_released += 1;
+        report.claims_released = report.claims_released.saturating_add(changed as u64);
+        report.reclaimed_bytes = report.reclaimed_bytes.saturating_add(
+            claims
+                .iter()
+                .map(|claim| claim.reserved_bytes.saturating_sub(claim.consumed_bytes))
+                .sum::<u64>(),
+        );
+    }
+    transaction.commit()?;
+    Ok(report)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AbandonedIngestClaimRow {
+    claim_id: String,
+    owner_id: String,
+    request_id: String,
+    request_digest: String,
+    disk_id: String,
+    reserved_bytes: u64,
+    consumed_bytes: u64,
+    lease_owner: Option<String>,
+    lease_expires_at_utc: Option<String>,
+    created_at_utc: String,
+    updated_at_utc: String,
+}
+
+fn recognized_direct_ingest_claim_group(
+    owner_id: &str,
+    claims: &[AbandonedIngestClaimRow],
+) -> bool {
+    let Some(first) = claims.first() else {
+        return false;
+    };
+    let Some(lease_owner) = first.lease_owner.as_deref() else {
+        return false;
+    };
+    if IngestJobId::new(lease_owner).is_err() {
+        return false;
+    }
+    let owner_prefix = format!("{lease_owner}:");
+    let Some(object_id) = owner_id.strip_prefix(&owner_prefix) else {
+        return false;
+    };
+    if ObjectId::new(object_id).is_err() || first.request_id != format!("ingest:{owner_id}") {
+        return false;
+    }
+    let digest_prefix = format!("{object_id}:");
+    let Some(digest_suffix) = first.request_digest.strip_prefix(&digest_prefix) else {
+        return false;
+    };
+    let Some((size, copies)) = digest_suffix.split_once(':') else {
+        return false;
+    };
+    let (Ok(size), Ok(copies)) = (size.parse::<u64>(), copies.parse::<usize>()) else {
+        return false;
+    };
+    if copies == 0 || copies != claims.len() {
+        return false;
+    }
+    let claimed_size = size.max(1);
+    claims.iter().all(|claim| {
+        claim.owner_id == owner_id
+            && claim.lease_owner.as_deref() == Some(lease_owner)
+            && claim.request_id == first.request_id
+            && claim.request_digest == first.request_digest
+            && claim.created_at_utc == first.created_at_utc
+            && claim.reserved_bytes == claimed_size
+            && claim.claim_id == format!("ingest:{owner_id}:{}", claim.disk_id)
+    })
+}
+
 pub fn update_disk_capacity_claim_consumption(
     live_sqlite_path: impl AsRef<Path>,
     kind: DiskCapacityClaimKind,
@@ -542,7 +741,8 @@ fn parse_kind(value: &str) -> Option<DiskCapacityClaimKind> {
 mod tests {
     use super::{
         acquire_disk_capacity_claims, read_outstanding_disk_capacity,
-        read_settlement_eligible_disk_ids, release_disk_capacity_claims,
+        read_settlement_eligible_disk_ids,
+        reconcile_abandoned_ingest_disk_capacity_claims_at_startup, release_disk_capacity_claims,
         update_disk_capacity_claim_consumption, DiskCapacityClaimAllocation,
         DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
     };
@@ -657,6 +857,123 @@ mod tests {
         assert!(read_outstanding_disk_capacity(&database)
             .expect("released claims excluded")
             .is_empty());
+        cleanup(&database);
+    }
+
+    #[test]
+    fn startup_releases_only_recognized_abandoned_direct_ingest_claims() {
+        let database = fixture("startup-recovery");
+        acquire_disk_capacity_claims(&direct_ingest_request(
+            &database,
+            "ingest-files-2026-07-25t00-00-00z",
+            "store-a/object.bin",
+            60,
+            None,
+            "2026-07-25T00:00:00Z",
+        ))
+        .expect("abandoned direct-ingest claim");
+
+        let report = reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+            &database,
+            "2026-07-25T01:00:00Z",
+        )
+        .expect("startup recovery");
+        assert_eq!(report.owners_scanned, 1);
+        assert_eq!(report.owners_released, 1);
+        assert_eq!(report.claims_released, 1);
+        assert_eq!(report.reclaimed_bytes, 60);
+        assert!(read_outstanding_disk_capacity(&database)
+            .expect("outstanding claims")
+            .is_empty());
+
+        let replay = reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+            &database,
+            "2026-07-25T01:00:01Z",
+        )
+        .expect("idempotent startup recovery");
+        assert_eq!(replay.owners_scanned, 0);
+        cleanup(&database);
+    }
+
+    #[test]
+    fn startup_recovery_retains_current_leased_and_unrecognized_claims() {
+        let database = fixture("startup-recovery-retained");
+        acquire_disk_capacity_claims(&direct_ingest_request(
+            &database,
+            "ingest-files-current",
+            "store-a/current.bin",
+            10,
+            None,
+            "2026-07-25T01:00:00Z",
+        ))
+        .expect("current claim");
+        acquire_disk_capacity_claims(&direct_ingest_request(
+            &database,
+            "ingest-files-leased",
+            "store-a/leased.bin",
+            20,
+            Some("2026-07-25T02:00:00Z"),
+            "2026-07-25T00:00:00Z",
+        ))
+        .expect("leased claim");
+        let mut unfamiliar = direct_ingest_request(
+            &database,
+            "ingest-files-unfamiliar",
+            "store-a/unfamiliar.bin",
+            30,
+            None,
+            "2026-07-25T00:00:00Z",
+        );
+        unfamiliar.request_id = "external-contract".to_string();
+        acquire_disk_capacity_claims(&unfamiliar).expect("unrecognized claim");
+        acquire_disk_capacity_claims(&request(
+            &database,
+            DiskCapacityClaimKind::Workspace,
+            "workspace-a",
+            5,
+        ))
+        .expect("non-ingest claim");
+
+        let report = reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+            &database,
+            "2026-07-25T01:00:00Z",
+        )
+        .expect("startup recovery");
+        assert_eq!(report.owners_scanned, 3);
+        assert_eq!(report.owners_released, 0);
+        assert_eq!(report.current_owners_retained, 1);
+        assert_eq!(report.leased_owners_retained, 1);
+        assert_eq!(report.unrecognized_owners_retained, 1);
+        assert_eq!(
+            read_outstanding_disk_capacity(&database)
+                .expect("all retained")
+                .values()
+                .sum::<u64>(),
+            65
+        );
+        cleanup(&database);
+    }
+
+    #[test]
+    fn startup_recovery_recognizes_zero_byte_accounting_floor() {
+        let database = fixture("startup-recovery-empty-object");
+        acquire_disk_capacity_claims(&direct_ingest_request(
+            &database,
+            "ingest-files-empty",
+            "store-a/empty.bin",
+            0,
+            None,
+            "2026-07-25T00:00:00Z",
+        ))
+        .expect("empty-object claim");
+
+        let report = reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+            &database,
+            "2026-07-25T01:00:00Z",
+        )
+        .expect("startup recovery");
+        assert_eq!(report.claims_released, 1);
+        assert_eq!(report.reclaimed_bytes, 1);
         cleanup(&database);
     }
 
@@ -786,6 +1103,32 @@ mod tests {
                 disk_id: DiskId::new("disk-a").expect("disk id"),
                 measured_available_bytes: 100,
                 requested_bytes: bytes,
+            }],
+        }
+    }
+
+    fn direct_ingest_request(
+        database: &Path,
+        job_id: &str,
+        object_id: &str,
+        bytes: u64,
+        lease_expires_at_utc: Option<&str>,
+        recorded_at_utc: &str,
+    ) -> DiskCapacityClaimRequest {
+        let owner_id = format!("{job_id}:{object_id}");
+        DiskCapacityClaimRequest {
+            live_sqlite_path: database.to_path_buf(),
+            kind: DiskCapacityClaimKind::Ingest,
+            owner_id: owner_id.clone(),
+            request_id: format!("ingest:{owner_id}"),
+            request_digest: format!("{object_id}:{bytes}:1"),
+            lease_owner: Some(job_id.to_string()),
+            lease_expires_at_utc: lease_expires_at_utc.map(str::to_string),
+            created_at_utc: recorded_at_utc.to_string(),
+            allocations: vec![DiskCapacityClaimAllocation {
+                disk_id: DiskId::new("disk-a").expect("disk id"),
+                measured_available_bytes: 100,
+                requested_bytes: bytes.max(1),
             }],
         }
     }

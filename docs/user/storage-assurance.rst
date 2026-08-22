@@ -17,6 +17,12 @@ idle gate. Primary ingress always has precedence. If ingest becomes active
 during a relocation, the temporary destination is discarded and the
 authoritative source placement remains untouched.
 
+At daemon startup, structurally verified capacity reservations belonging to a
+stopped direct-ingest worker are released before assurance begins. This keeps
+abandoned reservations from suppressing a valid rebalance. Durable destage,
+workspace, repair, evacuation, and unfamiliar claims remain authoritative and
+are not cleared by that recovery pass.
+
 Action order
 ------------
 

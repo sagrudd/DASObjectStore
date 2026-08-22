@@ -268,6 +268,23 @@ fn run() -> Result<(), String> {
             logical_identity_backfill.needs_review
         );
     }
+    let ingest_capacity_recovery =
+        dasobjectstore_metadata::reconcile_abandoned_ingest_disk_capacity_claims_at_startup(
+            &live_sqlite_path,
+            &startup_timestamp,
+        )
+        .map_err(|error| format!("ingest capacity-claim startup recovery failed: {error}"))?;
+    if ingest_capacity_recovery.claims_released > 0
+        || ingest_capacity_recovery.unrecognized_owners_retained > 0
+    {
+        eprintln!(
+            "ingest capacity-claim recovery released {} claim(s) for {} stopped owner(s), reclaimed {} byte(s), and retained {} unfamiliar owner(s)",
+            ingest_capacity_recovery.claims_released,
+            ingest_capacity_recovery.owners_released,
+            ingest_capacity_recovery.reclaimed_bytes,
+            ingest_capacity_recovery.unrecognized_owners_retained,
+        );
+    }
     let retirement_recovery =
         recover_profile_retirements(&profile_registry, profile_catalogue_live_sqlite_path())
             .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;

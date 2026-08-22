@@ -143,7 +143,7 @@ pub(super) fn spawn_hdd_settlement_workers(
                     acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
                         live_sqlite_path: live_sqlite_path.clone(),
                         kind: DiskCapacityClaimKind::Ingest,
-                        owner_id: claim_owner,
+                        owner_id: claim_owner.clone(),
                         request_id: format!(
                             "ingest:{}:{}",
                             ingest_job_id.as_str(),
@@ -169,10 +169,22 @@ pub(super) fn spawn_hdd_settlement_workers(
                     });
                     break;
                 }
-                let _ = event_tx.send(HddSettlementEvent::Started {
-                    entry: work.entry.clone(),
-                    roots: roots.clone(),
-                });
+                if event_tx
+                    .send(HddSettlementEvent::Started {
+                        entry: work.entry.clone(),
+                        roots: roots.clone(),
+                    })
+                    .is_err()
+                {
+                    let _ = release_hdd_settlement_roots(&scheduler, &roots, 0);
+                    let _ = release_disk_capacity_claims(
+                        &live_sqlite_path,
+                        DiskCapacityClaimKind::Ingest,
+                        &claim_owner,
+                        &recorded_at_utc,
+                    );
+                    break;
+                }
                 let entry = work.entry.clone();
                 let mut payload = work.payload;
                 payload.set_disk_roots(roots.clone());
@@ -187,19 +199,55 @@ pub(super) fn spawn_hdd_settlement_workers(
                 if let Err(error) =
                     release_hdd_settlement_roots(&scheduler, &roots, work.entry.size_bytes)
                 {
+                    let release_error = release_disk_capacity_claims(
+                        &live_sqlite_path,
+                        DiskCapacityClaimKind::Ingest,
+                        &claim_owner,
+                        &recorded_at_utc,
+                    )
+                    .err();
                     let _ = event_tx.send(HddSettlementEvent::Failed {
-                        error: ObjectPutError::Io(io::Error::other(error.to_string())),
+                        error: ObjectPutError::Io(io::Error::other(match release_error {
+                            Some(release_error) => format!(
+                                "{error}; failed to release stopped ingest capacity claim: {release_error}"
+                            ),
+                            None => error.to_string(),
+                        })),
                     });
                     break;
                 }
                 match result {
                     Ok(report) => {
-                        let _ = event_tx.send(HddSettlementEvent::Settled {
-                            entry: work.entry,
-                            report,
-                        });
+                        if event_tx
+                            .send(HddSettlementEvent::Settled {
+                                entry: work.entry,
+                                report,
+                            })
+                            .is_err()
+                        {
+                            let _ = release_disk_capacity_claims(
+                                &live_sqlite_path,
+                                DiskCapacityClaimKind::Ingest,
+                                &claim_owner,
+                                &recorded_at_utc,
+                            );
+                            break;
+                        }
                     }
                     Err(error) => {
+                        let release_error = release_disk_capacity_claims(
+                            &live_sqlite_path,
+                            DiskCapacityClaimKind::Ingest,
+                            &claim_owner,
+                            &recorded_at_utc,
+                        )
+                        .err();
+                        let error = match release_error {
+                            Some(release_error) => ObjectPutError::Io(io::Error::other(format!(
+                                "{error}; failed to release stopped ingest capacity claim: {release_error}"
+                            ))),
+                            None => error,
+                        };
                         let _ = event_tx.send(HddSettlementEvent::Failed { error });
                         break;
                     }
@@ -361,5 +409,106 @@ pub(super) fn wait_for_ssd_admission(
                 )?;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dasobjectstore_metadata::{read_outstanding_disk_capacity, LIVE_SCHEMA_SQL};
+    use rusqlite::Connection;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn disconnected_requester_releases_acquired_hdd_capacity_claim() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-disconnected-ingest-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let hdd_root = root.join("hdd-a");
+        fs::create_dir_all(&hdd_root).expect("HDD root");
+        let live_sqlite_path = root.join("live.sqlite");
+        let connection = Connection::open(&live_sqlite_path).expect("live metadata");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools (pool_id,state,created_at_utc,updated_at_utc)
+                 VALUES ('pool-a','Clean','2026-07-25T00:00:00Z','2026-07-25T00:00:00Z')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id,pool_id,role,state,created_at_utc,updated_at_utc
+                 ) VALUES (
+                    'disk-a','pool-a','hdd_capacity','Healthy',
+                    '2026-07-25T00:00:00Z','2026-07-25T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("disk");
+        drop(connection);
+
+        let roots = vec![DiskCopyRoot::new(
+            DiskId::new("disk-a").expect("disk id"),
+            &hdd_root,
+        )];
+        let scheduler = new_shared_hdd_settlement_scheduler_with_claims(&roots, &BTreeMap::new())
+            .expect("scheduler");
+        let source_path = root.join("source.bin");
+        fs::write(&source_path, b"data").expect("source");
+        let object_id = ObjectId::new("store-a/source.bin").expect("object id");
+        let (settle_tx, settle_rx) = mpsc::sync_channel(1);
+        let (event_tx, event_rx) = mpsc::channel();
+        drop(event_rx);
+        let workers = spawn_hdd_settlement_workers(
+            settle_rx,
+            event_tx,
+            1,
+            scheduler,
+            live_sqlite_path.clone(),
+            IngestJobId::new("ingest-files-disconnected").expect("job id"),
+            "2026-07-25T00:00:00Z".to_string(),
+        );
+        settle_tx
+            .send(HddSettlementWork {
+                entry: FileIngestEntry {
+                    source_path: source_path.clone(),
+                    relative_path: PathBuf::from("source.bin"),
+                    object_id: object_id.clone(),
+                    size_bytes: 4,
+                    file_index: 1,
+                },
+                payload: HddSettlementPayload::Direct(DirectObjectPutRequest::new(
+                    object_id,
+                    source_path,
+                    Vec::new(),
+                    1,
+                )),
+            })
+            .expect("work accepted");
+        drop(settle_tx);
+        for worker in workers {
+            worker.join().expect("worker exits");
+        }
+
+        assert!(read_outstanding_disk_capacity(&live_sqlite_path)
+            .expect("capacity claims")
+            .is_empty());
+        let state: String = Connection::open(&live_sqlite_path)
+            .expect("metadata")
+            .query_row(
+                "SELECT state FROM disk_capacity_claims WHERE claim_kind='ingest'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("released claim remains auditable");
+        assert_eq!(state, "released");
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

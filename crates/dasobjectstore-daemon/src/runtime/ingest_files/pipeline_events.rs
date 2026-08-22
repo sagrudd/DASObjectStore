@@ -156,14 +156,26 @@ pub(super) fn drain_hdd_settlement_events(
                 ))?;
             }
             HddSettlementEvent::Settled { entry, report } => {
+                let claim_owner = format!("{}:{}", job_id.as_str(), entry.object_id.as_str());
                 if let Err(error) =
                     commit_object_put(live_sqlite_path, endpoint, &report, recorded_at_utc)
                 {
+                    let release_error = release_disk_capacity_claims(
+                        live_sqlite_path,
+                        DiskCapacityClaimKind::Ingest,
+                        &claim_owner,
+                        recorded_at_utc,
+                    )
+                    .err();
                     return Err(DaemonIngestFilesRuntimeError::CommandFailed(format!(
-                        "failed to commit completed object metadata: {error}"
+                        "failed to commit completed object metadata: {error}{}",
+                        release_error
+                            .map(|release_error| format!(
+                                "; failed to release stopped ingest capacity claim: {release_error}"
+                            ))
+                            .unwrap_or_default()
                     )));
                 }
-                let claim_owner = format!("{}:{}", job_id.as_str(), entry.object_id.as_str());
                 release_disk_capacity_claims(
                     live_sqlite_path,
                     DiskCapacityClaimKind::Ingest,
