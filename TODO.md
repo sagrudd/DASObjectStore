@@ -80,7 +80,10 @@ Work is dependency ordered. Only these entries define open release work:
   priority cancellation source contracts remain green. The commit-bound,
   CODEX-only appliance harness is delivered; its quiescent physical load,
   device-mapping, latency, PSI, cancellation, and staging-recovery evidence
-  remains the final EPIC C acceptance action.
+  remains the final EPIC C acceptance action. Runtime endpoint status now
+  consumes the configured external-gateway HTTPS descriptor and fails closed
+  when a private-IP Web or S3 origin is not assigned to the appliance, instead
+  of reporting an inferred legacy HTTP endpoint as remote-ready.
 - [~] **EPIC D — security and package authority.** The strict Ergasterion
   binding-v2 exchange is live behind dedicated HTTPS routes: Ed25519/JCS
   proof verification, independently admitted current host/Prosopikon

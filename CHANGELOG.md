@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.172.1 - 2026-08-22
+
+- Make ``dasobjectstore status`` report the configured HTTPS external-gateway
+  descriptor and service instead of inferring a legacy Docker/HTTP endpoint.
+  A configured private-IP Web or S3 origin is no longer reported remote-ready
+  when that address is not assigned to the appliance.
+
 ## 0.172.0 - 2026-08-22
 
 - Add an explicit product-profile provisioning entry point for a typed,

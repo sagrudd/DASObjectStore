@@ -44,6 +44,12 @@ host itself; it is not a valid endpoint for a different workstation or for
 ``direct_gateway``. The native direct gateway requires HTTPS and a
 hostname-valid appliance certificate.
 
+``dasobjectstore status`` reports the exact configured public descriptor for
+an external gateway. When that descriptor contains a private IP address, the
+address must be assigned to the appliance before the command reports the Web
+or S3 surface as remote-ready. This prevents an active wildcard listener from
+masking a stale public origin or certificate binding after a network change.
+
 When rendering Docker Compose for the appliance object service, the CLI defaults
 to a remote-capable host binding:
 
