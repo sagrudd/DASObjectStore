@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.172.0 - 2026-08-22
+
+- Add an explicit product-profile provisioning entry point for a typed,
+  credential-free Pistis host subject. The daemon request records the verified
+  subject as its administrator and remains unusable through direct root,
+  sudo, or unreviewed socket peers.
+
+- Isolate the S3 reconciliation regression fixture from the installed host's
+  live profile-binding registry, so the release gate exercises the intended
+  Garage repair path on both build hosts and deployed appliances.
+- Isolate the preverified enclosure-preparation contract fixture from a live
+  appliance mount root, preserving its authorization-before-validation proof
+  on an already prepared DAS host.
+- Align the standalone-auth documentation gate with the Pistis-only human
+  authority decision, retaining OS identities solely as daemon transport and
+  ordinary writer-policy inputs rather than a local login fallback.
+- Keep the TLS S3 probe fixture's pre-bound listener open when starting its
+  server, eliminating an intermittent release-gate race on the reserved port.
+- Synchronize the Mnemosyne product manifest with 0.171.12 and declare that
+  standalone human authentication is host-owned by Monas/Pistis, not local to
+  DASObjectStore.
+- Flush and close generated report-renderer fixtures before making them
+  executable, preventing intermittent Linux `ETXTBSY` failures under the full
+  parallel workspace gate.
+- Remove an avoidable unwrap from dynamic application-token scope validation,
+  keeping the authority path clean under the warning-deny static gate.
+
 ## 0.171.11 - 2026-08-22
 
 - Reconcile structurally verified direct-ingest capacity claims left by a

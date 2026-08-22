@@ -34,7 +34,7 @@ fn product_manifest_declares_dasobjectstore_plugin_contract() {
     assert!(manifest["support"]["standalone"]["supported"]
         .as_bool()
         .expect("standalone support is bool"));
-    assert!(manifest["support"]["standalone"]["local_authentication"]
+    assert!(!manifest["support"]["standalone"]["local_authentication"]
         .as_bool()
         .expect("local_authentication is bool"));
     assert!(manifest["support"]["standalone"]["local_hardware"]

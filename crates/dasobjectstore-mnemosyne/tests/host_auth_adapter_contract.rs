@@ -450,6 +450,7 @@ async fn preverified_ingest_control_requires_a_verified_das_administrator() {
 
 #[tokio::test]
 async fn preverified_enclosure_prepare_requires_a_verified_das_administrator() {
+    let mount_root = temp_root("preverified-enclosure-prepare");
     let request = || {
         Request::builder()
             .method("POST")
@@ -457,7 +458,16 @@ async fn preverified_enclosure_prepare_requires_a_verified_das_administrator() {
             .header(FEDERATED_CSRF_HEADER, csrf_binding())
             .header("content-type", "application/json")
             .body(Body::from(
-                r#"{"ssd_device":"/dev/disk/by-id/nvme-test","hdd_devices":[],"dry_run":true,"allow_format":true,"existing_data_acknowledged":true,"confirmation_marker":"confirm enclosure preparation"}"#,
+                serde_json::json!({
+                    "ssd_device": "/dev/disk/by-id/nvme-test",
+                    "hdd_devices": [],
+                    "mount_root": mount_root.display().to_string(),
+                    "dry_run": true,
+                    "allow_format": true,
+                    "existing_data_acknowledged": true,
+                    "confirmation_marker": "confirm enclosure preparation"
+                })
+                .to_string(),
             ))
             .expect("request")
     };
@@ -496,6 +506,7 @@ async fn preverified_enclosure_prepare_requires_a_verified_das_administrator() {
         .await
         .expect("response");
     assert_eq!(legacy_headers.status(), StatusCode::UNAUTHORIZED);
+    cleanup(&mount_root);
 }
 
 #[tokio::test]

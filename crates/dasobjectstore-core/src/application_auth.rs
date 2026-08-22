@@ -660,8 +660,7 @@ impl AccessTokenClaims {
             });
         }
         self.scope.validate()?;
-        if identity.dynamic_binding.is_some() {
-            let policy = identity.dynamic_binding.as_ref().expect("checked");
+        if let Some(policy) = &identity.dynamic_binding {
             if self.audience != policy.audience
                 || !identity.scope.dynamic_ceiling_contains(&self.scope)
                 || self.scope.max_object_bytes.is_none()

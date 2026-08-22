@@ -9,8 +9,9 @@ use crate::{ProductPolicyTemplateAdapterError, ProductPolicyTemplateEnvelope};
 use dasobjectstore_core::{manifest::ObjectStoreManifest, store::StorePolicy};
 use dasobjectstore_daemon::{
     api::{
-        ProfileBindingOperation, ProfileBindingRequest, ProfileBindingResponse,
-        ProfileBindingValidationError, PROFILE_BINDING_CONFIRMATION,
+        PreverifiedHostSubject, PreverifiedHostSubjectValidationError, ProfileBindingOperation,
+        ProfileBindingRequest, ProfileBindingResponse, ProfileBindingValidationError,
+        PROFILE_BINDING_CONFIRMATION,
     },
     client::{DaemonClient, DaemonClientError, DaemonClientTransport},
 };
@@ -97,6 +98,27 @@ pub fn provision_product_profile<T: DaemonClientTransport>(
     Ok(client.register_profile_binding(plan.daemon_request()?)?)
 }
 
+/// Provision a product-owned profile through a host identity already verified
+/// by Pistis.
+///
+/// The verified subject is deliberately supplied at execution time rather
+/// than persisted in [`ProductProfileProvisioningPlan`]. The daemon combines
+/// this credential-free envelope with the authenticated Unix service peer and
+/// rejects direct root, sudo, or unreviewed callers.
+pub fn provision_product_profile_with_verified_subject<T: DaemonClientTransport>(
+    client: &DaemonClient<T>,
+    plan: &ProductProfileProvisioningPlan,
+    verified_subject: PreverifiedHostSubject,
+) -> Result<ProfileBindingResponse, ProductProfileProvisioningError> {
+    verified_subject
+        .validate()
+        .map_err(ProductProfileProvisioningError::InvalidVerifiedSubject)?;
+    let mut request = plan.daemon_request()?;
+    request.administrator_actor = Some(verified_subject.subject_id.clone());
+    request.verified_subject = Some(verified_subject);
+    Ok(client.register_profile_binding(request)?)
+}
+
 #[derive(Debug)]
 pub enum ProductProfileProvisioningError {
     InvalidTemplate(ProductPolicyTemplateAdapterError),
@@ -108,6 +130,7 @@ pub enum ProductProfileProvisioningError {
     CapacityMismatch,
     CopyCountMismatch,
     InvalidDaemonRequest(ProfileBindingValidationError),
+    InvalidVerifiedSubject(PreverifiedHostSubjectValidationError),
     Daemon(DaemonClientError),
 }
 
@@ -153,6 +176,9 @@ impl fmt::Display for ProductProfileProvisioningError {
             Self::InvalidDaemonRequest(error) => {
                 write!(f, "invalid daemon provisioning request: {error}")
             }
+            Self::InvalidVerifiedSubject(error) => {
+                write!(f, "invalid verified Pistis host subject: {error}")
+            }
             Self::Daemon(error) => write!(f, "daemon provisioning failed: {error}"),
         }
     }
@@ -173,7 +199,10 @@ mod tests {
         store::{CapacityPolicy, StoreClass},
         StoragePolicyTemplate,
     };
-    use dasobjectstore_daemon::api::{DaemonApiRequest, DaemonApiResponse, DaemonJobId};
+    use dasobjectstore_daemon::api::{
+        DaemonApiRequest, DaemonApiResponse, DaemonJobId, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+        PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+    };
     use std::cell::Cell;
 
     fn plan() -> ProductProfileProvisioningPlan {
@@ -215,6 +244,16 @@ mod tests {
             client_request_id: "synoptikon-install-1".to_string(),
             administrator_actor: "package-installer".to_string(),
             dry_run: false,
+        }
+    }
+
+    fn verified_subject() -> PreverifiedHostSubject {
+        PreverifiedHostSubject {
+            schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.to_string(),
+            peer_identity: PREVERIFIED_HOST_GUI_API_PEER_IDENTITY.to_string(),
+            subject_id: "pistis-subject-1".to_string(),
+            session_id: "pistis-session-1".to_string(),
+            correlation_id: "pistis-correlation-1".to_string(),
         }
     }
 
@@ -266,6 +305,11 @@ mod tests {
                     panic!("unexpected daemon request")
                 };
                 assert_eq!(request.operation, ProfileBindingOperation::Provision);
+                assert_eq!(request.verified_subject.as_ref(), Some(&verified_subject()));
+                assert_eq!(
+                    request.administrator_actor.as_deref(),
+                    Some("pistis-subject-1")
+                );
                 self.0.set(self.0.get() + 1);
                 Ok(DaemonApiResponse::RegisterProfileBinding(
                     ProfileBindingResponse::accepted(
@@ -278,7 +322,9 @@ mod tests {
         }
 
         let client = DaemonClient::new(RecordingTransport(Cell::new(0)));
-        let response = provision_product_profile(&client, &plan()).expect("daemon accepts request");
+        let response =
+            provision_product_profile_with_verified_subject(&client, &plan(), verified_subject())
+                .expect("daemon accepts request");
         assert_eq!(response.accepted.job_id.as_str(), "product-profile-1");
         assert_eq!(response.operation, ProfileBindingOperation::Provision);
     }

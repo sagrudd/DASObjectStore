@@ -84,7 +84,7 @@ fn plugin_spec_requires_daemon_backed_mutations() {
 }
 
 #[test]
-fn standalone_auth_decision_prefers_os_local_authority() {
+fn standalone_auth_decision_requires_pistis_host_authority() {
     for relative_path in [
         "docs/standalone-auth.md",
         "docs/standalone-service.md",
@@ -94,12 +94,27 @@ fn standalone_auth_decision_prefers_os_local_authority() {
         let document = fs::read_to_string(repo_root().join(relative_path))
             .unwrap_or_else(|_| panic!("read {relative_path}"));
 
-        assert_contains(&document, "OS-local");
-        assert_contains(&document, "sudo");
-        assert_contains(&document, "administrator");
-        assert_contains(&document, "product-local");
+        assert_contains(&document, "Monas");
+        assert_contains(&document, "Pistis");
         assert_contains(&document, "dasobjectstored");
     }
+
+    let decision = fs::read_to_string(repo_root().join("docs/standalone-auth.md"))
+        .expect("read standalone authentication decision");
+    assert_contains(&decision, "They are not human authentication");
+    assert_contains(&decision, "Neither sudo membership");
+    assert_contains(&decision, "retired product-local login/session store");
+
+    let user_contract = fs::read_to_string(repo_root().join("docs/user/standalone-auth.rst"))
+        .expect("read standalone authentication user contract");
+    assert_contains(
+        &user_contract,
+        "DASObjectStore does not authenticate human operators locally",
+    );
+    assert_contains(
+        &user_contract,
+        "They are not a password, PAM, administrator",
+    );
 }
 
 #[test]

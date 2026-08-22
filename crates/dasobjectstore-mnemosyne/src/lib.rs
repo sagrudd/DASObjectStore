@@ -101,7 +101,8 @@ pub use policy_templates::{
     ProductPolicyTemplateEnvelope, PRODUCT_POLICY_TEMPLATE_SCHEMA_VERSION,
 };
 pub use product_provisioning::{
-    provision_product_profile, ProductProfileProvisioningError, ProductProfileProvisioningPlan,
+    provision_product_profile, provision_product_profile_with_verified_subject,
+    ProductProfileProvisioningError, ProductProfileProvisioningPlan,
 };
 pub use product_ui::{
     bootstrap_path_for_web_mount, export_product_ui_bootstrap,

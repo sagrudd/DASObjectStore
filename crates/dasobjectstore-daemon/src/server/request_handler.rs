@@ -3543,7 +3543,8 @@ mod tests {
         )
         .with_registry_paths(&store_registry_path, &subobject_registry_path)
         .with_live_sqlite_path(live_sqlite.clone())
-        .with_hdd_root_path(hdd_root);
+        .with_hdd_root_path(hdd_root)
+        .with_profile_binding_registry_path(root.join("profile-bindings.json"));
         let actor = preverified_host_service_actor();
         let mut progress_events = Vec::new();
 

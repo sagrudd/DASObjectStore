@@ -247,8 +247,27 @@ mod tests {
     use serde_json::json;
     use std::ffi::OsString;
     use std::fs;
+    #[cfg(unix)]
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::path::Path;
     use std::time::Duration;
     use uuid::Uuid;
+
+    #[cfg(unix)]
+    fn write_mock_renderer(path: &Path, contents: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut file = fs::File::create(path).expect("create mock renderer");
+        file.write_all(contents.as_bytes())
+            .expect("write mock renderer");
+        file.sync_all().expect("flush mock renderer");
+        drop(file);
+
+        let mut permissions = fs::metadata(path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions).expect("permissions");
+    }
 
     #[test]
     fn rejects_unsupported_benchmark_json_schema() {
@@ -283,20 +302,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rebuild_invokes_renderer_and_returns_pdf_bytes() {
-        use std::os::unix::fs::PermissionsExt;
-
         let temp_root =
             std::env::temp_dir().join(format!("dasobjectstore-reporting-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&temp_root).expect("temp root");
         let renderer = temp_root.join("fake-renderer.sh");
-        fs::write(
+        write_mock_renderer(
             &renderer,
             "#!/bin/sh\nif [ \"$1\" != \"performance-report\" ]; then exit 2; fi\nprintf '%s' '%PDF-FAKE' > \"$5\"\n",
-        )
-        .expect("fake renderer written");
-        let mut permissions = fs::metadata(&renderer).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&renderer, permissions).expect("permissions");
+        );
 
         let artifact = json!({
             "schema": PERFORMANCE_REPORT_JSON_SCHEMA,
@@ -322,8 +335,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn rebuild_uses_supplied_host_visible_rebuild_root_for_renderer_paths() {
-        use std::os::unix::fs::PermissionsExt;
-
         let temp_root = std::env::temp_dir().join(format!(
             "dasobjectstore-reporting-root-test-{}",
             Uuid::new_v4()
@@ -331,17 +342,13 @@ mod tests {
         fs::create_dir_all(&temp_root).expect("temp root");
         let renderer = temp_root.join("path-capturing-renderer.sh");
         let marker = temp_root.join("renderer-args.txt");
-        fs::write(
+        write_mock_renderer(
             &renderer,
-            format!(
+            &format!(
                 "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '%s' '%PDF-FAKE' > \"$5\"\n",
                 marker.display()
             ),
-        )
-        .expect("fake renderer written");
-        let mut permissions = fs::metadata(&renderer).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&renderer, permissions).expect("permissions");
+        );
 
         let rebuild_root = temp_root.join("host-visible-rebuild-root");
         let artifact = json!({

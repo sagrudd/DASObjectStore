@@ -310,9 +310,8 @@ mod tests {
             .expect("load TLS");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
         let address = listener.local_addr().expect("address");
-        drop(listener);
         let server = tokio::spawn(async move {
-            axum_server::bind_rustls(address, tls)
+            axum_server::from_tcp_rustls(listener, tls)
                 .serve(app.into_make_service())
                 .await
         });

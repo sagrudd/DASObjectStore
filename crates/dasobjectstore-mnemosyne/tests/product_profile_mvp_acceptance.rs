@@ -9,6 +9,10 @@ use dasobjectstore_core::{
     StoragePolicyTemplate,
 };
 use dasobjectstore_daemon::{
+    api::{
+        PreverifiedHostSubject, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+        PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+    },
     runtime::{
         delete_profile_object, get_profile_object, get_profile_object_range, list_profile_objects,
         put_profile_object, verify_profile_object, DaemonServiceRuntimeError, FolderBackend,
@@ -17,10 +21,11 @@ use dasobjectstore_daemon::{
     DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOrchestrator,
     DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
     DaemonServiceStatusResponse, FixedDaemonClock, InProcessDaemonTransport,
+    DEFAULT_DAEMON_SERVICE_USER,
 };
 use dasobjectstore_mnemosyne::{
-    provision_product_profile, ProductPolicyAdapterKind, ProductPolicyTemplateAdapter,
-    ProductProfileProvisioningPlan,
+    provision_product_profile_with_verified_subject, ProductPolicyAdapterKind,
+    ProductPolicyTemplateAdapter, ProductProfileProvisioningPlan,
 };
 use std::{
     fs,
@@ -41,7 +46,8 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
     fs::create_dir_all(&state_root).expect("state root");
 
     let plan = provisioning_plan(backend_root.clone());
-    let actor = DaemonLocalActor::new(0).with_username("release-acceptance");
+    let actor = DaemonLocalActor::new(997).with_username(DEFAULT_DAEMON_SERVICE_USER);
+    let verified_subject = verified_pistis_subject();
     let handler = DaemonRequestHandler::new(
         AcceptanceOrchestrator,
         FixedDaemonClock::new("2026-07-16T12:00:00Z"),
@@ -58,10 +64,13 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
             .map_err(|error| DaemonClientError::Transport(error.to_string()))
     }));
 
-    let first = provision_product_profile(&client, &plan).expect("first provision succeeds");
+    let first =
+        provision_product_profile_with_verified_subject(&client, &plan, verified_subject.clone())
+            .expect("first provision succeeds");
     assert!(!first.reused);
     assert!(first.store_definition_published);
-    let second = provision_product_profile(&client, &plan).expect("provision retry succeeds");
+    let second = provision_product_profile_with_verified_subject(&client, &plan, verified_subject)
+        .expect("provision retry succeeds");
     assert!(
         second.reused,
         "identical product provisioning must be idempotent"
@@ -135,6 +144,16 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
     assert!(get_profile_object(&reopened, &object_key(0)).is_err());
 
     cleanup(&root);
+}
+
+fn verified_pistis_subject() -> PreverifiedHostSubject {
+    PreverifiedHostSubject {
+        schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.to_string(),
+        peer_identity: PREVERIFIED_HOST_GUI_API_PEER_IDENTITY.to_string(),
+        subject_id: "pistis-release-subject".to_string(),
+        session_id: "pistis-release-session".to_string(),
+        correlation_id: "pistis-release-correlation".to_string(),
+    }
 }
 
 fn provisioning_plan(backend_root: PathBuf) -> ProductProfileProvisioningPlan {
