@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.5 - 2026-08-23
+
+- Restore exact semantic-version agreement between the DASObjectStore package
+  and its public Mnemosyne product manifest, as enforced by the full Linux
+  workspace release gate.
+
 ## 0.173.4 - 2026-08-23
 
 - Isolate standalone-server CLI fixtures from an installed appliance's
