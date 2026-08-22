@@ -143,13 +143,20 @@ For an existing preserved package conffile, perform the atomic migration while
 the Web/API unit is inactive, then validate before activation::
 
    sudo /usr/libexec/dasobjectstore/migrate-monas-integrated-config \
+     --public-base-url https://storage.example:8443 \
      --public-endpoint-url https://storage.example:3900 \
      --region mnemosyne-local
    sudo /usr/bin/dasobjectstore-server \
      --config /opt/dasobjectstore/config.json --check-config --json
 
 The migration preserves unrelated TLS, listener, and product settings, keeps
-the existing file ownership and mode, and refuses non-HTTPS descriptors.
+the existing file ownership and mode, and refuses non-HTTPS descriptors.  A
+formal Monas activation supplies both URLs from its sealed runtime profile so
+the Web/EasyConnect origin and S3 endpoint move to the same verified Site
+generation as the newly activated service leaves.  The optional
+``--public-base-url`` remains available for that package-owned projection; an
+older standalone migration that omits it leaves the existing Web origin
+unchanged.
 
 Omitting ``s3_ingress`` is backward compatible and resolves to:
 

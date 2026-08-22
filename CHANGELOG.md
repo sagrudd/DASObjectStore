@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.2 - 2026-08-22
+
+- Extend the atomic Monas-integrated configuration migration to project the
+  sealed Web/EasyConnect public origin together with the S3 endpoint, so a
+  formally approved Site-origin move cannot leave DAS advertising its retired
+  address.
+
 ## 0.173.1 - 2026-08-22
 
 - Recover historical EasyConnect ingest-queue rows whose ``object_type`` was

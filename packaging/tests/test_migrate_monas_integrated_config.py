@@ -25,12 +25,14 @@ class MigrationTest(unittest.TestCase):
             subprocess.run(
                 [
                     str(SCRIPT), "--config", str(config_path),
+                    "--public-base-url", "https://192.168.0.193:8443",
                     "--public-endpoint-url", "https://192.168.1.192:3900",
                     "--region", "mnemosyne-local",
                 ],
                 check=True,
             )
             migrated = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(migrated["public_base_url"], "https://192.168.0.193:8443")
             self.assertEqual(migrated["authentication"]["authority"], "monas")
             self.assertEqual(migrated["s3_ingress"]["mode"], "external_gateway")
             self.assertEqual(migrated["s3_ingress"]["max_concurrent_uploads"], 17)
@@ -45,6 +47,23 @@ class MigrationTest(unittest.TestCase):
             result = subprocess.run(
                 [str(SCRIPT), "--config", str(config_path),
                  "--public-endpoint-url", "http://192.168.1.192:3900", "--region", "local"],
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(config_path.read_text(encoding="utf-8"), original)
+
+    def test_rejects_unsafe_public_base_url_without_modifying_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = pathlib.Path(directory) / "config.json"
+            original = '{"public_base_url":"https://old.example:8443"}\n'
+            config_path.write_text(original, encoding="utf-8")
+            result = subprocess.run(
+                [
+                    str(SCRIPT), "--config", str(config_path),
+                    "--public-base-url", "https://user@192.168.0.193:8443/login",
+                    "--public-endpoint-url", "https://192.168.0.193:3900",
+                    "--region", "local",
+                ],
                 check=False,
             )
             self.assertNotEqual(result.returncode, 0)

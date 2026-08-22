@@ -9,19 +9,27 @@ import tempfile
 import urllib.parse
 
 
+def parse_root_https_url(parser, label: str, value: str):
+    endpoint = urllib.parse.urlsplit(value)
+    if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.password:
+        parser.error(f"{label} must be an HTTPS URL without credentials")
+    if endpoint.path not in ("", "/") or endpoint.query or endpoint.fragment:
+        parser.error(f"{label} must not contain a path, query, or fragment")
+    return endpoint
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="/opt/dasobjectstore/config.json")
+    parser.add_argument("--public-base-url")
     parser.add_argument("--public-endpoint-url", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--addressing-style", choices=("path", "virtual"), default="path")
     args = parser.parse_args()
 
-    endpoint = urllib.parse.urlsplit(args.public_endpoint_url)
-    if endpoint.scheme != "https" or not endpoint.hostname or endpoint.username or endpoint.password:
-        parser.error("public endpoint must be an HTTPS URL without credentials")
-    if endpoint.path not in ("", "/") or endpoint.query or endpoint.fragment:
-        parser.error("public endpoint must not contain a path, query, or fragment")
+    if args.public_base_url is not None:
+        parse_root_https_url(parser, "public base URL", args.public_base_url)
+    parse_root_https_url(parser, "public endpoint", args.public_endpoint_url)
     if not args.region.strip():
         parser.error("region must not be empty")
 
@@ -29,6 +37,8 @@ def main() -> None:
     original_stat = path.stat()
     with path.open("r", encoding="utf-8") as source:
         config = json.load(source)
+    if args.public_base_url is not None:
+        config["public_base_url"] = args.public_base_url
     config.setdefault("authentication", {})["authority"] = "monas"
     ingress = config.setdefault("s3_ingress", {})
     ingress.update(
