@@ -2266,6 +2266,9 @@ list until every temporary size-budget exception has been removed.
   use its supported short ``-n`` key-name option so registry provisioning can
   complete without a daemon transport failure.
 - [x] Generate Docker/Compose configuration from store and pool policy.
+- [x] Render Garage's native multi-HDD data directories from one validated
+  Compose/TOML contract, including a read-only legacy path for source-preserving
+  migration away from an accidentally root-backed data directory.
 - [x] Generate per-store service credentials.
 - [x] Persist credential references without leaking secrets into normal logs.
 - [x] Map store definitions to bucket/service layout.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.173.0 - 2026-08-22
+
+- Add Garage 2.3 native multi-HDD rendering with explicit per-directory
+  capacities and read-only legacy paths. Compose and ``garage.toml`` data-dir
+  rendering now share one validated directory contract, reject duplicate or
+  read-only-only layouts, and retain the existing single-path behavior when
+  the feature is not requested.
+- Add ``service render-garage-data-config`` so operators can review the exact
+  secret-free TOML storage stanza alongside the matching Compose mounts before
+  changing a live provider. This does not launch Garage's active rebalance or
+  remove legacy blocks.
+
 ## 0.172.1 - 2026-08-22
 
 - Make ``dasobjectstore status`` report the configured HTTPS external-gateway

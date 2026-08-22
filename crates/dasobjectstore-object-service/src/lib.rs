@@ -23,8 +23,9 @@ pub use credentials::{
     SystemCredentialEntropy, GARAGE_CREDENTIAL_REGISTRY_ENV,
 };
 pub use garage::{
-    GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH,
-    DEFAULT_GARAGE_IMAGE, DEFAULT_GARAGE_SERVICE_NAME,
+    render_garage_data_directories, GarageDataDirectory, GarageProvider, GarageProviderConfig,
+    DEFAULT_GARAGE_API_PORT, DEFAULT_GARAGE_CONFIG_PATH, DEFAULT_GARAGE_IMAGE,
+    DEFAULT_GARAGE_SERVICE_NAME,
 };
 pub use inspection::{
     docker_object_service_binding, docker_object_service_container_state,

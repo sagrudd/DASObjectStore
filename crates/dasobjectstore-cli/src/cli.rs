@@ -37,7 +37,7 @@ pub(crate) use pool::PoolMarkerArgs;
 pub(crate) use pool::{PoolArgs, PoolCommand, PoolImportArgs, PoolInspectArgs, PoolRepairArgs};
 pub(crate) use service::{
     ServiceArgs, ServiceCommand, ServiceComposeArgs, ServiceProvisionArgs,
-    ServiceRenderComposeArgs, ServiceStatusArgs,
+    ServiceRenderComposeArgs, ServiceRenderGarageDataConfigArgs, ServiceStatusArgs,
 };
 pub(crate) use store::{
     StoreAcknowledgementPolicyArgs, StoreAdoptArgs, StoreArgs, StoreCapabilitiesArgs,

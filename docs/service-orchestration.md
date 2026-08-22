@@ -90,6 +90,34 @@ commands that would be applied. The daemon runs Garage admin commands inside
 the running Compose service, creating buckets and granting per-store keys
 without changing `/etc/dasobjectstore/garage.compose.yml`.
 
+### Native multi-HDD Garage storage
+
+For an appliance with several managed HDD mounts, do not bind Garage's data
+directory to an ordinary directory on the root filesystem. Garage 2.3 supports
+multiple data directories directly. Repeat the following option on
+`render-compose` for each reviewed directory:
+
+```text
+--garage-data-directory HOST_PATH=CONTAINER_PATH=CAPACITY|read-only
+```
+
+Use `read-only` for the old path during a source-preserving migration and a
+capacity such as `4T` for each writable member. Render the matching secret-free
+Garage TOML stanza with the exact same options:
+
+```bash
+dasobjectstore service render-garage-data-config \
+  --garage-data-directory \
+    /srv/dasobjectstore/hdd/garage=/var/lib/garage/data-legacy=read-only \
+  --garage-data-directory \
+    /srv/dasobjectstore/hdd/qnap-1057/garage=/var/lib/garage/data/qnap-1057=4T
+```
+
+Review both outputs together. The renderer does not edit the live config,
+restart Garage, launch active rebalance, or remove the legacy directory. See
+[Background storage assurance](user/storage-assurance.rst) for the distinction
+between DASObjectStore placement normalisation and Garage block placement.
+
 Use the top-level runtime status command as the appliance healthcheck. Its JSON
 payload includes the active S3 bind address, port, `remote_ready` flag, and
 `remote_url` to hand to remote upload clients:

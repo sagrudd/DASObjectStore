@@ -97,3 +97,40 @@ them through the service environment:
 
 Disabling the service stops new background work; it does not alter placements.
 Disk drain, repair, and force-retirement safety rules remain authoritative.
+
+Garage S3 storage is separate
+-----------------------------
+
+The assurance loop governs verified DASObjectStore placements recorded in
+``live.sqlite``. Garage's S3 block tree is a separate provider storage plane;
+it is not retrospectively moved by the assurance loop.
+
+Garage 2.3 can place new blocks natively across several HDD directories. Use
+the same explicit directory specifications when rendering its Compose mounts
+and its secret-free ``data_dir`` TOML stanza. A legacy path can be retained
+read-only while new writes are distributed across managed member disks:
+
+.. code-block:: console
+
+   dasobjectstore service render-garage-data-config \
+     --garage-data-directory \
+       /srv/dasobjectstore/hdd/garage=/var/lib/garage/data-legacy=read-only \
+     --garage-data-directory \
+       /srv/dasobjectstore/hdd/qnap-1057/garage=/var/lib/garage/data/qnap-1057=4T \
+     --garage-data-directory \
+       /srv/dasobjectstore/hdd/qnap-1058/garage=/var/lib/garage/data/qnap-1058=4T
+
+Repeat the writable specification for every reviewed managed HDD and pass the
+identical specifications to ``service render-compose``. The command rejects
+relative paths, duplicates, invalid capacities, and layouts with no writable
+directory. Garage capacity values are placement weights, not filesystem quotas;
+review actual free space and DASObjectStore's own reservations before applying
+the configuration.
+
+Changing the directory list does not move existing blocks. Keeping the legacy
+directory read-only is the source-preserving transition: Garage continues to
+read its blocks there and sends new blocks only to writable member disks. An
+active ``garage repair rebalance`` may later evacuate legacy blocks, but it is
+a separate, monitored operation. Do not launch it during package installation,
+remove the legacy path, or delete any residual files without a completed repair
+and explicit operator approval.

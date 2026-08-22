@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use dasobjectstore_object_service::ObjectServiceProviderId;
+use dasobjectstore_object_service::{GarageDataDirectory, ObjectServiceProviderId};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -17,6 +17,8 @@ impl ServiceArgs {
 pub(crate) enum ServiceCommand {
     /// Render Docker Compose YAML for store-aware object service access.
     RenderCompose(ServiceRenderComposeArgs),
+    /// Render the Garage data_dir TOML stanza for the same reviewed multi-HDD mounts.
+    RenderGarageDataConfig(ServiceRenderGarageDataConfigArgs),
     /// Provision S3 buckets and credentials from the live ObjectStore registry without restarting the service.
     Provision(ServiceProvisionArgs),
     /// Start the rendered object service with Docker Compose.
@@ -25,6 +27,18 @@ pub(crate) enum ServiceCommand {
     Down(ServiceComposeArgs),
     /// Inspect the rendered object service with Docker Compose.
     Status(ServiceStatusArgs),
+}
+
+#[derive(Debug, Eq, PartialEq, Args)]
+pub(crate) struct ServiceRenderGarageDataConfigArgs {
+    /// Garage data directory as HOST_PATH=CONTAINER_PATH=CAPACITY|read-only.
+    #[arg(long = "garage-data-directory", required = true)]
+    garage_data_directories: Vec<GarageDataDirectory>,
+}
+impl ServiceRenderGarageDataConfigArgs {
+    pub(crate) fn garage_data_directories(&self) -> &[GarageDataDirectory] {
+        &self.garage_data_directories
+    }
 }
 
 #[derive(Debug, Eq, PartialEq, Args)]
@@ -142,6 +156,11 @@ pub(crate) struct ServiceRenderComposeArgs {
     /// Host path for the generated Garage configuration file.
     #[arg(long, default_value = "/etc/dasobjectstore/garage.toml")]
     config_path: PathBuf,
+    /// Garage data directory as HOST_PATH=CONTAINER_PATH=CAPACITY|read-only.
+    /// Repeat to use Garage's native multi-HDD placement. If omitted, the
+    /// legacy single --hdd-data-path mount is retained.
+    #[arg(long = "garage-data-directory")]
+    garage_data_directories: Vec<GarageDataDirectory>,
 }
 impl ServiceRenderComposeArgs {
     pub(crate) fn stores_file(&self) -> Option<&Path> {
@@ -176,6 +195,9 @@ impl ServiceRenderComposeArgs {
     }
     pub(crate) fn config_path(&self) -> &Path {
         &self.config_path
+    }
+    pub(crate) fn garage_data_directories(&self) -> &[GarageDataDirectory] {
+        &self.garage_data_directories
     }
 }
 
@@ -226,6 +248,30 @@ mod tests {
         assert_eq!(
             render.config_path(),
             Path::new("/etc/dasobjectstore/garage.toml")
+        );
+        assert!(render.garage_data_directories().is_empty());
+
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "service",
+            "render-garage-data-config",
+            "--garage-data-directory",
+            "/srv/legacy=/var/lib/garage/data-legacy=read-only",
+            "--garage-data-directory",
+            "/srv/disk-a/garage=/var/lib/garage/data/disk-a=4T",
+        ])
+        .expect("Garage data config parses");
+        let Some(Command::Service(args)) = cli.command() else {
+            panic!("expected service command")
+        };
+        let ServiceCommand::RenderGarageDataConfig(render) = args.command() else {
+            panic!("expected Garage data config render")
+        };
+        assert_eq!(render.garage_data_directories().len(), 2);
+        assert!(render.garage_data_directories()[0].read_only);
+        assert_eq!(
+            render.garage_data_directories()[1].capacity.as_deref(),
+            Some("4T")
         );
 
         for (args, expected) in [

@@ -121,6 +121,7 @@ pub(crate) fn run_service_render_compose(
                 web_port: garage_derived_port(args.api_port(), 2)?,
                 admin_port: garage_derived_port(args.api_port(), 3)?,
                 config_path: args.config_path().to_string_lossy().into_owned(),
+                data_directories: args.garage_data_directories().to_vec(),
                 ..GarageProviderConfig::default()
             });
             provider.render_compose(&request)?
@@ -139,6 +140,18 @@ pub(crate) fn run_service_render_compose(
 
     writer.write_all(rendered.compose_yaml.as_bytes())?;
 
+    Ok(())
+}
+
+pub(crate) fn run_service_render_garage_data_config(
+    args: &ServiceRenderGarageDataConfigArgs,
+    writer: &mut impl Write,
+) -> Result<(), CliError> {
+    writeln!(
+        writer,
+        "{}",
+        render_garage_data_directories(args.garage_data_directories())?
+    )?;
     Ok(())
 }
 

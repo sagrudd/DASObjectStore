@@ -10,9 +10,9 @@ use crate::cli::{
     ObjectPutArgs, PerformanceFileOrder, PerformanceFileSelection, PerformanceReportArgs,
     PerformanceScenarioSelection, PerformanceTestArgs, PistisGrantCommand, PoolCommand,
     PoolImportArgs, PoolInspectArgs, PoolRepairArgs, ProbeArgs, ServiceCommand,
-    ServiceRenderComposeArgs, StoreAcknowledgementPolicyArgs, StoreAdoptArgs,
-    StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs, StoreCreateArgs,
-    StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
+    ServiceRenderComposeArgs, ServiceRenderGarageDataConfigArgs, StoreAcknowledgementPolicyArgs,
+    StoreAdoptArgs, StoreCapabilitiesArgs, StoreCapacityArgs, StoreCommand, StoreContentsArgs,
+    StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBrowserArgs,
     StoreProfileHeadArgs, StoreProfileHealthArgs, StoreProfileInspectionArgs,
     StoreProfileMigrationArgs, StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs,
@@ -101,6 +101,7 @@ use self::application_auth::run_application_auth;
 use self::command_handlers::{
     probe_current_platform, run_mnemosyne_export, run_mnemosyne_validate_nas_nfs_endpoint,
     run_object_export, run_object_inspect, run_object_put, run_service_render_compose,
+    run_service_render_garage_data_config,
 };
 #[cfg(feature = "debug-commands")]
 use self::command_handlers::{run_pool_mark_clean, run_pool_mark_dirty};
@@ -220,10 +221,11 @@ use dasobjectstore_object_service::{
     credential_reference_for_store, default_store_registry_path, default_subobject_registry_path,
     mirror_subobject_definition, plan_remote_s3_upload, plan_store_service_layout,
     portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
-    read_subobject_registry, render_compose, search_subobjects, upsert_store_definition,
-    ComposeRenderRequest, ComposeServiceConfig, GarageProvider, GarageProviderConfig,
-    ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId, RemoteS3UploadPlanRequest,
-    StoreRegistryUpdateReport, StoreServiceDefinition, SubObjectDefinition,
+    read_subobject_registry, render_compose, render_garage_data_directories, search_subobjects,
+    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
+    GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
+    RemoteS3UploadPlanRequest, StoreRegistryUpdateReport, StoreServiceDefinition,
+    SubObjectDefinition,
 };
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
@@ -361,6 +363,9 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         },
         Some(Command::Service(args)) => match args.command() {
             ServiceCommand::RenderCompose(args) => run_service_render_compose(args, writer),
+            ServiceCommand::RenderGarageDataConfig(args) => {
+                run_service_render_garage_data_config(args, writer)
+            }
             ServiceCommand::Provision(args) => run_service_provision(args, writer),
             ServiceCommand::Up(args) => run_service_up(args, writer),
             ServiceCommand::Down(args) => run_service_down(args, writer),

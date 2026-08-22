@@ -5,11 +5,70 @@ use crate::provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
     ProviderDescriptor, RenderedCompose, ServiceState, ServiceStatus,
 };
+use std::collections::BTreeSet;
+use std::path::Path;
+use std::str::FromStr;
 
 pub const DEFAULT_GARAGE_IMAGE: &str = "dxflrs/garage:v2.3.0";
 pub const DEFAULT_GARAGE_SERVICE_NAME: &str = "garage";
 pub const DEFAULT_GARAGE_API_PORT: u16 = 3900;
 pub const DEFAULT_GARAGE_CONFIG_PATH: &str = "/etc/dasobjectstore/garage.toml";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GarageDataDirectory {
+    pub host_path: String,
+    pub container_path: String,
+    pub capacity: Option<String>,
+    pub read_only: bool,
+}
+
+impl GarageDataDirectory {
+    pub fn writable(
+        host_path: impl Into<String>,
+        container_path: impl Into<String>,
+        capacity: impl Into<String>,
+    ) -> Self {
+        Self {
+            host_path: host_path.into(),
+            container_path: container_path.into(),
+            capacity: Some(capacity.into()),
+            read_only: false,
+        }
+    }
+
+    pub fn read_only(host_path: impl Into<String>, container_path: impl Into<String>) -> Self {
+        Self {
+            host_path: host_path.into(),
+            container_path: container_path.into(),
+            capacity: None,
+            read_only: true,
+        }
+    }
+}
+
+impl FromStr for GarageDataDirectory {
+    type Err = ObjectServiceError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (paths, mode) = value.rsplit_once('=').ok_or_else(|| {
+            ObjectServiceError::InvalidConfiguration(format!(
+                "invalid Garage data directory `{value}`; expected HOST_PATH=CONTAINER_PATH=CAPACITY|read-only"
+            ))
+        })?;
+        let (host_path, container_path) = paths.split_once('=').ok_or_else(|| {
+            ObjectServiceError::InvalidConfiguration(format!(
+                "invalid Garage data directory `{value}`; expected HOST_PATH=CONTAINER_PATH=CAPACITY|read-only"
+            ))
+        })?;
+        let directory = if mode == "read-only" {
+            Self::read_only(host_path, container_path)
+        } else {
+            Self::writable(host_path, container_path, mode)
+        };
+        validate_data_directory_entry(&directory)?;
+        Ok(directory)
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GarageProviderConfig {
@@ -29,6 +88,9 @@ pub struct GarageProviderConfig {
     pub rpc_secret: Option<String>,
     pub admin_token: Option<String>,
     pub metrics_token: Option<String>,
+    /// Explicit Garage 2.3 data directories. An empty list preserves the
+    /// legacy single path supplied by `ComposeRenderRequest::hdd_data_path`.
+    pub data_directories: Vec<GarageDataDirectory>,
 }
 
 impl Default for GarageProviderConfig {
@@ -47,6 +109,7 @@ impl Default for GarageProviderConfig {
             rpc_secret: None,
             admin_token: None,
             metrics_token: None,
+            data_directories: Vec::new(),
         }
     }
 }
@@ -78,10 +141,15 @@ impl GarageProvider {
     pub fn render_garage_config(&self) -> Result<String, ObjectServiceError> {
         validate_config(&self.config)?;
         let secrets = validate_config_secrets(&self.config)?;
+        let data_directories = if self.config.data_directories.is_empty() {
+            "data_dir = \"/var/lib/garage/data\"".to_string()
+        } else {
+            render_garage_data_directories(&self.config.data_directories)?
+        };
 
         Ok(format!(
             r#"metadata_dir = "/var/lib/garage/meta"
-data_dir = "/var/lib/garage/data"
+{data_directories}
 db_engine = "sqlite"
 replication_factor = {replication_factor}
 compression_level = 0
@@ -113,8 +181,32 @@ metrics_token = "{metrics_token}"
             rpc_secret = secrets.rpc_secret,
             admin_token = secrets.admin_token,
             metrics_token = secrets.metrics_token,
+            data_directories = data_directories,
         ))
     }
+}
+
+pub fn render_garage_data_directories(
+    directories: &[GarageDataDirectory],
+) -> Result<String, ObjectServiceError> {
+    validate_data_directories(directories)?;
+    let mut rendered = String::from("data_dir = [\n");
+    for directory in directories {
+        if directory.read_only {
+            rendered.push_str(&format!(
+                "    {{ path = \"{}\", read_only = true }},\n",
+                escape_toml_string(&directory.container_path)
+            ));
+        } else {
+            rendered.push_str(&format!(
+                "    {{ path = \"{}\", capacity = \"{}\" }},\n",
+                escape_toml_string(&directory.container_path),
+                escape_toml_string(directory.capacity.as_deref().unwrap_or_default())
+            ));
+        }
+    }
+    rendered.push(']');
+    Ok(rendered)
 }
 
 impl ObjectServiceProvider for GarageProvider {
@@ -171,10 +263,21 @@ impl ObjectServiceProvider for GarageProvider {
             "      - \"{}:/var/lib/garage/meta\"\n",
             escape_yaml_string(&request.ssd_metadata_path)
         ));
-        yaml.push_str(&format!(
-            "      - \"{}:/var/lib/garage/data\"\n",
-            escape_yaml_string(&request.hdd_data_path)
-        ));
+        if self.config.data_directories.is_empty() {
+            yaml.push_str(&format!(
+                "      - \"{}:/var/lib/garage/data\"\n",
+                escape_yaml_string(&request.hdd_data_path)
+            ));
+        } else {
+            for directory in &self.config.data_directories {
+                yaml.push_str(&format!(
+                    "      - \"{}:{}{}\"\n",
+                    escape_yaml_string(&directory.host_path),
+                    escape_yaml_string(&directory.container_path),
+                    if directory.read_only { ":ro" } else { "" }
+                ));
+            }
+        }
         yaml.push_str("    healthcheck:\n");
         yaml.push_str("      test: [\"CMD\", \"/garage\", \"status\"]\n");
         yaml.push_str("      interval: 10s\n");
@@ -227,6 +330,10 @@ fn escape_yaml_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn escape_toml_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn validate_config(config: &GarageProviderConfig) -> Result<(), ObjectServiceError> {
     reject_blank("service_name", &config.service_name)?;
     reject_blank("image", &config.image)?;
@@ -255,8 +362,93 @@ fn validate_config(config: &GarageProviderConfig) -> Result<(), ObjectServiceErr
             "Garage replication_factor must be greater than zero".to_string(),
         ));
     }
+    if !config.data_directories.is_empty() {
+        validate_data_directories(&config.data_directories)?;
+    }
 
     Ok(())
+}
+
+fn validate_data_directories(
+    directories: &[GarageDataDirectory],
+) -> Result<(), ObjectServiceError> {
+    if directories.is_empty() {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "Garage data directory list must not be empty".to_string(),
+        ));
+    }
+    let mut host_paths = BTreeSet::new();
+    let mut container_paths = BTreeSet::new();
+    let mut writable = 0usize;
+    for directory in directories {
+        validate_data_directory_entry(directory)?;
+        if !host_paths.insert(directory.host_path.as_str()) {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "duplicate Garage host data directory: {}",
+                directory.host_path
+            )));
+        }
+        if !container_paths.insert(directory.container_path.as_str()) {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "duplicate Garage container data directory: {}",
+                directory.container_path
+            )));
+        }
+        if !directory.read_only {
+            writable += 1;
+        }
+    }
+    if writable == 0 {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "Garage data directory list requires at least one writable directory".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_data_directory_entry(
+    directory: &GarageDataDirectory,
+) -> Result<(), ObjectServiceError> {
+    reject_blank("data directory host_path", &directory.host_path)?;
+    reject_blank("data directory container_path", &directory.container_path)?;
+    if !Path::new(&directory.host_path).is_absolute()
+        || !Path::new(&directory.container_path).is_absolute()
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "Garage data directory host and container paths must be absolute".to_string(),
+        ));
+    }
+    if directory.host_path.contains('\n')
+        || directory.host_path.contains('\r')
+        || directory.container_path.contains('\n')
+        || directory.container_path.contains('\r')
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "Garage data directory paths must not contain newlines".to_string(),
+        ));
+    }
+    match (directory.read_only, directory.capacity.as_deref()) {
+        (true, None) => Ok(()),
+        (true, Some(_)) => Err(ObjectServiceError::InvalidConfiguration(
+            "read-only Garage data directories must not declare capacity".to_string(),
+        )),
+        (false, Some(capacity)) if valid_capacity(capacity) => Ok(()),
+        (false, Some(_)) => Err(ObjectServiceError::InvalidConfiguration(
+            "Garage writable data directory capacity must use digits with an optional decimal point and storage suffix"
+                .to_string(),
+        )),
+        (false, None) => Err(ObjectServiceError::InvalidConfiguration(
+            "Garage writable data directories require capacity".to_string(),
+        )),
+    }
+}
+
+fn valid_capacity(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().any(|byte| byte.is_ascii_digit())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'.' || byte.is_ascii_alphabetic())
 }
 
 struct GarageConfigSecrets<'a> {
@@ -300,7 +492,7 @@ fn reject_blank(field: &str, value: &str) -> Result<(), ObjectServiceError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_IMAGE};
+    use super::{GarageDataDirectory, GarageProvider, GarageProviderConfig, DEFAULT_GARAGE_IMAGE};
     use crate::provider::StoreBucketBinding;
     use crate::provider::{ComposeRenderRequest, ObjectServiceProvider};
     use dasobjectstore_core::ids::StoreId;
@@ -420,6 +612,69 @@ mod tests {
         assert!(config.contains("rpc_bind_addr = \"[::]:4901\""));
         assert!(config.contains("api_bind_addr = \"[::]:4903\""));
         assert!(config.contains(&format!("rpc_secret = \"{}\"", secret("0"))));
+    }
+
+    #[test]
+    fn renders_native_multi_hdd_storage_and_read_only_legacy_path() {
+        let directories = vec![
+            GarageDataDirectory::read_only(
+                "/srv/dasobjectstore/hdd/garage",
+                "/var/lib/garage/data-legacy",
+            ),
+            GarageDataDirectory::writable(
+                "/srv/dasobjectstore/hdd/qnap-1057/garage",
+                "/var/lib/garage/data/qnap-1057",
+                "4T",
+            ),
+            GarageDataDirectory::writable(
+                "/srv/dasobjectstore/hdd/qnap-1063/garage",
+                "/var/lib/garage/data/qnap-1063",
+                "3T",
+            ),
+        ];
+        let provider = GarageProvider::new(GarageProviderConfig {
+            rpc_secret: Some(secret("0")),
+            admin_token: Some(secret("1")),
+            metrics_token: Some(secret("2")),
+            data_directories: directories,
+            ..GarageProviderConfig::default()
+        });
+
+        let compose = provider
+            .render_compose(&request())
+            .expect("multi-HDD compose renders")
+            .compose_yaml;
+        let config = provider.render_garage_config().expect("config renders");
+
+        assert!(
+            compose.contains("\"/srv/dasobjectstore/hdd/garage:/var/lib/garage/data-legacy:ro\"")
+        );
+        assert!(compose.contains(
+            "\"/srv/dasobjectstore/hdd/qnap-1057/garage:/var/lib/garage/data/qnap-1057\""
+        ));
+        assert!(!compose.contains("\"/srv/dasobjectstore/hdd/garage:/var/lib/garage/data\""));
+        assert!(config.contains("{ path = \"/var/lib/garage/data-legacy\", read_only = true }"));
+        assert!(config.contains("{ path = \"/var/lib/garage/data/qnap-1057\", capacity = \"4T\" }"));
+        assert!(config.contains("{ path = \"/var/lib/garage/data/qnap-1063\", capacity = \"3T\" }"));
+    }
+
+    #[test]
+    fn rejects_multi_hdd_storage_without_writable_directory() {
+        let provider = GarageProvider::new(GarageProviderConfig {
+            data_directories: vec![GarageDataDirectory::read_only(
+                "/srv/dasobjectstore/hdd/garage",
+                "/var/lib/garage/data-legacy",
+            )],
+            ..GarageProviderConfig::default()
+        });
+
+        let error = provider
+            .render_compose(&request())
+            .expect_err("read-only-only config rejected");
+
+        assert!(error
+            .to_string()
+            .contains("requires at least one writable directory"));
     }
 
     #[test]
