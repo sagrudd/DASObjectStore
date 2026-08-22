@@ -201,8 +201,12 @@ pub fn measure_ssd_capacity(
 
     let stats = unsafe { stats.assume_init() };
     let block_size = statvfs_block_size(&stats);
-    let total_bytes = u64::from(stats.f_blocks).saturating_mul(block_size);
-    let available_bytes = u64::from(stats.f_bavail).saturating_mul(block_size);
+    // libc exposes these counters as u32 on macOS and u64 on Linux.
+    #[allow(clippy::useless_conversion)]
+    let (block_count, available_block_count) =
+        (u64::from(stats.f_blocks), u64::from(stats.f_bavail));
+    let total_bytes = block_count.saturating_mul(block_size);
+    let available_bytes = available_block_count.saturating_mul(block_size);
 
     Ok(SsdCapacity::new(path, total_bytes, available_bytes))
 }

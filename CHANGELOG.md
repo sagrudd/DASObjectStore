@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.173.6 - 2026-08-23
+
+- Keep Unix ``statvfs`` capacity arithmetic warning-free under the strict
+  Linux release lint gate without changing its saturating byte calculation.
+
 ## 0.173.5 - 2026-08-23
 
 - Restore exact semantic-version agreement between the DASObjectStore package
