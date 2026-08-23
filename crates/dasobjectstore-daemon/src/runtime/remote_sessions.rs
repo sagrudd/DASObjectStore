@@ -114,13 +114,21 @@ pub struct RemoteEasyconnectS3Credential {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairedSessionRecord {
+    /// Pre-Pistis v1 records did not carry the formal pairing identity.
+    /// Retain an empty projection when reading them so expiry/revocation
+    /// filtering remains available; `validate` still rejects the record for
+    /// any operation that requires a formal identity.
+    #[serde(default)]
     pub pairing_id: String,
     pub session_id: String,
+    #[serde(default)]
     pub authority_id: String,
+    #[serde(default)]
     pub principal_id: String,
     /// Compatibility projection of `principal_id` for existing control audit
     /// responses. New code must keep the values identical.
     pub approved_actor: String,
+    #[serde(default)]
     pub authority_session_id: String,
     /// Immutable upper bound inherited from the originating host authority.
     ///
@@ -130,7 +138,9 @@ pub struct RemoteEasyconnectPairedSessionRecord {
     #[serde(default)]
     pub originating_authority_expires_at_utc: Option<String>,
     pub auth_provider: RemoteEasyconnectAuthProvider,
+    #[serde(default)]
     pub correlation_id: String,
+    #[serde(default)]
     pub audit_identity: String,
     pub issued_at_utc: String,
     pub expires_at_utc: String,
@@ -1095,6 +1105,68 @@ mod tests {
                 0o600
             );
         }
+        cleanup(&root);
+    }
+
+    #[test]
+    fn pre_pistis_v1_sessions_remain_expiry_filterable_but_not_formally_valid() {
+        let root = temp_root("pre-pistis-v1");
+        let path = remote_easyconnect_session_store_path(&root);
+        std::fs::create_dir_all(path.parent().expect("session parent"))
+            .expect("session parent created");
+        let legacy = serde_json::json!({
+            "schema_version": REMOTE_EASYCONNECT_SESSION_SCHEMA,
+            "sessions": [{
+                "session_id": "legacy-session-1",
+                "approved_actor": "stephen",
+                "auth_provider": "standalone_local_user",
+                "issued_at_utc": "2026-07-09T16:10:00Z",
+                "expires_at_utc": "2026-07-10T00:10:00Z",
+                "renew_after_utc": "2026-07-09T23:10:00Z",
+                "renewal_token": "legacy-renewal-token",
+                "credentials": {
+                    "access_key_id": "DOSTLEGACY",
+                    "secret_access_key": "legacy-secret",
+                    "session_token": "legacy-session-token"
+                },
+                "object_stores": [{
+                    "object_store": "legacy-store",
+                    "bucket": "dos-legacy-store",
+                    "can_read": true,
+                    "can_write": true,
+                    "writer_group": "legacy-writers",
+                    "object_type": "mixed",
+                    "control_operations": [],
+                    "allowed_prefixes": [""]
+                }],
+                "revoked_at_utc": null
+            }]
+        });
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&legacy).expect("legacy session JSON"),
+        )
+        .expect("legacy session file written");
+
+        let store = FileBackedRemoteEasyconnectPairedSessionStore::new(&path);
+        assert_eq!(
+            store
+                .active_s3_credentials("2026-07-09T17:00:00Z")
+                .expect("legacy credentials remain readable")
+                .len(),
+            1
+        );
+        assert!(store
+            .active_s3_credentials("2026-07-10T00:10:00Z")
+            .expect("expired legacy credentials are filtered")
+            .is_empty());
+        assert!(matches!(
+            store.get("legacy-session-1"),
+            Err(RemoteEasyconnectPairedSessionStoreError::BlankField {
+                field: "pairing_id"
+            })
+        ));
+
         cleanup(&root);
     }
 

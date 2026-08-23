@@ -965,6 +965,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn expired_pre_pistis_sessions_do_not_take_the_s3_service_root_offline() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-list-buckets-legacy-session-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("test root");
+        let state = S3GatewayState::with_registry(root.join("credentials.json"), 1);
+        let legacy = serde_json::json!({
+            "schema_version": "dasobjectstore.remote_easyconnect.sessions.v1",
+            "sessions": [{
+                "session_id": "legacy-session-1",
+                "approved_actor": "stephen",
+                "auth_provider": "standalone_local_user",
+                "issued_at_utc": "2026-07-09T16:10:00Z",
+                "expires_at_utc": "2026-07-10T00:10:00Z",
+                "renew_after_utc": "2026-07-09T23:10:00Z",
+                "renewal_token": "legacy-renewal-token",
+                "credentials": {
+                    "access_key_id": "DOSTLEGACY",
+                    "secret_access_key": "legacy-secret",
+                    "session_token": "legacy-session-token"
+                },
+                "object_stores": [{
+                    "object_store": "legacy-store",
+                    "bucket": "dos-legacy-store",
+                    "can_read": true,
+                    "can_write": true,
+                    "writer_group": "legacy-writers",
+                    "object_type": "mixed",
+                    "control_operations": [],
+                    "allowed_prefixes": [""]
+                }],
+                "revoked_at_utc": null
+            }]
+        });
+        std::fs::write(
+            &state.session_registry_path,
+            serde_json::to_vec_pretty(&legacy).expect("legacy session JSON"),
+        )
+        .expect("legacy session file written");
+
+        let response = s3_gateway_router_with_state(state)
+            .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), 4_096)
+            .await
+            .expect("error body");
+        let body = String::from_utf8(body.to_vec()).expect("UTF-8 XML");
+        assert!(body.contains("<Code>SignatureDoesNotMatch</Code>"));
+        assert!(!body.contains("temporary S3 session authority is unavailable"));
+
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
     async fn list_buckets_response_contains_only_the_verified_binding() {
         let verified = VerifiedS3Credential {
             store_id: dasobjectstore_core::ids::StoreId::new("store-a").expect("store"),
