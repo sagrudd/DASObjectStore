@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.13 - 2026-08-23
+
+- Pin Prosopikon 0.27.3 so DAS Web/API authority consumers and package
+  provenance use the same corrected Thesaurophylax purpose-four discovery
+  contract as the formal Monas authority-retirement path.
+
 ## 0.173.12 - 2026-08-23
 
 - Keep retained pre-Pistis EasyConnect v1 sessions readable for lifetime and
