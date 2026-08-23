@@ -514,19 +514,14 @@ pub struct DaemonIngestHddQueueState {
     pub max_queue_depth: u32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestTargetFailureState {
+    #[default]
     Available,
     Pressure,
     Failed,
     Suspended,
-}
-
-impl Default for DaemonIngestTargetFailureState {
-    fn default() -> Self {
-        Self::Available
-    }
 }
 
 fn available_cpu_cores() -> u16 {

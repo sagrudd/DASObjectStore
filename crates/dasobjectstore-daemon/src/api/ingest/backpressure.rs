@@ -17,19 +17,14 @@ impl Default for DaemonSourceReadBackpressurePolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonSourceReadPriority {
     BestEffort,
     Normal,
+    #[default]
     SourceToSsdFirst,
     Recovery,
-}
-
-impl Default for DaemonSourceReadPriority {
-    fn default() -> Self {
-        Self::SourceToSsdFirst
-    }
 }
 
 impl DaemonSourceReadPriority {

@@ -21,10 +21,10 @@ pub(super) fn ingest_control_for_actor(
                 "ingest control rejects direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service".to_string(),
             ));
         }
-        if !request
+        if request
             .verified_subject
             .as_deref()
-            .is_some_and(|subject| !subject.trim().is_empty())
+            .is_none_or(|subject| subject.trim().is_empty())
         {
             return Err((
                 "preverified_host_subject_required",

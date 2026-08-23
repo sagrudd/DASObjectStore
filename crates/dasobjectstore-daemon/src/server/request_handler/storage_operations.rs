@@ -921,7 +921,7 @@ fn require_preverified_host_maintenance_peer(
             ),
         ));
     }
-    if !verified_subject.is_some_and(|subject| !subject.trim().is_empty()) {
+    if verified_subject.is_none_or(|subject| subject.trim().is_empty()) {
         return Err((
             "preverified_host_subject_required",
             format!("{operation} requires a verified Pistis subject"),

@@ -43,7 +43,7 @@ pub(super) fn source_topology_details(source_path: &Path) -> String {
         } else {
             mount.source.as_str()
         };
-        return format!(
+        format!(
             "mount_point={} filesystem={} backing_device={} major_minor={} verification={}",
             mount.mount_point.display(),
             mount.filesystem_type,
@@ -54,7 +54,7 @@ pub(super) fn source_topology_details(source_path: &Path) -> String {
             } else {
                 "external-or-unverified"
             }
-        );
+        )
     }
 
     #[cfg(not(target_os = "linux"))]

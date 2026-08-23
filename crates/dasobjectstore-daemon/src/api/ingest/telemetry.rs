@@ -59,9 +59,10 @@ impl DaemonIngestSystemTelemetry {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestBottleneck {
+    #[default]
     None,
     Scan,
     SourceRead,
@@ -75,12 +76,6 @@ pub enum DaemonIngestBottleneck {
     SsdPressure,
     HddPressure,
     VerificationBacklog,
-}
-
-impl Default for DaemonIngestBottleneck {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -98,18 +93,13 @@ pub struct DaemonIngestThroughputTelemetry {
     pub trend: DaemonIngestThroughputTrend,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestThroughputTrend {
     Up,
     Down,
+    #[default]
     Flat,
-}
-
-impl Default for DaemonIngestThroughputTrend {
-    fn default() -> Self {
-        Self::Flat
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -156,19 +146,14 @@ impl Default for DaemonIngestPipelinePressure {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DaemonIngestPressure {
+    #[default]
     Normal,
     Elevated,
     High,
     Critical,
-}
-
-impl Default for DaemonIngestPressure {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 impl DaemonIngestPressure {

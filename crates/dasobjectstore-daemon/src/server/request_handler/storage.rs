@@ -484,7 +484,7 @@ fn require_preverified_host_service_peer(
             ),
         ));
     }
-    if !verified_subject.is_some_and(|value| !value.trim().is_empty()) {
+    if verified_subject.is_none_or(|value| value.trim().is_empty()) {
         return Err(DaemonApiErrorResponse::new(
             "preverified_host_subject_required",
             format!("{operation} require a verified host subject"),
