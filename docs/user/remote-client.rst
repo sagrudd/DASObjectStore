@@ -502,6 +502,12 @@ List the object stores visible to the configured S3 credentials:
 
    dasobjectstore-remote stores list
 
+An EasyConnect session is scoped to one ObjectStore. Its signed S3
+``ListBuckets`` response therefore contains only that ObjectStore's backing
+bucket, even if the same principal has other grants. Run ``login`` for each
+additional ObjectStore; the gateway never uses one session to enumerate
+another grant.
+
 Emit machine-readable output:
 
 .. code-block:: console

@@ -10,7 +10,10 @@ use crate::auth_routes::profile_multipart::{
 };
 use crate::auth_routes::profile_upload::stream_profile_s3_put;
 use crate::auth_routes::provider_stream_download;
-use crate::s3_gateway_auth::{verify_s3_sigv4, S3Credential, S3SigV4Request};
+use crate::s3_gateway_auth::{
+    verify_s3_sigv4, verify_s3_sigv4_bucket_listing, S3Credential, S3SigV4Request,
+    VerifiedS3Credential,
+};
 use crate::s3_multipart_listing::{render_multipart_upload_listing, MultipartListingQuery};
 use axum::body::Body;
 use axum::extract::{OriginalUri, Path, State};
@@ -82,6 +85,7 @@ pub fn s3_gateway_router(max_concurrent_uploads: usize) -> Router {
 
 fn s3_gateway_router_with_state(state: S3GatewayState) -> Router {
     Router::new()
+        .route("/", get(s3_list_buckets))
         .route(
             "/.well-known/dasobjectstore/appliance-ca.pem",
             get(appliance_ca_certificate),
@@ -155,6 +159,27 @@ async fn verified_credential(
     method: &Method,
     headers: &HeaderMap,
 ) -> Result<crate::s3_gateway_auth::VerifiedS3Credential, Response> {
+    let credentials = active_s3_credentials(state)?;
+    verify_s3_sigv4(
+        S3SigV4Request {
+            method,
+            raw_path: uri.path(),
+            raw_query: uri.query(),
+            headers,
+            bucket,
+        },
+        &credentials,
+    )
+    .map_err(|error| {
+        s3_error(
+            StatusCode::FORBIDDEN,
+            "SignatureDoesNotMatch",
+            &error.to_string(),
+        )
+    })
+}
+
+fn active_s3_credentials(state: &S3GatewayState) -> Result<Vec<S3Credential>, Response> {
     let managed =
         read_managed_credential_registry(&state.credential_registry_path, "direct-s3-request")
             .map_err(|_| {
@@ -207,23 +232,49 @@ async fn verified_credential(
             can_write: session.can_write,
         });
     }
-    verify_s3_sigv4(
+    Ok(credentials)
+}
+
+async fn s3_list_buckets(
+    State(state): State<S3GatewayState>,
+    OriginalUri(uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    let credentials = match active_s3_credentials(&state) {
+        Ok(credentials) => credentials,
+        Err(response) => return response,
+    };
+    let verified = match verify_s3_sigv4_bucket_listing(
         S3SigV4Request {
-            method,
+            method: &method,
             raw_path: uri.path(),
             raw_query: uri.query(),
-            headers,
-            bucket,
+            headers: &headers,
+            bucket: "",
         },
         &credentials,
+    ) {
+        Ok(verified) => verified,
+        Err(error) => {
+            return s3_error(
+                StatusCode::FORBIDDEN,
+                "SignatureDoesNotMatch",
+                &error.to_string(),
+            )
+        }
+    };
+    s3_list_buckets_response(&verified)
+}
+
+fn s3_list_buckets_response(verified: &VerifiedS3Credential) -> Response {
+    s3_xml(
+        StatusCode::OK,
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListAllMyBucketsResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Owner><ID>dasobjectstore</ID><DisplayName>DASObjectStore</DisplayName></Owner><Buckets><Bucket><Name>{}</Name><CreationDate>1970-01-01T00:00:00.000Z</CreationDate></Bucket></Buckets></ListAllMyBucketsResult>",
+            xml_escape(&verified.bucket_name)
+        ),
     )
-    .map_err(|error| {
-        s3_error(
-            StatusCode::FORBIDDEN,
-            "SignatureDoesNotMatch",
-            &error.to_string(),
-        )
-    })
 }
 
 async fn s3_get_object(
@@ -888,6 +939,52 @@ fn percent_decode_query(value: &str) -> String {
 mod tests {
     use super::*;
     use axum::body::to_bytes;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn service_root_is_a_fail_closed_signed_list_buckets_route() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-list-buckets-route-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).expect("test root");
+        let state = S3GatewayState::with_registry(root.join("credentials.json"), 1);
+        let response = s3_gateway_router_with_state(state)
+            .oneshot(Request::get("/").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = to_bytes(response.into_body(), 4_096)
+            .await
+            .expect("error body");
+        assert!(String::from_utf8(body.to_vec())
+            .expect("UTF-8 XML")
+            .contains("<Code>SignatureDoesNotMatch</Code>"));
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[tokio::test]
+    async fn list_buckets_response_contains_only_the_verified_binding() {
+        let verified = VerifiedS3Credential {
+            store_id: dasobjectstore_core::ids::StoreId::new("store-a").expect("store"),
+            bucket_name: "dos-store&amp;one".to_string(),
+            credential_reference: "secret://must-not-render".to_string(),
+            access_key_id: "MUSTNOTRENDERACCESS".to_string(),
+        };
+        let response = s3_list_buckets_response(&verified);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(
+            to_bytes(response.into_body(), 4_096)
+                .await
+                .expect("list body")
+                .to_vec(),
+        )
+        .expect("UTF-8 XML");
+        assert!(body.contains("<Name>dos-store&amp;amp;one</Name>"));
+        assert!(!body.contains("must-not-render"));
+        assert!(!body.contains("MUSTNOTRENDERACCESS"));
+    }
 
     #[tokio::test]
     async fn xml_errors_escape_untrusted_text_and_are_s3_xml() {

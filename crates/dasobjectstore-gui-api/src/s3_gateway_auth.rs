@@ -49,6 +49,29 @@ pub(crate) fn verify_s3_sigv4(
     request: S3SigV4Request<'_>,
     credentials: &[S3Credential],
 ) -> Result<VerifiedS3Credential, S3SigV4Error> {
+    verify_s3_sigv4_inner(request, credentials, true)
+}
+
+/// Verify the S3 service-root `ListBuckets` request for one scoped credential.
+///
+/// The returned credential still names exactly one ObjectStore/bucket. The
+/// caller may therefore render only that binding; this is not an authority to
+/// enumerate the registry or another session's grants.
+pub(crate) fn verify_s3_sigv4_bucket_listing(
+    request: S3SigV4Request<'_>,
+    credentials: &[S3Credential],
+) -> Result<VerifiedS3Credential, S3SigV4Error> {
+    if request.method != Method::GET || request.raw_path != "/" || !request.bucket.is_empty() {
+        return Err(S3SigV4Error::CredentialScopeMismatch);
+    }
+    verify_s3_sigv4_inner(request, credentials, false)
+}
+
+fn verify_s3_sigv4_inner(
+    request: S3SigV4Request<'_>,
+    credentials: &[S3Credential],
+    require_bucket_match: bool,
+) -> Result<VerifiedS3Credential, S3SigV4Error> {
     reject_duplicate_header(request.headers, "authorization")?;
     let authorization = required_header(request.headers, "authorization")?;
     let parsed = parse_authorization(authorization)?;
@@ -60,7 +83,7 @@ pub(crate) fn verify_s3_sigv4(
     if matches.next().is_some() {
         return Err(S3SigV4Error::AmbiguousCredential);
     }
-    if credential.bucket_name != request.bucket {
+    if require_bucket_match && credential.bucket_name != request.bucket {
         return Err(S3SigV4Error::CredentialScopeMismatch);
     }
     let is_read = matches!(*request.method, Method::GET | Method::HEAD);
@@ -502,6 +525,50 @@ mod tests {
         .expect("signature verifies");
         assert_eq!(verified.store_id.as_str(), "store-a");
         assert_eq!(verified.bucket_name, "dos-store");
+    }
+
+    #[test]
+    fn verifies_service_root_listing_for_only_the_bound_bucket() {
+        let mut headers = base_headers();
+        sign(
+            &mut headers,
+            &Method::GET,
+            "/",
+            "",
+            "host;x-amz-content-sha256;x-amz-date",
+        );
+        let verified = verify_s3_sigv4_bucket_listing(
+            request(&Method::GET, "/", None, &headers, ""),
+            &[credential()],
+        )
+        .expect("root listing signature verifies");
+        assert_eq!(verified.store_id.as_str(), "store-a");
+        assert_eq!(verified.bucket_name, "dos-store");
+    }
+
+    #[test]
+    fn service_root_listing_verifier_cannot_be_reused_for_bucket_routes() {
+        let mut headers = base_headers();
+        sign(
+            &mut headers,
+            &Method::GET,
+            "/dos-store",
+            "list-type=2",
+            "host;x-amz-content-sha256;x-amz-date",
+        );
+        assert_eq!(
+            verify_s3_sigv4_bucket_listing(
+                request(
+                    &Method::GET,
+                    "/dos-store",
+                    Some("list-type=2"),
+                    &headers,
+                    "dos-store"
+                ),
+                &[credential()]
+            ),
+            Err(S3SigV4Error::CredentialScopeMismatch)
+        );
     }
 
     #[test]

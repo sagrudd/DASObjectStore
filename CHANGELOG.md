@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.7 - 2026-08-23
+
+- Restore signed S3 ``ListBuckets`` at the gateway service root. A scoped
+  EasyConnect credential sees only its bound ObjectStore bucket; unsigned,
+  cross-route, and unrelated credentials remain fail-closed.
+
 ## 0.173.6 - 2026-08-23
 
 - Keep Unix ``statvfs`` capacity arithmetic warning-free under the strict
