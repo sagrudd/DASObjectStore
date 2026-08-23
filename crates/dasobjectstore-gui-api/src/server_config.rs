@@ -351,20 +351,15 @@ impl Default for StandaloneAuthenticationConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StandaloneAuthenticationAuthority {
     /// Decode-only legacy value. It is rejected by configuration validation;
     /// human authentication is supplied by Monas/Synoptikon Pistis authority.
     LocalUser,
     Synoptikon,
+    #[default]
     Monas,
-}
-
-impl Default for StandaloneAuthenticationAuthority {
-    fn default() -> Self {
-        Self::Monas
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
