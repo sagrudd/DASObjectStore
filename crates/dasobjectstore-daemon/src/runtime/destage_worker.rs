@@ -1005,13 +1005,16 @@ mod tests {
         let selected = select_managed_hdd_roots_with_capacity(&database, &hdd_root, 2, 1, None)
             .expect("placement-eligible destinations");
         assert_eq!(selected.len(), 2);
-        assert_eq!(
-            selected
-                .iter()
-                .map(|root| root.disk_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["disk-healthy", "disk-watch"]
-        );
+        let mut selected_ids = selected
+            .iter()
+            .map(|root| root.disk_id.as_str())
+            .collect::<Vec<_>>();
+        // Both test roots share one busy filesystem, so their observed free
+        // fractions can legitimately change between measurements. Placement
+        // order follows those observations; this assertion concerns only the
+        // registry-health eligibility boundary.
+        selected_ids.sort_unstable();
+        assert_eq!(selected_ids, vec!["disk-healthy", "disk-watch"]);
         fs::remove_dir_all(root).expect("cleanup");
     }
 
