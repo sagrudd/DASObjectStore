@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.16 - 2026-08-23
+
+- Accept the Prosopikon legacy-registry session shape with or without its
+  optional UUID session identifier during formal authority retirement, while
+  rejecting nil, malformed, duplicate, or otherwise extended records.
+
 ## 0.173.15 - 2026-08-23
 
 - Treat systemd's persistent and runtime masked states as valid evidence that

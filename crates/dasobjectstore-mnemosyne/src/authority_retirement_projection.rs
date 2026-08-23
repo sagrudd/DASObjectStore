@@ -312,6 +312,7 @@ fn observe_registry(path: &Path, uid: u32, gid: u32, now: i64) -> Result<(u64, u
     let mut registrations = 0_u64;
     let mut usernames = HashSet::new();
     let mut credential_hashes = HashSet::new();
+    let mut session_ids = HashSet::new();
     for user in users {
         exact_keys(
             user,
@@ -333,15 +334,37 @@ fn observe_registry(path: &Path, uid: u32, gid: u32, now: i64) -> Result<(u64, u
             return Err(());
         }
         for session in user.get("sessions").and_then(Value::as_array).ok_or(())? {
-            exact_keys(
-                session,
-                &[
-                    "token_hash",
-                    "issued_at_utc",
-                    "expires_at_utc",
-                    "revoked_at_utc",
-                ],
-            )?;
+            if session.get("session_id").is_some() {
+                exact_keys(
+                    session,
+                    &[
+                        "session_id",
+                        "token_hash",
+                        "issued_at_utc",
+                        "expires_at_utc",
+                        "revoked_at_utc",
+                    ],
+                )?;
+                let session_id = session
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                    .filter(|value| !value.is_nil())
+                    .ok_or(())?;
+                if !session_ids.insert(session_id) {
+                    return Err(());
+                }
+            } else {
+                exact_keys(
+                    session,
+                    &[
+                        "token_hash",
+                        "issued_at_utc",
+                        "expires_at_utc",
+                        "revoked_at_utc",
+                    ],
+                )?;
+            }
             if !session
                 .get("token_hash")
                 .and_then(Value::as_str)
@@ -509,13 +532,19 @@ mod tests {
         let root = std::env::temp_dir().join(format!("das-observation-{}", Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let path = root.join("users.json");
-        fs::write(&path, br#"{"schema_version":2,"users":[{"username":"owner","created_at_utc":"2020-01-01T00:00:00Z","password_hash":null,"registered_at_utc":null,"sudo_administrator":false,"sessions":[{"token_hash":"session-live","issued_at_utc":"2020-01-01T00:00:00Z","expires_at_utc":"2030-01-01T00:00:00Z","revoked_at_utc":null},{"token_hash":"session-expired","issued_at_utc":"2019-01-01T00:00:00Z","expires_at_utc":"2020-01-01T00:00:00Z","revoked_at_utc":null}],"registration_tokens":[{"token_hash":"registration-live","issued_at_utc":"2020-01-01T00:00:00Z","expires_at_utc":"2030-01-01T00:00:00Z","used_at_utc":null}]}],"groups":[],"group_memberships":[],"rights":[],"device_tokens":[]}"#).unwrap();
+        fs::write(&path, br#"{"schema_version":2,"users":[{"username":"owner","created_at_utc":"2020-01-01T00:00:00Z","password_hash":null,"registered_at_utc":null,"sudo_administrator":false,"sessions":[{"session_id":"00000000-0000-0000-0000-000000000001","token_hash":"session-live","issued_at_utc":"2020-01-01T00:00:00Z","expires_at_utc":"2030-01-01T00:00:00Z","revoked_at_utc":null},{"token_hash":"session-expired","issued_at_utc":"2019-01-01T00:00:00Z","expires_at_utc":"2020-01-01T00:00:00Z","revoked_at_utc":null}],"registration_tokens":[{"token_hash":"registration-live","issued_at_utc":"2020-01-01T00:00:00Z","expires_at_utc":"2030-01-01T00:00:00Z","used_at_utc":null}]}],"groups":[],"group_memberships":[],"rights":[],"device_tokens":[]}"#).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
         let metadata = fs::metadata(&path).unwrap();
         assert_eq!(
             observe_registry(&path, metadata.uid(), metadata.gid(), 1_700_000_000).unwrap(),
             (1, 1)
         );
+
+        let mut duplicate: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        duplicate["users"][0]["sessions"][1]["session_id"] =
+            Value::String("00000000-0000-0000-0000-000000000001".into());
+        fs::write(&path, serde_json::to_vec(&duplicate).unwrap()).unwrap();
+        assert!(observe_registry(&path, metadata.uid(), metadata.gid(), 1_700_000_000).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
