@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.14 - 2026-08-23
+
+- Pin Prosopikon 0.27.4 so the formal DAS authority-retirement closure can
+  project a quiescent checkpointed authority without SQLite attempting to
+  recreate WAL coordination sidecars inside the private Monas directory.
+
 ## 0.173.13 - 2026-08-23
 
 - Pin Prosopikon 0.27.3 so DAS Web/API authority consumers and package
