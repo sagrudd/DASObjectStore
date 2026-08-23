@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.173.12 - 2026-08-23
+
+- Keep retained pre-Pistis EasyConnect v1 sessions readable for lifetime and
+  revocation filtering without treating their absent formal identity fields
+  as Pistis authority. Expired legacy sessions can no longer take the signed
+  S3 service root offline, while formal identity operations still fail closed.
+- Add regressions for the retained-session S3 outage and make the managed-disk
+  eligibility assertion independent of live free-space measurement order.
+- Keep the Linux Rust 1.93 strict lint release gate green with
+  behavior-preserving default derivations and equivalent guard expressions.
+
 ## 0.173.7 - 2026-08-23
 
 - Restore signed S3 ``ListBuckets`` at the gateway service root. A scoped
