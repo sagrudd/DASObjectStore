@@ -16,7 +16,8 @@ impl LegacySurfaceProbeV1 for ProductionProbeV1 {
         command_stdout(
             "systemctl",
             &["is-enabled", "dasobjectstore-server.service"],
-        ) == Some("disabled".into())
+        )
+        .is_some_and(|value| service_activation_blocked(&value))
             && command_stdout("systemctl", &["is-active", "dasobjectstore-server.service"])
                 == Some("inactive".into())
             && command_stdout(
@@ -81,6 +82,10 @@ impl LegacySurfaceProbeV1 for ProductionProbeV1 {
     }
 }
 
+fn service_activation_blocked(value: &str) -> bool {
+    matches!(value, "disabled" | "masked" | "masked-runtime")
+}
+
 fn fixed_files_exclude_retired_helpers() -> bool {
     [
         "/usr/lib/systemd/system",
@@ -131,5 +136,32 @@ fn main() {
     if !ok {
         eprintln!("DAS authority-retirement projection unavailable");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service_activation_blocked;
+
+    #[test]
+    fn legacy_service_accepts_disabled_and_masked_states_only() {
+        for state in ["disabled", "masked", "masked-runtime"] {
+            assert!(service_activation_blocked(state), "rejected {state}");
+        }
+        for state in [
+            "enabled",
+            "enabled-runtime",
+            "linked",
+            "linked-runtime",
+            "static",
+            "indirect",
+            "generated",
+            "transient",
+            "alias",
+            "bad",
+            "",
+        ] {
+            assert!(!service_activation_blocked(state), "accepted {state}");
+        }
     }
 }

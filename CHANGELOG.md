@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.15 - 2026-08-23
+
+- Treat systemd's persistent and runtime masked states as valid evidence that
+  the retired standalone authority cannot activate, while continuing to reject
+  every startable or indeterminate unit state.
+
 ## 0.173.14 - 2026-08-23
 
 - Pin Prosopikon 0.27.4 so the formal DAS authority-retirement closure can
