@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.20 - 2026-08-24
+
+- Sample the DAS replacement-receipt verification clock only after the
+  attended receipt request returns. A valid receipt issued after the
+  operator's Face ID delay is no longer rejected as future-dated, and an
+  orchestration regression fixes request, clock and verification ordering.
+
 ## 0.173.19 - 2026-08-24
 
 - Restore the root-only `0600` metadata required by the formal authority

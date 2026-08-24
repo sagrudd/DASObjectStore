@@ -77,38 +77,14 @@ fn run() -> Result<(), ()> {
     let (service_uid, service_gid) = service_account_ids()?;
     let projection = load_root_projection()?;
     let challenge = reserve_challenge()?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| ())?
-        .as_secs();
-    let expected = DasReplacementReceiptExpectationV1 {
+    let verified = request_and_verify_receipt(
+        &projection,
         challenge,
-        now,
-        verifier: DasReplacementVerifierRecordV1 {
-            site_trust_domain_id: projection.verifier.site_trust_domain_id,
-            site_trust_state_revision: projection.verifier.site_trust_state_revision,
-            authority_id: projection.verifier.authority_id,
-            custody_generation: projection.verifier.custody_generation,
-            key_generation: projection.verifier.key_generation,
-            key_id: projection.verifier.key_id,
-            public_key_sec1: projection
-                .verifier
-                .public_key_sec1
-                .try_into()
-                .map_err(|_| ())?,
-            descriptor_sha256: projection.verifier.descriptor_sha256,
-            site_trust_anchor_sha256: projection.verifier.site_trust_anchor_sha256,
-            active: projection.verifier.active,
-        },
-        monas_version: projection.monas_version,
-        monas_source_revision: projection.monas_source_revision,
-        monas_package_sha256: projection.monas_package_sha256,
-        prosopikon_version: projection.prosopikon_version,
-        prosopikon_source_revision: projection.prosopikon_source_revision,
-        prosopikon_artifact_sha256: projection.prosopikon_artifact_sha256,
-    };
-    let receipt = request_receipt_as_service_identity(challenge, service_uid)?;
-    let verified = verify_das_replacement_receipt_v1(&receipt, &expected).map_err(|_| ())?;
+        service_uid,
+        request_receipt_as_service_identity,
+        current_unix_seconds,
+        |receipt, expected| verify_das_replacement_receipt_v1(receipt, expected).map_err(|_| ()),
+    )?;
     let completion = retire_local_authority_v1(
         &DasLocalAuthorityRetirementPathsV1::production(service_uid, service_gid).ok_or(())?,
         &verified,
@@ -117,6 +93,56 @@ fn run() -> Result<(), ()> {
     .map_err(|_| ())?;
     println!("{}", serde_json::to_string(&completion).map_err(|_| ())?);
     Ok(())
+}
+
+fn current_unix_seconds() -> Result<u64, ()> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ())?
+        .as_secs())
+}
+
+fn request_and_verify_receipt<R>(
+    projection: &AcceptedProjectionV1,
+    challenge: [u8; 32],
+    service_uid: u32,
+    request: impl FnOnce([u8; 32], u32) -> Result<Vec<u8>, ()>,
+    clock: impl FnOnce() -> Result<u64, ()>,
+    verify: impl FnOnce(&[u8], &DasReplacementReceiptExpectationV1) -> Result<R, ()>,
+) -> Result<R, ()> {
+    let receipt = request(challenge, service_uid)?;
+    // Verification time is an observation of the returned receipt. Sampling
+    // before the attended request would reject every receipt issued after the
+    // operator's Face ID delay as if it came from the future.
+    let now = clock()?;
+    let expected = DasReplacementReceiptExpectationV1 {
+        challenge,
+        now,
+        verifier: DasReplacementVerifierRecordV1 {
+            site_trust_domain_id: projection.verifier.site_trust_domain_id.clone(),
+            site_trust_state_revision: projection.verifier.site_trust_state_revision,
+            authority_id: projection.verifier.authority_id,
+            custody_generation: projection.verifier.custody_generation.clone(),
+            key_generation: projection.verifier.key_generation,
+            key_id: projection.verifier.key_id,
+            public_key_sec1: projection
+                .verifier
+                .public_key_sec1
+                .clone()
+                .try_into()
+                .map_err(|_| ())?,
+            descriptor_sha256: projection.verifier.descriptor_sha256,
+            site_trust_anchor_sha256: projection.verifier.site_trust_anchor_sha256,
+            active: projection.verifier.active,
+        },
+        monas_version: projection.monas_version.clone(),
+        monas_source_revision: projection.monas_source_revision,
+        monas_package_sha256: projection.monas_package_sha256,
+        prosopikon_version: projection.prosopikon_version.clone(),
+        prosopikon_source_revision: projection.prosopikon_source_revision,
+        prosopikon_artifact_sha256: projection.prosopikon_artifact_sha256,
+    };
+    verify(&receipt, &expected)
 }
 
 /// Request only the kernel-authenticated receipt as the unprivileged DAS
@@ -312,7 +338,71 @@ fn reserve_challenge_from(
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use super::*;
+
+    #[test]
+    fn verification_clock_is_sampled_after_attended_receipt_returns() {
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let request_events = Rc::clone(&events);
+        let clock_events = Rc::clone(&events);
+        let verify_events = Rc::clone(&events);
+        let projection = AcceptedProjectionV1 {
+            schema: "dasobjectstore.accepted-authority-retirement-projection.v1".into(),
+            verifier: VerifierProjectionV1 {
+                site_trust_domain_id: "site-1".into(),
+                site_trust_state_revision: 1,
+                authority_id: Uuid::from_u128(1),
+                custody_generation: "pistis-first-device-authority-1".into(),
+                key_generation: 2,
+                key_id: [3; 32],
+                public_key_sec1: vec![2; 33],
+                descriptor_sha256: [4; 32],
+                site_trust_anchor_sha256: [5; 32],
+                active: true,
+            },
+            monas_version: "0.115.11".into(),
+            monas_source_revision: [6; 20],
+            monas_package_sha256: [7; 32],
+            prosopikon_version: "0.27.4".into(),
+            prosopikon_source_revision: [8; 20],
+            prosopikon_artifact_sha256: [9; 32],
+            observation: LegacyAuthoritySurfaceObservationV1 {
+                standalone_service_disabled_inactive: true,
+                legacy_listeners_absent: true,
+                monas_authority_selected_only: true,
+                legacy_routes_absent: true,
+                legacy_helpers_and_pam_absent: true,
+                live_sessions: 0,
+                live_registration_tokens: 0,
+            },
+        };
+        request_and_verify_receipt(
+            &projection,
+            [10; 32],
+            1000,
+            move |challenge, uid| {
+                request_events.borrow_mut().push("request");
+                assert_eq!(challenge, [10; 32]);
+                assert_eq!(uid, 1000);
+                Ok(vec![11; 64])
+            },
+            move || {
+                assert_eq!(clock_events.borrow().as_slice(), ["request"]);
+                clock_events.borrow_mut().push("clock");
+                Ok(1234)
+            },
+            move |receipt, expected| {
+                verify_events.borrow_mut().push("verify");
+                assert_eq!(receipt, [11; 64]);
+                assert_eq!(expected.now, 1234);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(events.borrow().as_slice(), ["request", "clock", "verify"]);
+    }
 
     #[test]
     fn receipt_helper_is_exactly_one_request_without_retirement_inputs() {
