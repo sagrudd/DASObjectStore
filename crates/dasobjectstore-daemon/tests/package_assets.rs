@@ -536,6 +536,14 @@ fn package_owns_fixed_authority_retirement_consumer() {
         "RestrictAddressFamilies=AF_UNIX",
     );
     assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "NoNewPrivileges=false",
+    );
+    assert_not_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "NoNewPrivileges=yes",
+    );
+    assert_contains(
         TMPFILES,
         "d /var/lib/dasobjectstore/auth-retired 0700 root root -",
     );

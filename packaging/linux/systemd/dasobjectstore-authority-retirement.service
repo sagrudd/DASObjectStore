@@ -9,7 +9,11 @@ User=root
 Group=root
 ExecStartPre=/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize
 ExecStart=/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement
-NoNewPrivileges=yes
+# The root parent must make one bounded exec transition to the unprivileged
+# dasobjectstore receipt peer. Linux denies that setuid transition when
+# PR_SET_NO_NEW_PRIVS is already set; the child itself cannot regain root and
+# receives no authority paths or mutation capability.
+NoNewPrivileges=false
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes

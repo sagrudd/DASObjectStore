@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.18 - 2026-08-24
+
+- Permit the root-owned authority-retirement parent to perform its single
+  bounded `setuid`/`exec` transition to the unprivileged DAS receipt peer.
+  Linux rejects that transition after `NoNewPrivileges` is set, which had
+  prevented the helper from ever reaching the protected Monas socket.
+
 ## 0.173.17 - 2026-08-24
 
 - Request the protected Monas replacement receipt through a bounded helper
