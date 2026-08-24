@@ -1,7 +1,7 @@
 use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
-    io::{Read as _, Write as _},
+    io::{Read, Write},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     os::unix::process::CommandExt as _,
     path::Path,
