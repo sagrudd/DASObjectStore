@@ -3,7 +3,9 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read as _, Write as _},
     os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
+    os::unix::process::CommandExt as _,
     path::Path,
+    process::{Command, Stdio},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -19,6 +21,9 @@ use uuid::Uuid;
 const PROJECTION: &str = "/var/lib/dasobjectstore/authority-retirement/accepted-projection.v1.json";
 const RESERVATION: &str = "/var/lib/dasobjectstore/authority-retirement/challenge-reservation.v1";
 const RANDOM: &str = "/dev/urandom";
+const RECEIPT_HELPER_ARGUMENT: &str = "--request-replacement-receipt-v1";
+const RECEIPT_SOCKET_GROUP: &str = "mnemosyne-pistis-das";
+const MAXIMUM_RECEIPT_BYTES: usize = 16 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,7 +55,19 @@ struct VerifierProjectionV1 {
 }
 
 fn main() {
-    if std::env::args_os().len() != 1 || run().is_err() {
+    let mut arguments = std::env::args_os();
+    let _executable = arguments.next();
+    let operation = arguments.next();
+    if arguments.next().is_some() {
+        eprintln!("DAS authority retirement unavailable");
+        std::process::exit(1);
+    }
+    let result = match operation.as_deref() {
+        None => run(),
+        Some(value) if value == RECEIPT_HELPER_ARGUMENT => run_receipt_helper(),
+        Some(_) => Err(()),
+    };
+    if result.is_err() {
         eprintln!("DAS authority retirement unavailable");
         std::process::exit(1);
     }
@@ -90,7 +107,7 @@ fn run() -> Result<(), ()> {
         prosopikon_source_revision: projection.prosopikon_source_revision,
         prosopikon_artifact_sha256: projection.prosopikon_artifact_sha256,
     };
-    let receipt = request_das_replacement_receipt_v1(challenge).map_err(|_| ())?;
+    let receipt = request_receipt_as_service_identity(challenge, service_uid)?;
     let verified = verify_das_replacement_receipt_v1(&receipt, &expected).map_err(|_| ())?;
     let completion = retire_local_authority_v1(
         &DasLocalAuthorityRetirementPathsV1::production(service_uid, service_gid).ok_or(())?,
@@ -100,6 +117,101 @@ fn run() -> Result<(), ()> {
     .map_err(|_| ())?;
     println!("{}", serde_json::to_string(&completion).map_err(|_| ())?);
     Ok(())
+}
+
+/// Request only the kernel-authenticated receipt as the unprivileged DAS
+/// service identity. The root parent retains projection verification and the
+/// atomic root-owned archive transaction; the helper receives no filesystem
+/// path, authority material, or mutation capability.
+fn request_receipt_as_service_identity(
+    challenge: [u8; 32],
+    service_uid: u32,
+) -> Result<Vec<u8>, ()> {
+    if service_uid == 0 {
+        return Err(());
+    }
+    let receipt_gid = named_group_id(RECEIPT_SOCKET_GROUP)?;
+    let executable = std::env::current_exe().map_err(|_| ())?;
+    let metadata = fs::symlink_metadata(&executable).map_err(|_| ())?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != 0
+        || metadata.permissions().mode() & 0o022 != 0
+    {
+        return Err(());
+    }
+    let mut child = Command::new(executable);
+    child
+        .arg(RECEIPT_HELPER_ARGUMENT)
+        .env_clear()
+        .current_dir("/")
+        .uid(service_uid)
+        .gid(receipt_gid)
+        .groups(&[])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = child.spawn().map_err(|_| ())?;
+    let mut input = child.stdin.take().ok_or(())?;
+    if input.write_all(&challenge).is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(());
+    }
+    drop(input);
+    let output = child.wait_with_output().map_err(|_| ())?;
+    if !output.status.success()
+        || output.stdout.is_empty()
+        || output.stdout.len() > MAXIMUM_RECEIPT_BYTES
+    {
+        return Err(());
+    }
+    Ok(output.stdout)
+}
+
+fn run_receipt_helper() -> Result<(), ()> {
+    if unsafe { libc::geteuid() } == 0 || unsafe { libc::getegid() } == 0 {
+        return Err(());
+    }
+    request_receipt_helper_io(
+        &mut std::io::stdin().lock(),
+        &mut std::io::stdout().lock(),
+        request_das_replacement_receipt_v1,
+    )
+}
+
+fn request_receipt_helper_io(
+    input: &mut impl Read,
+    output: &mut impl Write,
+    request: impl FnOnce(
+        [u8; 32],
+    ) -> Result<
+        Vec<u8>,
+        dasobjectstore_mnemosyne::local_authority_retirement::DasLocalAuthorityRetirementErrorV1,
+    >,
+) -> Result<(), ()> {
+    let mut challenge = [0_u8; 32];
+    input.read_exact(&mut challenge).map_err(|_| ())?;
+    let mut trailing = [0_u8; 1];
+    if challenge == [0; 32] || input.read(&mut trailing).map_err(|_| ())? != 0 {
+        return Err(());
+    }
+    let receipt = request(challenge).map_err(|_| ())?;
+    if receipt.is_empty() || receipt.len() > MAXIMUM_RECEIPT_BYTES {
+        return Err(());
+    }
+    output.write_all(&receipt).map_err(|_| ())?;
+    output.flush().map_err(|_| ())
+}
+
+fn named_group_id(name: &str) -> Result<u32, ()> {
+    let name = CString::new(name).map_err(|_| ())?;
+    let record = unsafe { libc::getgrnam(name.as_ptr()) };
+    if record.is_null() {
+        return Err(());
+    }
+    let gid = unsafe { (*record).gr_gid };
+    (gid != 0).then_some(gid).ok_or(())
 }
 
 fn service_account_ids() -> Result<(u32, u32), ()> {
@@ -202,6 +314,25 @@ fn reserve_challenge_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn receipt_helper_is_exactly_one_request_without_retirement_inputs() {
+        let challenge = [7_u8; 32];
+        let mut input = challenge.as_slice();
+        let mut output = Vec::new();
+        request_receipt_helper_io(&mut input, &mut output, |observed| {
+            assert_eq!(observed, challenge);
+            Ok(vec![9_u8; 48])
+        })
+        .unwrap();
+        assert_eq!(output, vec![9_u8; 48]);
+
+        let extended_bytes = [challenge.as_slice(), &[1]].concat();
+        let mut extended = extended_bytes.as_slice();
+        assert!(
+            request_receipt_helper_io(&mut extended, &mut Vec::new(), |_| Ok(vec![1])).is_err()
+        );
+    }
 
     #[test]
     fn challenge_reservation_reuses_exact_bytes_and_denies_conflict() {

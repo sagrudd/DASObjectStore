@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.17 - 2026-08-24
+
+- Request the protected Monas replacement receipt through a bounded helper
+  running as the kernel-authenticated `dasobjectstore` identity, while keeping
+  receipt verification and the atomic root-owned legacy-authority archive in
+  the root service parent. This closes the live peer-credential mismatch
+  without accepting root on the protected Monas socket.
+
 ## 0.173.16 - 2026-08-23
 
 - Accept the Prosopikon legacy-registry session shape with or without its
