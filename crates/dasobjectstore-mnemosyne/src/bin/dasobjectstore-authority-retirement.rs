@@ -10,10 +10,10 @@ use std::{
 };
 
 use dasobjectstore_mnemosyne::local_authority_retirement::{
-    request_das_replacement_receipt_v1, retire_local_authority_v1,
-    verify_das_replacement_receipt_v1, DasLocalAuthorityRetirementPathsV1,
-    DasReplacementReceiptExpectationV1, DasReplacementVerifierRecordV1,
-    LegacyAuthoritySurfaceObservationV1,
+    request_das_replacement_receipt_v1, resume_local_authority_retirement_v1,
+    retire_local_authority_v1, verify_das_replacement_receipt_v1,
+    DasLocalAuthorityRetirementPathsV1, DasReplacementReceiptExpectationV1,
+    DasReplacementVerifierRecordV1, LegacyAuthoritySurfaceObservationV1,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -77,6 +77,15 @@ fn run() -> Result<(), ()> {
     let (service_uid, service_gid) = service_account_ids()?;
     let projection = load_root_projection()?;
     let challenge = reserve_challenge()?;
+    let paths =
+        DasLocalAuthorityRetirementPathsV1::production(service_uid, service_gid).ok_or(())?;
+    if let Some(completion) =
+        resume_local_authority_retirement_v1(&paths, challenge, projection.observation)
+            .map_err(|_| ())?
+    {
+        println!("{}", serde_json::to_string(&completion).map_err(|_| ())?);
+        return Ok(());
+    }
     let verified = request_and_verify_receipt(
         &projection,
         challenge,
@@ -85,12 +94,8 @@ fn run() -> Result<(), ()> {
         current_unix_seconds,
         |receipt, expected| verify_das_replacement_receipt_v1(receipt, expected).map_err(|_| ()),
     )?;
-    let completion = retire_local_authority_v1(
-        &DasLocalAuthorityRetirementPathsV1::production(service_uid, service_gid).ok_or(())?,
-        &verified,
-        projection.observation,
-    )
-    .map_err(|_| ())?;
+    let completion =
+        retire_local_authority_v1(&paths, &verified, projection.observation).map_err(|_| ())?;
     println!("{}", serde_json::to_string(&completion).map_err(|_| ())?);
     Ok(())
 }

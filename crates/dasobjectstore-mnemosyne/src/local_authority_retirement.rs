@@ -250,6 +250,17 @@ pub struct DasLocalAuthorityRetirementCompletionV1 {
     pub archive_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DasLocalAuthorityRetirementIntentV1 {
+    schema: String,
+    transaction_id: String,
+    source_sha256: String,
+    receipt_sha256: String,
+    authority_revision: u64,
+    archive_path: String,
+}
+
 /// Verifies the byte-exact attached receipt against trusted local discovery.
 pub fn verify_das_replacement_receipt_v1(
     receipt: &[u8],
@@ -361,6 +372,92 @@ pub fn verify_das_replacement_receipt_v1(
     })
 }
 
+/// Resumes the exact pre-archive crash window recorded by a durable intent.
+///
+/// The intent is root-owned, write-once evidence produced only after receipt
+/// verification. Recovery binds it back to the locally reserved challenge and
+/// current legacy bytes; it never requests or accepts a second approval.
+pub fn resume_local_authority_retirement_v1(
+    paths: &DasLocalAuthorityRetirementPathsV1,
+    challenge: [u8; 32],
+    observation: LegacyAuthoritySurfaceObservationV1,
+) -> Result<Option<DasLocalAuthorityRetirementCompletionV1>, DasLocalAuthorityRetirementErrorV1> {
+    if !observation.is_inactive() {
+        return Err(DasLocalAuthorityRetirementErrorV1::LegacySurfaceActive);
+    }
+    let transaction_id = hex(&challenge_digest(&challenge));
+    let archive = paths
+        .archive_directory
+        .join(format!("{transaction_id}.users.json"));
+    let intent = paths
+        .transaction_directory
+        .join(format!("{transaction_id}.intent.json"));
+    let manifest = paths
+        .transaction_directory
+        .join(format!("{transaction_id}.complete.json"));
+    let temporary = paths
+        .transaction_directory
+        .join(format!(".{transaction_id}.complete.tmp"));
+    let intent_meta = match fs::symlink_metadata(&intent) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(DasLocalAuthorityRetirementErrorV1::IoUnavailable),
+    };
+    if !intent_meta.is_file()
+        || intent_meta.uid() != paths.state_uid
+        || intent_meta.permissions().mode() & 0o777 != 0o600
+        || intent_meta.nlink() != 1
+        || !(1..=4096).contains(&intent_meta.len())
+        || archive.exists()
+        || manifest.exists()
+        || temporary.exists()
+    {
+        return Err(DasLocalAuthorityRetirementErrorV1::Conflict);
+    }
+    let source_meta = safe_file(&paths.source, paths.source_uid, paths.source_gid, 0o640)?;
+    let archive_meta = safe_directory(&paths.archive_directory, paths.state_uid, 0o700)?;
+    let transaction_meta = safe_directory(&paths.transaction_directory, paths.state_uid, 0o700)?;
+    if source_meta.dev() != archive_meta.dev() || source_meta.dev() != transaction_meta.dev() {
+        return Err(DasLocalAuthorityRetirementErrorV1::UnsafeState);
+    }
+    let source_sha256: [u8; 32] = Sha256::digest(
+        fs::read(&paths.source).map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?,
+    )
+    .into();
+    let retained: DasLocalAuthorityRetirementIntentV1 = serde_json::from_slice(
+        &fs::read(&intent).map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?,
+    )
+    .map_err(|_| DasLocalAuthorityRetirementErrorV1::UnsafeState)?;
+    let expected_archive = archive.to_string_lossy().into_owned();
+    if retained.schema != "dasobjectstore.local-authority-retirement-completion.v1"
+        || retained.transaction_id != transaction_id
+        || retained.source_sha256 != hex(&source_sha256)
+        || !is_lower_hex_32(&retained.receipt_sha256)
+        || retained.authority_revision == 0
+        || retained.archive_path != expected_archive
+    {
+        return Err(DasLocalAuthorityRetirementErrorV1::UnsafeState);
+    }
+    let completion = DasLocalAuthorityRetirementCompletionV1 {
+        schema: "dasobjectstore.local-authority-retirement-completion.v1",
+        transaction_id: retained.transaction_id,
+        source_sha256: retained.source_sha256,
+        receipt_sha256: retained.receipt_sha256,
+        authority_revision: retained.authority_revision,
+        archive_path: retained.archive_path,
+    };
+    finish_retirement_v1(
+        paths,
+        &source_meta,
+        source_sha256,
+        &completion,
+        &archive,
+        &manifest,
+        &temporary,
+    )?;
+    Ok(Some(completion))
+}
+
 /// Atomically preserves the inactive registry and publishes completion.
 pub fn retire_local_authority_v1(
     paths: &DasLocalAuthorityRetirementPathsV1,
@@ -409,6 +506,27 @@ pub fn retire_local_authority_v1(
             .map_err(|_| DasLocalAuthorityRetirementErrorV1::UnsafeState)?,
     )?;
     sync_dir(&paths.transaction_directory)?;
+    finish_retirement_v1(
+        paths,
+        &source_meta,
+        source_sha256,
+        &completion,
+        &archive,
+        &manifest,
+        &temporary,
+    )?;
+    Ok(completion)
+}
+
+fn finish_retirement_v1(
+    paths: &DasLocalAuthorityRetirementPathsV1,
+    source_meta: &fs::Metadata,
+    source_sha256: [u8; 32],
+    completion: &DasLocalAuthorityRetirementCompletionV1,
+    archive: &Path,
+    manifest: &Path,
+    temporary: &Path,
+) -> Result<(), DasLocalAuthorityRetirementErrorV1> {
     let current_source_sha256: [u8; 32] = Sha256::digest(
         fs::read(&paths.source).map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?,
     )
@@ -438,7 +556,7 @@ pub fn retire_local_authority_v1(
     fs::rename(&temporary, &manifest)
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
     sync_dir(&paths.transaction_directory)?;
-    Ok(completion)
+    Ok(())
 }
 
 fn safe_file(
@@ -523,6 +641,14 @@ fn unsigned(map: &std::collections::BTreeMap<u64, Value>, key: u64) -> Option<u6
 }
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn is_lower_hex_32(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        && value.bytes().any(|byte| byte != b'0')
 }
 
 #[cfg(test)]
@@ -778,6 +904,71 @@ mod tests {
         assert!(root
             .join("authority-retirement")
             .join(format!("{}.complete.json", completion.transaction_id))
+            .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resumes_root_owned_intent_without_requesting_a_second_receipt() {
+        let root = std::env::temp_dir().join(format!("das-retirement-resume-{}", Uuid::new_v4()));
+        let auth = root.join("auth");
+        fs::create_dir_all(&auth).unwrap();
+        fs::create_dir(root.join("auth-retired")).unwrap();
+        fs::create_dir(root.join("authority-retirement")).unwrap();
+        for directory in [
+            &root,
+            &auth,
+            &root.join("auth-retired"),
+            &root.join("authority-retirement"),
+        ] {
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let source = auth.join("users.json");
+        fs::write(&source, b"legacy-authority").unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o640)).unwrap();
+        let metadata = fs::metadata(&source).unwrap();
+        let paths =
+            DasLocalAuthorityRetirementPathsV1::fixture(&root, metadata.uid(), metadata.gid());
+        let challenge = [41; 32];
+        let transaction_id = hex(&challenge_digest(&challenge));
+        let archive = root
+            .join("auth-retired")
+            .join(format!("{transaction_id}.users.json"));
+        let completion = DasLocalAuthorityRetirementCompletionV1 {
+            schema: "dasobjectstore.local-authority-retirement-completion.v1",
+            transaction_id: transaction_id.clone(),
+            source_sha256: hex(&Sha256::digest(b"legacy-authority")),
+            receipt_sha256: hex(&[31; 32]),
+            authority_revision: 5,
+            archive_path: archive.to_string_lossy().into_owned(),
+        };
+        write_new_fsync(
+            &root
+                .join("authority-retirement")
+                .join(format!("{transaction_id}.intent.json")),
+            &serde_json::to_vec(&completion).unwrap(),
+        )
+        .unwrap();
+        let inactive = LegacyAuthoritySurfaceObservationV1 {
+            standalone_service_disabled_inactive: true,
+            legacy_listeners_absent: true,
+            monas_authority_selected_only: true,
+            legacy_routes_absent: true,
+            legacy_helpers_and_pam_absent: true,
+            live_sessions: 0,
+            live_registration_tokens: 0,
+        };
+
+        let resumed = resume_local_authority_retirement_v1(&paths, challenge, inactive)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resumed, completion);
+        assert!(!source.exists());
+        assert_eq!(fs::read(archive).unwrap(), b"legacy-authority");
+        assert!(root
+            .join("authority-retirement")
+            .join(format!("{transaction_id}.complete.json"))
             .exists());
         fs::remove_dir_all(root).unwrap();
     }

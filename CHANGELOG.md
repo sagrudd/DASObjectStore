@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.21 - 2026-08-24
+
+- Resume the exact root-owned pre-archive retirement intent without requesting
+  a second attended receipt. Recovery rebinds the durable intent to the locally
+  reserved challenge, inactive legacy surface, unchanged authority bytes and
+  fixed archive path before completing the atomic archive transaction.
+
 ## 0.173.20 - 2026-08-24
 
 - Sample the DAS replacement-receipt verification clock only after the
