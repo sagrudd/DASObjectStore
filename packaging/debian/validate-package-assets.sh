@@ -228,6 +228,10 @@ require_text "$postinst" 'usermod -aG docker "$service_user"'
 require_text "$postinst" "find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json'"
 require_text "$postinst" "-exec chgrp \"\$service_group\" {} +"
 require_text "$postinst" "-exec chmod 0640 {} +"
+require_text "$postinst" 'authority_retirement_projection=/etc/dasobjectstore/authority-retirement-projection-finalize-v1.json'
+require_text "$postinst" 'chown root:root "$authority_retirement_projection"'
+require_text "$postinst" 'chmod 0600 "$authority_retirement_projection"'
+require_text "$postinst" 'protected DAS authority-retirement projection is unsafe'
 require_text "$postinst" 'reject_user_owned_managed_root "$managed_root"'
 require_text "$postinst" 'repair_marked_managed_tree()'
 require_text "$postinst" 'profile'

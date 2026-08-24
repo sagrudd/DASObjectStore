@@ -570,4 +570,16 @@ mod tests {
         assert!(observe_monas_config_for_identity(&path, metadata.uid(), metadata.gid()).is_err());
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn package_upgrade_restores_protected_projection_metadata() {
+        assert!(DEBIAN_POSTINST.contains(
+            "authority_retirement_projection=/etc/dasobjectstore/authority-retirement-projection-finalize-v1.json"
+        ));
+        assert!(DEBIAN_POSTINST.contains("chown root:root \"$authority_retirement_projection\""));
+        assert!(DEBIAN_POSTINST.contains("chmod 0600 \"$authority_retirement_projection\""));
+        assert!(DEBIAN_POSTINST.contains(
+            "[[ ! -f \"$authority_retirement_projection\" || -L \"$authority_retirement_projection\" ]]"
+        ));
+    }
 }

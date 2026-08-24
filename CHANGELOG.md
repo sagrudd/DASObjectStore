@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.19 - 2026-08-24
+
+- Restore the root-only `0600` metadata required by the formal authority
+  projection finalizer after every DEB or RPM upgrade. Package scripts now
+  reject symlink or non-file substitutions before repairing the retained
+  projection input, preventing the general service-readable JSON policy from
+  reopening this protected boundary.
+
 ## 0.173.18 - 2026-08-24
 
 - Permit the root-owned authority-retirement parent to perform its single

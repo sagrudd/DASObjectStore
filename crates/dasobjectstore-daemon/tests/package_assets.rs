@@ -535,14 +535,8 @@ fn package_owns_fixed_authority_retirement_consumer() {
         AUTHORITY_RETIREMENT_SERVICE,
         "RestrictAddressFamilies=AF_UNIX",
     );
-    assert_contains(
-        AUTHORITY_RETIREMENT_SERVICE,
-        "NoNewPrivileges=false",
-    );
-    assert_not_contains(
-        AUTHORITY_RETIREMENT_SERVICE,
-        "NoNewPrivileges=yes",
-    );
+    assert_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=false");
+    assert_not_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=yes");
     assert_contains(
         TMPFILES,
         "d /var/lib/dasobjectstore/auth-retired 0700 root root -",
@@ -555,6 +549,29 @@ fn package_owns_fixed_authority_retirement_consumer() {
         assert_contains(builder, "dasobjectstore-authority-retirement");
         assert_contains(builder, "dasobjectstore-authority-retirement-finalize");
         assert_contains(builder, "dasobjectstore-authority-retirement.service");
+    }
+    assert_contains(
+        POSTINST,
+        "authority_retirement_projection=/etc/dasobjectstore/authority-retirement-projection-finalize-v1.json",
+    );
+    assert_contains(
+        POSTINST,
+        "chown root:root \"$authority_retirement_projection\"",
+    );
+    assert_contains(POSTINST, "chmod 0600 \"$authority_retirement_projection\"");
+    assert_contains(
+        BUILD_RPM,
+        "chown root:root \"\\$authority_retirement_projection\"",
+    );
+    assert_contains(
+        BUILD_RPM,
+        "chmod 0600 \"\\$authority_retirement_projection\"",
+    );
+    for maintainer_script in [POSTINST, BUILD_RPM] {
+        assert_contains(
+            maintainer_script,
+            "protected DAS authority-retirement projection is unsafe",
+        );
     }
 }
 

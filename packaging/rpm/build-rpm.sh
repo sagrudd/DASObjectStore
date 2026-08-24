@@ -233,6 +233,15 @@ install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore/tls
 install -d -o root -g "\$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$service_group" {} + -exec chmod 0640 {} +
+authority_retirement_projection=/etc/dasobjectstore/authority-retirement-projection-finalize-v1.json
+if [ -e "\$authority_retirement_projection" ] || [ -L "\$authority_retirement_projection" ]; then
+  if [ ! -f "\$authority_retirement_projection" ] || [ -L "\$authority_retirement_projection" ]; then
+    echo "protected DAS authority-retirement projection is unsafe" >&2
+    exit 1
+  fi
+  chown root:root "\$authority_retirement_projection"
+  chmod 0600 "\$authority_retirement_projection"
+fi
 store_registry_state=/var/lib/dasobjectstore/stores.json
 store_registry_config=/etc/dasobjectstore/stores.json
 if [ ! -e "\$store_registry_state" ] && [ -f "\$store_registry_config" ]; then
