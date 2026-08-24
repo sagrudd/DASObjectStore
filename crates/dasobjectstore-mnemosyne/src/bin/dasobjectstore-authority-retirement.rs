@@ -147,7 +147,6 @@ fn request_receipt_as_service_identity(
         .current_dir("/")
         .uid(service_uid)
         .gid(receipt_gid)
-        .groups(&[])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
