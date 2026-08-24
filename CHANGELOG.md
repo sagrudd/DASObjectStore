@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.22 - 2026-08-24
+
+- Mount the common DAS state root once in the protected authority-retirement
+  service. Separate systemd writable bind mounts made the required source-to-
+  archive rename fail with `EXDEV`; the package regression now requires the
+  single mount namespace boundary used by the atomic transaction.
+
 ## 0.173.21 - 2026-08-24
 
 - Resume the exact root-owned pre-archive retirement intent without requesting

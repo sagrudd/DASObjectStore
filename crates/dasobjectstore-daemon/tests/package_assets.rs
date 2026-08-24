@@ -538,6 +538,14 @@ fn package_owns_fixed_authority_retirement_consumer() {
     assert_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=false");
     assert_not_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=yes");
     assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "ReadWritePaths=/var/lib/dasobjectstore\n",
+    );
+    assert_not_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "ReadWritePaths=/var/lib/dasobjectstore/auth ",
+    );
+    assert_contains(
         TMPFILES,
         "d /var/lib/dasobjectstore/auth-retired 0700 root root -",
     );
