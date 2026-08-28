@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.173.23 - 2026-08-28
+
+- Pin Prosopikon 0.28.8 for one concrete Monas/DASObjectStore actor type
+  identity while preserving the existing audience-bound actor contract. The
+  package and local-container regressions reject split or stale Prosopikon
+  revisions before a release can conceal an incompatible runtime boundary.
+- Preserve the TUI bottleneck default with the Rust 1.93 derived form required
+  by the strict release lint gate.
+- Keep the authority-retirement V1 pass/fail contract unchanged while adopting
+  the behavior-equivalent Rust 1.93 lint forms inside its implementation.
+- Rename one private destage retry accessor to satisfy the Rust 1.93 convention
+  lint without changing the command-line argument or request shape.
+
 ## 0.173.22 - 2026-08-24
 
 - Mount the common DAS state root once in the protected authority-retirement

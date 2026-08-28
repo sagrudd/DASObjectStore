@@ -682,7 +682,7 @@ fn run_destage_retry(args: &DestageRetryArgs, writer: &mut impl Write) -> Result
     let client = DaemonClient::new(UnixSocketDaemonTransport::new(config.socket_path));
     let response = client.destage_retry(DaemonDestageRetryRequest {
         store_id: args.store_id().as_str().to_string(),
-        from_state: args.from_state().to_string(),
+        from_state: args.expected_state().to_string(),
         dry_run: args.dry_run(),
         allow_destage_retry: args.allow_destage_retry(),
         confirmation_marker: args.confirm().to_string(),

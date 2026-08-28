@@ -121,6 +121,7 @@ pub trait LegacySurfaceProbeV1 {
 
 /// Validates fixed governed inputs, observes local state, and atomically emits
 /// the sole projection accepted by the retirement consumer.
+#[allow(clippy::result_unit_err)] // The fixed V1 service boundary exposes only pass/fail.
 pub fn finalize_authority_retirement_projection_v1(
     paths: &ProjectionPathsV1,
     probe: &impl LegacySurfaceProbeV1,
@@ -373,7 +374,7 @@ fn observe_registry(path: &Path, uid: u32, gid: u32, now: i64) -> Result<(u64, u
                 return Err(());
             }
             let expires = timestamp(session.get("expires_at_utc").ok_or(())?)?;
-            if session.get("revoked_at_utc").map_or(true, Value::is_null) && expires > now {
+            if session.get("revoked_at_utc").is_none_or(Value::is_null) && expires > now {
                 sessions = sessions.checked_add(1).ok_or(())?;
             }
         }
@@ -399,7 +400,7 @@ fn observe_registry(path: &Path, uid: u32, gid: u32, now: i64) -> Result<(u64, u
                 return Err(());
             }
             let expires = timestamp(token.get("expires_at_utc").ok_or(())?)?;
-            if token.get("used_at_utc").map_or(true, Value::is_null) && expires > now {
+            if token.get("used_at_utc").is_none_or(Value::is_null) && expires > now {
                 registrations = registrations.checked_add(1).ok_or(())?;
             }
         }
