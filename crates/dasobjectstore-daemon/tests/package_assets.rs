@@ -506,6 +506,13 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 }
 
 #[test]
+fn monas_boundary_publishes_the_stable_appliance_identity() {
+    assert_contains(MONAS_ACCESS_BOUNDARY, "appliance-identity.json");
+    assert_contains(MONAS_ACCESS_BOUNDARY, "publish-identity");
+    assert_contains(MONAS_ACCESS_BOUNDARY, "publish_appliance_identity");
+}
+
+#[test]
 fn package_excludes_retired_local_human_authority() {
     assert_not_contains(BUILD_DEB, "etc/pam.d");
     assert_not_contains(BUILD_DEB, "dasobjectstore-local-auth-helper");

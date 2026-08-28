@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.25 - 2026-08-28
+
+- Publish the stable non-secret appliance identity through the existing
+  ``mnemosyne-pistis-das`` package boundary. Upgrades repair retained identity
+  metadata without replacing its bytes, first daemon startup publishes the
+  create-once identity before consumers proceed, and package regressions reject
+  unreadable, linked or substituted identity state.
+
 ## 0.173.24 - 2026-08-28
 
 - Advance both Prosopikon dependencies to the merged 0.28.9 authority revision
