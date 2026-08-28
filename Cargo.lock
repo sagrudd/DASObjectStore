@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "base64",
  "chrono",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "base64",
  "chrono",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "axum",
  "axum-server",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "axum",
  "chrono",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "serde",
  "serde_json",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "base64",
  "clap",
@@ -963,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.173.22"
+version = "0.173.23"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -2181,7 +2181,7 @@ version = "1.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0aeb26bf5e836cc1c341c8106051b573f1766dfa05aa87f0b98be5e51b02303"
 dependencies = [
- "nix",
+ "nix 0.29.0",
  "winapi",
 ]
 
@@ -2257,6 +2257,18 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.13.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -2768,8 +2780,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.27.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=414de4bc07c4ce1bbba61da12b6ccf933e484313#414de4bc07c4ce1bbba61da12b6ccf933e484313"
+version = "0.28.8"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=eccb42b59f04029677e3f3c28bb8b52a7087bb93#eccb42b59f04029677e3f3c28bb8b52a7087bb93"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2780,6 +2792,8 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hmac",
+ "libc",
+ "nix 0.30.1",
  "p256",
  "parking_lot",
  "pistis-canonical",
@@ -2801,7 +2815,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=414de4bc07c4ce1bbba61da12b6ccf933e484313#414de4bc07c4ce1bbba61da12b6ccf933e484313"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=eccb42b59f04029677e3f3c28bb8b52a7087bb93#eccb42b59f04029677e3f3c28bb8b52a7087bb93"
 dependencies = [
  "prosopikon-core",
  "web-sys",
@@ -3692,7 +3706,7 @@ dependencies = [
  "libc",
  "log",
  "memmem",
- "nix",
+ "nix 0.29.0",
  "num-derive",
  "num-traits",
  "ordered-float",

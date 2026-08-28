@@ -258,7 +258,7 @@ impl DestageRetryArgs {
     pub(crate) fn store_id(&self) -> &StoreId {
         &self.store_id
     }
-    pub(crate) fn from_state(&self) -> &str {
+    pub(crate) fn expected_state(&self) -> &str {
         &self.from_state
     }
     pub(crate) fn dry_run(&self) -> bool {
@@ -592,7 +592,7 @@ mod tests {
             panic!("expected retry-destage command")
         };
         assert_eq!(retry.store_id().as_str(), "epic_collection");
-        assert_eq!(retry.from_state(), "needs_review");
+        assert_eq!(retry.expected_state(), "needs_review");
         assert!(retry.allow_destage_retry());
         assert_eq!(retry.confirm(), "confirm retry needs-review destage");
         assert!(retry.json());

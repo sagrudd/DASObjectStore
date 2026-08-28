@@ -40,6 +40,7 @@ const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const LOCAL_DOCKERFILE: &str = include_str!("../../../deploy/local-docker/Dockerfile");
 const WORKSPACE_MANIFEST: &str = include_str!("../../../Cargo.toml");
+const WORKSPACE_LOCK: &str = include_str!("../../../Cargo.lock");
 const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
 const RELEASE_READINESS: &str =
     include_str!("../../../deploy/acceptance/verify-release-readiness.sh");
@@ -54,6 +55,27 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
     "Conflicts: dasobjectstore-remote",
     "Replaces: dasobjectstore-remote",
 ];
+
+#[test]
+fn workspace_pins_one_prosopikon_type_identity() {
+    const REVISION: &str = "eccb42b59f04029677e3f3c28bb8b52a7087bb93";
+    let manifest_pin =
+        format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
+    assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
+
+    let locked_source = format!(
+        "source = \"git+https://github.com/sagrudd/prosopikon.git?rev={REVISION}#{REVISION}\""
+    );
+    assert_eq!(WORKSPACE_LOCK.matches(&locked_source).count(), 2);
+    assert_eq!(
+        WORKSPACE_LOCK
+            .lines()
+            .filter(|line| line.contains("git+https://github.com/sagrudd/prosopikon.git"))
+            .count(),
+        2,
+        "prosopikon-core and prosopikon-yew must resolve from one revision"
+    );
+}
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {

@@ -15,10 +15,10 @@ COPY DASObjectStore /src/DASObjectStore
 COPY prosopikon /src/prosopikon
 WORKDIR /src/DASObjectStore
 RUN grep -Fqx \
-        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "d955875b8e992da5fc80e5fc0a28c6f12d40a4c7" }' \
+        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "eccb42b59f04029677e3f3c28bb8b52a7087bb93" }' \
         Cargo.toml \
     && sed -i \
-        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "d955875b8e992da5fc80e5fc0a28c6f12d40a4c7" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
+        's#prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "eccb42b59f04029677e3f3c28bb8b52a7087bb93" }#prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }#' \
         Cargo.toml \
     && grep -Fqx \
         'prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }' \

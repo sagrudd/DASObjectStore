@@ -367,8 +367,9 @@ impl QueueDepthTelemetry {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Bottleneck {
+    #[default]
     None,
     Scan,
     SourceRead,
@@ -401,12 +402,6 @@ impl Bottleneck {
             Self::HddPressure => "HDD pressure",
             Self::VerificationBacklog => "verification backlog",
         }
-    }
-}
-
-impl Default for Bottleneck {
-    fn default() -> Self {
-        Self::None
     }
 }
 
