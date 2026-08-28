@@ -58,7 +58,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "eccb42b59f04029677e3f3c28bb8b52a7087bb93";
+    const REVISION: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
