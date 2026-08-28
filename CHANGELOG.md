@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.24 - 2026-08-28
+
+- Advance both Prosopikon dependencies to the merged 0.28.9 authority revision
+  so DASObjectStore and Monas resolve one authority crate/type identity while
+  retaining the fail-closed expired first-device recovery contract.
+
 ## 0.173.23 - 2026-08-28
 
 - Pin Prosopikon 0.28.8 for one concrete Monas/DASObjectStore actor type
