@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.173.26 - 2026-08-30
+
+- Normalize platform-specific `statvfs` capacity fields to the public `u64`
+  storage contract so the GUI API builds consistently on macOS and Linux.
+
 ## 0.173.25 - 2026-08-28
 
 - Publish the stable non-secret appliance identity through the existing
