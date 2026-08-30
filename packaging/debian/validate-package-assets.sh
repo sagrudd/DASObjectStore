@@ -178,7 +178,7 @@ require_text "$source_access_path" "PathChanged=/run/media"
 require_text "$source_access_path" "PathChanged=/media"
 require_text "$source_access_helper" 'setfacl -m "u:${service_user}:--x" "$path"'
 require_text "$monas_root_traversal_helper" 'shared_group="mnemosyne-pistis-das"'
-require_text "$monas_root_traversal_helper" 'setfacl -m "g:${shared_group}:${permissions}"'
+require_text "$monas_root_traversal_helper" 'setfacl -m "g:${shared_group}:${permissions},m::rwx"'
 require_text "$monas_root_traversal_helper" 'grep -q '\''^role=hdd:'\'' "$marker"'
 require_text "$storage_ready_service" 'ExecStartPre=/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal'
 require_text "$control_slice" "CPUWeight=200"

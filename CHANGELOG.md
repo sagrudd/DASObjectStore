@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.31 - 2026-08-30
+
+- Repair historical ACL masks on retained SSD and HDD marker directories so
+  the Monas authority can read the complete storage inventory.  The helper
+  still grants only marker-scoped read/traverse access and never recurses into
+  object payloads.
+
 ## 0.173.30 - 2026-08-30
 
 - Treat marker-backed QNAP filesystem pools as supported managed enclosures

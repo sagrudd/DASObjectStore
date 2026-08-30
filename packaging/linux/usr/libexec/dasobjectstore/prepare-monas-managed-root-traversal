@@ -16,7 +16,10 @@ grant_directory() {
   local path="$1"
   local permissions="$2"
   [[ -d "$path" ]] || return 0
-  setfacl -m "g:${shared_group}:${permissions}" "$path"
+  # Some retained marker directories carry a historical mask of ``---``.
+  # Widen only the ACL mask; the named shared group still receives exactly
+  # the read/traverse permissions requested by this helper.
+  setfacl -m "g:${shared_group}:${permissions},m::rwx" "$path"
 }
 
 grant_marker() {
@@ -26,7 +29,7 @@ grant_marker() {
   grant_directory "$root" rx
   grant_directory "$marker" rx
   [[ -f "$marker/device.env" ]] || return 0
-  setfacl -m "g:${shared_group}:r" "$marker/device.env"
+  setfacl -m "g:${shared_group}:r,m::rwx" "$marker/device.env"
 }
 
 # The parent is deliberately execute-only.  Monas can reach declared roots,
