@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.27 - 2026-08-30
+
+- Wire the daemon `health_summary` protocol to the authoritative persisted
+  disk lifecycle state so integrated Monas readiness no longer reports a
+  healthy, running DAS daemon as unavailable.
+- Add fail-closed handling for missing metadata and regression coverage for
+  compact and detailed health projections.
+
 ## 0.173.26 - 2026-08-30
 
 - Normalize platform-specific `statvfs` capacity fields to the public `u64`
