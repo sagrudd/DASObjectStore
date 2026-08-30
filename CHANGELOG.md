@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.29 - 2026-08-30
+
+- Mark retained registry entries as `Watch` whenever live metadata is absent
+  or unreadable, instead of presenting historical/unavailable stores as
+  healthy active services.
+
 ## 0.173.28 - 2026-08-30
 
 - Restore the Monas read-only managed-root projection for retained DAS disks.

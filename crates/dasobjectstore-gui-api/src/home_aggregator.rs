@@ -338,10 +338,10 @@ pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
         return None;
     }
     let stat = unsafe { stat.assume_init() };
-    let fragment_size = stat.f_frsize;
+    let fragment_size = u64::from(stat.f_frsize);
     Some(FilesystemCapacity {
-        total_bytes: stat.f_blocks.saturating_mul(fragment_size),
-        available_bytes: stat.f_bavail.saturating_mul(fragment_size),
+        total_bytes: u64::from(stat.f_blocks).saturating_mul(fragment_size),
+        available_bytes: u64::from(stat.f_bavail).saturating_mul(fragment_size),
     })
 }
 
