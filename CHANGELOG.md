@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.173.30 - 2026-08-30
+
+- Treat marker-backed QNAP filesystem pools as supported managed enclosures
+  even when the host exposes no kernel enclosure device.  The enclosure view
+  now reports the detected pool instead of the misleading empty-state text.
+
 ## 0.173.29 - 2026-08-30
 
 - Restore the Monas read-only managed-root projection for retained DAS disks.

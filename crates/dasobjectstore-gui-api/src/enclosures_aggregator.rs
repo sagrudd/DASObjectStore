@@ -90,7 +90,11 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
         .map(|root| marker_for_root(root))
         .collect::<Vec<_>>();
     let managed_enclosure_known = !hdd_roots.is_empty();
-    let supported_enclosure_detected = false;
+    // A managed QNAP filesystem pool is the supported enclosure projection
+    // for hosts where the enclosure itself is presented as independent USB
+    // disks (and therefore has no /sys/class/enclosure entry).  The marker
+    // inventory is the authoritative hardware evidence in that mode.
+    let supported_enclosure_detected = managed_enclosure_known;
     let daemon_ready = daemon_ready_for_affordance(&warnings);
     let add_enclosure = add_enclosure_affordance(
         config.administrator,
@@ -408,7 +412,7 @@ mod tests {
         assert!(!view.add_enclosure.enabled);
         assert_eq!(view.add_enclosure.state, "already_managed");
         assert!(view.add_enclosure.administrator);
-        assert!(!view.add_enclosure.supported_enclosure_detected);
+        assert!(view.add_enclosure.supported_enclosure_detected);
         assert!(view.add_enclosure.daemon_ready);
         assert!(view
             .add_enclosure

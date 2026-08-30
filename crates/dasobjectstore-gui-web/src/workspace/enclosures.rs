@@ -190,8 +190,8 @@ fn render_enclosure_registry_table(
                     if view.enclosures.is_empty() {
                         <tr class="dos-enclosures-empty">
                             <td colspan="7">
-                                <strong>{ "No enclosures detected" }</strong>
-                                <span>{ "Supported hardware will appear here when the daemon reports it." }</span>
+                                <strong>{ "No managed DAS pool detected" }</strong>
+                                <span>{ "Managed storage roots will appear here when the daemon can read their marker metadata." }</span>
                             </td>
                         </tr>
                     }
