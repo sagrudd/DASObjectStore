@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.173.28 - 2026-08-30
+
+- Restore the Monas read-only managed-root projection for retained DAS disks.
+  Package and storage-readiness gates now grant the shared `mnemosyne-pistis-das`
+  role traversal plus access to declared device markers only; payload data,
+  credentials and private daemon state remain inaccessible.
+
 ## 0.173.21 - 2026-08-24
 
 - Resume the exact root-owned pre-archive retirement intent without requesting

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The Monas authority receives only the shared read-only DAS role.  Managed
+# roots remain owned by the DAS daemon's private account; these narrow ACLs
+# expose traversal and marker metadata, never payload objects or credentials.
+shared_group="mnemosyne-pistis-das"
+managed_root="/srv/dasobjectstore"
+
+command -v setfacl >/dev/null 2>&1 || {
+  printf 'DASObjectStore: setfacl is required for the Monas managed-root boundary.\n' >&2
+  exit 1
+}
+
+grant_directory() {
+  local path="$1"
+  local permissions="$2"
+  [[ -d "$path" ]] || return 0
+  setfacl -m "g:${shared_group}:${permissions}" "$path"
+}
+
+grant_marker() {
+  local root="$1"
+  local marker="$root/.dasobjectstore"
+  [[ -d "$marker" ]] || return 0
+  grant_directory "$root" rx
+  grant_directory "$marker" rx
+  [[ -f "$marker/device.env" ]] || return 0
+  setfacl -m "g:${shared_group}:r" "$marker/device.env"
+}
+
+# The parent is deliberately execute-only.  Monas can reach declared roots,
+# but cannot enumerate unrelated files below the DAS data plane.
+grant_directory "$managed_root" --x
+grant_directory "$managed_root/hdd" rx
+grant_marker "$managed_root/ssd"
+
+if [[ -d "$managed_root/hdd" ]]; then
+  for root in "$managed_root"/hdd/*; do
+    [[ -d "$root" ]] || continue
+    marker="$root/.dasobjectstore/device.env"
+    [[ -f "$marker" ]] || continue
+    if grep -q '^role=hdd:' "$marker"; then
+      grant_marker "$root"
+    fi
+  done
+fi

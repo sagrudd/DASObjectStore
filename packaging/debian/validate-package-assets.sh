@@ -15,6 +15,7 @@ workspace_host_service="$repo_root/packaging/linux/systemd/dasobjectstore-worksp
 workspace_host_socket="$repo_root/packaging/linux/systemd/dasobjectstore-workspace-host.socket"
 authority_retirement_service="$repo_root/packaging/linux/systemd/dasobjectstore-authority-retirement.service"
 source_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+monas_root_traversal_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal"
 monas_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 storage_mount_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/verify-managed-storage-mounts"
@@ -96,6 +97,7 @@ require_file "$workspace_host_service"
 require_file "$workspace_host_socket"
 require_file "$authority_retirement_service"
 require_file "$source_access_helper"
+require_file "$monas_root_traversal_helper"
 require_file "$monas_access_helper"
 require_file "$mount_policy_helper"
 require_file "$storage_mount_helper"
@@ -175,6 +177,10 @@ require_text "$source_access_service" "ExecStart=/usr/libexec/dasobjectstore/pre
 require_text "$source_access_path" "PathChanged=/run/media"
 require_text "$source_access_path" "PathChanged=/media"
 require_text "$source_access_helper" 'setfacl -m "u:${service_user}:--x" "$path"'
+require_text "$monas_root_traversal_helper" 'shared_group="mnemosyne-pistis-das"'
+require_text "$monas_root_traversal_helper" 'setfacl -m "g:${shared_group}:${permissions}"'
+require_text "$monas_root_traversal_helper" 'grep -q '\''^role=hdd:'\'' "$marker"'
+require_text "$storage_ready_service" 'ExecStartPre=/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal'
 require_text "$control_slice" "CPUWeight=200"
 require_text "$control_slice" "IOWeight=200"
 require_text "$control_slice" "MemoryLow=256M"
@@ -293,6 +299,7 @@ require_text "$build_deb" 'usr/lib/sysusers.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/lib/tmpfiles.d/dasobjectstore.conf'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/gnostikon-workflow-control'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-external-mount-traversal'
+require_text "$build_deb" 'usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/configure-external-mount-policy'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/manage-monas-access-boundary'
 require_text "$build_deb" 'usr/libexec/dasobjectstore/verify-managed-storage-mounts'
@@ -325,6 +332,7 @@ require_text "$build_deb" 'Recommends: awscli'
 require_text "$build_rpm" 'Requires:       udisks2'
 require_text "$build_rpm" 'Requires:       smartmontools'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/configure-external-mount-policy'
+require_text "$build_rpm" '/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-source-access.path'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-control.slice'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage.slice'

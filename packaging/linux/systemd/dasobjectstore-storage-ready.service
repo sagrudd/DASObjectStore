@@ -6,6 +6,7 @@ Before=dasobjectstored.service dasobjectstore-garage.service
 
 [Service]
 Type=simple
+ExecStartPre=/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal
 ExecStartPre=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json
 ExecStart=/usr/libexec/dasobjectstore/verify-managed-storage-mounts --manifest /etc/dasobjectstore/managed-storage.v1.json --watch --interval-seconds 2
 Restart=no
