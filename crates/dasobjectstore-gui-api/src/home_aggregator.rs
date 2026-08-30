@@ -338,10 +338,14 @@ pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
         return None;
     }
     let stat = unsafe { stat.assume_init() };
-    let fragment_size = u64::from(stat.f_frsize);
+    // libc exposes these fields as platform-dependent unsigned integers
+    // (`u32` on some targets and `u64` on others).  Normalize before
+    // multiplying so the public capacity contract is always u64 and the
+    // native build remains portable across macOS and Linux.
+    let fragment_size = stat.f_frsize as u64;
     Some(FilesystemCapacity {
-        total_bytes: u64::from(stat.f_blocks).saturating_mul(fragment_size),
-        available_bytes: u64::from(stat.f_bavail).saturating_mul(fragment_size),
+        total_bytes: (stat.f_blocks as u64).saturating_mul(fragment_size),
+        available_bytes: (stat.f_bavail as u64).saturating_mul(fragment_size),
     })
 }
 
@@ -1310,6 +1314,14 @@ mod tests {
             throughput_interval_label(timestamp, ApplianceTelemetryWindow::TenDays),
             "2026-07-09"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_capacity_normalizes_platform_stat_types() {
+        let capacity = super::capacity_for_root(std::path::Path::new("/")).expect("root capacity");
+        assert!(capacity.total_bytes >= capacity.available_bytes);
+        assert!(capacity.total_bytes > 0);
     }
 
     fn sample_at(template: &serde_json::Value, timestamp: &str) -> serde_json::Value {

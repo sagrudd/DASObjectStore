@@ -24,6 +24,13 @@ where
 {
     match request {
         DaemonApiRequest::LiveStatus(_) => Ok(DaemonApiResponse::LiveStatus(handler.live_status())),
+        DaemonApiRequest::HealthSummary(request) => match handler.health_summary(request) {
+            Ok(response) => Ok(DaemonApiResponse::HealthSummary(response)),
+            Err(message) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                "health_summary_unavailable",
+                message,
+            ))),
+        },
         governed_request @ (DaemonApiRequest::ExchangeErgasterionCapability(_)
         | DaemonApiRequest::RenewErgasterionCapability(_)
         | DaemonApiRequest::DiscoverErgasterionCapability

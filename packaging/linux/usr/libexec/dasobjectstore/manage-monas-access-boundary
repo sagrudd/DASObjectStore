@@ -14,6 +14,7 @@ service_group=dasobjectstore
 shared_group=mnemosyne-pistis-das
 state_dir="$root/var/lib/dasobjectstore"
 registry="$state_dir/stores.json"
+appliance_identity="$state_dir/appliance-identity.json"
 runtime_dir="$root/run/dasobjectstore"
 socket="$runtime_dir/dasobjectstored.sock"
 
@@ -36,12 +37,29 @@ await_live_socket() {
   done
   return 1
 }
+publish_appliance_identity() {
+  [[ -f "$appliance_identity" && ! -L "$appliance_identity" ]] || deny
+  [[ "$(stat -c %U "$appliance_identity")" == "$service_user" ]] || deny
+  [[ "$(stat -c %h "$appliance_identity")" == 1 ]] || deny
+  case "$(stat -c %G "$appliance_identity")" in "$service_group"|"$shared_group") ;; *) deny ;; esac
+  mode=$(stat -c %a "$appliance_identity")
+  [[ "$mode" =~ ^[0-7]+$ && "${mode: -1}" == 0 ]] || deny
+  chgrp "$shared_group" "$appliance_identity"
+  chmod 0640 "$appliance_identity"
+  meta "$appliance_identity" "$service_user" "$shared_group" 640
+}
 
 getent group "$shared_group" >/dev/null || deny
 [[ -d "$state_dir" && ! -L "$state_dir" ]] || deny
 meta "$state_dir" "$service_user" "$shared_group" 750
 [[ -f "$registry" && ! -L "$registry" ]] || deny
 meta "$registry" "$service_user" "$shared_group" 640
+if [[ -e "$appliance_identity" || -L "$appliance_identity" ]]; then
+  [[ -f "$appliance_identity" && ! -L "$appliance_identity" ]] || deny
+  case "$action" in publish-identity|publish-socket) ;; *)
+    meta "$appliance_identity" "$service_user" "$shared_group" 640
+  esac
+fi
 [[ -d "$runtime_dir" && ! -L "$runtime_dir" ]] || deny
 meta "$runtime_dir" "$service_user" "$shared_group" 750
 private "$state_dir/auth"
@@ -50,10 +68,14 @@ private "$root/opt/dasobjectstore/tls"
 [[ ! -e "$state_dir/pistis-grants.json" && ! -L "$state_dir/pistis-grants.json" ]] || deny
 
 case "$action" in
+  publish-identity)
+    publish_appliance_identity
+    ;;
   pre-start)
     [[ ! -e "$socket" && ! -L "$socket" ]] || deny
     ;;
   publish-socket)
+    publish_appliance_identity
     await_live_socket || deny
     [[ -S "$socket" && ! -L "$socket" ]] || deny
     [[ "$(stat -c %U "$socket")" == "$service_user" && "$(stat -c %a "$socket")" == 660 ]] || deny

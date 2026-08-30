@@ -1,19 +1,51 @@
 # Changelog
 
-## 0.173.29 - 2026-08-30
+## 0.173.27 - 2026-08-30
 
-- Mark retained registry entries as `Watch` whenever live metadata is absent
-  or unreadable, instead of presenting historical/unavailable stores as
-  healthy active services.
-- Print the Monas approval URL even when the CLI launches a browser, making the
-  QR-backed SSH workflow explicit and recoverable on a separate workstation.
+- Wire the daemon `health_summary` protocol to the authoritative persisted
+  disk lifecycle state so integrated Monas readiness no longer reports a
+  healthy, running DAS daemon as unavailable.
+- Add fail-closed handling for missing metadata and regression coverage for
+  compact and detailed health projections.
 
-## 0.173.28 - 2026-08-30
+## 0.173.26 - 2026-08-30
 
-- Restore the Monas read-only managed-root projection for retained DAS disks.
-  Package and storage-readiness gates now grant the shared `mnemosyne-pistis-das`
-  role traversal plus access to declared device markers only; payload data,
-  credentials and private daemon state remain inaccessible.
+- Normalize platform-specific `statvfs` capacity fields to the public `u64`
+  storage contract so the GUI API builds consistently on macOS and Linux.
+
+## 0.173.25 - 2026-08-28
+
+- Publish the stable non-secret appliance identity through the existing
+  ``mnemosyne-pistis-das`` package boundary. Upgrades repair retained identity
+  metadata without replacing its bytes, first daemon startup publishes the
+  create-once identity before consumers proceed, and package regressions reject
+  unreadable, linked or substituted identity state.
+
+## 0.173.24 - 2026-08-28
+
+- Advance both Prosopikon dependencies to the merged 0.28.9 authority revision
+  so DASObjectStore and Monas resolve one authority crate/type identity while
+  retaining the fail-closed expired first-device recovery contract.
+
+## 0.173.23 - 2026-08-28
+
+- Pin Prosopikon 0.28.8 for one concrete Monas/DASObjectStore actor type
+  identity while preserving the existing audience-bound actor contract. The
+  package and local-container regressions reject split or stale Prosopikon
+  revisions before a release can conceal an incompatible runtime boundary.
+- Preserve the TUI bottleneck default with the Rust 1.93 derived form required
+  by the strict release lint gate.
+- Keep the authority-retirement V1 pass/fail contract unchanged while adopting
+  the behavior-equivalent Rust 1.93 lint forms inside its implementation.
+- Rename one private destage retry accessor to satisfy the Rust 1.93 convention
+  lint without changing the command-line argument or request shape.
+
+## 0.173.22 - 2026-08-24
+
+- Mount the common DAS state root once in the protected authority-retirement
+  service. Separate systemd writable bind mounts made the required source-to-
+  archive rename fail with `EXDEV`; the package regression now requires the
+  single mount namespace boundary used by the atomic transaction.
 
 ## 0.173.21 - 2026-08-24
 

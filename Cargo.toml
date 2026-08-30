@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.173.29"
+version = "0.173.27"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -52,8 +52,8 @@ plist = "1"
 p256 = { version = "0.13.2", features = ["ecdsa"] }
 coset = "0.3.8"
 pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "14e481497d3838d3310df3b0a21232f5d01d6f9f" }
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "414de4bc07c4ce1bbba61da12b6ccf933e484313" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "414de4bc07c4ce1bbba61da12b6ccf933e484313" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "f09749273ef382c1b42bf04a77d96189dd7361b3" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "f09749273ef382c1b42bf04a77d96189dd7361b3" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"

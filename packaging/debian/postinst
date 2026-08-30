@@ -240,6 +240,9 @@ elif [[ -f "$store_registry_state" ]]; then
   chown "$service_user:$shared_monas_group" "$store_registry_state"
   chmod 0640 "$store_registry_state"
 fi
+if [[ -e /var/lib/dasobjectstore/appliance-identity.json || -L /var/lib/dasobjectstore/appliance-identity.json ]]; then
+  /usr/libexec/dasobjectstore/manage-monas-access-boundary publish-identity
+fi
 if [[ -e /run/dasobjectstore/dasobjectstored.sock ]]; then
   /usr/libexec/dasobjectstore/manage-monas-access-boundary publish-socket
 fi

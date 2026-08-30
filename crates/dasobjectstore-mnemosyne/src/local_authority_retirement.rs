@@ -539,7 +539,7 @@ fn finish_retirement_v1(
     {
         return Err(DasLocalAuthorityRetirementErrorV1::UnsafeState);
     }
-    fs::rename(&paths.source, &archive)
+    fs::rename(&paths.source, archive)
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
     sync_dir(
         paths
@@ -549,11 +549,11 @@ fn finish_retirement_v1(
     )?;
     sync_dir(&paths.archive_directory)?;
     write_new_fsync(
-        &temporary,
+        temporary,
         &serde_json::to_vec(&completion)
             .map_err(|_| DasLocalAuthorityRetirementErrorV1::UnsafeState)?,
     )?;
-    fs::rename(&temporary, &manifest)
+    fs::rename(temporary, manifest)
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::IoUnavailable)?;
     sync_dir(&paths.transaction_directory)?;
     Ok(())

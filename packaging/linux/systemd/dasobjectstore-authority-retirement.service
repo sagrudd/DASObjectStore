@@ -18,7 +18,10 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadOnlyPaths=/var/lib/prosopikon/das-replacement/accepted-governance.v1.json /etc/dasobjectstore/authority-retirement-projection-finalize-v1.json /opt/dasobjectstore/config.json
-ReadWritePaths=/var/lib/dasobjectstore/auth /var/lib/dasobjectstore/auth-retired /var/lib/dasobjectstore/authority-retirement
+# The source, archive and journal must share one writable mount namespace root.
+# Separate ReadWritePaths bind mounts make the required atomic rename fail with
+# EXDEV even when all three directories are on the same underlying filesystem.
+ReadWritePaths=/var/lib/dasobjectstore
 RestrictAddressFamilies=AF_UNIX
 LockPersonality=yes
 MemoryDenyWriteExecute=yes

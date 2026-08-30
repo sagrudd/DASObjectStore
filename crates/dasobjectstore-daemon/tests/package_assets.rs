@@ -43,6 +43,7 @@ const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-
 const LOCAL_DOCKER: &str = include_str!("../../../deploy/local-docker/local.sh");
 const LOCAL_DOCKERFILE: &str = include_str!("../../../deploy/local-docker/Dockerfile");
 const WORKSPACE_MANIFEST: &str = include_str!("../../../Cargo.toml");
+const WORKSPACE_LOCK: &str = include_str!("../../../Cargo.lock");
 const MACOS_USER_SERVICE: &str = include_str!("../../../deploy/macos/user-service.sh");
 const RELEASE_READINESS: &str =
     include_str!("../../../deploy/acceptance/verify-release-readiness.sh");
@@ -57,6 +58,27 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
     "Conflicts: dasobjectstore-remote",
     "Replaces: dasobjectstore-remote",
 ];
+
+#[test]
+fn workspace_pins_one_prosopikon_type_identity() {
+    const REVISION: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
+    let manifest_pin =
+        format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
+    assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
+
+    let locked_source = format!(
+        "source = \"git+https://github.com/sagrudd/prosopikon.git?rev={REVISION}#{REVISION}\""
+    );
+    assert_eq!(WORKSPACE_LOCK.matches(&locked_source).count(), 2);
+    assert_eq!(
+        WORKSPACE_LOCK
+            .lines()
+            .filter(|line| line.contains("git+https://github.com/sagrudd/prosopikon.git"))
+            .count(),
+        2,
+        "prosopikon-core and prosopikon-yew must resolve from one revision"
+    );
+}
 
 #[test]
 fn package_daemon_config_matches_runtime_defaults() {
@@ -500,6 +522,13 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
 }
 
 #[test]
+fn monas_boundary_publishes_the_stable_appliance_identity() {
+    assert_contains(MONAS_ACCESS_BOUNDARY, "appliance-identity.json");
+    assert_contains(MONAS_ACCESS_BOUNDARY, "publish-identity");
+    assert_contains(MONAS_ACCESS_BOUNDARY, "publish_appliance_identity");
+}
+
+#[test]
 fn package_excludes_retired_local_human_authority() {
     assert_not_contains(BUILD_DEB, "etc/pam.d");
     assert_not_contains(BUILD_DEB, "dasobjectstore-local-auth-helper");
@@ -553,6 +582,14 @@ fn package_owns_fixed_authority_retirement_consumer() {
     );
     assert_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=false");
     assert_not_contains(AUTHORITY_RETIREMENT_SERVICE, "NoNewPrivileges=yes");
+    assert_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "ReadWritePaths=/var/lib/dasobjectstore\n",
+    );
+    assert_not_contains(
+        AUTHORITY_RETIREMENT_SERVICE,
+        "ReadWritePaths=/var/lib/dasobjectstore/auth ",
+    );
     assert_contains(
         TMPFILES,
         "d /var/lib/dasobjectstore/auth-retired 0700 root root -",
