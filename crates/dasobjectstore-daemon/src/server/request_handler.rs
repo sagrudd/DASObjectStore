@@ -10,26 +10,27 @@ use crate::api::{
     AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
     CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
     CreateObjectStoreResponse, DaemonApiErrorResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
-    DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress, DaemonJobState,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
-    DaemonLocalAdminAcceptedResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, DestageRetryRequest,
-    DestageRetryResponse, DiskForceRetireRequest, DiskRetireRequest, DiskRetireResponse,
-    IngestQueueDrainRequest, IngestQueueDrainResponse, ObjectBrowserDelegatedActor,
-    ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest, ObjectPutResponse,
-    PrepareEnclosureRequest, PrepareEnclosureResponse, PreverifiedHostSubject,
-    ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry, ProfileBrowserResponse,
-    ProfileDiagnosticsResponse, ProfileInspectionResponse, ProfileInspectionRootState,
-    ProfileLifecycleState, ProfileMigrationResponse, ProfileReadinessResponse,
-    ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView, ProfileS3VerifyResponse,
-    RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
-    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
+    DaemonDiskHealthSummary, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
+    DaemonIngestProgressEvent, DaemonIngestSummary, DaemonJobCancelRequest,
+    DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
+    DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
+    DaemonJobStatusResponse, DaemonJobSummary, DaemonLocalAdminAcceptedResponse,
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
+    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    DaemonSsdPressure, DestageRetryRequest, DestageRetryResponse, DiskForceRetireRequest,
+    DiskRetireRequest, DiskRetireResponse, IngestQueueDrainRequest, IngestQueueDrainResponse,
+    ObjectBrowserDelegatedActor, ObjectDownloadRequest, ObjectFolderDownloadRequest,
+    ObjectPutRequest, ObjectPutResponse, PrepareEnclosureRequest, PrepareEnclosureResponse,
+    PreverifiedHostSubject, ProfileBindingRequest, ProfileBindingResponse, ProfileBrowserEntry,
+    ProfileBrowserResponse, ProfileDiagnosticsResponse, ProfileInspectionResponse,
+    ProfileInspectionRootState, ProfileLifecycleState, ProfileMigrationResponse,
+    ProfileReadinessResponse, ProfileS3HeadResponse, ProfileS3HealthResponse, ProfileS3ObjectView,
+    ProfileS3VerifyResponse, RemoteEasyconnectApprovePairingRequest,
+    RemoteEasyconnectApprovePairingResponse, RemoteEasyconnectCreatePairingRequest,
+    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectRenewSessionRequest,
+    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionRenewal,
     RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
     StoreDeduplicateReport, StoreDeduplicateRequest, StoreDeduplicateResponse,
     StoreDeleteCommandReport, StoreDeleteRequest, StoreDeleteResponse, StoreDrainRequest,
@@ -88,13 +89,14 @@ use dasobjectstore_core::application_auth::{
 use dasobjectstore_core::backend::ObjectCatalogueAuthority;
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_core::lifecycle::HealthState;
 use dasobjectstore_core::store::ExportPolicy;
 use dasobjectstore_core::utc::{
     add_seconds_to_utc_timestamp, format_utc_timestamp_seconds, parse_utc_timestamp_seconds,
 };
 use dasobjectstore_metadata::{
-    put_object_ssd_first, DiskCopyRoot, ObjectPutRequest as MetadataObjectPutRequest,
-    LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
+    list_assurance_disk_states, put_object_ssd_first, DiskCopyRoot,
+    ObjectPutRequest as MetadataObjectPutRequest, LIVE_SQLITE_FILE_NAME, METADATA_DIR_NAME,
 };
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
@@ -172,6 +174,17 @@ pub struct DaemonRequestHandler<S, C> {
     application_capability_master_key_path: PathBuf,
     synoptikon_projection_ledger_path: PathBuf,
     live_status_registry: Arc<crate::runtime::LiveStatusRegistry>,
+}
+
+fn health_state_rank(state: HealthState) -> u8 {
+    match state {
+        HealthState::Healthy => 0,
+        HealthState::Retired => 1,
+        HealthState::Watch => 2,
+        HealthState::Draining => 3,
+        HealthState::Suspect => 4,
+        HealthState::Failed => 5,
+    }
 }
 
 impl<S, C> DaemonRequestHandler<S, C>
@@ -338,6 +351,77 @@ where
 
     fn live_status(&self) -> crate::api::LiveStatusResponse {
         self.live_status_registry.snapshot(self.clock.now_utc())
+    }
+
+    /// Return the daemon-owned storage health projection used by integrated
+    /// consumers such as Monas.  The CLI performs host SMART probing, which a
+    /// long-lived daemon must not repeat for every request.  The daemon's
+    /// authoritative lifecycle state is persisted in its read-only metadata
+    /// database and is therefore the correct bounded source for this API.
+    fn health_summary(
+        &self,
+        request: DaemonHealthSummaryRequest,
+    ) -> Result<DaemonHealthSummaryResponse, String> {
+        let persisted = list_assurance_disk_states(&self.live_sqlite_path)
+            .map_err(|error| format!("storage health metadata unavailable: {error}"))?;
+        if persisted.is_empty() {
+            return Err("no managed disks are registered".to_owned());
+        }
+
+        let disk_count = persisted.len();
+        let mut overall_state = HealthState::Healthy;
+        let mut suspect_disk_count = 0_usize;
+        let mut warnings = Vec::new();
+        let mut disks = Vec::with_capacity(persisted.len());
+        for disk in persisted {
+            let (state, score, placement_eligible) = match disk.state.to_ascii_lowercase().as_str()
+            {
+                "healthy" => (HealthState::Healthy, 100, true),
+                "watch" => (HealthState::Watch, 75, true),
+                "suspect" => (HealthState::Suspect, 50, false),
+                "draining" => (HealthState::Draining, 25, false),
+                "retired" => (HealthState::Retired, 0, false),
+                "failed" => (HealthState::Failed, 0, false),
+                state => {
+                    warnings.push(crate::api::DaemonApiWarning::new(
+                        "unknown_disk_state",
+                        format!("disk {} has unsupported state {state}", disk.disk_id),
+                    ));
+                    (HealthState::Suspect, 50, false)
+                }
+            };
+            if state == HealthState::Suspect {
+                suspect_disk_count = suspect_disk_count.saturating_add(1);
+            }
+            if health_state_rank(state) > health_state_rank(overall_state) {
+                overall_state = state;
+            }
+            disks.push(DaemonDiskHealthSummary {
+                disk_id: disk.disk_id,
+                state,
+                score,
+                placement_eligible,
+            });
+        }
+
+        let live = self.live_status();
+        if !request.include_disk_details {
+            disks.clear();
+        }
+        Ok(DaemonHealthSummaryResponse {
+            generated_at_utc: self.clock.now_utc(),
+            overall_state,
+            disk_count,
+            suspect_disk_count,
+            ingest: DaemonIngestSummary {
+                queued_jobs: 0,
+                active_jobs: live.aggregate.active_ingests as usize,
+                failed_jobs: 0,
+                ssd_pressure: DaemonSsdPressure::AcceptingWrites,
+            },
+            disks,
+            warnings,
+        })
     }
     fn record_admin_job(&self, job: DaemonJobSummary) -> Result<(), DaemonRequestHandlerError> {
         if let Some(registry) = &self.admin_job_registry {
@@ -1010,19 +1094,20 @@ mod tests {
         AssignLocalUserToLocalGroupRequest, AssignLocalUserToLocalGroupResponse,
         CapacityAdmissionDecision, CapacityAdmissionRequest, CapacityAdmissionResponse,
         CreateLocalGroupRequest, CreateLocalGroupResponse, CreateObjectStoreRequest,
-        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonEndpointKind,
-        DaemonEndpointValidation, DaemonEndpointValidationState, DaemonJobCancelRequest,
-        DaemonJobCancelResponse, DaemonJobId, DaemonJobKind, DaemonJobListRequest,
-        DaemonJobListResponse, DaemonJobProgress, DaemonJobState, DaemonJobStatusRequest,
-        DaemonJobStatusResponse, DaemonJobSummary, DaemonRequestValidationError,
-        DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceOperation,
-        DaemonServiceProvisionRequest, DaemonServiceProvisionResponse, DaemonServiceStatusRequest,
-        DaemonServiceStatusResponse, DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest,
-        LiveStatusRequest, ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource,
-        ObjectBrowserPageRequest, ObjectBrowserPlacementLocation, ObjectBrowserPlacementState,
-        ObjectBrowserReadinessState, ObjectBrowserRequest, ObjectBrowserSort,
-        ObjectBrowserVerifiedSubject, ObjectDownloadRequest, ObjectFolderDownloadRequest,
-        ObjectPutRequest, ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
+        CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse, DaemonDiskHealthSummary,
+        DaemonEndpointKind, DaemonEndpointValidation, DaemonEndpointValidationState,
+        DaemonHealthSummaryRequest, DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobId,
+        DaemonJobKind, DaemonJobListRequest, DaemonJobListResponse, DaemonJobProgress,
+        DaemonJobState, DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonJobSummary,
+        DaemonRequestValidationError, DaemonServiceLifecycleRequest,
+        DaemonServiceLifecycleResponse, DaemonServiceOperation, DaemonServiceProvisionRequest,
+        DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+        DaemonSsdPressure, DiskRetireRequest, IngestQueueDrainRequest, LiveStatusRequest,
+        ObjectBrowserDelegatedActor, ObjectBrowserDownloadSource, ObjectBrowserPageRequest,
+        ObjectBrowserPlacementLocation, ObjectBrowserPlacementState, ObjectBrowserReadinessState,
+        ObjectBrowserRequest, ObjectBrowserSort, ObjectBrowserVerifiedSubject,
+        ObjectDownloadRequest, ObjectFolderDownloadRequest, ObjectPutRequest,
+        ObjectStoreCapabilityDiscoveryRequest, PrepareEnclosureFilesystem,
         PrepareEnclosureHddDevice, PrepareEnclosureRequest, PrepareEnclosureResponse,
         PreverifiedHostSubject, ProfileBindingOperation, ProfileBindingRequest,
         ProfileBrowserRequest, ProfileDiagnosticsRequest, ProfileInspectionRequest,
@@ -1071,6 +1156,7 @@ mod tests {
     };
     use dasobjectstore_core::deployment::{DeploymentProfile, HostMode};
     use dasobjectstore_core::ids::{IngestJobId, ObjectId, PoolId, StoreId};
+    use dasobjectstore_core::lifecycle::HealthState;
     use dasobjectstore_core::manifest::{
         BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
     };
@@ -1144,6 +1230,71 @@ mod tests {
         assert_eq!(response.sequence, 0);
         assert!(response.active.is_empty());
         assert!(response.recent.is_empty());
+    }
+
+    #[test]
+    fn dispatches_health_summary_from_authoritative_disk_lifecycle_state() {
+        let root = temp_root("health-summary");
+        let live_sqlite = create_live_sqlite(&root.join("metadata"), "health-store");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        )
+        .with_live_sqlite_path(&live_sqlite);
+
+        let compact = handler
+            .handle(DaemonApiRequest::HealthSummary(
+                DaemonHealthSummaryRequest::default(),
+            ))
+            .expect("health summary handled");
+        let DaemonApiResponse::HealthSummary(compact) = compact else {
+            panic!("expected health summary response");
+        };
+        assert_eq!(compact.generated_at_utc, "2026-07-19T05:00:00Z");
+        assert_eq!(compact.overall_state, HealthState::Healthy);
+        assert_eq!(compact.disk_count, 1);
+        assert!(compact.disks.is_empty());
+
+        let detailed = handler
+            .handle(DaemonApiRequest::HealthSummary(
+                DaemonHealthSummaryRequest {
+                    include_connections: false,
+                    include_disk_details: true,
+                },
+            ))
+            .expect("detailed health summary handled");
+        let DaemonApiResponse::HealthSummary(detailed) = detailed else {
+            panic!("expected detailed health summary response");
+        };
+        assert_eq!(
+            detailed.disks,
+            vec![DaemonDiskHealthSummary {
+                disk_id: dasobjectstore_core::ids::DiskId::new("qnap-1057").unwrap(),
+                state: HealthState::Healthy,
+                score: 100,
+                placement_eligible: true,
+            }]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn health_summary_fails_closed_when_disk_lifecycle_metadata_is_missing() {
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-19T05:00:00Z"),
+        )
+        .with_live_sqlite_path(temp_root("missing-health-summary").join("missing.sqlite"));
+
+        let response = handler
+            .handle(DaemonApiRequest::HealthSummary(
+                DaemonHealthSummaryRequest::default(),
+            ))
+            .expect("health summary error handled");
+        assert!(matches!(
+            response,
+            DaemonApiResponse::Error(error) if error.code == "health_summary_unavailable"
+        ));
     }
 
     #[test]
