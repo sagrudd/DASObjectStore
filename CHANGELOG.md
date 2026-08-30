@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.173.29 - 2026-08-30
+
+- Restore the Monas read-only managed-root projection for retained DAS disks.
+  Package and storage-readiness gates grant the shared `mnemosyne-pistis-das`
+  role traversal plus access to declared device markers only; payload data,
+  credentials and private daemon state remain inaccessible.
+- Mark retained registry entries as `Watch` whenever live metadata is absent
+  or unreadable, instead of presenting historical/unavailable stores as
+  healthy active services.
+- Print the Monas approval URL even when the CLI launches a browser, making the
+  QR-backed SSH workflow explicit and recoverable on a separate workstation.
+
 ## 0.173.27 - 2026-08-30
 
 - Wire the daemon `health_summary` protocol to the authoritative persisted
