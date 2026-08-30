@@ -5,6 +5,8 @@
 - Mark retained registry entries as `Watch` whenever live metadata is absent
   or unreadable, instead of presenting historical/unavailable stores as
   healthy active services.
+- Print the Monas approval URL even when the CLI launches a browser, making the
+  QR-backed SSH workflow explicit and recoverable on a separate workstation.
 
 ## 0.173.28 - 2026-08-30
 

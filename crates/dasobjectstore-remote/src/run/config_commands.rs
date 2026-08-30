@@ -154,8 +154,9 @@ pub(super) fn write_easyconnect_pairing_ready(
     )?;
     if open_browser {
         writeln!(writer, "Browser launch: requested")?;
+        writeln!(writer, "Monas approval URL (shows Pistis QR): {browser_login_url}")?;
     } else {
-        writeln!(writer, "Open browser URL: {browser_login_url}")?;
+        writeln!(writer, "Open Monas approval URL (shows Pistis QR): {browser_login_url}")?;
     }
     writeln!(writer, "Waiting for browser-approved pairing callback...")?;
     Ok(())
