@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.176.8 - 2026-08-31
+
+- Preserve a package-managed QNAP DAS inventory in the Enclosures view when
+  the kernel exposes no enclosure device and no live marker-backed mount roots
+  are available. The UI labels this as a read-only managed-storage manifest
+  fallback, marks unavailable members as unavailable rather than mounted, and
+  disables preparation. It never adopts, mounts, migrates, normalizes,
+  rebalances, deletes, or otherwise changes retained ObjectStore data.
+
 ## 0.176.7 - 2026-08-31
 
 - Complete ``dasobjectstore-remote --no-browser`` pairing through the
