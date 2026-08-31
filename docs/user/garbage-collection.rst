@@ -2,9 +2,9 @@ Daemon garbage collection
 =========================
 
 ``dasobjectstored`` starts a bounded, asynchronous garbage-collection pass on
-every daemon start. Socket service is not delayed while the pass runs. The
-collector first inventories candidates, then repeats every durability check
-before reclaiming anything.
+every daemon start and repeats it hourly through ``disk_housekeeping``. Socket
+service is not delayed while a pass runs. The collector first inventories
+candidates, then repeats every durability check before reclaiming anything.
 
 What the daemon may reclaim
 ---------------------------
@@ -39,6 +39,12 @@ The latest general and reconciliation reports are written below
 ``dasobjectstore.staging_inventory.v1`` projection. It groups path-free counts
 and bytes by managed staging kind, disposition, and typed retention reason.
 The daemon refreshes this read-only inventory every 30 seconds.
+
+This staging inventory is distinct from the native SSD-residency report at
+``<state_dir>/disk_housekeeping/ssd-residency.json``. The latter reconciles
+physical native payloads with SSD placement and HDD-destage evidence, so it can
+separate safely landed-but-uncleared bytes from bytes still awaiting HDD and
+from orphaned or unexplained data. Neither report authorizes manual deletion.
 
 The inventory covers ingest jobs, performance fixtures, reconciliation
 checkpoints, direct-S3 uploads and multipart work, registered folder staging,

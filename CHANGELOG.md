@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.174.0 - 2026-08-31
+
+- Promote the existing idle storage-assurance work into the named
+  ``disk_housekeeping`` daemon worker. It now safely evicts settled SSD
+  residue even when HDD destage remains continuously queued, repeats
+  evidence-based staging cleanup hourly, and writes a physical SSD-residency
+  report that distinguishes settled residue, pending HDD work, orphaned data,
+  provider-managed bytes, and unexplained payloads.
+- Enforce a bounded maintenance I/O rate of at most ten percent of the
+  configured available capacity, and rotate verified HDD placements after nine
+  weeks when copy separation permits it (otherwise re-hash them fail-closed).
+
 ## 0.173.32 - 2026-08-31
 
 - Restored the protected DASObjectStore remote-connection approval action by
