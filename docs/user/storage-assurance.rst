@@ -49,7 +49,9 @@ or co-locating a replica.
 Destinations must be ``Healthy`` or ``Watch``, contain no other copy of the
 same object, and have room for the complete file. Fractional free space is
 compared exactly; filesystem discovery order and absolute free bytes do not
-override the policy.
+override the policy. An earlier ingest-time capacity reservation is
+re-measured and atomically retargeted immediately before the HDD write, so it
+cannot force an artefact onto a disk that has subsequently filled.
 
 Relocation safety
 -----------------

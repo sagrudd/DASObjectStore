@@ -9,11 +9,11 @@ use dasobjectstore_metadata::{
     claim_next_scheduler_job, complete_scheduler_job, fail_destage, list_ssd_eviction_candidates,
     mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement, read_disk_capacity_claims,
     read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
-    read_ssd_placement, renew_destage_and_scheduler_leases, retry_scheduler_job,
-    settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
-    DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
-    DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, SchedulerClaimRequest,
-    SchedulerError, StagedObjectPut, VerifiedHddPlacement,
+    read_ssd_placement, refresh_disk_capacity_claims, renew_destage_and_scheduler_leases,
+    retry_scheduler_job, settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress,
+    DestageMetadataError, DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError,
+    DiskCapacityClaimKind, DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError,
+    SchedulerClaimRequest, SchedulerError, StagedObjectPut, VerifiedHddPlacement,
 };
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
@@ -24,6 +24,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_DESTAGE_LEASE_SECONDS: u64 = 60 * 60;
 const DESTAGE_LEASE_RENEWAL_SECONDS: u64 = DEFAULT_DESTAGE_LEASE_SECONDS / 3;
+const DESTAGE_CAPACITY_SELECTION_ATTEMPTS: usize = 3;
 pub const MAX_DESTAGE_RETRY_SECONDS: u64 = 60 * 60;
 
 #[derive(Clone, Debug)]
@@ -256,29 +257,20 @@ fn settle_claimed_record(
         });
     }
     let object_type = parse_queued_object_type(&record.object_type)?;
-    let held_claims = read_disk_capacity_claims(
+    let has_held_claims = read_disk_capacity_claims(
         &config.live_sqlite_path,
         DiskCapacityClaimKind::Destage,
         record.object_id.as_str(),
     )?
     .into_iter()
-    .filter(|claim| claim.state == "active")
-    .collect::<Vec<_>>();
-    let roots = if held_claims.is_empty() {
-        // Compatibility for SSD acknowledgements created before reservations
-        // became mandatory. New publication paths reserve before returning.
-        let roots = select_managed_hdd_roots_with_capacity(
-            &config.live_sqlite_path,
-            &config.hdd_root,
-            record.required_copy_count,
-            record.expected_size_bytes,
-            Some(record.object_id.as_str()),
-        )?;
-        acquire_destage_claims(config, record, now_utc, lease_expires_at_utc, &roots)?;
-        roots
-    } else {
-        roots_for_held_claims(config, record, &held_claims)?
-    };
+    .any(|claim| claim.state == "active");
+    let roots = select_and_claim_destage_roots(
+        config,
+        record,
+        now_utc,
+        lease_expires_at_utc,
+        has_held_claims,
+    )?;
     let job_root = payload_path
         .parent()
         .ok_or_else(|| DurableDestageWorkerError::UnsafeSsdPlacement(ssd.relative_path.clone()))?
@@ -423,7 +415,90 @@ fn acquire_destage_claims(
     lease_expires_at_utc: &str,
     roots: &[dasobjectstore_metadata::DiskCopyRoot],
 ) -> Result<(), DurableDestageWorkerError> {
-    acquire_disk_capacity_claims(&DiskCapacityClaimRequest {
+    acquire_disk_capacity_claims(&destage_capacity_claim_request(
+        config,
+        record,
+        now_utc,
+        lease_expires_at_utc,
+        roots,
+    )?)?;
+    Ok(())
+}
+
+fn select_and_claim_destage_roots(
+    config: &DurableDestageWorkerConfig,
+    record: &DestageQueueRecord,
+    now_utc: &str,
+    lease_expires_at_utc: &str,
+    has_held_claims: bool,
+) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
+    let mut last_capacity_race = None;
+    for _ in 0..DESTAGE_CAPACITY_SELECTION_ATTEMPTS {
+        // Re-evaluate the complete enclosure immediately before writing. A
+        // claim made at ingest is admission control, not a permanent target
+        // pin. Select only disks that already fit the complete artefact,
+        // ranked by exact free-space fraction.
+        let roots = select_managed_hdd_roots_with_capacity(
+            &config.live_sqlite_path,
+            &config.hdd_root,
+            record.required_copy_count,
+            record.expected_size_bytes,
+            Some(record.object_id.as_str()),
+        )?;
+        let claim_result = if has_held_claims {
+            refresh_destage_claims(config, record, now_utc, lease_expires_at_utc, &roots)
+        } else {
+            // Compatibility for SSD acknowledgements created before
+            // reservations became mandatory. New publication paths reserve
+            // before returning.
+            acquire_destage_claims(config, record, now_utc, lease_expires_at_utc, &roots)
+        };
+        match claim_result {
+            Ok(()) => return Ok(roots),
+            Err(error) if retryable_capacity_selection_race(&error) => {
+                last_capacity_race = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_capacity_race.expect("capacity selection retry records an error"))
+}
+
+fn retryable_capacity_selection_race(error: &DurableDestageWorkerError) -> bool {
+    matches!(
+        error,
+        DurableDestageWorkerError::CapacityClaim(
+            DiskCapacityClaimError::IneligibleDisk { .. }
+                | DiskCapacityClaimError::InsufficientCapacity { .. }
+        )
+    )
+}
+
+fn refresh_destage_claims(
+    config: &DurableDestageWorkerConfig,
+    record: &DestageQueueRecord,
+    now_utc: &str,
+    lease_expires_at_utc: &str,
+    roots: &[dasobjectstore_metadata::DiskCopyRoot],
+) -> Result<(), DurableDestageWorkerError> {
+    refresh_disk_capacity_claims(&destage_capacity_claim_request(
+        config,
+        record,
+        now_utc,
+        lease_expires_at_utc,
+        roots,
+    )?)?;
+    Ok(())
+}
+
+fn destage_capacity_claim_request(
+    config: &DurableDestageWorkerConfig,
+    record: &DestageQueueRecord,
+    now_utc: &str,
+    lease_expires_at_utc: &str,
+    roots: &[dasobjectstore_metadata::DiskCopyRoot],
+) -> Result<DiskCapacityClaimRequest, DurableDestageWorkerError> {
+    Ok(DiskCapacityClaimRequest {
         live_sqlite_path: config.live_sqlite_path.clone(),
         kind: DiskCapacityClaimKind::Destage,
         owner_id: record.object_id.as_str().to_string(),
@@ -454,43 +529,7 @@ fn acquire_destage_claims(
                 })
             })
             .collect::<Result<Vec<_>, DurableDestageWorkerError>>()?,
-    })?;
-    Ok(())
-}
-
-fn roots_for_held_claims(
-    config: &DurableDestageWorkerConfig,
-    record: &DestageQueueRecord,
-    claims: &[dasobjectstore_metadata::DiskCapacityClaim],
-) -> Result<Vec<dasobjectstore_metadata::DiskCopyRoot>, DurableDestageWorkerError> {
-    if claims.len() != usize::from(record.required_copy_count)
-        || claims.iter().any(|claim| {
-            claim.reserved_bytes != record.expected_size_bytes || claim.consumed_bytes != 0
-        })
-    {
-        return Err(DurableDestageWorkerError::InvalidHeldCapacityClaims {
-            object_id: record.object_id.clone(),
-        });
-    }
-    let eligible_disk_ids = read_settlement_eligible_disk_ids(&config.live_sqlite_path)?;
-    let discovered = discover_managed_hdd_roots(&config.hdd_root)?;
-    claims
-        .iter()
-        .map(|claim| {
-            if !eligible_disk_ids.contains(&claim.disk_id) {
-                return Err(DurableDestageWorkerError::ReservedDiskIneligible {
-                    disk_id: claim.disk_id.as_str().to_string(),
-                });
-            }
-            discovered
-                .iter()
-                .find(|root| root.disk_id == claim.disk_id)
-                .cloned()
-                .ok_or_else(|| DurableDestageWorkerError::ReservedDiskUnavailable {
-                    disk_id: claim.disk_id.as_str().to_string(),
-                })
-        })
-        .collect()
+    })
 }
 
 /// Select distinct managed HDD roots that can hold a complete copy before
@@ -785,15 +824,6 @@ pub enum DurableDestageWorkerError {
         disk_id: String,
         message: String,
     },
-    InvalidHeldCapacityClaims {
-        object_id: ObjectId,
-    },
-    ReservedDiskUnavailable {
-        disk_id: String,
-    },
-    ReservedDiskIneligible {
-        disk_id: String,
-    },
     SchedulerJobMissingObject(String),
     LeaseFenceLost {
         object_id: ObjectId,
@@ -857,16 +887,6 @@ impl Display for DurableDestageWorkerError {
             }
             Self::CapacityMeasurement { disk_id, message } => {
                 write!(formatter, "failed to measure HDD {disk_id} capacity: {message}")
-            }
-            Self::InvalidHeldCapacityClaims { object_id } => write!(
-                formatter,
-                "held destage capacity claims do not cover every copy for {object_id}"
-            ),
-            Self::ReservedDiskUnavailable { disk_id } => {
-                write!(formatter, "reserved HDD disk {disk_id} is unavailable")
-            }
-            Self::ReservedDiskIneligible { disk_id } => {
-                write!(formatter, "reserved HDD disk {disk_id} is no longer placement-eligible")
             }
             Self::SchedulerJobMissingObject(job_id) => {
                 write!(formatter, "destage scheduler job {job_id} has no object identity")
@@ -1073,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn verified_hdd_settlement_evicts_the_ssd_payload_in_the_same_pass() {
+    fn verified_hdd_settlement_retargets_stale_claim_and_evicts_ssd_payload() {
         let root = temporary_root("evict-on-hdd-settlement");
         let ssd_root = root.join("ssd");
         let hdd_root = root.join("hdd");
@@ -1081,9 +1101,11 @@ mod tests {
         fs::create_dir_all(payload.parent().expect("payload parent")).expect("payload root");
         fs::write(&payload, b"payload").expect("payload");
         let digest = format!("{:x}", Sha256::digest(b"payload"));
-        let marker = hdd_root.join("disk-a/.dasobjectstore/device.env");
-        fs::create_dir_all(marker.parent().expect("marker parent")).expect("disk root");
-        fs::write(&marker, "role=hdd:disk-a\n").expect("disk marker");
+        for disk_id in ["disk-a", "disk-b"] {
+            let marker = hdd_root.join(format!("{disk_id}/.dasobjectstore/device.env"));
+            fs::create_dir_all(marker.parent().expect("marker parent")).expect("disk root");
+            fs::write(&marker, format!("role=hdd:{disk_id}\n")).expect("disk marker");
+        }
 
         let database = ssd_root.join(".dasobjectstore/live.sqlite");
         let connection = Connection::open(&database).expect("database");
@@ -1102,13 +1124,15 @@ mod tests {
                 [],
             )
             .expect("store");
-        connection
-            .execute(
-                "INSERT INTO disks(disk_id,pool_id,role,state,created_at_utc,updated_at_utc)
-                 VALUES('disk-a','pool-a','hdd_capacity','Healthy','now','now')",
-                [],
-            )
-            .expect("disk");
+        for disk_id in ["disk-a", "disk-b"] {
+            connection
+                .execute(
+                    "INSERT INTO disks(disk_id,pool_id,role,state,created_at_utc,updated_at_utc)
+                     VALUES(?1,'pool-a','hdd_capacity','Healthy','now','now')",
+                    [disk_id],
+                )
+                .expect("disk");
+        }
         connection
             .execute(
                 "INSERT INTO objects(object_id,store_id,object_type,state,size_bytes,content_hash,created_at_utc,updated_at_utc)
@@ -1144,6 +1168,20 @@ mod tests {
                 [&digest],
             )
             .expect("destage queue");
+        connection
+            .execute(
+                "INSERT INTO disk_capacity_claims(
+                    claim_id,claim_kind,owner_id,request_id,request_digest,disk_id,state,
+                    reserved_bytes,consumed_bytes,lease_owner,lease_expires_at_utc,
+                    created_at_utc,updated_at_utc,released_at_utc
+                 ) VALUES(
+                    'destage:object-a:disk-b','destage','object-a','destage:job-a',?1,
+                    'disk-b','active',7,0,'test-worker','2026-08-31T01:00:00Z',
+                    'now','now',NULL
+                 )",
+                [format!("object-a:7:1:{digest}")],
+            )
+            .expect("stale held claim");
         drop(connection);
 
         let outcome = run_one_durable_destage(
@@ -1172,6 +1210,25 @@ mod tests {
             )
             .expect("eviction state");
         assert_eq!(evicted.as_deref(), Some("2026-08-31T00:00:00Z"));
+        let placement_disk: String = Connection::open(&database)
+            .expect("database")
+            .query_row(
+                "SELECT disk_id FROM placements WHERE object_id='object-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("placement disk");
+        assert_eq!(placement_disk, "disk-a");
+        let retargeted_claim: String = Connection::open(&database)
+            .expect("database")
+            .query_row(
+                "SELECT state FROM disk_capacity_claims
+                 WHERE claim_kind='destage' AND owner_id='object-a' AND disk_id='disk-a'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("retargeted claim");
+        assert_eq!(retargeted_claim, "released");
         fs::remove_dir_all(root).expect("cleanup");
     }
 

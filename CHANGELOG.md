@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.176.3 - 2026-08-31
+
+- Re-measure and fractionally rebalance each HDD destination immediately
+  before durable destage. An ingest-time capacity reservation is atomically
+  refreshed onto the currently most-free eligible disk or disks, and capacity
+  is reported blocked only when no eligible destination can hold the complete
+  artefact.
+
 ## 0.176.2 - 2026-08-31
 
 - Require Terraform's standalone DEB/RPM staging route to prove and consume
