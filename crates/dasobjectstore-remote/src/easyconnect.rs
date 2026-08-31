@@ -90,12 +90,15 @@ pub struct RemoteEasyconnectPairingOptions {
     pub tls_trust: RemoteEasyconnectTlsTrust,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteEasyconnectTlsTrust {
     /// Validate through the operating-system trust store and exact URL identity.
     SystemPki,
     /// Validate through the explicitly enrolled legacy appliance certificate.
     EnrolledCertificate,
+    /// Validate through a signed Site-root record provisioned on this host or
+    /// mounted into a container; never consult the operating-system CA store.
+    ProvisionedSiteTrust(crate::site_trust::LoadedSiteTrust),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -16,6 +16,10 @@ pub struct RemoteCli {
     /// Remote client config path.
     #[arg(long)]
     config: Option<PathBuf>,
+    /// Verified Site Trust record for a Monas private-root endpoint. Defaults to
+    /// the package path or DASOBJECTSTORE_REMOTE_SITE_TRUST_BUNDLE.
+    #[arg(long, value_name = "PATH")]
+    site_trust_bundle: Option<PathBuf>,
     /// DASObjectStore S3 endpoint URL, for example http://192.168.1.192:3900.
     #[arg(long)]
     endpoint_url: Option<String>,
@@ -44,6 +48,10 @@ pub struct RemoteCli {
 impl RemoteCli {
     pub fn config(&self) -> Option<&Path> {
         self.config.as_deref()
+    }
+
+    pub fn site_trust_bundle(&self) -> Option<&Path> {
+        self.site_trust_bundle.as_deref()
     }
 
     pub fn endpoint_url(&self) -> Option<&str> {
@@ -176,8 +184,8 @@ impl LoginArgs {
     pub fn force(&self) -> bool {
         self.force
     }
-    pub fn uses_system_pki(&self) -> bool {
-        self.authority_profile == LoginAuthorityProfile::IntegratedMonas
+    pub fn authority_profile(&self) -> LoginAuthorityProfile {
+        self.authority_profile
     }
 }
 
@@ -919,8 +927,8 @@ impl UploadArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli, RemoteCommand, S3Command,
-        StoresCommand, TrustCommand,
+        LoginAuthorityProfile, ObjectsCommand, OperationWaitUntil, OperationsCommand, RemoteCli,
+        RemoteCommand, S3Command, StoresCommand, TrustCommand,
     };
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
@@ -1141,6 +1149,35 @@ mod tests {
 
     #[test]
     fn parses_trust_management_commands() {
+        let provision = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "provision",
+            "192.168.0.193",
+            "--site-uuid",
+            "11111111111111111111111111111111",
+            "--envelope",
+            "/mnt/site-trust/monas.pxce",
+            "--authenticated-envelope-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--output",
+            "/run/das/site-trust.json",
+        ])
+        .expect("Site Trust provision parses");
+        let RemoteCommand::Trust(args) = provision.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Provision(args) = args.command() else {
+            panic!("expected Site Trust provision command");
+        };
+        assert_eq!(args.host_or_ip(), "192.168.0.193");
+        assert_eq!(args.https_port(), 8443);
+        assert_eq!(args.site_uuid(), "11111111111111111111111111111111");
+        assert_eq!(
+            args.output().and_then(|path| path.to_str()),
+            Some("/run/das/site-trust.json")
+        );
+
         let enroll = RemoteCli::try_parse_from([
             "dasobjectstore-remote",
             "trust",
@@ -1376,7 +1413,10 @@ mod tests {
         let RemoteCommand::Login(integrated) = integrated.command() else {
             panic!("expected login command");
         };
-        assert!(integrated.uses_system_pki());
+        assert_eq!(
+            integrated.authority_profile(),
+            LoginAuthorityProfile::IntegratedMonas
+        );
         assert_eq!(integrated.https_port(), 8443);
 
         let legacy = RemoteCli::try_parse_from([
@@ -1393,7 +1433,10 @@ mod tests {
         let RemoteCommand::Login(legacy) = legacy.command() else {
             panic!("expected login command");
         };
-        assert!(!legacy.uses_system_pki());
+        assert_eq!(
+            legacy.authority_profile(),
+            LoginAuthorityProfile::LegacyStandalone
+        );
         assert_eq!(legacy.https_port(), 8448);
     }
 }

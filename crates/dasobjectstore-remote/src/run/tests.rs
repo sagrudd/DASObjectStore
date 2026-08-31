@@ -301,6 +301,7 @@ fn paired_upload_can_submit_aws_plan_to_daemon_with_session_environment() {
         &plan,
         "garage",
         credentials.as_ref(),
+        Some("/run/site-trust/monas.pem"),
         &source,
         source_inventory(&source).expect("source inventory"),
     )
@@ -315,6 +316,9 @@ fn paired_upload_can_submit_aws_plan_to_daemon_with_session_environment() {
     };
     assert_eq!(request.object_store, "zymo_fecal_2025.05");
     assert_eq!(request.source_bytes, 4);
+    assert!(request.environment.iter().any(|variable| {
+        variable.name == "AWS_CA_BUNDLE" && variable.value == "/run/site-trust/monas.pem"
+    }));
     assert_eq!(
         request
             .progress_telemetry
@@ -353,7 +357,7 @@ fn paired_upload_can_submit_aws_plan_to_daemon_with_session_environment() {
                     &completion.expected_checksum[7..]
                 )
     }));
-    assert_eq!(request.environment.len(), 4);
+    assert_eq!(request.environment.len(), 5);
     assert!(request
         .environment
         .iter()
@@ -458,6 +462,7 @@ fn paired_config() -> RemoteConfig {
                 addressing_style: "path".to_string(),
                 s3_profile: None,
                 tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
+                site_trust_bundle_path: None,
                 trust_fingerprint_sha256: "test-fingerprint".to_string(),
                 trust_spki_sha256: "test-spki".to_string(),
                 session,

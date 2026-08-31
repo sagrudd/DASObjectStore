@@ -45,11 +45,13 @@ install only the remote client binary and its documentation. They do not install
 managed storage directories.
 
 The remote package has a hard runtime dependency on system CA certificates so
-it can connect to appliance HTTPS endpoints. The AWS CLI is a runtime
+it can connect to public appliance HTTPS endpoints. Monas private-root
+installations instead use the package's signed, process-local Site Trust path;
+they do not require a global CA-store mutation. The AWS CLI is a runtime
 dependency for actual object transfer: Debian packages list it as ``Suggests:
 awscli`` and RPM packages list it as ``Recommends: awscli`` because some sites
-install AWS CLI v2 outside the OS package manager. Install a working
-``aws`` command before running ``stores list`` or ``upload``.
+install AWS CLI v2 outside the OS package manager. Install a working ``aws``
+command before running ``stores list`` or ``upload``.
 
 Easyconnect tries to open the browser login URL automatically. On macOS this
 uses the platform ``open`` command; on Linux it uses ``xdg-open``; on Windows
@@ -375,11 +377,41 @@ approval, and session completion. Integrated deployments keep the standalone
 DAS Web/API listener on 8448 closed. ``--authority-profile legacy-standalone``
 is required to select the legacy 8448 boundary explicitly.
 
-Integrated Monas uses the platform operating-system trust store and ordinary
-certificate-chain plus exact IP-or-DNS validation. Install the current,
-governed Site root through the platform trust workflow before login. Do not run
-``trust enroll`` for the integrated endpoint: per-endpoint certificate records
-remain only for the explicit legacy standalone profile.
+Integrated Monas requires a one-time signed Site Trust provision before the
+first login. On the Monas authority, ``domain-cert site-root public-export``
+emits a short-lived public-only ``PXCE/v1`` envelope and prints its SHA-256.
+Transfer the envelope and SHA-256 through the independently authenticated
+host/container provisioning channel, then run:
+
+.. code-block:: console
+
+   dasobjectstore-remote trust provision 192.168.0.193 \
+     --site-uuid SITE_UUID \
+     --envelope /secure-mount/site-trust.pxce \
+     --authenticated-envelope-sha256 SHA256_FROM_THE_AUTHENTICATED_CHANNEL
+
+The command verifies the Site UUID, signed envelope, current receipt-key
+registration, expiry, action, root fingerprint, and canonical CA before writing
+a public Site Trust record and PEM bundle. It does not modify the OS CA store,
+does not start a daemon, and does not receive a Site private key, GitHub
+credential, Pistis identity, or S3 credential. A container or HPC host may
+mount that generated record and PEM read-only and pass its record path with
+``--site-trust-bundle`` (or set
+``DASOBJECTSTORE_REMOTE_SITE_TRUST_BUNDLE``). A missing record fails before any
+HTTPS request with ``site trust not provisioned``.
+
+After successful provisioning, the normal command remains fully automated
+apart from its intentional browser/Pistis approval:
+
+.. code-block:: console
+
+   dasobjectstore-remote login 192.168.0.193 OBJECTSTORE \
+     --username USER --set-s3-config --no-browser
+
+The generated AWS profile includes the same process-local CA bundle, so S3
+verification and transfers do not depend on the host CA store either. Do not
+use legacy ``trust enroll`` for an integrated Monas endpoint; it remains only
+for the explicit legacy standalone profile.
 
 Each invocation asks the appliance to mint a fresh, one-use pairing and shows
 the exact browser approval URL. The exchange must return the requested

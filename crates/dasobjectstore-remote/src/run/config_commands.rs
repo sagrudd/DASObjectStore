@@ -5,6 +5,20 @@ pub(super) fn run_login(
     args: &LoginArgs,
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
+    let tls_trust = match args.authority_profile() {
+        LoginAuthorityProfile::IntegratedMonas => {
+            let trust = crate::site_trust::load_for_endpoint(
+                args.host_or_ip(),
+                args.https_port(),
+                cli.site_trust_bundle(),
+            )
+            .map_err(|error| RemoteRunError::UploadRouting(error.to_string()))?;
+            crate::easyconnect::RemoteEasyconnectTlsTrust::ProvisionedSiteTrust(trust)
+        }
+        LoginAuthorityProfile::LegacyStandalone => {
+            crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate
+        }
+    };
     let options = RemoteEasyconnectPairingOptions {
         host_or_ip: args.host_or_ip().to_string(),
         https_port: args.https_port(),
@@ -13,11 +27,7 @@ pub(super) fn run_login(
         callback_port: args.callback_port(),
         timeout: Duration::from_secs(args.timeout_seconds()),
         open_browser: !args.no_browser(),
-        tls_trust: if args.uses_system_pki() {
-            crate::easyconnect::RemoteEasyconnectTlsTrust::SystemPki
-        } else {
-            crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate
-        },
+        tls_trust,
     };
     let open_browser = !args.no_browser();
     let outcome = run_complete_easyconnect_pairing_with_ready(
@@ -154,9 +164,15 @@ pub(super) fn write_easyconnect_pairing_ready(
     )?;
     if open_browser {
         writeln!(writer, "Browser launch: requested")?;
-        writeln!(writer, "Monas approval URL (shows Pistis QR): {browser_login_url}")?;
+        writeln!(
+            writer,
+            "Monas approval URL (shows Pistis QR): {browser_login_url}"
+        )?;
     } else {
-        writeln!(writer, "Open Monas approval URL (shows Pistis QR): {browser_login_url}")?;
+        writeln!(
+            writer,
+            "Open Monas approval URL (shows Pistis QR): {browser_login_url}"
+        )?;
     }
     writeln!(writer, "Waiting for browser-approved pairing callback...")?;
     Ok(())
@@ -201,13 +217,20 @@ fn install_easyconnect_result(
         RemoteEasyconnectAuthProvider::Synoptikon => RemoteAuthAuthority::Synoptikon,
         RemoteEasyconnectAuthProvider::Mneion => RemoteAuthAuthority::Mneion,
     };
-    let tls_trust = match outcome.tls_trust {
+    let tls_trust = match &outcome.tls_trust {
         crate::easyconnect::RemoteEasyconnectTlsTrust::SystemPki => {
             crate::config::RemoteTlsTrust::SystemPki
         }
         crate::easyconnect::RemoteEasyconnectTlsTrust::EnrolledCertificate => {
             crate::config::RemoteTlsTrust::EnrolledCertificate
         }
+        crate::easyconnect::RemoteEasyconnectTlsTrust::ProvisionedSiteTrust(_) => {
+            crate::config::RemoteTlsTrust::ProvisionedSiteTrust
+        }
+    };
+    let provisioned_site_trust = match &outcome.tls_trust {
+        crate::easyconnect::RemoteEasyconnectTlsTrust::ProvisionedSiteTrust(trust) => Some(trust),
+        _ => None,
     };
     let enrolled_trust = if tls_trust == crate::config::RemoteTlsTrust::EnrolledCertificate {
         Some(
@@ -286,6 +309,8 @@ fn install_easyconnect_result(
             addressing_style: outcome.exchange.s3.addressing_style.clone(),
             s3_profile: None,
             tls_trust,
+            site_trust_bundle_path: provisioned_site_trust
+                .map(|trust| trust.record_path.display().to_string()),
             trust_fingerprint_sha256: enrolled_trust
                 .as_ref()
                 .map(|trust| trust.fingerprint_sha256.clone())
@@ -464,7 +489,11 @@ pub(super) fn run_store_list(
         writeln!(writer, "{}", plan.display_command())?;
         return Ok(());
     }
-    let raw = execute_aws_plan(&plan, credentials.as_ref())?;
+    let ca_bundle_path = super::control_commands::provisioned_ca_bundle_path_for_s3_endpoint(
+        &config,
+        &config.endpoint_url,
+    )?;
+    let raw = execute_aws_plan(&plan, credentials.as_ref(), ca_bundle_path.as_deref())?;
     let stores = parse_list_buckets(&raw)?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &stores)?;

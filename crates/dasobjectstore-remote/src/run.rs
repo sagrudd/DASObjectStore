@@ -9,10 +9,11 @@ use crate::aws_profile::{
     status as s3_profile_status, AwsProfileError,
 };
 use crate::cli::{
-    AuthenticateArgs, ConfigCommand, EasyconnectArgs, LoginArgs, ObjectReconcileS3Args,
-    ObjectSnapshotArgs, ObjectsCommand, OperationStatusArgs, OperationWaitArgs, OperationsCommand,
-    RemoteCli, RemoteCommand, ResyncArgs, S3Command, StoreListArgs, StoreReadinessArgs,
-    StoresCommand, TrustCommand, TrustEnrollArgs, TrustRepairArgs, UploadArgs,
+    AuthenticateArgs, ConfigCommand, EasyconnectArgs, LoginArgs, LoginAuthorityProfile,
+    ObjectReconcileS3Args, ObjectSnapshotArgs, ObjectsCommand, OperationStatusArgs,
+    OperationWaitArgs, OperationsCommand, RemoteCli, RemoteCommand, ResyncArgs, S3Command,
+    StoreListArgs, StoreReadinessArgs, StoresCommand, TrustCommand, TrustEnrollArgs,
+    TrustProvisionArgs, TrustRepairArgs, UploadArgs,
 };
 use crate::config::{
     acquire_config_transaction, default_config_path, doctor_config, read_optional_config,
@@ -61,6 +62,7 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {
+            TrustCommand::Provision(args) => run_site_trust_provision(args, writer),
             TrustCommand::Enroll(args) => run_trust_enroll(args, writer),
             TrustCommand::Inspect(args) => {
                 run_trust_inspect(args.host_or_ip(), args.https_port(), args.json(), writer)
@@ -132,6 +134,7 @@ pub enum RemoteRunError {
     Auth(RemoteAuthError),
     Authenticate(RemoteAuthenticateError),
     Trust(crate::trust::TrustError),
+    SiteTrust(crate::site_trust::SiteTrustError),
     Control(RemoteControlError),
     S3(RemoteS3Error),
     AwsProfile(AwsProfileError),
@@ -151,6 +154,7 @@ impl fmt::Display for RemoteRunError {
             Self::Auth(error) => write!(formatter, "{error}"),
             Self::Authenticate(error) => write!(formatter, "{error}"),
             Self::Trust(error) => write!(formatter, "{error}"),
+            Self::SiteTrust(error) => write!(formatter, "{error}"),
             Self::Control(error) => write!(formatter, "{error}"),
             Self::S3(error) => write!(formatter, "{error}"),
             Self::AwsProfile(error) => write!(formatter, "{error}"),
@@ -209,6 +213,38 @@ impl From<crate::trust::TrustError> for RemoteRunError {
     fn from(error: crate::trust::TrustError) -> Self {
         Self::Trust(error)
     }
+}
+
+impl From<crate::site_trust::SiteTrustError> for RemoteRunError {
+    fn from(error: crate::site_trust::SiteTrustError) -> Self {
+        Self::SiteTrust(error)
+    }
+}
+
+fn run_site_trust_provision(
+    args: &TrustProvisionArgs,
+    writer: &mut impl Write,
+) -> Result<(), RemoteRunError> {
+    let trust = crate::site_trust::provision(crate::site_trust::ProvisionRequest {
+        host: args.host_or_ip(),
+        port: args.https_port(),
+        site_uuid_hex: args.site_uuid(),
+        envelope_path: args.envelope(),
+        authenticated_envelope_sha256_hex: args.authenticated_envelope_sha256(),
+        output: args.output(),
+    })?;
+    writeln!(
+        writer,
+        "Signed Site Trust provisioned for {}:{}.",
+        trust.record.endpoint_host, trust.record.endpoint_port
+    )?;
+    writeln!(
+        writer,
+        "Process-local CA bundle: {}",
+        trust.ca_bundle_path.display()
+    )?;
+    writeln!(writer, "No operating-system CA store was modified.")?;
+    Ok(())
 }
 
 impl From<AwsProfileError> for RemoteRunError {
