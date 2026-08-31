@@ -37,6 +37,7 @@ build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
 prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
 pinned_sources="$repo_root/packaging/pinned-mnemosyne-package-sources.sh"
+pinned_sources_test="$repo_root/packaging/tests/pinned-mnemosyne-package-sources.sh"
 monas_access_test="$repo_root/packaging/tests/monas-access-boundary.sh"
 storage_startup_test="$repo_root/packaging/tests/resource-bound-storage-startup.sh"
 garage_renderer="$repo_root/crates/dasobjectstore-object-service/src/garage.rs"
@@ -120,6 +121,8 @@ require_file "$build_remote_rpm"
 require_file "$prepare_web_dist"
 require_file "$package_auth_guard"
 require_file "$pinned_sources"
+require_file "$pinned_sources_test"
+require_executable "$pinned_sources_test"
 require_file "$monas_access_test"
 require_file "$storage_startup_test"
 require_file "$garage_renderer"
@@ -272,14 +275,19 @@ done
 require_text "$pinned_sources" 'git -c safe.directory="$checkout" -C "$checkout" status --porcelain'
 require_text "$pinned_sources" 'command -v git'
 require_text "$pinned_sources" 'das_package_write_pinned_dependency_provenance'
+require_text "$pinned_sources" 'DAS_PACKAGE_PROXENOS_REVISION'
+require_text "$pinned_sources" 'DAS_PACKAGE_THESAUROPHYLAX_REVISION'
+require_text "$pinned_sources" 'mnemosyne.dasobjectstore.package-dependencies.v2'
 require_text "$repo_root/Cargo.toml" 'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
 require_text "$repo_root/Cargo.toml" 'prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
+require_text "$repo_root/Cargo.toml" 'proxenos = { git = "https://github.com/sagrudd/proxenos.git", rev = '
 require_absent "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
 require_text "$repo_root/Cargo.toml" 'pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = '
 require_text "$build_deb" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_rpm" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_deb" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_rpm" 'das_package_write_pinned_dependency_provenance'
+"$pinned_sources_test" "$pinned_sources"
 require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" 'target/release/dasobjectstored'
