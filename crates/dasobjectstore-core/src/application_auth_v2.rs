@@ -14,6 +14,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub const GOVERNED_BINDING_SCHEMA_VERSION_V2: &str = "ergasterion.object-store-binding.v2";
+/// Provider-owned, pre-admission generated-output binding.
+///
+/// This contract is deliberately distinct from the read-only object-store
+/// binding.  It describes authority to settle generated output through the
+/// DASObjectStore/Limen boundary; it does not itself issue a capability or
+/// expose a provider route.
+pub const ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1: &str =
+    "ergasterion.generated-output-binding.v1";
 pub const ERGASTERION_CAPABILITY_EXCHANGE_SCHEMA_VERSION: &str =
     "dasobjectstore.ergasterion-capability-exchange.v1";
 pub const ERGASTERION_CAPABILITY_RENEWAL_SCHEMA_VERSION: &str =
@@ -27,6 +35,10 @@ pub const ERGASTERION_APPLICATION_KEY_ID: &str = "ergasterion-ed25519-2026-07-19
 pub const ERGASTERION_CAPABILITY_AUDIENCE: &str = "ergasterion-governed-data-service";
 pub const ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 pub const ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES: u64 = 256 * 1024 * 1024 * 1024;
+pub const ERGASTERION_GENERATED_OUTPUT_AUDIENCE: &str = "ergasterion-governed-output-service";
+pub const ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE: &str =
+    "ergasterion.governed-output-completion";
+pub const ERGASTERION_GENERATED_OUTPUT_POLICY_CLASS: &str = "generated_data";
 pub const ERGASTERION_CAPABILITY_RENEWAL_WINDOW_SECONDS: u64 = 5 * 60;
 pub const ERGASTERION_CAPABILITY_CLOCK_SKEW_SECONDS: u64 = 30;
 
@@ -161,6 +173,155 @@ impl GovernedObjectStoreBindingV2 {
                 != trusted.prosopikon_authority.authority_revision
         {
             return Err(ApplicationAuthValidationError::BindingAuthorityStale);
+        }
+        Ok(())
+    }
+}
+
+/// A provider-owned generated-output binding.  The application identity is
+/// intentionally carried by the binding so the output service cannot reuse
+/// the established read-only Ergasterion identity.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GeneratedOutputBindingV1 {
+    pub schema_version: String,
+    pub binding_id: String,
+    pub application_id: String,
+    pub host_authority: GovernedHostAuthorityV2,
+    pub prosopikon_authority: GovernedProsopikonAuthorityV2,
+    pub tenant_id: String,
+    pub object_store_id: StoreId,
+    pub scope: GovernedObjectStoreBindingScope,
+    pub policy_class: String,
+    pub max_object_bytes: u64,
+    pub max_total_bytes: u64,
+    pub issued_at: String,
+    pub expires_at: String,
+    pub status: GovernedBindingStatus,
+}
+
+/// A narrowed transfer settlement request that the future DASObjectStore /
+/// Limen adapter must compare to a current [`GeneratedOutputBindingV1`].
+/// It carries logical object identities only; credentials, endpoints, and
+/// managed paths are deliberately absent.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GeneratedOutputRequestedScopeV1 {
+    pub object_store_id: StoreId,
+    pub prefixes: Vec<String>,
+    pub operations: Vec<ApplicationOperation>,
+    pub max_object_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+impl GeneratedOutputBindingV1 {
+    pub fn validate_at(&self, now: u64) -> Result<(), ApplicationAuthValidationError> {
+        if self.schema_version != ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1 {
+            return Err(ApplicationAuthValidationError::UnsupportedBindingSchema);
+        }
+        validate_opaque_id("bindingId", &self.binding_id)?;
+        validate_opaque_id("applicationId", &self.application_id)?;
+        validate_uuid(
+            "hostAuthority.authorityId",
+            &self.host_authority.authority_id,
+        )?;
+        validate_opaque_id("hostAuthority.projectId", &self.host_authority.project_id)?;
+        validate_uuid(
+            "prosopikonAuthority.authorityId",
+            &self.prosopikon_authority.authority_id,
+        )?;
+        validate_uuid("tenantId", &self.tenant_id)?;
+        if self.host_authority.project_revision == 0
+            || self.prosopikon_authority.authority_revision == 0
+            || self.scope.prefixes.is_empty()
+            || duplicates(&self.scope.prefixes)
+            || !has_exact_generated_output_operations(&self.scope.operations)
+            || self.policy_class != ERGASTERION_GENERATED_OUTPUT_POLICY_CLASS
+            || self.max_object_bytes == 0
+            || self.max_object_bytes > ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES
+            || self.max_total_bytes == 0
+            || self.max_total_bytes > ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES
+            || self.max_object_bytes > self.max_total_bytes
+        {
+            return Err(ApplicationAuthValidationError::InvalidBinding);
+        }
+        for prefix in &self.scope.prefixes {
+            validate_logical_prefix(prefix)?;
+        }
+        let issued = timestamp(&self.issued_at)?;
+        let expires = timestamp(&self.expires_at)?;
+        if expires <= issued
+            || now.saturating_add(ERGASTERION_CAPABILITY_CLOCK_SKEW_SECONDS) < issued
+            || now >= expires.saturating_add(ERGASTERION_CAPABILITY_CLOCK_SKEW_SECONDS)
+        {
+            return Err(ApplicationAuthValidationError::BindingInactiveOrExpired);
+        }
+        Ok(())
+    }
+
+    pub fn contains(&self, requested: &GeneratedOutputRequestedScopeV1) -> bool {
+        requested.validate().is_ok()
+            && requested.object_store_id == self.object_store_id
+            && requested.max_object_bytes <= self.max_object_bytes
+            && requested.max_total_bytes <= self.max_total_bytes
+            && requested
+                .operations
+                .iter()
+                .all(|operation| self.scope.operations.contains(operation))
+            && requested.prefixes.iter().all(|prefix| {
+                self.scope
+                    .prefixes
+                    .iter()
+                    .any(|allowed| prefix_contains(allowed, prefix))
+            })
+    }
+
+    pub fn verify_current_authority(
+        &self,
+        trusted: &GovernedBindingAuthorityVerificationInputV2,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        if self.tenant_id != trusted.tenant_id
+            || self.host_authority.mode != trusted.host_authority.mode
+            || self.host_authority.authority_id != trusted.host_authority.authority_id
+            || self.host_authority.project_id != trusted.host_authority.project_id
+            || self.prosopikon_authority.authority_id != trusted.prosopikon_authority.authority_id
+        {
+            return Err(ApplicationAuthValidationError::BindingAuthorityMismatch);
+        }
+        if self.host_authority.project_revision != trusted.host_authority.project_revision
+            || self.prosopikon_authority.authority_revision
+                != trusted.prosopikon_authority.authority_revision
+        {
+            return Err(ApplicationAuthValidationError::BindingAuthorityStale);
+        }
+        Ok(())
+    }
+}
+
+impl GeneratedOutputRequestedScopeV1 {
+    pub fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
+        if self.prefixes.is_empty()
+            || self.operations.is_empty()
+            || duplicates(&self.prefixes)
+            || duplicates(&self.operations)
+            || self.operations.iter().any(|operation| {
+                !matches!(
+                    operation,
+                    ApplicationOperation::Write
+                        | ApplicationOperation::CompleteUpload
+                        | ApplicationOperation::Verify
+                )
+            })
+            || self.max_object_bytes == 0
+            || self.max_object_bytes > ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES
+            || self.max_total_bytes == 0
+            || self.max_total_bytes > ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES
+            || self.max_object_bytes > self.max_total_bytes
+        {
+            return Err(ApplicationAuthValidationError::ScopeNotContained);
+        }
+        for prefix in &self.prefixes {
+            validate_logical_prefix(prefix)?;
         }
         Ok(())
     }
@@ -575,6 +736,14 @@ fn duplicates<T: Eq>(values: &[T]) -> bool {
         .any(|(index, value)| values[..index].contains(value))
 }
 
+fn has_exact_generated_output_operations(operations: &[ApplicationOperation]) -> bool {
+    operations.len() == 3
+        && !duplicates(operations)
+        && operations.contains(&ApplicationOperation::Write)
+        && operations.contains(&ApplicationOperation::CompleteUpload)
+        && operations.contains(&ApplicationOperation::Verify)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -639,6 +808,69 @@ mod tests {
             binding.verify_current_authority(&stale),
             Err(ApplicationAuthValidationError::BindingAuthorityStale)
         );
+    }
+
+    #[test]
+    fn generated_output_binding_is_separate_and_fails_closed() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../docs/user/examples/ergasterion-generated-output-binding-v1.json"
+        ))
+        .expect("generated output fixture");
+        let binding: GeneratedOutputBindingV1 =
+            serde_json::from_value(value.clone()).expect("generated output binding");
+        let now = timestamp(&binding.issued_at).expect("issued");
+        binding.validate_at(now).expect("binding shape");
+
+        let trusted = GovernedBindingAuthorityVerificationInputV2 {
+            tenant_id: binding.tenant_id.clone(),
+            host_authority: binding.host_authority.clone(),
+            prosopikon_authority: binding.prosopikon_authority.clone(),
+        };
+        binding
+            .verify_current_authority(&trusted)
+            .expect("exact current authority");
+        let mut stale = trusted.clone();
+        stale.prosopikon_authority.authority_revision += 1;
+        assert_eq!(
+            binding.verify_current_authority(&stale),
+            Err(ApplicationAuthValidationError::BindingAuthorityStale)
+        );
+
+        let requested = GeneratedOutputRequestedScopeV1 {
+            object_store_id: binding.object_store_id.clone(),
+            prefixes: vec!["projects/project-opaque-001/generated/run-001/".to_string()],
+            operations: vec![
+                ApplicationOperation::Write,
+                ApplicationOperation::CompleteUpload,
+            ],
+            max_object_bytes: 8 * 1024 * 1024 * 1024,
+            max_total_bytes: 32 * 1024 * 1024 * 1024,
+        };
+        assert!(binding.contains(&requested));
+
+        let mut cross_prefix = requested.clone();
+        cross_prefix.prefixes = vec!["projects/project-other/generated/".to_string()];
+        assert!(!binding.contains(&cross_prefix));
+        let mut read_request = requested;
+        read_request.operations = vec![ApplicationOperation::Read];
+        assert!(!binding.contains(&read_request));
+
+        let mut invalid_operations = binding.clone();
+        invalid_operations.scope.operations[0] = ApplicationOperation::Read;
+        assert_eq!(
+            invalid_operations.validate_at(now),
+            Err(ApplicationAuthValidationError::InvalidBinding)
+        );
+        let mut excessive = binding;
+        excessive.max_object_bytes = ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES + 1;
+        assert_eq!(
+            excessive.validate_at(now),
+            Err(ApplicationAuthValidationError::InvalidBinding)
+        );
+
+        let mut unknown = value;
+        unknown["unexpected"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<GeneratedOutputBindingV1>(unknown).is_err());
     }
 
     #[test]

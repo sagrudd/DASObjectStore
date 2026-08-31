@@ -1,0 +1,33 @@
+{
+  "identity": {
+    "schema_version": "dasobjectstore.application_auth.v1",
+    "application_id": "ergasterion-output-completion",
+    "owner": "Ergasterion and Limen generated-output boundary",
+    "purpose": "ergasterion.governed-output-completion",
+    "environment": "production",
+    "credential_kind": "asymmetric_key",
+    "scope": {
+      "store_ids": [],
+      "prefixes": [],
+      "object_types": [],
+      "operations": ["write", "complete_upload", "verify"],
+      "ingress_origin": "synoptikon",
+      "max_object_bytes": null,
+      "max_total_bytes": null
+    },
+    "dynamic_binding": {
+      "schema_version": "ergasterion.generated-output-binding.v1",
+      "audience": "ergasterion-governed-output-service",
+      "audit_purpose": "ergasterion.governed-output-completion",
+      "max_object_bytes": 68719476736,
+      "max_total_bytes": 274877906944
+    },
+    "issued_at_unix_seconds": 1788224400,
+    "expires_at_unix_seconds": 1819760400,
+    "active": true
+  },
+  "dry_run": true,
+  "client_request_id": "ergasterion-output-registration-v1-20260831",
+  "administrator_actor": null,
+  "confirmation_marker": "confirm application identity registration"
+}

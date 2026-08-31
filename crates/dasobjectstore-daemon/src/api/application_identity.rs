@@ -602,4 +602,49 @@ mod tests {
             dasobjectstore_core::application_auth_v2::GOVERNED_BINDING_SCHEMA_VERSION_V2
         );
     }
+
+    #[test]
+    fn generated_output_registration_fixture_yields_non_secret_receipt_evidence() {
+        let request: ApplicationIdentityRegistrationRequest = serde_json::from_str(include_str!(
+            "../../../../docs/user/examples/ergasterion-generated-output-application-identity-registration-v1.json"
+        ))
+        .expect("generated output registration fixture");
+        request
+            .validate()
+            .expect("generated output registration validates");
+        assert!(request.dry_run, "the checked-in request must not register");
+
+        let response = ApplicationIdentityRegistrationResponse::accepted(
+            DaemonJobId::new("generated-output-registration").expect("job"),
+            "2026-08-31T09:45:00Z",
+            request,
+            false,
+        );
+        let registration = response.registration.expect("registration evidence");
+        assert_eq!(registration.application_id, "ergasterion-output-completion");
+        assert_eq!(
+            registration.binding_schema_version,
+            dasobjectstore_core::application_auth_v2::ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1
+        );
+        assert_eq!(
+            registration.audience,
+            dasobjectstore_core::application_auth_v2::ERGASTERION_GENERATED_OUTPUT_AUDIENCE
+        );
+        assert_eq!(
+            registration.audit_purpose,
+            dasobjectstore_core::application_auth_v2::ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE
+        );
+        assert_eq!(
+            registration.operations,
+            vec![
+                ApplicationOperation::Write,
+                ApplicationOperation::CompleteUpload,
+                ApplicationOperation::Verify,
+            ]
+        );
+        let encoded = serde_json::to_string(&registration).expect("serialize");
+        for forbidden in ["private_key", "client_secret", "bearer_token", "/srv/"] {
+            assert!(!encoded.contains(forbidden), "must omit {forbidden}");
+        }
+    }
 }

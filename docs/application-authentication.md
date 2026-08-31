@@ -103,6 +103,36 @@ clients should renew within the final five minutes. Revocation propagation is
 therefore at most 15 minutes, with 30 seconds of clock skew accepted only for
 binding boundary evaluation.
 
+### Generated-output binding (pre-admission only)
+
+The product-owner-approved output boundary is deliberately separate from the
+read identity above. DASObjectStore owns the proposed
+`ergasterion.generated-output-binding.v1` schema at
+`docs/schemas/ergasterion.generated-output-binding.v1.schema.json`; its
+synthetic, credential-free example is
+`docs/user/examples/ergasterion-generated-output-binding-v1.json`. The
+corresponding identity-registration request is an unexecuted dry run at
+`docs/user/examples/ergasterion-generated-output-application-identity-registration-v1.json`.
+
+An output binding identifies a distinct output application identity, the exact
+current Monas or Synoptikon project authority and Prosopikon authority,
+tenant, ObjectStore, logical output prefix, `generated_data` policy class,
+64 GiB per-object maximum, 256 GiB aggregate maximum, and the exact
+`write`, `complete_upload`, and `verify` operation set. Validation rejects a
+reader operation, deletion, a cross-prefix request, excessive limits, stale
+authority revisions, and unknown fields. The only code path that can use the
+result must compare it to independently obtained current authority before
+provider mutation.
+
+This is a source-level validation foundation, not a live output capability.
+It does not register an identity or key, issue an opaque capability, expose an
+HTTP route, transfer bytes, or create a receipt. It cannot be used until the
+separate identity and public key are registered by the DASObjectStore owner,
+the output binding is formally admitted, Limen supplies its authenticated
+logical route, and the coordinated Kanon/lockset/Terraform release gates have
+passed. The existing reader identity and v1/v2 input contracts remain
+unchanged; no migration is required.
+
 Successful registration returns a non-secret registration record alongside
 the identity. It documents the contract revision, limits, correlation/audit
 contract, stable `governed_scope_denied` consumer reason, public-key rotation,

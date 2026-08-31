@@ -4,7 +4,11 @@
 //! material. Cryptographic signing, key custody, token exchange, and daemon
 //! authorization are layered above this path-free core contract.
 
-use crate::application_auth_v2::GOVERNED_BINDING_SCHEMA_VERSION_V2;
+use crate::application_auth_v2::{
+    ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES, ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES,
+    ERGASTERION_GENERATED_OUTPUT_AUDIENCE, ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE,
+    ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1, GOVERNED_BINDING_SCHEMA_VERSION_V2,
+};
 use crate::ids::StoreId;
 use crate::ingress::IngressOrigin;
 use crate::object_type::ObjectType;
@@ -121,17 +125,29 @@ pub struct DynamicBindingPolicy {
 
 impl DynamicBindingPolicy {
     fn validate(&self) -> Result<(), ApplicationAuthValidationError> {
-        if self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION
-            && self.schema_version != GOVERNED_BINDING_SCHEMA_VERSION_V2
+        let read_profile = (self.schema_version == GOVERNED_BINDING_SCHEMA_VERSION
+            || self.schema_version == GOVERNED_BINDING_SCHEMA_VERSION_V2)
+            && self.audit_purpose == "ergasterion.governed-data-access";
+        let generated_output_profile = self.schema_version
+            == ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1
+            && self.audience == ERGASTERION_GENERATED_OUTPUT_AUDIENCE
+            && self.audit_purpose == ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE;
+        if (!read_profile && !generated_output_profile)
             || self.audience.trim().is_empty()
-            || self.audit_purpose != "ergasterion.governed-data-access"
             || self.max_object_bytes == 0
             || self.max_total_bytes == 0
             || self.max_object_bytes > self.max_total_bytes
+            || (generated_output_profile
+                && (self.max_object_bytes > ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES
+                    || self.max_total_bytes > ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES))
         {
             return Err(ApplicationAuthValidationError::InvalidBindingPolicy);
         }
         Ok(())
+    }
+
+    fn is_generated_output_profile(&self) -> bool {
+        self.schema_version == ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1
     }
 }
 
@@ -287,6 +303,25 @@ impl ApplicationScope {
         Ok(())
     }
 
+    fn validate_generated_output_dynamic_ceiling(
+        &self,
+    ) -> Result<(), ApplicationAuthValidationError> {
+        if !self.store_ids.is_empty()
+            || !self.prefixes.is_empty()
+            || !self.object_types.is_empty()
+            || self.operations.len() != 3
+            || has_duplicates(&self.operations)
+            || !self.operations.contains(&ApplicationOperation::Write)
+            || !self
+                .operations
+                .contains(&ApplicationOperation::CompleteUpload)
+            || !self.operations.contains(&ApplicationOperation::Verify)
+        {
+            return Err(ApplicationAuthValidationError::InvalidBindingPolicy);
+        }
+        Ok(())
+    }
+
     fn dynamic_ceiling_contains(&self, requested: &Self) -> bool {
         requested
             .operations
@@ -333,7 +368,11 @@ impl ApplicationIdentity {
             ));
         }
         if let Some(policy) = &self.dynamic_binding {
-            self.scope.validate_dynamic_ceiling()?;
+            if policy.is_generated_output_profile() {
+                self.scope.validate_generated_output_dynamic_ceiling()?;
+            } else {
+                self.scope.validate_dynamic_ceiling()?;
+            }
             policy.validate()
         } else {
             self.scope.validate()
@@ -1364,6 +1403,56 @@ mod tests {
         let encoded = serde_json::to_string(&descriptor).expect("encode");
         assert!(!encoded.contains("private_key"));
         assert!(!encoded.contains("secret"));
+    }
+
+    #[test]
+    fn generated_output_identity_is_separate_and_exactly_bounded() {
+        let mut identity = identity();
+        identity.application_id = "ergasterion-output-completion".to_string();
+        identity.scope = ApplicationScope {
+            store_ids: Vec::new(),
+            prefixes: Vec::new(),
+            object_types: Vec::new(),
+            operations: vec![
+                ApplicationOperation::Write,
+                ApplicationOperation::CompleteUpload,
+                ApplicationOperation::Verify,
+            ],
+            ingress_origin: IngressOrigin::Synoptikon,
+            max_object_bytes: None,
+            max_total_bytes: None,
+        };
+        identity.dynamic_binding = Some(DynamicBindingPolicy {
+            schema_version: ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1.to_string(),
+            audience: ERGASTERION_GENERATED_OUTPUT_AUDIENCE.to_string(),
+            audit_purpose: ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE.to_string(),
+            max_object_bytes: ERGASTERION_CAPABILITY_MAX_OBJECT_BYTES,
+            max_total_bytes: ERGASTERION_CAPABILITY_MAX_TOTAL_BYTES,
+        });
+        identity.validate().expect("separate output identity");
+
+        let mut widened = identity.clone();
+        widened.scope.operations.push(ApplicationOperation::Delete);
+        assert_eq!(
+            widened.validate(),
+            Err(ApplicationAuthValidationError::InvalidBindingPolicy)
+        );
+
+        let mut read_profile = identity;
+        read_profile
+            .dynamic_binding
+            .as_mut()
+            .expect("policy")
+            .schema_version = GOVERNED_BINDING_SCHEMA_VERSION_V2.to_string();
+        read_profile
+            .dynamic_binding
+            .as_mut()
+            .expect("policy")
+            .audit_purpose = "ergasterion.governed-data-access".to_string();
+        assert_eq!(
+            read_profile.validate(),
+            Err(ApplicationAuthValidationError::InvalidBindingPolicy)
+        );
     }
 
     #[test]
