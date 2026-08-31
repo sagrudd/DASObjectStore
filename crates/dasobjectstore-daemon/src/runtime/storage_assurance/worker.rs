@@ -1,6 +1,7 @@
 use super::{
-    assurance_primary_work_pending, persist_report, run_one_disk_housekeeping, LiveStatusRegistry,
-    StorageAssuranceAction, StorageAssuranceConfig, StorageAssuranceReport,
+    assurance_destage_copying, assurance_primary_work_pending, persist_report,
+    run_one_disk_housekeeping, LiveStatusRegistry, StorageAssuranceAction, StorageAssuranceConfig,
+    StorageAssuranceReport,
 };
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -12,6 +13,7 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct IdleObservation {
     primary_work_pending: bool,
+    destage_copying: bool,
     live_ingests: bool,
     garbage_collection_running: bool,
     io_bytes_per_second: u64,
@@ -22,22 +24,35 @@ struct IdleGate {
     idle_since: Option<Instant>,
     required_idle: Duration,
     maximum_io_bytes_per_second: u64,
+    parallel_destage: bool,
 }
 
 impl IdleGate {
-    fn new(required_idle: Duration, maximum_io_bytes_per_second: u64) -> Self {
+    fn new(
+        required_idle: Duration,
+        maximum_io_bytes_per_second: u64,
+        parallel_destage: bool,
+    ) -> Self {
         Self {
             idle_since: None,
             required_idle,
             maximum_io_bytes_per_second,
+            parallel_destage,
         }
     }
 
     fn observe(&mut self, now: Instant, observation: IdleObservation) -> bool {
-        let busy = observation.primary_work_pending
+        // Destage owns a separate capacity claim and target selection. A
+        // bounded rebalance may run alongside it, so a fuller HDD member does
+        // not remain full merely because the SSD has a backlog. Foreground
+        // ingest and collection still preempt before the next IO chunk.
+        let destage_busy = observation.primary_work_pending && !self.parallel_destage;
+        let external_io_busy = observation.io_bytes_per_second > self.maximum_io_bytes_per_second
+            && !(self.parallel_destage && observation.destage_copying);
+        let busy = destage_busy
             || observation.live_ingests
             || observation.garbage_collection_running
-            || observation.io_bytes_per_second > self.maximum_io_bytes_per_second;
+            || external_io_busy;
         if busy {
             self.idle_since = None;
             return false;
@@ -63,6 +78,7 @@ pub fn spawn_disk_housekeeping_loop(
             let mut gate = IdleGate::new(
                 Duration::from_secs(config.idle_grace_seconds),
                 config.idle_io_bytes_per_second,
+                config.parallel_destage,
             );
             let mut previous_io = read_linux_disk_io_bytes().ok();
             let mut previous_io_at = Instant::now();
@@ -82,8 +98,11 @@ pub fn spawn_disk_housekeeping_loop(
                 let snapshot = live_status_registry.snapshot(now_utc());
                 let primary_work_pending =
                     assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true);
+                let destage_copying =
+                    assurance_destage_copying(&config.live_sqlite_path).unwrap_or(true);
                 let observation = IdleObservation {
                     primary_work_pending,
+                    destage_copying,
                     live_ingests: snapshot.aggregate.active_ingests > 0,
                     garbage_collection_running: snapshot
                         .garbage_collection
@@ -165,9 +184,10 @@ mod tests {
     #[test]
     fn idle_gate_requires_continuous_quiescence_and_resets_on_io() {
         let start = Instant::now();
-        let mut gate = IdleGate::new(Duration::from_secs(60), 100);
+        let mut gate = IdleGate::new(Duration::from_secs(60), 100, false);
         let idle = IdleObservation {
             primary_work_pending: false,
+            destage_copying: false,
             live_ingests: false,
             garbage_collection_running: false,
             io_bytes_per_second: 0,
@@ -183,5 +203,28 @@ mod tests {
             }
         ));
         assert!(!gate.observe(start + Duration::from_secs(120), idle));
+    }
+
+    #[test]
+    fn idle_gate_starts_rebalance_alongside_durable_destage_but_not_ingest() {
+        let start = Instant::now();
+        let mut gate = IdleGate::new(Duration::from_secs(60), 100, true);
+        let destage = IdleObservation {
+            primary_work_pending: true,
+            destage_copying: true,
+            live_ingests: false,
+            garbage_collection_running: false,
+            // The destage writer itself can exceed the ordinary idle probe.
+            io_bytes_per_second: 1_000,
+        };
+        assert!(!gate.observe(start, destage));
+        assert!(gate.observe(start + Duration::from_secs(60), destage));
+        assert!(!gate.observe(
+            start + Duration::from_secs(61),
+            IdleObservation {
+                live_ingests: true,
+                ..destage
+            }
+        ));
     }
 }

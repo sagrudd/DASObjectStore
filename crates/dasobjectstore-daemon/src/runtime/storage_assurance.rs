@@ -15,13 +15,13 @@ use dasobjectstore_metadata::assurance::{
     assurance_relocation_committed, complete_assurance_drain_if_empty,
 };
 use dasobjectstore_metadata::{
-    acquire_disk_capacity_claims, assurance_primary_work_pending, commit_assurance_relocation,
-    list_assurance_disk_states, list_assurance_placement_candidates, measure_ssd_capacity,
-    read_outstanding_disk_capacity, record_assurance_hash_failure, record_assurance_verification,
-    release_disk_capacity_claims, write_verified_hdd_copy_with_controlled_progress,
-    AssuranceMetadataError, AssurancePlacementCandidate, DiskCapacityClaimAllocation,
-    DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest, HddCopyError,
-    HddCopyRequest,
+    acquire_disk_capacity_claims, assurance_destage_copying, assurance_primary_work_pending,
+    commit_assurance_relocation, list_assurance_disk_states, list_assurance_placement_candidates,
+    measure_ssd_capacity, read_outstanding_disk_capacity, record_assurance_hash_failure,
+    record_assurance_verification, release_disk_capacity_claims,
+    write_verified_hdd_copy_with_controlled_progress, AssuranceMetadataError,
+    AssurancePlacementCandidate, DiskCapacityClaimAllocation, DiskCapacityClaimError,
+    DiskCapacityClaimKind, DiskCapacityClaimRequest, HddCopyError, HddCopyRequest,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -499,7 +499,7 @@ fn remove_redundant_source(path: &Path) -> Result<bool, StorageAssuranceError> {
 }
 
 fn assurance_should_preempt(
-    config: &StorageAssuranceConfig,
+    _config: &StorageAssuranceConfig,
     live_status_registry: &LiveStatusRegistry,
     now_utc: &str,
 ) -> bool {
@@ -508,7 +508,6 @@ fn assurance_should_preempt(
         || snapshot
             .garbage_collection
             .is_some_and(|collection| collection.running)
-        || assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true)
 }
 
 /// A per-action rate governor.  It intentionally accounts IO by bytes rather
@@ -1141,6 +1140,7 @@ mod tests {
             idle_io_bytes_per_second: 1024,
             available_io_bytes_per_second: 100 * 1024 * 1024,
             io_percent: 10,
+            parallel_destage: true,
             live_sqlite_path: PathBuf::from("/live.sqlite"),
             hdd_root: PathBuf::from("/hdd"),
             latest_report_path: PathBuf::from("/state/latest.json"),

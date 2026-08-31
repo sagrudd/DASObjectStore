@@ -9,15 +9,16 @@ than a bulk shuffle.
 
 The service waits for ten uninterrupted minutes with:
 
-* no active or queued ingest/destage work;
+* no active foreground ingest work;
 * no live ingest connection;
 * no startup garbage collection; and
 * less than 1 MiB/s of aggregate host block-device IO.
 
 After that quiet period it performs exactly one action, then returns to the
-idle gate. Primary ingress always has precedence. If ingest becomes active
-during a relocation, the temporary destination is discarded and the
-authoritative source placement remains untouched.
+idle gate. HDD rebalancing takes maintenance precedence and may run in parallel
+with durable SSD-to-HDD destage. Foreground ingest always has precedence. If
+ingest becomes active during a relocation, the temporary destination is
+discarded and the authoritative source placement remains untouched.
 
 At daemon startup, structurally verified capacity reservations belonging to a
 stopped direct-ingest worker are released before assurance begins. This keeps
@@ -82,7 +83,8 @@ I/O limit and SSD priority
 ``disk_housekeeping`` accounts source reads and destination writes for every
 verification and relocation chunk. Its effective rate is capped at no more than
 ten percent of the configured available I/O capacity; foreground ingest and
-destage preempt it before the next chunk. Packaged appliances use a conservative
+garbage collection preempt it before the next chunk. Durable destage continues
+in parallel using its own capacity claims and HDD-target selection. Packaged appliances use a conservative
 100 MiB/s commissioning baseline (therefore at most 10 MiB/s); set the measured
 available capacity for the appliance after commissioning so the ten-percent
 limit is exact for its disks.
@@ -149,6 +151,7 @@ them through the service environment:
 * ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IDLE_IO_BYTES_PER_SECOND``
 * ``DASOBJECTSTORE_DISK_HOUSEKEEPING_AVAILABLE_IO_BYTES_PER_SECOND``
 * ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IO_PERCENT`` (accepted values are 1--10)
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_PARALLEL_DESTAGE`` (default ``true``)
 
 The earlier ``DASOBJECTSTORE_ASSURANCE_*`` names remain accepted as compatibility
 fallbacks. New appliance configuration must use the ``DISK_HOUSEKEEPING``

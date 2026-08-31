@@ -12,6 +12,9 @@ pub const DEFAULT_ASSURANCE_IMBALANCE_BASIS_POINTS: u16 = 500;
 pub const DEFAULT_ASSURANCE_MAX_OBJECT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 pub const DEFAULT_ASSURANCE_IDLE_IO_BYTES_PER_SECOND: u64 = 1024 * 1024;
 pub const DEFAULT_DISK_HOUSEKEEPING_IO_PERCENT: u8 = 10;
+/// Durable destage must not indefinitely defer a bounded rebalance of a fuller
+/// HDD member; both paths retain independent capacity claims.
+pub const DEFAULT_DISK_HOUSEKEEPING_PARALLEL_DESTAGE: bool = true;
 /// The conservative appliance commissioning baseline. The effective
 /// housekeeping limit is always a percentage of this value and deployments
 /// should replace it with their measured available IO throughput.
@@ -28,6 +31,7 @@ pub struct StorageAssuranceConfig {
     pub idle_io_bytes_per_second: u64,
     pub available_io_bytes_per_second: u64,
     pub io_percent: u8,
+    pub parallel_destage: bool,
     pub live_sqlite_path: PathBuf,
     pub hdd_root: PathBuf,
     pub latest_report_path: PathBuf,
@@ -96,6 +100,11 @@ impl StorageAssuranceConfig {
                     "disk housekeeping IO percentage exceeds u8".to_string(),
                 )
             })?,
+            parallel_destage: env_bool_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_PARALLEL_DESTAGE",
+                "DASOBJECTSTORE_ASSURANCE_PARALLEL_DESTAGE",
+                DEFAULT_DISK_HOUSEKEEPING_PARALLEL_DESTAGE,
+            )?,
             live_sqlite_path: ssd_root.join(".dasobjectstore/live.sqlite"),
             hdd_root,
             latest_report_path: state_dir.join("disk_housekeeping/latest.json"),

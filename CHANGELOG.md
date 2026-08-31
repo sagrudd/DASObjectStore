@@ -1,9 +1,16 @@
 # Changelog
 
+## 0.176.5 - 2026-08-31
+
+- Allow bounded HDD balancing to run alongside durable SSD-to-HDD destage.
+  Rebalancing continues to take maintenance action precedence, while foreground
+  ingest and garbage collection preempt it. The housekeeping worker remains
+  capped at ten percent of the configured available I/O capacity.
+
 ## 0.176.4 - 2026-08-31
 
 - Make the standalone ``dasobjectstore-remote`` DEB and RPM builders honour
-  ``CARGO_TARGET_DIR``.  Formal builds can now isolate Cargo outputs outside
+  ``CARGO_TARGET_DIR``. Formal builds can now isolate Cargo outputs outside
   the source checkout while packaging the binary that Cargo actually built.
 
 ## 0.176.3 - 2026-08-31
