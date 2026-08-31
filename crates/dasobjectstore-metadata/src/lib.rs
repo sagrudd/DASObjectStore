@@ -83,7 +83,10 @@ pub use destage::{
 pub use destage_control::{
     pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
 };
-pub use destage_control::{retry_needs_review_destage_for_store, DestageRetryReport};
+pub use destage_control::{
+    retry_needs_review_destage_for_store, retry_one_capacity_blocked_destage, DestageRetryReport,
+    CAPACITY_BLOCKED_DESTAGE_ERROR_FRAGMENT,
+};
 pub use direct_import::{
     import_reproducible_object_direct_to_hdd, DirectHddImportError, DirectHddImportReport,
     DirectHddImportRequest,

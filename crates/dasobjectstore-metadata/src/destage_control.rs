@@ -7,9 +7,16 @@ use crate::scheduler::{
 };
 use crate::schema::LIVE_SCHEMA_SQL;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+
+/// The OS error fragment used to identify terminal jobs that became
+/// `needs_review` solely because no HDD could accept the copy at that time.
+///
+/// This is intentionally narrower than a general destage failure: checksum,
+/// path, policy, cancellation, and metadata failures require operator review.
+pub const CAPACITY_BLOCKED_DESTAGE_ERROR_FRAGMENT: &str = "No space left on device";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DestageRetryReport {
@@ -165,6 +172,56 @@ pub fn retry_needs_review_destage_for_store(
         matched_object_ids,
         dry_run,
     })
+}
+
+/// Requeue one terminal destage job that failed solely because the enclosure
+/// had no HDD capacity at the time.
+///
+/// This is daemon-owned housekeeping rather than a user mutation. It resets
+/// only an un-cancelled `needs_review` row whose recorded failure has the
+/// narrow capacity-exhaustion signature. The durable destage worker still
+/// verifies the SSD payload, selects a currently eligible HDD, checksums the
+/// copied bytes, and deletes the SSD source only after settlement succeeds.
+pub fn retry_one_capacity_blocked_destage(
+    path: impl AsRef<Path>,
+    updated_at_utc: &str,
+) -> Result<Option<ObjectId>, DestageMetadataError> {
+    let mut connection = Connection::open(path)?;
+    connection.execute_batch(LIVE_SCHEMA_SQL)?;
+    let tx = connection.transaction()?;
+    let object_id = tx
+        .query_row(
+            "SELECT object_id FROM destage_queue
+             WHERE state='needs_review' AND cancellation_requested=0
+               AND last_error LIKE '%' || ?1 || '%'
+             ORDER BY created_at_utc,destage_job_id LIMIT 1",
+            [CAPACITY_BLOCKED_DESTAGE_ERROR_FRAGMENT],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(object_id) = object_id else {
+        tx.commit()?;
+        return Ok(None);
+    };
+    let object_id =
+        ObjectId::new(object_id).map_err(|_| DestageMetadataError::InvalidIdentifier)?;
+    let changed = tx.execute(
+        "UPDATE destage_queue SET state='queued_for_hdd',next_retry_at_utc=NULL,
+             lease_owner=NULL,lease_expires_at_utc=NULL,attempt_count=0,
+             updated_at_utc=?1 WHERE object_id=?2 AND state='needs_review'
+               AND cancellation_requested=0 AND last_error LIKE '%' || ?3 || '%'",
+        params![
+            updated_at_utc,
+            object_id.as_str(),
+            CAPACITY_BLOCKED_DESTAGE_ERROR_FRAGMENT
+        ],
+    )?;
+    if changed != 1 {
+        return Err(DestageMetadataError::InvalidTransition);
+    }
+    retry_destage_scheduler_job_tx(&tx, &object_id, updated_at_utc)?;
+    tx.commit()?;
+    Ok(Some(object_id))
 }
 
 fn control(

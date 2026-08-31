@@ -10,10 +10,11 @@ use dasobjectstore_metadata::{
     mark_ssd_evicted, measure_ssd_capacity, promote_hdd_settlement, read_disk_capacity_claims,
     read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
     read_ssd_placement, refresh_disk_capacity_claims, renew_destage_and_scheduler_leases,
-    retry_scheduler_job, settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress,
-    DestageMetadataError, DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError,
-    DiskCapacityClaimKind, DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError,
-    SchedulerClaimRequest, SchedulerError, StagedObjectPut, VerifiedHddPlacement,
+    retry_one_capacity_blocked_destage, retry_scheduler_job,
+    settle_staged_object_to_hdd_preserving_ssd_with_controlled_progress, DestageMetadataError,
+    DestageQueueRecord, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+    DiskCapacityClaimRequest, HddSettlementPromotionRequest, ObjectPutError, SchedulerClaimRequest,
+    SchedulerError, StagedObjectPut, VerifiedHddPlacement,
 };
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
@@ -88,6 +89,10 @@ pub fn run_one_durable_destage(
     let lease_expires_at_utc = add_seconds_to_utc_timestamp(now_utc, DEFAULT_DESTAGE_LEASE_SECONDS)
         .ok_or_else(|| DurableDestageWorkerError::InvalidTimestamp(now_utc.to_string()))?;
     let _ = previously_served_store;
+    // A past capacity shortage is transient appliance state, not a human
+    // approval boundary. Recover one such job at a time so daemon-owned
+    // durable destage resumes verified SSD settlement without a logged-in user.
+    retry_one_capacity_blocked_destage(&config.live_sqlite_path, now_utc)?;
     backfill_destage_scheduler_jobs(&config.live_sqlite_path, now_utc)?;
     let Some(scheduled) = claim_next_scheduler_job(&SchedulerClaimRequest {
         live_sqlite_path: config.live_sqlite_path.clone(),
@@ -1093,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    fn verified_hdd_settlement_retargets_stale_claim_and_evicts_ssd_payload() {
+    fn autonomous_capacity_recovery_retries_settlement_and_evicts_ssd_payload() {
         let root = temporary_root("evict-on-hdd-settlement");
         let ssd_root = root.join("ssd");
         let hdd_root = root.join("hdd");
@@ -1171,6 +1176,15 @@ mod tests {
                 [&digest],
             )
             .expect("destage queue");
+        connection
+            .execute(
+                "UPDATE destage_queue
+                 SET state='needs_review',attempt_count=max_attempts,
+                     last_error='HDD copy IO failed: No space left on device (os error 28)'
+                 WHERE object_id='object-a'",
+                [],
+            )
+            .expect("capacity review state");
         connection
             .execute(
                 "INSERT INTO disk_capacity_claims(
