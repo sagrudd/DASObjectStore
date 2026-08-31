@@ -679,9 +679,18 @@ fn deb_build_installs_daemon_boundary_assets() {
         BUILD_DEB,
         "dpkg-deb is required to build the DASObjectStore Debian package.",
     );
-    assert_contains(BUILD_DEB, "target/release/dasobjectstored");
-    assert_contains(BUILD_DEB, "target/release/dasobjectstore-s3-gateway");
-    assert_contains(BUILD_DEB, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_DEB, "packaging/cargo-target-dir.sh");
+    assert_contains(BUILD_DEB, "das_cargo_target_dir");
+    assert_contains(BUILD_DEB, "\"$cargo_target_dir/release/dasobjectstored\"");
+    assert_contains(
+        BUILD_DEB,
+        "\"$cargo_target_dir/release/dasobjectstore-s3-gateway\"",
+    );
+    assert_contains(
+        BUILD_DEB,
+        "\"$cargo_target_dir/release/dasobjectstore-remote\"",
+    );
+    assert_not_contains(BUILD_DEB, "\"$repo_root/target/release/dasobjectstored\"");
     assert_contains(BUILD_DEB, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_DEB, "usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_DEB, "lib/systemd/system/dasobjectstored.service");
@@ -712,9 +721,18 @@ fn rpm_build_installs_daemon_boundary_assets() {
         "cargo build --release --no-default-features -p dasobjectstore-daemon",
     );
     assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
-    assert_contains(BUILD_RPM, "target/release/dasobjectstored");
-    assert_contains(BUILD_RPM, "target/release/dasobjectstore-s3-gateway");
-    assert_contains(BUILD_RPM, "target/release/dasobjectstore-remote");
+    assert_contains(BUILD_RPM, "packaging/cargo-target-dir.sh");
+    assert_contains(BUILD_RPM, "das_cargo_target_dir");
+    assert_contains(BUILD_RPM, "\"$cargo_target_dir/release/dasobjectstored\"");
+    assert_contains(
+        BUILD_RPM,
+        "\"$cargo_target_dir/release/dasobjectstore-s3-gateway\"",
+    );
+    assert_contains(
+        BUILD_RPM,
+        "\"$cargo_target_dir/release/dasobjectstore-remote\"",
+    );
+    assert_not_contains(BUILD_RPM, "\"$repo_root/target/release/dasobjectstored\"");
     assert_contains(BUILD_RPM, "packaging/web/prepare-web-dist.sh");
     assert_contains(BUILD_RPM, "/usr/bin/dasobjectstore-remote");
     assert_contains(BUILD_RPM, "usr/lib/systemd/system/dasobjectstored.service");
