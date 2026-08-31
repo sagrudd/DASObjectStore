@@ -94,10 +94,10 @@ pub use disk::{
 pub use disk_capacity::{
     acquire_disk_capacity_claims, read_disk_capacity_claims, read_outstanding_disk_capacity,
     read_outstanding_disk_capacity_excluding, read_settlement_eligible_disk_ids,
-    reconcile_abandoned_ingest_disk_capacity_claims_at_startup, release_disk_capacity_claims,
-    update_disk_capacity_claim_consumption, AbandonedIngestCapacityClaimRecoveryReport,
-    DiskCapacityClaim, DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
-    DiskCapacityClaimRequest,
+    reconcile_abandoned_ingest_disk_capacity_claims_at_startup, refresh_disk_capacity_claims,
+    release_disk_capacity_claims, update_disk_capacity_claim_consumption,
+    AbandonedIngestCapacityClaimRecoveryReport, DiskCapacityClaim, DiskCapacityClaimAllocation,
+    DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
 };
 pub use drain::{
     read_disk_drain_plan, read_disk_replacement_plan, DiskDrainAction, DiskDrainError,

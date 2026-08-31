@@ -181,6 +181,21 @@ pub fn acquire_disk_capacity_claims(
     Ok(claims)
 }
 
+/// Refresh one owner's active capacity claims against fresh filesystem
+/// measurements. This atomically retargets unconsumed claims when placement
+/// selects different disks, so an ingest-time reservation cannot pin a later
+/// destage onto a disk that has since filled.
+pub fn refresh_disk_capacity_claims(
+    request: &DiskCapacityClaimRequest,
+) -> Result<Vec<DiskCapacityClaim>, DiskCapacityClaimError> {
+    validate_request(request)?;
+    let mut connection = open(&request.live_sqlite_path)?;
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let claims = refresh_disk_capacity_claims_in_transaction(&transaction, request)?;
+    transaction.commit()?;
+    Ok(claims)
+}
+
 pub fn read_disk_capacity_claims(
     live_sqlite_path: impl AsRef<Path>,
     kind: DiskCapacityClaimKind,
@@ -305,6 +320,140 @@ pub(crate) fn acquire_disk_capacity_claims_in_transaction(
     }
     let claims = read_owner_claims(transaction, request.kind, &request.owner_id)?;
     Ok(claims)
+}
+
+fn refresh_disk_capacity_claims_in_transaction(
+    transaction: &Transaction<'_>,
+    request: &DiskCapacityClaimRequest,
+) -> Result<Vec<DiskCapacityClaim>, DiskCapacityClaimError> {
+    validate_request(request)?;
+    let existing = read_owner_claims(transaction, request.kind, &request.owner_id)?;
+    let active = existing
+        .iter()
+        .filter(|claim| claim.state == "active")
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        return Err(DiskCapacityClaimError::ClaimNotFound {
+            kind: request.kind,
+            owner_id: request.owner_id.clone(),
+        });
+    }
+    if active.iter().any(|claim| claim.consumed_bytes != 0) {
+        return Err(DiskCapacityClaimError::InvalidRequest {
+            field: "allocations",
+            reason: "cannot refresh a partially consumed capacity claim".to_string(),
+        });
+    }
+    let stored_digest: String = transaction.query_row(
+        "SELECT request_digest FROM disk_capacity_claims
+         WHERE claim_kind=?1 AND owner_id=?2 AND state='active' LIMIT 1",
+        params![request.kind.as_str(), request.owner_id],
+        |row| row.get(0),
+    )?;
+    if stored_digest != request.request_digest {
+        return Err(DiskCapacityClaimError::RequestConflict {
+            kind: request.kind,
+            owner_id: request.owner_id.clone(),
+        });
+    }
+
+    for allocation in &request.allocations {
+        let state = transaction
+            .query_row(
+                "SELECT state FROM disks WHERE disk_id=?1",
+                [allocation.disk_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if !matches!(state.as_deref(), Some("Healthy" | "Watch")) {
+            return Err(DiskCapacityClaimError::IneligibleDisk {
+                disk_id: allocation.disk_id.clone(),
+                state,
+            });
+        }
+        let outstanding = outstanding_claim_bytes_excluding_owner(
+            transaction,
+            &allocation.disk_id,
+            request.kind,
+            &request.owner_id,
+        )?;
+        let available_after_claims = allocation
+            .measured_available_bytes
+            .saturating_sub(outstanding);
+        if available_after_claims < allocation.requested_bytes {
+            return Err(DiskCapacityClaimError::InsufficientCapacity {
+                disk_id: allocation.disk_id.clone(),
+                requested_bytes: allocation.requested_bytes,
+                available_after_claims_bytes: available_after_claims,
+            });
+        }
+    }
+
+    let requested_disks = request
+        .allocations
+        .iter()
+        .map(|allocation| &allocation.disk_id)
+        .collect::<BTreeSet<_>>();
+    for claim in active {
+        if !requested_disks.contains(&claim.disk_id) {
+            transaction.execute(
+                "UPDATE disk_capacity_claims
+                 SET state='released', released_at_utc=?1, updated_at_utc=?1,
+                     lease_owner=NULL, lease_expires_at_utc=NULL
+                 WHERE claim_id=?2 AND state='active' AND released_at_utc IS NULL",
+                params![request.created_at_utc, claim.claim_id],
+            )?;
+        }
+    }
+    for allocation in &request.allocations {
+        let updated = transaction.execute(
+            "UPDATE disk_capacity_claims
+             SET request_id=?1, request_digest=?2, state='active',
+                 reserved_bytes=?3, consumed_bytes=0, lease_owner=?4,
+                 lease_expires_at_utc=?5, updated_at_utc=?6, released_at_utc=NULL
+             WHERE claim_kind=?7 AND owner_id=?8 AND disk_id=?9",
+            params![
+                request.request_id,
+                request.request_digest,
+                allocation.requested_bytes,
+                request.lease_owner,
+                request.lease_expires_at_utc,
+                request.created_at_utc,
+                request.kind.as_str(),
+                request.owner_id,
+                allocation.disk_id.as_str(),
+            ],
+        )?;
+        if updated == 0 {
+            transaction.execute(
+                "INSERT INTO disk_capacity_claims (
+                    claim_id, claim_kind, owner_id, request_id, request_digest,
+                    disk_id, state, reserved_bytes, consumed_bytes, lease_owner,
+                    lease_expires_at_utc, created_at_utc, updated_at_utc,
+                    released_at_utc
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, 0, ?8, ?9,
+                           ?10, ?10, NULL)",
+                params![
+                    claim_id(request.kind, &request.owner_id, &allocation.disk_id),
+                    request.kind.as_str(),
+                    request.owner_id,
+                    request.request_id,
+                    request.request_digest,
+                    allocation.disk_id.as_str(),
+                    allocation.requested_bytes,
+                    request.lease_owner,
+                    request.lease_expires_at_utc,
+                    request.created_at_utc,
+                ],
+            )?;
+        }
+    }
+    Ok(
+        read_owner_claims(transaction, request.kind, &request.owner_id)?
+            .into_iter()
+            .filter(|claim| claim.state == "active")
+            .collect(),
+    )
 }
 
 pub fn release_disk_capacity_claims(
@@ -624,6 +773,22 @@ pub(crate) fn outstanding_claim_bytes(
     )
 }
 
+fn outstanding_claim_bytes_excluding_owner(
+    connection: &Connection,
+    disk_id: &DiskId,
+    kind: DiskCapacityClaimKind,
+    owner_id: &str,
+) -> Result<u64, rusqlite::Error> {
+    connection.query_row(
+        "SELECT COALESCE(SUM(reserved_bytes - consumed_bytes), 0)
+         FROM disk_capacity_claims
+         WHERE disk_id=?1 AND state='active' AND released_at_utc IS NULL
+           AND NOT (claim_kind=?2 AND owner_id=?3)",
+        params![disk_id.as_str(), kind.as_str(), owner_id],
+        |row| row.get(0),
+    )
+}
+
 fn open(path: &Path) -> Result<Connection, DiskCapacityClaimError> {
     let connection = Connection::open(path)?;
     connection.busy_timeout(Duration::from_secs(5))?;
@@ -742,9 +907,10 @@ mod tests {
     use super::{
         acquire_disk_capacity_claims, read_outstanding_disk_capacity,
         read_settlement_eligible_disk_ids,
-        reconcile_abandoned_ingest_disk_capacity_claims_at_startup, release_disk_capacity_claims,
-        update_disk_capacity_claim_consumption, DiskCapacityClaimAllocation,
-        DiskCapacityClaimError, DiskCapacityClaimKind, DiskCapacityClaimRequest,
+        reconcile_abandoned_ingest_disk_capacity_claims_at_startup, refresh_disk_capacity_claims,
+        release_disk_capacity_claims, update_disk_capacity_claim_consumption,
+        DiskCapacityClaimAllocation, DiskCapacityClaimError, DiskCapacityClaimKind,
+        DiskCapacityClaimRequest,
     };
     use crate::LIVE_SCHEMA_SQL;
     use dasobjectstore_core::ids::DiskId;
@@ -857,6 +1023,64 @@ mod tests {
         assert!(read_outstanding_disk_capacity(&database)
             .expect("released claims excluded")
             .is_empty());
+        cleanup(&database);
+    }
+
+    #[test]
+    fn refresh_retargets_an_unconsumed_claim_without_double_counting_capacity() {
+        let database = fixture("refresh-target");
+        let original = request(&database, DiskCapacityClaimKind::Destage, "object-a", 60);
+        acquire_disk_capacity_claims(&original).expect("original claim");
+
+        let connection = Connection::open(&database).expect("open fixture");
+        connection
+            .execute(
+                "INSERT INTO disks (
+                    disk_id, pool_id, role, state, created_at_utc, updated_at_utc
+                 ) VALUES (
+                    'disk-b', 'pool-a', 'hdd_capacity', 'Healthy',
+                    '2026-07-25T00:00:00Z', '2026-07-25T00:00:00Z'
+                 )",
+                [],
+            )
+            .expect("second disk");
+        drop(connection);
+
+        let mut refreshed = original.clone();
+        refreshed.created_at_utc = "2026-07-25T01:00:00Z".to_string();
+        refreshed.allocations[0].disk_id = DiskId::new("disk-b").expect("disk id");
+        let claims = refresh_disk_capacity_claims(&refreshed).expect("refresh claim");
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0].disk_id.as_str(), "disk-b");
+        assert_eq!(claims[0].state, "active");
+
+        let connection = Connection::open(&database).expect("open verification");
+        let states = connection
+            .prepare(
+                "SELECT disk_id,state FROM disk_capacity_claims
+                 WHERE claim_kind='destage' AND owner_id='object-a'
+                 ORDER BY disk_id",
+            )
+            .expect("states")
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .expect("query states")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect states");
+        assert_eq!(
+            states,
+            vec![
+                ("disk-a".to_string(), "released".to_string()),
+                ("disk-b".to_string(), "active".to_string()),
+            ]
+        );
+        assert_eq!(
+            read_outstanding_disk_capacity(&database)
+                .expect("outstanding claims")
+                .get(&DiskId::new("disk-b").expect("disk id")),
+            Some(&60)
+        );
         cleanup(&database);
     }
 
