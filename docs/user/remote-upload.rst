@@ -46,11 +46,13 @@ for that endpoint. The lower-level
 ``authenticate`` command is retained only to reject retired local-password
 invocations and is not an authority fallback.
 
-The client starts a loopback callback listener, opens the appliance login page
-in a browser, and waits for authenticated approval. Use ``--no-browser`` on a
-headless remote host; the command prints the browser URL and still waits for
-approval. Use ``--contract`` to inspect the easyconnect contract without
-starting a pairing.
+The client starts a loopback callback listener only when it launches the
+browser itself. Use ``--no-browser`` on a headless remote host: the command
+prints an approval URL containing only an opaque server-issued handoff and
+securely polls the appliance over its existing HTTPS connection. The separately
+opened approval browser never calls the remote host's ``127.0.0.1`` and never
+receives an exchange capability. Use ``--contract`` to inspect the easyconnect
+contract without starting a pairing.
 
 For an attended login from a headless GB10 host, keep the command running and
 open its printed URL in a separately trusted browser:

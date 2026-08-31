@@ -44,6 +44,12 @@ pub trait RemoteEasyconnectPairingStore: Send + Sync {
         now_utc: &str,
     ) -> Result<RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectPairingStoreError>;
 
+    fn status_by_browser_handoff(
+        &self,
+        browser_handoff_reference: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectPairingStoreError>;
+
     fn prepare_exchange(
         &self,
         request: &RemoteEasyconnectPairingExchange,
@@ -58,8 +64,15 @@ pub trait RemoteEasyconnectPairingStore: Send + Sync {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairingRecord {
     pub pairing_id: String,
+    /// Random, opaque, one-purpose reference permitted in a browser URL.
+    /// Empty only on expired pre-handoff records retained for client polling.
+    #[serde(default)]
+    pub browser_handoff_reference: String,
     pub client_name: String,
-    pub callback_url: String,
+    #[serde(default)]
+    pub callback_url: Option<String>,
+    #[serde(default)]
+    pub completion_mode: crate::api::RemoteEasyconnectCompletionMode,
     pub requested_object_store: Option<String>,
     pub requested_session_lifetime_seconds: Option<u64>,
     pub client_request_id: Option<String>,
@@ -73,7 +86,24 @@ impl RemoteEasyconnectPairingRecord {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectPairingStoreError> {
         require_non_blank("pairing_id", &self.pairing_id)?;
         require_non_blank("client_name", &self.client_name)?;
-        require_non_blank("callback_url", &self.callback_url)?;
+        match (self.completion_mode, self.callback_url.as_deref()) {
+            (crate::api::RemoteEasyconnectCompletionMode::Callback, Some(callback_url)) => {
+                require_non_blank("callback_url", callback_url)?;
+            }
+            (crate::api::RemoteEasyconnectCompletionMode::Callback, None) => {
+                return Err(RemoteEasyconnectPairingStoreError::InvalidRecord {
+                    pairing_id: self.pairing_id.clone(),
+                    message: "callback completion requires a callback URL".to_string(),
+                });
+            }
+            (crate::api::RemoteEasyconnectCompletionMode::Polling, None) => {}
+            (crate::api::RemoteEasyconnectCompletionMode::Polling, Some(_)) => {
+                return Err(RemoteEasyconnectPairingStoreError::InvalidRecord {
+                    pairing_id: self.pairing_id.clone(),
+                    message: "polling completion must not retain a callback URL".to_string(),
+                });
+            }
+        }
         validate_optional_non_blank(
             "requested_object_store",
             self.requested_object_store.as_deref(),
@@ -153,6 +183,40 @@ impl FileBackedRemoteEasyconnectPairingStore {
     }
 }
 
+fn pairing_status(
+    pairing: &RemoteEasyconnectPairingRecord,
+    now_utc: &str,
+) -> RemoteEasyconnectPairingStatusResponse {
+    let approval_expired = pairing
+        .approval
+        .as_ref()
+        .is_some_and(|approval| approval.approval_expires_at_utc.as_str() <= now_utc);
+    let state = if pairing.exchanged_at_utc.is_some() {
+        RemoteEasyconnectPairingState::Exchanged
+    } else if pairing.expires_at_utc.as_str() <= now_utc || approval_expired {
+        RemoteEasyconnectPairingState::Expired
+    } else if pairing.approval.is_some() {
+        RemoteEasyconnectPairingState::Approved
+    } else {
+        RemoteEasyconnectPairingState::Pending
+    };
+    RemoteEasyconnectPairingStatusResponse {
+        pairing_id: pairing.pairing_id.clone(),
+        state,
+        expires_at_utc: pairing.expires_at_utc.clone(),
+        requested_object_store: pairing.requested_object_store.clone(),
+        completion_mode: pairing.completion_mode,
+        exchange_code: if state == RemoteEasyconnectPairingState::Approved {
+            pairing
+                .approval
+                .as_ref()
+                .map(|approval| approval.exchange_code.clone())
+        } else {
+            None
+        },
+    }
+}
+
 impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
     fn create(
         &self,
@@ -226,32 +290,28 @@ impl RemoteEasyconnectPairingStore for FileBackedRemoteEasyconnectPairingStore {
                 pairing_id: pairing_id.to_string(),
             });
         };
-        let approval_expired = pairing
-            .approval
-            .as_ref()
-            .is_some_and(|approval| approval.approval_expires_at_utc.as_str() <= now_utc);
-        let state = if pairing.exchanged_at_utc.is_some() {
-            RemoteEasyconnectPairingState::Exchanged
-        } else if pairing.expires_at_utc.as_str() <= now_utc || approval_expired {
-            RemoteEasyconnectPairingState::Expired
-        } else if pairing.approval.is_some() {
-            RemoteEasyconnectPairingState::Approved
-        } else {
-            RemoteEasyconnectPairingState::Pending
-        };
-        Ok(RemoteEasyconnectPairingStatusResponse {
-            pairing_id: pairing.pairing_id.clone(),
-            state,
-            expires_at_utc: pairing.expires_at_utc.clone(),
-            exchange_code: if state == RemoteEasyconnectPairingState::Approved {
-                pairing
-                    .approval
-                    .as_ref()
-                    .map(|approval| approval.exchange_code.clone())
-            } else {
-                None
-            },
-        })
+        Ok(pairing_status(pairing, now_utc))
+    }
+
+    fn status_by_browser_handoff(
+        &self,
+        browser_handoff_reference: &str,
+        now_utc: &str,
+    ) -> Result<RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectPairingStoreError> {
+        require_non_blank("browser_handoff_reference", browser_handoff_reference)?;
+        require_non_blank("now_utc", now_utc)?;
+        let _guard = self.lock.lock().expect("pairing store lock poisoned");
+        let store = read_store(&self.path)?;
+        let pairing = store
+            .pairings
+            .iter()
+            .find(|pairing| pairing.browser_handoff_reference == browser_handoff_reference)
+            .ok_or(RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable)?;
+        let status = pairing_status(pairing, now_utc);
+        if status.state != RemoteEasyconnectPairingState::Pending {
+            return Err(RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable);
+        }
+        Ok(status)
     }
 
     fn prepare_exchange(
@@ -343,6 +403,10 @@ pub enum RemoteEasyconnectPairingStoreError {
         pairing_id: String,
         message: String,
     },
+    InvalidRecord {
+        pairing_id: String,
+        message: String,
+    },
     InvalidApprovalContext {
         pairing_id: String,
         message: String,
@@ -360,6 +424,9 @@ pub enum RemoteEasyconnectPairingStoreError {
     PairingNotFound {
         pairing_id: String,
     },
+    /// Deliberately contains no handoff reference: browser-visible failures
+    /// must not disclose opaque URL capabilities.
+    BrowserHandoffUnavailable,
     PairingNotApproved {
         pairing_id: String,
     },
@@ -409,6 +476,10 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
                 formatter,
                 "pairing {pairing_id} has invalid object store grant: {message}"
             ),
+            Self::InvalidRecord {
+                pairing_id,
+                message,
+            } => write!(formatter, "pairing {pairing_id} is invalid: {message}"),
             Self::InvalidApprovalContext {
                 pairing_id,
                 message,
@@ -435,6 +506,9 @@ impl std::fmt::Display for RemoteEasyconnectPairingStoreError {
                     formatter,
                     "remote easyconnect pairing {pairing_id} was not found"
                 )
+            }
+            Self::BrowserHandoffUnavailable => {
+                formatter.write_str("remote easyconnect browser handoff is unavailable")
             }
             Self::PairingNotApproved { pairing_id } => {
                 write!(
@@ -751,10 +825,13 @@ mod tests {
         store
             .create(RemoteEasyconnectPairingRecord {
                 pairing_id: "pairing-1".to_string(),
+                browser_handoff_reference: "handoff-test-1".to_string(),
                 client_name: "remote CLI".to_string(),
-                callback_url:
+                callback_url: Some(
                     "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
                         .to_string(),
+                ),
+                completion_mode: crate::api::RemoteEasyconnectCompletionMode::Callback,
                 requested_object_store: Some("requested-store".to_string()),
                 requested_session_lifetime_seconds: None,
                 client_request_id: Some("request-1".to_string()),
@@ -970,10 +1047,13 @@ mod tests {
     fn pairing(pairing_id: &str) -> RemoteEasyconnectPairingRecord {
         RemoteEasyconnectPairingRecord {
             pairing_id: pairing_id.to_string(),
+            browser_handoff_reference: format!("handoff-{pairing_id}"),
             client_name: "remote CLI".to_string(),
-            callback_url:
+            callback_url: Some(
                 "http://127.0.0.1:49152/products/dasobjectstore/remote/easyconnect/callback"
                     .to_string(),
+            ),
+            completion_mode: crate::api::RemoteEasyconnectCompletionMode::Callback,
             requested_object_store: Some("requested-store".to_string()),
             requested_session_lifetime_seconds: None,
             client_request_id: Some(format!("request-{pairing_id}")),
@@ -1009,5 +1089,43 @@ mod tests {
             approval_expires_at_utc: "2099-07-28T10:03:00Z".to_string(),
             exchange_code: "exchange-secret".to_string(),
         }
+    }
+
+    #[test]
+    fn browser_handoff_is_opaque_pending_and_cannot_be_replayed() {
+        let root = root();
+        let store = FileBackedRemoteEasyconnectPairingStore::new(root.join("pairings.json"));
+        store
+            .create(pairing("handoff-pending"))
+            .expect("pairing stored");
+
+        let status = store
+            .status_by_browser_handoff("handoff-handoff-pending", "2099-07-28T10:01:00Z")
+            .expect("opaque handoff resolves while pending");
+        assert_eq!(status.pairing_id, "handoff-pending");
+        assert_eq!(
+            status.requested_object_store.as_deref(),
+            Some("requested-store")
+        );
+        assert!(matches!(
+            store.status_by_browser_handoff("handoff-tampered", "2099-07-28T10:01:00Z"),
+            Err(RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable)
+        ));
+        store
+            .approve(
+                approval("handoff-pending", "requested-store"),
+                "2099-07-28T10:02:00Z",
+            )
+            .expect("approval stored");
+        assert!(matches!(
+            store.status_by_browser_handoff("handoff-handoff-pending", "2099-07-28T10:02:00Z"),
+            Err(RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable)
+        ));
+        assert!(matches!(
+            store.status_by_browser_handoff("handoff-handoff-pending", "2099-07-28T10:06:00Z"),
+            Err(RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable)
+        ));
+
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }

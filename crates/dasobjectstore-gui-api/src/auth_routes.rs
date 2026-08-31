@@ -110,11 +110,11 @@ use dasobjectstore_daemon::{
     ProfileS3VerifyRequest as DaemonProfileS3VerifyRequest,
     ProfileS3VerifyResponse as DaemonProfileS3VerifyResponse,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
-    RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryResponse,
-    RemoteEasyconnectExchangeConnectionResponse, RemoteEasyconnectExchangePairingRequest,
-    RemoteEasyconnectS3ConnectionDescriptor, RemoteEasyconnectSessionPolicy,
-    UnixSocketDaemonTransport,
+    RemoteEasyconnectAuthProvider, RemoteEasyconnectCompletionMode,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangeConnectionResponse,
+    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectS3ConnectionDescriptor,
+    RemoteEasyconnectSessionPolicy, UnixSocketDaemonTransport,
     UpdateObjectStoreIngestPolicyRequest as DaemonUpdateObjectStoreIngestPolicyRequest,
     UpdateObjectStoreIngestPolicyResponse as DaemonUpdateObjectStoreIngestPolicyResponse,
     UpsertEndpointInventoryRequest as DaemonUpsertEndpointInventoryRequest,
@@ -147,9 +147,7 @@ pub(super) struct ProfileS3HeadQuery {
 
 #[derive(Clone, Debug, Deserialize)]
 struct EasyconnectBrowserApprovalQuery {
-    pairing_id: String,
-    object_store: String,
-    expires_at_utc: String,
+    handoff: String,
 }
 
 /// The bounded remote pairing target approved by a browser ceremony.
@@ -159,8 +157,9 @@ struct EasyconnectBrowserApprovalQuery {
 /// pairing and ObjectStore rather than to a browser session alone.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EasyconnectBrowserApprovalIntent {
-    pub pairing_id: String,
-    pub object_store: String,
+    /// Opaque server-issued browser handoff. The daemon derives the pairing,
+    /// ObjectStore scope, expiry, and completion transport from durable state.
+    pub handoff: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

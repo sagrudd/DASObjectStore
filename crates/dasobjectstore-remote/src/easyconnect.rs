@@ -90,6 +90,19 @@ pub struct RemoteEasyconnectPairingOptions {
     pub tls_trust: RemoteEasyconnectTlsTrust,
 }
 
+impl RemoteEasyconnectPairingOptions {
+    /// A browser launched by this process may deliver to a local loopback
+    /// listener. A URL opened on a separate operator machine must instead use
+    /// the appliance's authenticated pairing poll endpoint.
+    pub fn completion_mode(&self) -> dasobjectstore_daemon::RemoteEasyconnectCompletionMode {
+        if self.open_browser {
+            dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Callback
+        } else {
+            dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Polling
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RemoteEasyconnectTlsTrust {
     /// Validate through the operating-system trust store and exact URL identity.
@@ -614,6 +627,7 @@ mod tests {
         DEFAULT_REMOTE_SESSION_LIFETIME_SECS, DEFAULT_REMOTE_SESSION_RENEWAL_LEAD_SECS,
         EASYCONNECT_CALLBACK_PATH,
     };
+    use dasobjectstore_daemon::RemoteEasyconnectCompletionMode;
     use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
@@ -917,6 +931,25 @@ mod tests {
             .local_callback_bind
             .starts_with("127.0.0.1:"));
         assert_ne!(outcome.contract.local_callback_bind, "127.0.0.1:0");
+    }
+
+    #[test]
+    fn no_browser_selects_server_polling_without_a_loopback_callback() {
+        let options = RemoteEasyconnectPairingOptions {
+            host_or_ip: "192.168.1.192".to_string(),
+            https_port: DEFAULT_APPLIANCE_HTTPS_PORT,
+            requested_object_store: Some("alleleanchor_mvp".to_string()),
+            client_request_id: None,
+            callback_port: None,
+            timeout: Duration::from_secs(5),
+            open_browser: false,
+            tls_trust: RemoteEasyconnectTlsTrust::SystemPki,
+        };
+
+        assert_eq!(
+            options.completion_mode(),
+            RemoteEasyconnectCompletionMode::Polling
+        );
     }
 
     struct CallbackLauncher;

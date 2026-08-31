@@ -27,21 +27,30 @@ pub fn run_complete_easyconnect_pairing_with_ready<F>(
 where
     F: FnOnce(&RemoteEasyconnectContract, &str) -> Result<(), RemoteEasyconnectPairingError>,
 {
-    let bind_address = options
-        .callback_port
-        .map(|port| format!("127.0.0.1:{port}"))
-        .unwrap_or_else(|| "127.0.0.1:0".to_string());
-    let listener = TcpListener::bind(&bind_address).map_err(|source| {
-        RemoteEasyconnectPairingError::CallbackBindFailed {
-            address: bind_address,
-            source,
-        }
-    })?;
-    let callback_port = listener.local_addr()?.port();
+    let completion_mode = options.completion_mode();
+    let listener =
+        if completion_mode == dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Callback {
+            let bind_address = options
+                .callback_port
+                .map(|port| format!("127.0.0.1:{port}"))
+                .unwrap_or_else(|| "127.0.0.1:0".to_string());
+            Some(TcpListener::bind(&bind_address).map_err(|source| {
+                RemoteEasyconnectPairingError::CallbackBindFailed {
+                    address: bind_address,
+                    source,
+                }
+            })?)
+        } else {
+            None
+        };
+    let callback_port = listener
+        .as_ref()
+        .map(|listener| listener.local_addr().map(|address| address.port()))
+        .transpose()?;
     let contract = define_easyconnect_contract(RemoteEasyconnectContractRequest {
         host_or_ip: options.host_or_ip,
         https_port: options.https_port,
-        callback_port: Some(callback_port),
+        callback_port,
     })?;
     let requested_object_store = options.requested_object_store.clone();
     let transport = https_client(&contract.host_or_ip, options.https_port, &options.tls_trust)?;
@@ -73,7 +82,10 @@ where
         )?,
         &RemoteEasyconnectCreatePairingRequest {
             client_name: "dasobjectstore-remote".to_string(),
-            callback_url: contract.local_callback_url.clone(),
+            callback_url: (completion_mode
+                == dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Callback)
+                .then(|| contract.local_callback_url.clone()),
+            completion_mode,
             requested_object_store,
             requested_session_lifetime_seconds: Some(
                 discovery.session_policy.default_lifetime_seconds,
@@ -86,7 +98,14 @@ where
         &pairing.browser_login_url,
         "browser_login_url",
     )?;
-    if pairing.callback_url != contract.local_callback_url {
+    if pairing.completion_mode != completion_mode {
+        return Err(RemoteEasyconnectPairingError::Protocol(
+            "appliance did not preserve the requested pairing completion mode".to_string(),
+        ));
+    }
+    if completion_mode == dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Callback
+        && pairing.callback_url.as_deref() != Some(contract.local_callback_url.as_str())
+    {
         return Err(RemoteEasyconnectPairingError::Protocol(
             "appliance changed the exact loopback callback URL".to_string(),
         ));
@@ -95,18 +114,36 @@ where
     if options.open_browser {
         launcher.open(&pairing.browser_login_url)?;
     }
-    let callback = wait_for_pairing_callback_or_poll(
-        &listener,
-        &transport.client,
-        &transport_url(
-            &contract.appliance_base_url,
-            &transport.base_url,
-            &pairing.polling_url,
-            "polling_url",
-        )?,
-        &pairing.pairing_id,
-        options.timeout,
+    let polling_url = transport_url(
+        &contract.appliance_base_url,
+        &transport.base_url,
+        &pairing.polling_url,
+        "polling_url",
     )?;
+    let callback = match (completion_mode, listener.as_ref()) {
+        (dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Callback, Some(listener)) => {
+            wait_for_pairing_callback_or_poll(
+                listener,
+                &transport.client,
+                &polling_url,
+                &pairing.pairing_id,
+                options.timeout,
+            )?
+        }
+        (dasobjectstore_daemon::RemoteEasyconnectCompletionMode::Polling, None) => {
+            wait_for_pairing_poll(
+                &transport.client,
+                &polling_url,
+                &pairing.pairing_id,
+                options.timeout,
+            )?
+        }
+        _ => {
+            return Err(RemoteEasyconnectPairingError::Protocol(
+                "pairing completion setup was internally inconsistent".to_string(),
+            ));
+        }
+    };
     if callback.pairing_id != pairing.pairing_id {
         return Err(RemoteEasyconnectPairingError::Protocol(
             "loopback callback pairing ID did not match the created pairing".to_string(),
@@ -173,50 +210,59 @@ fn wait_for_pairing_callback_or_poll(
         let _ = callback_sender.send(result);
     });
     std::thread::spawn(move || {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            match get_json::<RemoteEasyconnectPairingStatusResponse>(&polling_client, &polling_url)
-            {
-                Ok(status)
-                    if status.pairing_id == polling_pairing_id
-                        && status.state == RemoteEasyconnectPairingState::Approved =>
-                {
-                    let result = status
-                        .exchange_code
-                        .filter(|code| !code.is_empty())
-                        .map(|exchange_code| RemoteEasyconnectPairingResult {
-                            pairing_id: polling_pairing_id.clone(),
-                            exchange_code,
-                        })
-                        .ok_or_else(|| {
-                            RemoteEasyconnectPairingError::Protocol(
-                                "approved polling response omitted the exchange capability"
-                                    .to_string(),
-                            )
-                        });
-                    let _ = sender.send(result);
-                    return;
-                }
-                Ok(status)
-                    if matches!(
-                        status.state,
-                        RemoteEasyconnectPairingState::Expired
-                            | RemoteEasyconnectPairingState::Exchanged
-                    ) =>
-                {
-                    let _ = sender.send(Err(RemoteEasyconnectPairingError::Protocol(
-                        "pairing became unusable before exchange".to_string(),
-                    )));
-                    return;
-                }
-                Ok(_) | Err(_) => std::thread::sleep(Duration::from_millis(250)),
-            }
-        }
-        let _ = sender.send(Err(RemoteEasyconnectPairingError::PairingTimedOut));
+        let _ = sender.send(wait_for_pairing_poll(
+            &polling_client,
+            &polling_url,
+            &polling_pairing_id,
+            timeout,
+        ));
     });
     receiver
         .recv_timeout(timeout + Duration::from_secs(1))
         .map_err(|_| RemoteEasyconnectPairingError::PairingTimedOut)?
+}
+
+fn wait_for_pairing_poll(
+    client: &Client,
+    polling_url: &str,
+    pairing_id: &str,
+    timeout: Duration,
+) -> Result<RemoteEasyconnectPairingResult, RemoteEasyconnectPairingError> {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        match get_json::<RemoteEasyconnectPairingStatusResponse>(client, polling_url) {
+            Ok(status)
+                if status.pairing_id == pairing_id
+                    && status.state == RemoteEasyconnectPairingState::Approved =>
+            {
+                return status
+                    .exchange_code
+                    .filter(|code| !code.is_empty())
+                    .map(|exchange_code| RemoteEasyconnectPairingResult {
+                        pairing_id: pairing_id.to_string(),
+                        exchange_code,
+                    })
+                    .ok_or_else(|| {
+                        RemoteEasyconnectPairingError::Protocol(
+                            "approved polling response omitted the exchange capability".to_string(),
+                        )
+                    });
+            }
+            Ok(status)
+                if matches!(
+                    status.state,
+                    RemoteEasyconnectPairingState::Expired
+                        | RemoteEasyconnectPairingState::Exchanged
+                ) =>
+            {
+                return Err(RemoteEasyconnectPairingError::Protocol(
+                    "pairing became unusable before exchange".to_string(),
+                ));
+            }
+            Ok(_) | Err(_) => std::thread::sleep(Duration::from_millis(250)),
+        }
+    }
+    Err(RemoteEasyconnectPairingError::PairingTimedOut)
 }
 
 pub(super) fn validate_requested_store(
@@ -500,9 +546,11 @@ pub(super) fn transport_url(
 
 #[cfg(test)]
 mod tests {
-    use super::{https_client, RemoteEasyconnectTlsTrust};
+    use super::{https_client, wait_for_pairing_poll, RemoteEasyconnectTlsTrust};
     use rustls::pki_types::PrivatePkcs8KeyDer;
+    use std::io::{Read, Write};
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn integrated_system_pki_transport_requires_no_enrollment_record() {
@@ -555,5 +603,37 @@ mod tests {
             .expect_err("untrusted certificate must fail closed");
         assert!(error.is_connect() || error.is_request());
         server_thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn headless_pairing_completion_uses_the_appliance_poll_endpoint() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("poll test listener");
+        let address = listener.local_addr().expect("poll test address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("poll request");
+            let mut request = [0_u8; 2_048];
+            let received = stream.read(&mut request).expect("read poll request");
+            let request = String::from_utf8_lossy(&request[..received]);
+            assert!(request.starts_with("GET /pairings/pairing-dgx HTTP/1.1"));
+            let body = r#"{"pairing_id":"pairing-dgx","state":"approved","expires_at_utc":"2099-08-31T15:10:12Z","requested_object_store":"alleleanchor_mvp","completion_mode":"polling","exchange_code":"capability"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .expect("write poll response");
+        });
+
+        let result = wait_for_pairing_poll(
+            &reqwest::blocking::Client::new(),
+            &format!("http://{address}/pairings/pairing-dgx"),
+            "pairing-dgx",
+            Duration::from_secs(2),
+        )
+        .expect("poll completion");
+
+        assert_eq!(result.pairing_id, "pairing-dgx");
+        assert_eq!(result.exchange_code, "capability");
+        server.join().expect("poll server");
     }
 }

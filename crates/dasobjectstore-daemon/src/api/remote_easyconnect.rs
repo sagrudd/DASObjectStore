@@ -156,10 +156,29 @@ pub enum RemoteEasyconnectAuthProvider {
     Mneion,
 }
 
+/// How the remote client receives its one-time pairing completion.
+///
+/// `Polling` is required when the approval browser is not running on the
+/// remote client host. It keeps the one-time exchange capability inside the
+/// appliance-to-client HTTPS polling boundary; no browser loopback request is
+/// made.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteEasyconnectCompletionMode {
+    #[default]
+    Callback,
+    Polling,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectCreatePairingRequest {
     pub client_name: String,
-    pub callback_url: String,
+    /// Present only for a browser and remote client running on the same host.
+    #[serde(default)]
+    pub callback_url: Option<String>,
+    /// Defaults to callback mode so older clients remain compatible.
+    #[serde(default)]
+    pub completion_mode: RemoteEasyconnectCompletionMode,
     pub requested_object_store: Option<String>,
     pub requested_session_lifetime_seconds: Option<u64>,
     pub client_request_id: Option<String>,
@@ -168,7 +187,18 @@ pub struct RemoteEasyconnectCreatePairingRequest {
 impl RemoteEasyconnectCreatePairingRequest {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
         require_non_blank("client_name", &self.client_name)?;
-        require_http_url("callback_url", &self.callback_url)?;
+        match (self.completion_mode, self.callback_url.as_deref()) {
+            (RemoteEasyconnectCompletionMode::Callback, Some(callback_url)) => {
+                require_http_url("callback_url", callback_url)?;
+            }
+            (RemoteEasyconnectCompletionMode::Callback, None) => {
+                return Err(RemoteEasyconnectValidationError::MissingCallbackUrl);
+            }
+            (RemoteEasyconnectCompletionMode::Polling, None) => {}
+            (RemoteEasyconnectCompletionMode::Polling, Some(_)) => {
+                return Err(RemoteEasyconnectValidationError::UnexpectedCallbackUrl);
+            }
+        }
         validate_optional_non_blank(
             "requested_object_store",
             self.requested_object_store.as_deref(),
@@ -183,7 +213,10 @@ impl RemoteEasyconnectCreatePairingRequest {
 pub struct RemoteEasyconnectCreatePairingResponse {
     pub pairing_id: String,
     pub browser_login_url: String,
-    pub callback_url: String,
+    #[serde(default)]
+    pub callback_url: Option<String>,
+    #[serde(default)]
+    pub completion_mode: RemoteEasyconnectCompletionMode,
     pub expires_at_utc: String,
     pub polling_url: String,
 }
@@ -742,6 +775,9 @@ pub fn remote_easyconnect_object_store_grants_for_actor(
 pub enum RemoteEasyconnectValidationError {
     BlankField { field: &'static str },
     InvalidUrl { field: &'static str, value: String },
+    MissingCallbackUrl,
+    UnexpectedCallbackUrl,
+    InvalidPairingStatusReference,
     InvalidLoopbackUrl { field: &'static str, value: String },
     InvalidRequestedLifetime { seconds: u64 },
     EmptyObjectStoreGrants,
@@ -784,6 +820,15 @@ impl std::fmt::Display for RemoteEasyconnectValidationError {
                     "{field} must be an http or https URL, got {value}"
                 )
             }
+            Self::MissingCallbackUrl => {
+                formatter.write_str("callback completion requires an exact loopback callback URL")
+            }
+            Self::UnexpectedCallbackUrl => formatter.write_str(
+                "polling completion must not supply a browser callback URL",
+            ),
+            Self::InvalidPairingStatusReference => formatter.write_str(
+                "pairing status requires exactly one non-empty pairing or browser-handoff reference",
+            ),
             Self::InvalidLoopbackUrl { field, value } => write!(
                 formatter,
                 "{field} must be a loopback http URL for the paired local agent, got {value}"
@@ -938,19 +983,19 @@ mod tests {
         remote_easyconnect_object_store_grants_for_actor,
         remote_easyconnect_renew_after_offset_seconds,
         resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
-        RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
-        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
-        RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials,
-        RemoteEasyconnectSessionPolicy, RemoteEasyconnectSessionRenewal,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        RemoteEasyconnectUploadHandoffMode, RemoteEasyconnectUploadHandoffRequest,
-        RemoteEasyconnectUploadHandoffResponse, RemoteEasyconnectUploadHandoffState,
-        RemoteEasyconnectUploadSelectionEntry, RemoteEasyconnectValidationError,
-        REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS, REMOTE_EASYCONNECT_PAIRINGS_ROUTE,
-        REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE, REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE,
-        REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
+        RemoteEasyconnectCompletionMode, RemoteEasyconnectCreatePairingRequest,
+        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreAccessPolicy,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
+        RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectSession,
+        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
+        RemoteEasyconnectSessionRenewal, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, RemoteEasyconnectUploadHandoffMode,
+        RemoteEasyconnectUploadHandoffRequest, RemoteEasyconnectUploadHandoffResponse,
+        RemoteEasyconnectUploadHandoffState, RemoteEasyconnectUploadSelectionEntry,
+        RemoteEasyconnectValidationError, REMOTE_EASYCONNECT_DEFAULT_SESSION_LIFETIME_SECONDS,
+        REMOTE_EASYCONNECT_PAIRINGS_ROUTE, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
+        REMOTE_EASYCONNECT_SESSION_RENEW_ROUTE_TEMPLATE, REMOTE_EASYCONNECT_SESSION_ROUTE_TEMPLATE,
     };
     use crate::auth::DaemonLocalActor;
     use dasobjectstore_core::remote_upload::{
@@ -961,9 +1006,11 @@ mod tests {
     fn validates_create_pairing_contract() {
         let request = RemoteEasyconnectCreatePairingRequest {
             client_name: "macbook-pro".to_string(),
-            callback_url:
+            callback_url: Some(
                 "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
                     .to_string(),
+            ),
+            completion_mode: RemoteEasyconnectCompletionMode::Callback,
             requested_object_store: Some("zymo_fecal_2025.05".to_string()),
             requested_session_lifetime_seconds: Some(28_800),
             client_request_id: Some("request-1".to_string()),
@@ -984,7 +1031,8 @@ mod tests {
     fn rejects_invalid_callback_url() {
         let request = RemoteEasyconnectCreatePairingRequest {
             client_name: "macbook-pro".to_string(),
-            callback_url: "127.0.0.1:49321/callback".to_string(),
+            callback_url: Some("127.0.0.1:49321/callback".to_string()),
+            completion_mode: RemoteEasyconnectCompletionMode::Callback,
             requested_object_store: None,
             requested_session_lifetime_seconds: None,
             client_request_id: None,
@@ -999,6 +1047,23 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn polling_pairing_contract_omits_the_browser_callback() {
+        let request = RemoteEasyconnectCreatePairingRequest {
+            client_name: "dasobjectstore-remote".to_string(),
+            callback_url: None,
+            completion_mode: RemoteEasyconnectCompletionMode::Polling,
+            requested_object_store: Some("alleleanchor_mvp".to_string()),
+            requested_session_lifetime_seconds: Some(300),
+            client_request_id: Some("remote-login-1".to_string()),
+        };
+
+        request.validate().expect("polling request validates");
+        let encoded = serde_json::to_value(request).expect("request serializes");
+        assert_eq!(encoded["completion_mode"], "polling");
+        assert!(encoded["callback_url"].is_null());
     }
 
     #[test]

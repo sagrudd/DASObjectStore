@@ -280,17 +280,18 @@ pub use remote_easyconnect::{
     resolve_remote_easyconnect_session_lifetime_seconds, RemoteEasyconnectApprovalContext,
     RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectApprovePairingResponse,
     RemoteEasyconnectAuthProvider, RemoteEasyconnectAwsCliEnvironmentVariable,
-    RemoteEasyconnectComponentBuilds, RemoteEasyconnectControlAuthorization,
-    RemoteEasyconnectControlOperation, RemoteEasyconnectCreatePairingRequest,
-    RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectDiscoveryRequest,
-    RemoteEasyconnectDiscoveryResponse, RemoteEasyconnectExchangeConnectionResponse,
-    RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectExchangePairingResponse,
-    RemoteEasyconnectObjectStoreAccessPolicy, RemoteEasyconnectObjectStoreGrant,
-    RemoteEasyconnectPairingState, RemoteEasyconnectPairingStatusRequest,
-    RemoteEasyconnectPairingStatusResponse, RemoteEasyconnectRenewSessionRequest,
-    RemoteEasyconnectRenewSessionResponse, RemoteEasyconnectRevokeSessionRequest,
-    RemoteEasyconnectRevokeSessionResponse, RemoteEasyconnectS3ConnectionDescriptor,
-    RemoteEasyconnectSession, RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
+    RemoteEasyconnectCompletionMode, RemoteEasyconnectComponentBuilds,
+    RemoteEasyconnectControlAuthorization, RemoteEasyconnectControlOperation,
+    RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+    RemoteEasyconnectDiscoveryRequest, RemoteEasyconnectDiscoveryResponse,
+    RemoteEasyconnectExchangeConnectionResponse, RemoteEasyconnectExchangePairingRequest,
+    RemoteEasyconnectExchangePairingResponse, RemoteEasyconnectObjectStoreAccessPolicy,
+    RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectPairingState,
+    RemoteEasyconnectPairingStatusRequest, RemoteEasyconnectPairingStatusResponse,
+    RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRenewSessionResponse,
+    RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectRevokeSessionResponse,
+    RemoteEasyconnectS3ConnectionDescriptor, RemoteEasyconnectSession,
+    RemoteEasyconnectSessionCredentials, RemoteEasyconnectSessionPolicy,
     RemoteEasyconnectSessionRenewal, RemoteEasyconnectSubmitAwsCliUploadRequest,
     RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
     RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
@@ -723,6 +724,9 @@ impl DaemonApiRequest {
             Self::RemoteEasyconnectCreatePairing(request) => request
                 .validate()
                 .map_err(remote_easyconnect_validation_error),
+            Self::RemoteEasyconnectPairingStatus(request) => request
+                .validate()
+                .map_err(remote_easyconnect_validation_error),
             Self::RemoteEasyconnectApprovePairing(request) => request
                 .validate()
                 .map_err(remote_easyconnect_validation_error),
@@ -752,7 +756,6 @@ impl DaemonApiRequest {
             | Self::ApplianceTelemetry(_)
             | Self::DiscoverErgasterionCapability
             | Self::RemoteEasyconnectDiscovery(_)
-            | Self::RemoteEasyconnectPairingStatus(_)
             | Self::RemoteEasyconnectUploadAdmission(_) => Ok(()),
         }
     }
@@ -883,12 +886,13 @@ mod tests {
         ObjectBrowserSort, ObjectDownloadRequest, ObjectFolderDownloadRequest,
         PrepareEnclosureFilesystem, PrepareEnclosureHddDevice, PrepareEnclosureRequest,
         ProfileBrowserRequest, ProfileS3ListRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
-        StoreInventoryRequest, SubmitIngestFilesRequest, UpsertEndpointInventoryRequest,
-        ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCompletionMode,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSubmitAwsCliUploadRequest,
+        RemoteEasyconnectUploadAdmissionRequest, StoreInventoryRequest, SubmitIngestFilesRequest,
+        UpsertEndpointInventoryRequest, ENCLOSURE_PREPARE_CONFIRMATION,
+        ENDPOINT_RECORD_CONFIRMATION, INGEST_CONTROL_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION, REMOTE_EASYCONNECT_PAIRING_EXCHANGE_ROUTE,
     };
     use crate::api::DiskLockdownRequest;
@@ -1377,7 +1381,8 @@ mod tests {
         let request = DaemonApiRequest::RemoteEasyconnectCreatePairing(
             RemoteEasyconnectCreatePairingRequest {
                 client_name: "macbook".to_string(),
-                callback_url: "127.0.0.1:49321/callback".to_string(),
+                callback_url: Some("127.0.0.1:49321/callback".to_string()),
+                completion_mode: RemoteEasyconnectCompletionMode::Callback,
                 requested_object_store: None,
                 requested_session_lifetime_seconds: Some(1),
                 client_request_id: None,
@@ -1465,7 +1470,8 @@ mod tests {
     fn create_easyconnect_pairing_request() -> RemoteEasyconnectCreatePairingRequest {
         RemoteEasyconnectCreatePairingRequest {
             client_name: "macbook".to_string(),
-            callback_url: "http://127.0.0.1:49321/callback".to_string(),
+            callback_url: Some("http://127.0.0.1:49321/callback".to_string()),
+            completion_mode: RemoteEasyconnectCompletionMode::Callback,
             requested_object_store: Some("zymo_fecal_2025.05".to_string()),
             requested_session_lifetime_seconds: Some(28_800),
             client_request_id: Some("request-1".to_string()),

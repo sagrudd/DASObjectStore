@@ -1119,17 +1119,18 @@ mod tests {
         ProfileInspectionRootState, ProfileMigrationRequest, ProfileReadinessRequest,
         ProviderStreamChunkHeader, ProviderStreamOpenRequest, ProviderStreamUploadOpenRequest,
         RemoteEasyconnectApprovePairingRequest, RemoteEasyconnectAuthProvider,
-        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, RemoteEasyconnectObjectStoreGrant,
-        RemoteEasyconnectRenewSessionRequest, RemoteEasyconnectRevokeSessionRequest,
-        RemoteEasyconnectSessionCredentials, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        RemoteEasyconnectUploadCompletion, StoreDeduplicateRequest, StoreDeleteRequest,
-        StoreDrainRequest, StoreInventoryRequest, StoreRepairRequest, SubmitIngestFilesRequest,
-        SubmitIngestFilesResponse, UpdateObjectStoreAcknowledgementPolicyRequest,
-        UpdateObjectStoreIngestPolicyRequest, UpsertEndpointInventoryRequest,
-        UpsertEndpointInventoryResponse, WorkspaceControlAction, WorkspaceControlRequest,
-        ACKNOWLEDGEMENT_POLICY_CONFIRMATION, APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
+        RemoteEasyconnectAwsCliEnvironmentVariable, RemoteEasyconnectCompletionMode,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        RemoteEasyconnectObjectStoreGrant, RemoteEasyconnectRenewSessionRequest,
+        RemoteEasyconnectRevokeSessionRequest, RemoteEasyconnectSessionCredentials,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, RemoteEasyconnectUploadCompletion,
+        StoreDeduplicateRequest, StoreDeleteRequest, StoreDrainRequest, StoreInventoryRequest,
+        StoreRepairRequest, SubmitIngestFilesRequest, SubmitIngestFilesResponse,
+        UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreIngestPolicyRequest,
+        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse, WorkspaceControlAction,
+        WorkspaceControlRequest, ACKNOWLEDGEMENT_POLICY_CONFIRMATION,
+        APPLICATION_CREDENTIAL_REVOCATION_CONFIRMATION,
         APPLICATION_IDENTITY_REGISTRATION_CONFIRMATION, DIRECT_TO_HDD_POLICY_CONFIRMATION,
         ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_BROWSER_GUI_API_PEER_IDENTITY, OBJECT_BROWSER_VERIFIED_SUBJECT_SCHEMA_VERSION,
@@ -5294,7 +5295,8 @@ mod tests {
             .handle(DaemonApiRequest::RemoteEasyconnectCreatePairing(
                 RemoteEasyconnectCreatePairingRequest {
                     client_name: "macbook-pro".to_string(),
-                    callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                    callback_url: Some("http://127.0.0.1:49321/callback".to_string()),
+                    completion_mode: RemoteEasyconnectCompletionMode::Callback,
                     requested_object_store: Some("zymo_fecal_2025.05".to_string()),
                     requested_session_lifetime_seconds: Some(28_800),
                     client_request_id: Some("request-1".to_string()),
@@ -5304,6 +5306,13 @@ mod tests {
         let DaemonApiResponse::RemoteEasyconnectCreatePairing(create) = create else {
             panic!("expected create pairing response");
         };
+        assert!(create
+            .browser_login_url
+            .starts_with("/products/dasobjectstore/remote/easyconnect/login?handoff=handoff-"));
+        assert!(!create.browser_login_url.contains(&create.pairing_id));
+        assert!(!create.browser_login_url.contains("zymo_fecal_2025.05"));
+        assert!(!create.browser_login_url.contains("expires_at_utc"));
+        assert!(!create.browser_login_url.contains("completion="));
         let grant = paired_session("session-template")
             .object_stores
             .into_iter()
@@ -5335,7 +5344,9 @@ mod tests {
             .handle(DaemonApiRequest::RemoteEasyconnectExchangePairing(
                 RemoteEasyconnectExchangePairingRequest {
                     pairing_id: create.pairing_id,
-                    exchange_code: approve.exchange_code,
+                    exchange_code: approve
+                        .exchange_code
+                        .expect("callback approval returns an exchange capability"),
                     client_request_id: Some("request-2".to_string()),
                 },
             ))

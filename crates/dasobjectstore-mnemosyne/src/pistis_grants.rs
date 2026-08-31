@@ -214,8 +214,9 @@ mod tests {
         DaemonServiceProvisionResponse, DaemonServiceRuntimeError, DaemonServiceStatusRequest,
         DaemonServiceStatusResponse, FixedDaemonClock, InProcessDaemonTransport,
         PistisObjectStoreGrantRegistry, RemoteEasyconnectApprovePairingRequest,
-        RemoteEasyconnectAuthProvider, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectExchangePairingRequest, PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
+        RemoteEasyconnectAuthProvider, RemoteEasyconnectCompletionMode,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectExchangePairingRequest,
+        PISTIS_GRANT_REGISTRY_SCHEMA_VERSION,
     };
     use dasobjectstore_gui_api::{
         accept_host_authenticated_context, AuthenticatedActorAuthority, HostAuthenticatedContext,
@@ -360,9 +361,11 @@ mod tests {
         let created = client
             .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
                 client_name: "dasobjectstore-remote".to_owned(),
-                callback_url:
+                callback_url: Some(
                     "http://127.0.0.1:49321/products/dasobjectstore/remote/easyconnect/callback"
                         .to_owned(),
+                ),
+                completion_mode: RemoteEasyconnectCompletionMode::Callback,
                 requested_object_store: Some("epic_collection".to_owned()),
                 requested_session_lifetime_seconds: Some(300),
                 client_request_id: Some("client-request-1".to_owned()),
@@ -389,7 +392,9 @@ mod tests {
         let restarted = daemon_client(&pairing_path, &session_path, &clock);
         let exchange_request = RemoteEasyconnectExchangePairingRequest {
             pairing_id: created.pairing_id.clone(),
-            exchange_code: approved.exchange_code,
+            exchange_code: approved
+                .exchange_code
+                .expect("callback completion returns the exchange capability"),
             client_request_id: Some("client-request-2".to_owned()),
         };
         let exchanged = restarted

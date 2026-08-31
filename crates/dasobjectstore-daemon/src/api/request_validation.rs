@@ -10,6 +10,23 @@ pub(super) fn remote_easyconnect_validation_error(
         RemoteEasyconnectValidationError::InvalidUrl { field, value } => {
             DaemonRequestValidationError::UnsupportedFieldValue { field, value }
         }
+        RemoteEasyconnectValidationError::MissingCallbackUrl => {
+            DaemonRequestValidationError::BlankField {
+                field: "callback_url",
+            }
+        }
+        RemoteEasyconnectValidationError::UnexpectedCallbackUrl => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "callback_url",
+                value: "not permitted for polling completion".to_string(),
+            }
+        }
+        RemoteEasyconnectValidationError::InvalidPairingStatusReference => {
+            DaemonRequestValidationError::UnsupportedFieldValue {
+                field: "pairing_status_reference",
+                value: "exactly one reference is required".to_string(),
+            }
+        }
         RemoteEasyconnectValidationError::InvalidLoopbackUrl { field, value } => {
             DaemonRequestValidationError::UnsupportedFieldValue { field, value }
         }

@@ -406,8 +406,8 @@ pub(super) async fn easyconnect_create_pairing(
             error.to_string(),
         )
     })?;
-    validate_loopback_callback(&request.callback_url)?;
-    let requested_object_store = request.requested_object_store.clone().ok_or_else(|| {
+    validate_pairing_completion(&request)?;
+    request.requested_object_store.as_deref().ok_or_else(|| {
         route_error(
             StatusCode::BAD_REQUEST,
             "easyconnect_object_store_required",
@@ -432,7 +432,7 @@ pub(super) async fn easyconnect_create_pairing(
         })
         .await
         .map_err(remote_auth_bridge_error)?;
-    let mut browser_url = reqwest::Url::parse(&format!(
+    let browser_url = reqwest::Url::parse(&format!(
         "{}{}",
         public_base_url.trim_end_matches('/'),
         response.browser_login_url
@@ -444,10 +444,6 @@ pub(super) async fn easyconnect_create_pairing(
             "daemon returned an invalid EasyConnect browser route",
         )
     })?;
-    browser_url
-        .query_pairs_mut()
-        .append_pair("object_store", &requested_object_store)
-        .append_pair("expires_at_utc", &response.expires_at_utc);
     response.browser_login_url = browser_url.to_string();
     response.polling_url = format!(
         "{}{}",
@@ -486,10 +482,38 @@ pub(super) async fn easyconnect_approve_pairing(
             "Pistis approval context does not match the current verified host session",
         ));
     }
+    let handoff = intent.handoff.clone();
+    let resolution_endpoint = daemon_endpoint.clone();
+    let status = crate::daemon_bridge::DaemonBridge::shared_packaged()
+        .call_message(move || {
+            DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(
+                resolution_endpoint.socket_path(),
+            ))
+            .remote_easyconnect_pairing_status(RemoteEasyconnectPairingStatusRequest {
+                pairing_id: None,
+                browser_handoff_reference: Some(handoff),
+            })
+            .map_err(|_| "browser handoff unavailable".to_string())
+        })
+        .await
+        .map_err(|_| {
+            route_error(
+                StatusCode::GONE,
+                "easyconnect_browser_handoff_unavailable",
+                "this remote approval handoff is unavailable; return to the remote terminal and start a new pairing",
+            )
+        })?;
+    let object_store = status.requested_object_store.as_deref().ok_or_else(|| {
+        route_error(
+            StatusCode::GONE,
+            "easyconnect_browser_handoff_unavailable",
+            "this remote approval handoff is unavailable; return to the remote terminal and start a new pairing",
+        )
+    })?;
     let Some(grant) = approval_context
         .allowed_object_stores
         .iter()
-        .find(|grant| grant.object_store == intent.object_store)
+        .find(|grant| grant.object_store == object_store)
     else {
         return Err(route_error(
             StatusCode::FORBIDDEN,
@@ -505,7 +529,7 @@ pub(super) async fn easyconnect_approve_pairing(
         ));
     }
     let request = RemoteEasyconnectApprovePairingRequest {
-        pairing_id: intent.pairing_id,
+        pairing_id: status.pairing_id,
         approval_context,
     };
     request.validate().map_err(|error| {
@@ -602,9 +626,27 @@ async fn verify_easyconnect_s3_endpoint(
     })
 }
 
-fn validate_loopback_callback(
-    callback_url: &str,
+fn validate_pairing_completion(
+    request: &RemoteEasyconnectCreatePairingRequest,
 ) -> Result<(), (StatusCode, Json<AuthRouteError>)> {
+    if request.completion_mode == RemoteEasyconnectCompletionMode::Polling {
+        return if request.callback_url.is_none() {
+            Ok(())
+        } else {
+            Err(route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_easyconnect_polling_completion",
+                "server-polling EasyConnect must not provide a browser callback URL",
+            ))
+        };
+    }
+    let callback_url = request.callback_url.as_deref().ok_or_else(|| {
+        route_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_easyconnect_callback",
+            "callback completion requires an exact loopback HTTP URL",
+        )
+    })?;
     let callback = reqwest::Url::parse(callback_url).map_err(|_| {
         route_error(
             StatusCode::BAD_REQUEST,
