@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.173.32 - 2026-08-31
+
+- Restored the protected DASObjectStore remote-connection approval action by
+  deriving a valid CSP nonce from the host CSRF binding rather than placing the
+  `sha256:` prefix in the nonce source.
+- Aligned the remote approval screen with the Mnemosyne design language and
+  made failures visible rather than leaving the approval control inert.
+
+## 0.173.31 - 2026-08-30
+
+- Repair historical ACL masks on retained SSD and HDD marker directories so
+  the Monas authority can read the complete storage inventory.  The helper
+  still grants only marker-scoped read/traverse access and never recurses into
+  object payloads.
+
+## 0.173.30 - 2026-08-30
+
+- Treat marker-backed QNAP filesystem pools as supported managed enclosures
+  even when the host exposes no kernel enclosure device.  The enclosure view
+  now reports the detected pool instead of the misleading empty-state text.
+
+## 0.173.29 - 2026-08-30
+
+- Restore the Monas read-only managed-root projection for retained DAS disks.
+  Package and storage-readiness gates grant the shared `mnemosyne-pistis-das`
+  role traversal plus access to declared device markers only; payload data,
+  credentials and private daemon state remain inaccessible.
+- Mark retained registry entries as `Watch` whenever live metadata is absent
+  or unreadable, instead of presenting historical/unavailable stores as
+  healthy active services.
+- Print the Monas approval URL even when the CLI launches a browser, making the
+  QR-backed SSH workflow explicit and recoverable on a separate workstation.
+
 ## 0.173.27 - 2026-08-30
 
 - Wire the daemon `health_summary` protocol to the authoritative persisted

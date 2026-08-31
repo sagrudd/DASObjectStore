@@ -179,12 +179,20 @@ pub(crate) fn registry_object_store_cards(
                     "No objects have been recorded for this ObjectStore.",
                 ));
             }
+            let health = if card_warnings.is_empty() {
+                DashboardHealthStateView::Healthy
+            } else {
+                // Registry entries are retained for audit and recovery, but a
+                // missing/unreadable live-metadata binding must never present
+                // as a healthy active ObjectStore.
+                DashboardHealthStateView::Watch
+            };
             ObjectStoreCardView {
                 store_id: definition.store_id.to_string(),
                 display_name: definition.store_id.to_string(),
                 store_class: policy.class.name().to_string(),
                 object_type: usage.object_type.unwrap_or_else(|| "naive".to_string()),
-                health: DashboardHealthStateView::Healthy,
+                health,
                 required_copies: policy.copies,
                 object_count: usage.object_count,
                 capacity: used_capacity_summary(usage.used_bytes),
@@ -464,6 +472,45 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.code == "store_registry_unreadable"));
+    }
+
+    #[test]
+    fn retained_store_without_live_metadata_is_not_reported_healthy() {
+        let root = temp_root("object-stores-retained-missing-live-binding");
+        let registry_path = root.join("stores.json");
+        let live_sqlite_path = root.join("live.sqlite");
+        let groups_registry_path = root.join("groups.json");
+        let definition = StoreServiceDefinition {
+            store_id: StoreId::new("retained-only").expect("store id"),
+            policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+            bucket_name: None,
+            reader_group: None,
+            writer_group: None,
+            public: false,
+        };
+        fs::write(
+            &registry_path,
+            serde_json::to_string_pretty(&vec![definition]).expect("registry json"),
+        )
+        .expect("registry write");
+        create_live_sqlite_with_store_objects(&live_sqlite_path, "different-store");
+        fs::write(&groups_registry_path, r#"{"groups":[]}"#).expect("groups write");
+
+        let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
+            store_registry_path: registry_path,
+            live_sqlite_path,
+            groups_registry_path,
+            current_user_groups: Vec::new(),
+            administrator: false,
+            mounted_enclosures: Some(Vec::new()),
+        });
+
+        assert_eq!(view.stores.len(), 1);
+        assert_eq!(view.stores[0].health, DashboardHealthStateView::Watch);
+        assert!(view.stores[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "store_usage_unavailable"));
     }
 
     fn mounted_enclosure_fixture() -> DasEnclosureCardView {

@@ -24,6 +24,9 @@ const WEB_CONFIG: &str = include_str!("../../../packaging/linux/opt/dasobjectsto
 const MONAS_CONFIG_MIGRATION: &str = include_str!(
     "../../../packaging/linux/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 );
+const MONAS_ROOT_TRAVERSAL: &str = include_str!(
+    "../../../packaging/linux/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal"
+);
 const MONAS_ACCESS_BOUNDARY: &str = include_str!(
     "../../../packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 );
@@ -140,6 +143,26 @@ fn packages_fail_closed_monas_access_boundary() {
     }
     assert_not_contains(MONAS_ACCESS_BOUNDARY, "users.json");
     assert_not_contains(POSTINST, "auth/users.json");
+}
+
+#[test]
+fn monas_managed_root_projection_is_read_only_and_marker_scoped() {
+    assert_contains(MONAS_ROOT_TRAVERSAL, "shared_group=\"mnemosyne-pistis-das\"");
+    assert_contains(
+        MONAS_ROOT_TRAVERSAL,
+        "setfacl -m \"g:${shared_group}:${permissions},m::rwx\"",
+    );
+    assert_contains(
+        MONAS_ROOT_TRAVERSAL,
+        "setfacl -m \"g:${shared_group}:r,m::rwx\"",
+    );
+    assert_contains(MONAS_ROOT_TRAVERSAL, "grep -q '^role=hdd:' \"$marker\"");
+    assert_not_contains(MONAS_ROOT_TRAVERSAL, "setfacl -R");
+    assert_not_contains(MONAS_ROOT_TRAVERSAL, "find \"$managed_root\"");
+    assert_contains(
+        include_str!("../../../packaging/linux/systemd/dasobjectstore-storage-ready.service"),
+        "ExecStartPre=/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal",
+    );
 }
 
 #[test]

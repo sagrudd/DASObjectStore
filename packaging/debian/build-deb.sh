@@ -77,6 +77,8 @@ install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$build_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-external-mount-traversal" \
   "$build_root/usr/libexec/dasobjectstore/prepare-external-mount-traversal"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal" \
+  "$build_root/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/configure-external-mount-policy" \
   "$build_root/usr/libexec/dasobjectstore/configure-external-mount-policy"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/verify-managed-storage-mounts" \

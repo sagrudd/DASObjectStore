@@ -270,6 +270,10 @@ if [[ -d "$managed_root/hdd" ]]; then
   done
 fi
 
+# Keep the Monas dashboard's read-only marker projection usable after package
+# upgrades and retained-disk repair without exposing the DAS data plane.
+/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal
+
 if [[ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]]; then
   /usr/libexec/dasobjectstore/configure-external-mount-policy || true
 fi

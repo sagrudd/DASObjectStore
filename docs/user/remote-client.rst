@@ -407,6 +407,40 @@ The easyconnect lifecycle is:
   ObjectStore list; and
 * persist only non-secret appliance metadata and issued session references.
 
+DGX Spark over SSH
+------------------
+
+For a DGX Spark reached over SSH, run the canonical integrated-Monas command
+on the Spark and keep that terminal attached while the pairing is in progress:
+
+.. code-block:: console
+
+   dasobjectstore-remote login 192.168.0.193 epic_collection \
+     --username stephen --set-s3-config --no-browser
+
+The client prints an ``Open Monas approval URL (shows Pistis QR):`` line. Open
+that URL in a browser that can reach the NUC. Even when that browser already
+has an ordinary Monas session, Monas displays a fresh Pistis QR for this exact
+remote pairing; scan it and complete Face ID. The resulting approval is bound
+to the selected ObjectStore and cannot authorise a substituted or replayed
+pairing. The QR is rendered only by the Monas host; it is never copied into the
+SSH terminal. The client polls for the approved exchange and then prints that
+the short-lived session and AWS profile were committed. ``--no-browser`` is
+important on the headless Spark because the SSH session cannot launch a local
+browser.
+
+Verify the resulting profile from the Spark without exposing credentials:
+
+.. code-block:: console
+
+   aws --profile dasobjectstore-epic_collection s3 ls \
+     --endpoint-url https://192.168.0.193:3900
+
+Repeat ``login`` for a different ObjectStore.  Each invocation is scoped to
+one store and creates a fresh, expiring session; ordinary object transfers do
+not require another QR until that session expires.  Destructive or governed
+operations remain behind the normal Monas/Pistis approval policy.
+
 Expected failure states include unreachable discovery URL, untrusted appliance
 identity, callback bind failure, browser launch failure, denied login, expired
 pairing, denied session exchange, and local agent disconnection.
