@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.176.0 - 2026-08-31
+
+- Canonicalize the Proxenos public Site Trust source URL in the remote-client
+  dependency closure so the strict Kanon Cargo-lock verifier can bind the
+  exact immutable source revision.
+
 ## 0.175.0 - 2026-08-31
 
 - Add signed, process-local Monas Site Trust provisioning to
