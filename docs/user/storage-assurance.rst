@@ -1,9 +1,11 @@
-Background storage assurance
-============================
+``disk_housekeeping`` background maintenance
+============================================
 
-``dasobjectstored`` continuously protects settled appliance data when the
-server is otherwise idle. This is deliberately a low-priority, one-object-at-a-
-time service rather than a bulk shuffle.
+``dasobjectstored`` runs a daemon-owned background worker named
+``disk_housekeeping`` whenever the appliance is otherwise idle. It continuously
+protects settled appliance data, clears proven SSD residue, and balances member
+disks. It is deliberately a low-priority, one-object-at-a-time service rather
+than a bulk shuffle.
 
 The service waits for ten uninterrupted minutes with:
 
@@ -33,7 +35,16 @@ The daemon chooses work in this order:
 2. rebalance one placement from the fractionally fullest disk to the
    fractionally freest eligible disk when their free-space difference is at
    least five percentage points;
-3. re-hash the oldest placement whose verification is at least 30 days old.
+3. rotate the oldest placement that has not moved or been verified for nine
+   weeks to another eligible disk, verifying both source and destination; or
+4. re-hash that placement when copy separation leaves no safe destination.
+
+Nine weeks sits inside the required eight-to-ten-week maintenance window.
+Rotation updates the verification timestamp only after the copy has passed its
+checksum, been synchronized, and replaced the authoritative placement. A
+fully replicated object may have no disk that can safely accept another copy;
+in that case the worker proves the existing bytes by checksum without deleting
+or co-locating a replica.
 
 Destinations must be ``Healthy`` or ``Watch``, contain no other copy of the
 same object, and have room for the complete file. Fractional free space is
@@ -63,6 +74,29 @@ feasible source/destination pairs, so an ineligible freest disk does not hide a
 valid second choice. Object size is not used to silently exclude evacuation or
 reverification.
 
+I/O limit and SSD priority
+-------------------------
+
+``disk_housekeeping`` accounts source reads and destination writes for every
+verification and relocation chunk. Its effective rate is capped at no more than
+ten percent of the configured available I/O capacity; foreground ingest and
+destage preempt it before the next chunk. Packaged appliances use a conservative
+100 MiB/s commissioning baseline (therefore at most 10 MiB/s); set the measured
+available capacity for the appliance after commissioning so the ten-percent
+limit is exact for its disks.
+
+SSD settlement is not idle-only. The durable destage worker removes one
+proof-backed SSD payload before accepting another queued HDD copy. Therefore a
+continuously busy queue cannot indefinitely retain already-settled SSD bytes,
+while objects that still need HDD copies remain the next priority. A scheduled,
+evidence-based garbage-collection pass also runs every hour, rather than only
+at daemon startup.
+
+The worker never deletes an SSD payload merely because it is old. It requires
+the durable HDD settlement state, required verified-copy count, and exact
+managed path to agree. A missing queue, path mismatch, unreadable entry, or
+``needs_review`` state is reported as orphaned and retained for repair.
+
 When the last placement leaves a disk already marked ``Draining``, one SQLite
 transaction proves the disk empty and changes it to ``Retired``. A disk with
 any remaining placement stays draining and is reported as blocked; operators
@@ -78,22 +112,45 @@ Status and configuration
 
 The latest durable result is written to:
 
-``/var/lib/dasobjectstore/storage-assurance/latest.json``
+``/var/lib/dasobjectstore/disk_housekeeping/latest.json``
 
 An interrupted relocation checkpoint is held at
-``/var/lib/dasobjectstore/storage-assurance/operation.json``. Do not edit or
+``/var/lib/dasobjectstore/disk_housekeeping/operation.json``. Do not edit or
 remove it manually; daemon restart recovery owns it.
+
+Every five minutes the worker also writes the path-free physical SSD residency
+report ``/var/lib/dasobjectstore/disk_housekeeping/ssd-residency.json``. It
+accounts native payload bytes into these mutually exclusive categories:
+
+* ``settled_uncleared``: sufficient verified HDD copies exist, but the exact
+  SSD payload is still present and eligible for deletion;
+* ``awaiting_hdd``: the payload has a live, retryable HDD destage state;
+* ``orphaned_unlanded``: the payload or metadata is inconsistent, missing a
+  safe destage record, or needs review; and
+* ``unexplained``: regular payload-like bytes have no authoritative native SSD
+  placement.
+
+Each category has a byte fraction in basis points of native payload bytes.
+Provider-managed data (such as Garage), daemon operational metadata, missing
+expected payloads, and incomplete scans are reported separately. A partial
+report is an uncertainty signal, not authorization to delete anything.
 
 Defaults are enabled for packaged Linux appliances. Operators may override
 them through the service environment:
 
-* ``DASOBJECTSTORE_ASSURANCE_ENABLED``
-* ``DASOBJECTSTORE_ASSURANCE_POLL_SECONDS``
-* ``DASOBJECTSTORE_ASSURANCE_IDLE_GRACE_SECONDS``
-* ``DASOBJECTSTORE_ASSURANCE_VERIFY_AFTER_SECONDS``
-* ``DASOBJECTSTORE_ASSURANCE_IMBALANCE_BASIS_POINTS``
-* ``DASOBJECTSTORE_ASSURANCE_MAX_OBJECT_BYTES``
-* ``DASOBJECTSTORE_ASSURANCE_IDLE_IO_BYTES_PER_SECOND``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_ENABLED``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_POLL_SECONDS``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IDLE_GRACE_SECONDS``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_ROTATE_AFTER_SECONDS``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IMBALANCE_BASIS_POINTS``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_MAX_OBJECT_BYTES``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IDLE_IO_BYTES_PER_SECOND``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_AVAILABLE_IO_BYTES_PER_SECOND``
+* ``DASOBJECTSTORE_DISK_HOUSEKEEPING_IO_PERCENT`` (accepted values are 1--10)
+
+The earlier ``DASOBJECTSTORE_ASSURANCE_*`` names remain accepted as compatibility
+fallbacks. New appliance configuration must use the ``DISK_HOUSEKEEPING``
+names.
 
 Disabling the service stops new background work; it does not alter placements.
 Disk drain, repair, and force-retirement safety rules remain authoritative.
@@ -101,7 +158,7 @@ Disk drain, repair, and force-retirement safety rules remain authoritative.
 Garage S3 storage is separate
 -----------------------------
 
-The assurance loop governs verified DASObjectStore placements recorded in
+The ``disk_housekeeping`` loop governs verified DASObjectStore placements recorded in
 ``live.sqlite``. Garage's S3 block tree is a separate provider storage plane;
 it is not retrospectively moved by the assurance loop.
 

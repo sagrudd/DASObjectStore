@@ -680,11 +680,13 @@ Exit criteria:
 - protected stores must drain before safe removal;
 - force operations require policy allowance and action-time confirmation.
 
-The packaged appliance additionally runs one-object-at-a-time background
-storage assurance after a continuous idle grace period. Drain/suspect
-evacuation precedes fractional-capacity rebalancing and age-based checksum
-scrubbing. Relocation never retires a source until its replacement is
-independently verified and transactionally promoted.
+The packaged appliance additionally runs one-object-at-a-time
+``disk_housekeeping`` after a continuous idle grace period. Drain/suspect
+evacuation precedes fractional-capacity rebalancing and nine-week placement
+rotation with checksum verification. Its bounded worker consumes no more than
+ten percent of the configured available I/O capacity, clears proven SSD residue
+even under continuous destage demand, and never retires a source until its
+replacement is independently verified and transactionally promoted.
 
 ## Milestone 11: macOS Development and Read/Export Path
 

@@ -74,6 +74,16 @@ pub fn run_one_durable_destage(
     now_utc: &str,
     previously_served_store: Option<&dasobjectstore_core::ids::StoreId>,
 ) -> Result<DurableDestageOutcome, DurableDestageWorkerError> {
+    // Settlement promotion makes an SSD copy eviction-safe, but a permanently
+    // busy scheduler used to postpone every such deletion indefinitely.  Reap
+    // one proof-backed residue before accepting the next HDD copy, then allow
+    // the following pass to prioritize an unlanded object.  This bounded
+    // interleave keeps SSD staging finite without competing writers.
+    if let DurableDestageOutcome::Evicted { object_id } =
+        evict_one_settled_ssd_copy(config, now_utc)?
+    {
+        return Ok(DurableDestageOutcome::Evicted { object_id });
+    }
     let lease_expires_at_utc = add_seconds_to_utc_timestamp(now_utc, DEFAULT_DESTAGE_LEASE_SECONDS)
         .ok_or_else(|| DurableDestageWorkerError::InvalidTimestamp(now_utc.to_string()))?;
     let _ = previously_served_store;
@@ -167,7 +177,7 @@ pub fn run_one_durable_destage(
     }
 }
 
-fn evict_one_settled_ssd_copy(
+pub fn evict_one_settled_ssd_copy(
     config: &DurableDestageWorkerConfig,
     now_utc: &str,
 ) -> Result<DurableDestageOutcome, DurableDestageWorkerError> {
@@ -895,8 +905,9 @@ impl From<std::io::Error> for DurableDestageWorkerError {
 mod tests {
     use super::{
         parse_queued_object_type, remove_managed_direct_s3_payload, remove_managed_ssd_job_root,
-        retry_delay_seconds, safe_relative_path, select_hdd_roots_with_capacity,
-        select_managed_hdd_roots_with_capacity,
+        retry_delay_seconds, run_one_durable_destage, safe_relative_path,
+        select_hdd_roots_with_capacity, select_managed_hdd_roots_with_capacity,
+        DurableDestageOutcome, DurableDestageWorkerConfig,
     };
     use dasobjectstore_core::ids::{DiskId, StoreId};
     use dasobjectstore_core::object_type::ObjectType;
@@ -942,6 +953,108 @@ mod tests {
         fs::create_dir_all(root.join("unmanaged")).expect("unmanaged");
         assert!(remove_managed_ssd_job_root(&root, &root.join("unmanaged")).is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn settled_ssd_residue_is_evicted_before_another_queued_destage() {
+        let root = temporary_root("evict-before-queued-destage");
+        let ssd_root = root.join("ssd");
+        let settled_payload = ssd_root.join(".dasobjectstore/ingest/jobs/settled/payload");
+        let queued_payload = ssd_root.join(".dasobjectstore/ingest/jobs/queued/payload");
+        fs::create_dir_all(settled_payload.parent().expect("settled parent"))
+            .expect("settled directory");
+        fs::create_dir_all(queued_payload.parent().expect("queued parent"))
+            .expect("queued directory");
+        fs::write(&settled_payload, b"settled").expect("settled payload");
+        fs::write(&queued_payload, b"queued").expect("queued payload");
+        let database = ssd_root.join(".dasobjectstore/live.sqlite");
+        let connection = Connection::open(&database).expect("database");
+        connection.execute_batch(LIVE_SCHEMA_SQL).expect("schema");
+        connection
+            .execute(
+                "INSERT INTO pools(pool_id,state,created_at_utc,updated_at_utc)
+                 VALUES('pool-a','Clean','now','now')",
+                [],
+            )
+            .expect("pool");
+        connection
+            .execute(
+                "INSERT INTO stores(store_id,pool_id,class,policy_json,created_at_utc,updated_at_utc)
+                 VALUES('store-a','pool-a','generated_data','{}','now','now')",
+                [],
+            )
+            .expect("store");
+        for (object_id, path, size, eligible, state, verified) in [
+            (
+                "settled",
+                ".dasobjectstore/ingest/jobs/settled/payload",
+                7_i64,
+                true,
+                "hdd_copy_verified",
+                1_i64,
+            ),
+            (
+                "queued",
+                ".dasobjectstore/ingest/jobs/queued/payload",
+                6_i64,
+                false,
+                "queued_for_hdd",
+                0_i64,
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO objects(object_id,store_id,object_type,state,size_bytes,content_hash,created_at_utc,updated_at_utc)
+                     VALUES(?1,'store-a','naive','PlacementPlanned',?2,'hash','now','now')",
+                    rusqlite::params![object_id, size],
+                )
+                .expect("object");
+            connection
+                .execute(
+                    "INSERT INTO ssd_object_placements(object_id,store_id,relative_path,size_bytes,content_hash_algorithm,content_hash,verified_at_utc,eviction_eligible,created_at_utc,updated_at_utc)
+                     VALUES(?1,'store-a',?2,?3,'sha256','hash','now',?4,'now','now')",
+                    rusqlite::params![object_id, path, size, eligible],
+                )
+                .expect("placement");
+            connection
+                .execute(
+                    "INSERT INTO destage_queue(destage_job_id,store_id,object_id,state,expected_size_bytes,content_hash_algorithm,content_hash,acknowledgement_policy,required_copy_count,priority,max_attempts,verified_copy_count,created_at_utc,updated_at_utc)
+                     VALUES(?1,'store-a',?1,?2,?3,'sha256','hash','after_ssd_ingest',1,0,3,?4,'now','now')",
+                    rusqlite::params![object_id, state, size, verified],
+                )
+                .expect("queue");
+        }
+        drop(connection);
+
+        let outcome = run_one_durable_destage(
+            &DurableDestageWorkerConfig {
+                live_sqlite_path: database.clone(),
+                ssd_root: ssd_root.clone(),
+                hdd_root: root.join("hdd"),
+                worker_id: "test-worker".to_string(),
+            },
+            "2026-08-31T00:00:00Z",
+            None,
+        )
+        .expect("outcome");
+        assert_eq!(
+            outcome,
+            DurableDestageOutcome::Evicted {
+                object_id: "settled".parse().expect("object id"),
+            }
+        );
+        assert!(!settled_payload.exists());
+        assert!(queued_payload.exists());
+        let evicted: Option<String> = Connection::open(&database)
+            .expect("database")
+            .query_row(
+                "SELECT evicted_at_utc FROM ssd_object_placements WHERE object_id='settled'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("eviction state");
+        assert_eq!(evicted.as_deref(), Some("2026-08-31T00:00:00Z"));
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

@@ -1,15 +1,16 @@
 use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
-    build_staging_inventory, default_hdd_root, default_ssd_root,
-    garbage_collect_reconciliation_staging, profile_binding_registry_path,
-    reconcile_workspace_cleanups, reconcile_workspace_materializations,
-    reconcile_workspace_nfs_attachments, reconcile_workspace_promotions,
-    reconcile_workspace_provision_operations, run_garbage_collection, run_one_durable_destage,
-    spawn_storage_assurance_loop, DurableDestageOutcome, DurableDestageWorkerConfig,
-    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
-    LiveStatusRegistry, StorageAssuranceConfig, WorkspaceCleanupWorkerConfig,
-    WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
+    build_ssd_residency_report, build_staging_inventory, default_hdd_root, default_ssd_root,
+    garbage_collect_reconciliation_staging, persist_ssd_residency_report,
+    profile_binding_registry_path, reconcile_workspace_cleanups,
+    reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
+    reconcile_workspace_promotions, reconcile_workspace_provision_operations,
+    run_garbage_collection, run_one_durable_destage, spawn_disk_housekeeping_loop,
+    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
+    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
+    WorkspaceCleanupWorkerConfig, WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig,
+    DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -346,11 +347,11 @@ fn run() -> Result<(), String> {
     }
     let _telemetry_loop = spawn_appliance_telemetry_loop(&config)?;
     let _capacity_lease_loop = spawn_capacity_lease_loop(&config, Arc::clone(&capacity_provider));
-    let assurance_config = StorageAssuranceConfig::from_environment(&config.state_dir)
+    let housekeeping_config = StorageAssuranceConfig::from_environment(&config.state_dir)
         .map_err(|error| error.to_string())?;
-    let _assurance_loop = assurance_config.enabled.then(|| {
-        spawn_storage_assurance_loop(
-            assurance_config,
+    let _disk_housekeeping_loop = housekeeping_config.enabled.then(|| {
+        spawn_disk_housekeeping_loop(
+            housekeeping_config,
             Arc::clone(&live_status_registry),
             current_utc_timestamp,
         )
@@ -603,7 +604,9 @@ fn spawn_startup_garbage_collection(
     live_status_registry: Arc<LiveStatusRegistry>,
 ) -> thread::JoinHandle<()> {
     let state_dir = config.state_dir.clone();
-    thread::spawn(move || {
+    thread::Builder::new()
+        .name("disk_housekeeping_ssd_cleanup".to_string())
+        .spawn(move || {
         live_status_registry.record_garbage_collection(LiveStatusGarbageCollection {
             running: true,
             ..LiveStatusGarbageCollection::default()
@@ -742,8 +745,48 @@ fn spawn_startup_garbage_collection(
         // Startup collection owns the initial SSD metadata/removal window. Begin
         // durable destage only after that pass has either completed or failed closed.
         let _ = spawn_durable_destage_loop();
+        let residency_report_path = state_dir.join("disk_housekeeping/ssd-residency.json");
+        let mut next_reclaim = std::time::Instant::now() + Duration::from_secs(60 * 60);
+        let mut next_residency_audit = std::time::Instant::now();
         loop {
             let now_utc = current_utc_timestamp();
+            if std::time::Instant::now() >= next_reclaim {
+                match run_garbage_collection(
+                    &gc_config,
+                    GarbageCollectMode::Reclaim,
+                    GarbageCollectTrigger::Scheduled,
+                    format!("scheduled-{}", current_unix_seconds()),
+                    &now_utc,
+                    SystemTime::now(),
+                ) {
+                    Ok(report) => {
+                        if let Err(error) =
+                            dasobjectstore_daemon::runtime::persist_garbage_collection_report(
+                                &gc_config.report_journal_path,
+                                &report,
+                            )
+                        {
+                            eprintln!("scheduled SSD garbage-collection report persistence failed: {error}");
+                        }
+                    }
+                    Err(error) => eprintln!(
+                        "scheduled SSD garbage collection retained uncertain data: {error}"
+                    ),
+                }
+                next_reclaim = std::time::Instant::now() + Duration::from_secs(60 * 60);
+            }
+            if std::time::Instant::now() >= next_residency_audit {
+                match build_ssd_residency_report(&ssd_root, &gc_config.live_sqlite_path, &now_utc)
+                    .and_then(|report| {
+                        persist_ssd_residency_report(&residency_report_path, &report)
+                    }) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        eprintln!("disk_housekeeping SSD residency audit deferred: {error}")
+                    }
+                }
+                next_residency_audit = std::time::Instant::now() + Duration::from_secs(5 * 60);
+            }
             live_status_registry.record_staging_inventory(build_staging_inventory(
                 &gc_config,
                 &now_utc,
@@ -751,7 +794,8 @@ fn spawn_startup_garbage_collection(
             ));
             thread::sleep(Duration::from_secs(30));
         }
-    })
+        })
+        .expect("disk_housekeeping SSD cleanup thread should start")
 }
 
 fn persist_reconciliation_garbage_collection_report(

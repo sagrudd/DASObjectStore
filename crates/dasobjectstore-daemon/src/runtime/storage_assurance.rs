@@ -1,4 +1,4 @@
-//! Idle-gated background verification, rebalancing, and disk evacuation.
+//! Idle-gated disk housekeeping: verification, relocation, balancing, and evacuation.
 
 mod operation;
 
@@ -33,10 +33,19 @@ use operation::{DurableAssuranceOperation, OperationPhase};
 
 pub const DEFAULT_ASSURANCE_POLL_SECONDS: u64 = 30;
 pub const DEFAULT_ASSURANCE_IDLE_GRACE_SECONDS: u64 = 10 * 60;
-pub const DEFAULT_ASSURANCE_VERIFY_AFTER_SECONDS: u64 = 30 * 24 * 60 * 60;
+/// Nine weeks keeps every settled placement within the requested eight-to-ten
+/// week physical-movement and checksum-verification window when a safe target
+/// disk exists.  If replication leaves no eligible target, housekeeping
+/// re-hashes the source instead of weakening copy separation.
+pub const DEFAULT_ASSURANCE_VERIFY_AFTER_SECONDS: u64 = 9 * 7 * 24 * 60 * 60;
 pub const DEFAULT_ASSURANCE_IMBALANCE_BASIS_POINTS: u16 = 500;
 pub const DEFAULT_ASSURANCE_MAX_OBJECT_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 pub const DEFAULT_ASSURANCE_IDLE_IO_BYTES_PER_SECOND: u64 = 1024 * 1024;
+pub const DEFAULT_DISK_HOUSEKEEPING_IO_PERCENT: u8 = 10;
+/// The conservative appliance commissioning baseline.  The effective
+/// housekeeping limit is always a percentage of this value and deployments
+/// should replace it with their measured available IO throughput.
+pub const DEFAULT_DISK_HOUSEKEEPING_AVAILABLE_IO_BYTES_PER_SECOND: u64 = 100 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StorageAssuranceConfig {
@@ -47,6 +56,8 @@ pub struct StorageAssuranceConfig {
     pub imbalance_basis_points: u16,
     pub max_object_bytes: u64,
     pub idle_io_bytes_per_second: u64,
+    pub available_io_bytes_per_second: u64,
+    pub io_percent: u8,
     pub live_sqlite_path: PathBuf,
     pub hdd_root: PathBuf,
     pub latest_report_path: PathBuf,
@@ -62,20 +73,28 @@ impl StorageAssuranceConfig {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/srv/dasobjectstore/hdd"));
         let config = Self {
-            enabled: env_bool("DASOBJECTSTORE_ASSURANCE_ENABLED", true)?,
-            poll_seconds: env_u64(
+            enabled: env_bool_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_ENABLED",
+                "DASOBJECTSTORE_ASSURANCE_ENABLED",
+                true,
+            )?,
+            poll_seconds: env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_POLL_SECONDS",
                 "DASOBJECTSTORE_ASSURANCE_POLL_SECONDS",
                 DEFAULT_ASSURANCE_POLL_SECONDS,
             )?,
-            idle_grace_seconds: env_u64(
+            idle_grace_seconds: env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_IDLE_GRACE_SECONDS",
                 "DASOBJECTSTORE_ASSURANCE_IDLE_GRACE_SECONDS",
                 DEFAULT_ASSURANCE_IDLE_GRACE_SECONDS,
             )?,
-            verify_after_seconds: env_u64(
+            verify_after_seconds: env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_ROTATE_AFTER_SECONDS",
                 "DASOBJECTSTORE_ASSURANCE_VERIFY_AFTER_SECONDS",
                 DEFAULT_ASSURANCE_VERIFY_AFTER_SECONDS,
             )?,
-            imbalance_basis_points: u16::try_from(env_u64(
+            imbalance_basis_points: u16::try_from(env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_IMBALANCE_BASIS_POINTS",
                 "DASOBJECTSTORE_ASSURANCE_IMBALANCE_BASIS_POINTS",
                 u64::from(DEFAULT_ASSURANCE_IMBALANCE_BASIS_POINTS),
             )?)
@@ -84,18 +103,33 @@ impl StorageAssuranceConfig {
                     "imbalance basis points exceed u16".to_string(),
                 )
             })?,
-            max_object_bytes: env_u64(
+            max_object_bytes: env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_MAX_OBJECT_BYTES",
                 "DASOBJECTSTORE_ASSURANCE_MAX_OBJECT_BYTES",
                 DEFAULT_ASSURANCE_MAX_OBJECT_BYTES,
             )?,
-            idle_io_bytes_per_second: env_u64(
+            idle_io_bytes_per_second: env_u64_with_legacy(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_IDLE_IO_BYTES_PER_SECOND",
                 "DASOBJECTSTORE_ASSURANCE_IDLE_IO_BYTES_PER_SECOND",
                 DEFAULT_ASSURANCE_IDLE_IO_BYTES_PER_SECOND,
             )?,
+            available_io_bytes_per_second: env_u64(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_AVAILABLE_IO_BYTES_PER_SECOND",
+                DEFAULT_DISK_HOUSEKEEPING_AVAILABLE_IO_BYTES_PER_SECOND,
+            )?,
+            io_percent: u8::try_from(env_u64(
+                "DASOBJECTSTORE_DISK_HOUSEKEEPING_IO_PERCENT",
+                u64::from(DEFAULT_DISK_HOUSEKEEPING_IO_PERCENT),
+            )?)
+            .map_err(|_| {
+                StorageAssuranceError::InvalidConfiguration(
+                    "disk housekeeping IO percentage exceeds u8".to_string(),
+                )
+            })?,
             live_sqlite_path: ssd_root.join(".dasobjectstore/live.sqlite"),
             hdd_root,
-            latest_report_path: state_dir.join("storage-assurance/latest.json"),
-            operation_journal_path: state_dir.join("storage-assurance/operation.json"),
+            latest_report_path: state_dir.join("disk_housekeeping/latest.json"),
+            operation_journal_path: state_dir.join("disk_housekeeping/operation.json"),
         };
         config.validate()?;
         Ok(config)
@@ -106,10 +140,13 @@ impl StorageAssuranceConfig {
             || self.idle_grace_seconds < self.poll_seconds
             || self.verify_after_seconds == 0
             || self.max_object_bytes == 0
+            || self.available_io_bytes_per_second == 0
+            || self.io_percent == 0
+            || self.io_percent > DEFAULT_DISK_HOUSEKEEPING_IO_PERCENT
             || self.imbalance_basis_points > 10_000
         {
             return Err(StorageAssuranceError::InvalidConfiguration(
-                "poll must be non-zero, idle grace must cover one poll, verification/max size must be non-zero, and imbalance must be <=10000 basis points".to_string(),
+                "poll must be non-zero, idle grace must cover one poll, rotation/max size and available IO must be non-zero, IO percentage must be 1..=10, and imbalance must be <=10000 basis points".to_string(),
             ));
         }
         Ok(())
@@ -172,6 +209,7 @@ struct MeasuredRoot {
 pub enum StorageAssuranceAction {
     Evacuate,
     Rebalance,
+    Rotate,
     Verify,
     Idle,
 }
@@ -181,6 +219,7 @@ impl StorageAssuranceAction {
         match self {
             Self::Evacuate => "evacuate",
             Self::Rebalance => "rebalance",
+            Self::Rotate => "rotate",
             Self::Verify => "verify",
             Self::Idle => "idle",
         }
@@ -201,82 +240,109 @@ pub struct StorageAssuranceReport {
     pub message: String,
 }
 
+/// Start the low-priority daemon-owned `disk_housekeeping` worker.
+///
+/// The legacy function name remains available below so existing embedding
+/// callers continue to compile, but all new operational names and reports use
+/// `disk_housekeeping`.
+pub fn spawn_disk_housekeeping_loop(
+    config: StorageAssuranceConfig,
+    live_status_registry: Arc<LiveStatusRegistry>,
+    now_utc: fn() -> String,
+) -> thread::JoinHandle<()> {
+    thread::Builder::new()
+        .name("disk_housekeeping".to_string())
+        .spawn(move || {
+            let mut gate = IdleGate::new(
+                Duration::from_secs(config.idle_grace_seconds),
+                config.idle_io_bytes_per_second,
+            );
+            let mut previous_io = read_linux_disk_io_bytes().ok();
+            let mut previous_io_at = Instant::now();
+            loop {
+                thread::sleep(Duration::from_secs(config.poll_seconds));
+                let observed_at = Instant::now();
+                let current_io = read_linux_disk_io_bytes().ok();
+                let io_rate = match (previous_io, current_io) {
+                    (Some(previous), Some(current)) => current
+                        .saturating_sub(previous)
+                        .checked_div(observed_at.duration_since(previous_io_at).as_secs().max(1))
+                        .unwrap_or(0),
+                    _ => u64::MAX,
+                };
+                previous_io = current_io;
+                previous_io_at = observed_at;
+                let snapshot = live_status_registry.snapshot(now_utc());
+                let primary_work_pending =
+                    assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true);
+                let observation = IdleObservation {
+                    primary_work_pending,
+                    live_ingests: snapshot.aggregate.active_ingests > 0,
+                    garbage_collection_running: snapshot
+                        .garbage_collection
+                        .is_some_and(|collection| collection.running),
+                    io_bytes_per_second: io_rate,
+                };
+                if !gate.observe(observed_at, observation) {
+                    continue;
+                }
+                let result = run_one_disk_housekeeping(
+                    &config,
+                    Arc::clone(&live_status_registry),
+                    &now_utc(),
+                );
+                match result {
+                    Ok(report) => {
+                        if let Err(error) = persist_report(&config.latest_report_path, &report) {
+                            eprintln!("disk_housekeeping report persistence failed: {error}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("disk_housekeeping retained source data: {error}");
+                        let report = StorageAssuranceReport {
+                            schema: "dasobjectstore.disk_housekeeping.report.v1",
+                            completed_at_utc: now_utc(),
+                            success: false,
+                            action: StorageAssuranceAction::Idle,
+                            object_id: None,
+                            source_disk_id: None,
+                            destination_disk_id: None,
+                            bytes: 0,
+                            source_removed: false,
+                            message: error.to_string(),
+                        };
+                        if let Err(report_error) =
+                            persist_report(&config.latest_report_path, &report)
+                        {
+                            eprintln!(
+                            "disk_housekeeping failure report persistence failed: {report_error}"
+                        );
+                        }
+                    }
+                }
+                gate.reset();
+                previous_io = read_linux_disk_io_bytes().ok();
+                previous_io_at = Instant::now();
+            }
+        })
+        .expect("disk_housekeeping thread should start")
+}
+
+/// Backwards-compatible alias for in-process callers from the earlier
+/// storage-assurance delivery.
 pub fn spawn_storage_assurance_loop(
     config: StorageAssuranceConfig,
     live_status_registry: Arc<LiveStatusRegistry>,
     now_utc: fn() -> String,
 ) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
-        let mut gate = IdleGate::new(
-            Duration::from_secs(config.idle_grace_seconds),
-            config.idle_io_bytes_per_second,
-        );
-        let mut previous_io = read_linux_disk_io_bytes().ok();
-        let mut previous_io_at = Instant::now();
-        loop {
-            thread::sleep(Duration::from_secs(config.poll_seconds));
-            let observed_at = Instant::now();
-            let current_io = read_linux_disk_io_bytes().ok();
-            let io_rate = match (previous_io, current_io) {
-                (Some(previous), Some(current)) => current
-                    .saturating_sub(previous)
-                    .checked_div(observed_at.duration_since(previous_io_at).as_secs().max(1))
-                    .unwrap_or(0),
-                _ => u64::MAX,
-            };
-            previous_io = current_io;
-            previous_io_at = observed_at;
-            let snapshot = live_status_registry.snapshot(now_utc());
-            let primary_work_pending =
-                assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true);
-            let observation = IdleObservation {
-                primary_work_pending,
-                live_ingests: snapshot.aggregate.active_ingests > 0,
-                garbage_collection_running: snapshot
-                    .garbage_collection
-                    .is_some_and(|collection| collection.running),
-                io_bytes_per_second: io_rate,
-            };
-            if !gate.observe(observed_at, observation) {
-                continue;
-            }
-            let result =
-                run_one_storage_assurance(&config, Arc::clone(&live_status_registry), &now_utc());
-            match result {
-                Ok(report) => {
-                    if let Err(error) = persist_report(&config.latest_report_path, &report) {
-                        eprintln!("storage assurance report persistence failed: {error}");
-                    }
-                }
-                Err(error) => {
-                    eprintln!("storage assurance retained source data: {error}");
-                    let report = StorageAssuranceReport {
-                        schema: "dasobjectstore.storage_assurance.report.v1",
-                        completed_at_utc: now_utc(),
-                        success: false,
-                        action: StorageAssuranceAction::Idle,
-                        object_id: None,
-                        source_disk_id: None,
-                        destination_disk_id: None,
-                        bytes: 0,
-                        source_removed: false,
-                        message: error.to_string(),
-                    };
-                    if let Err(report_error) = persist_report(&config.latest_report_path, &report) {
-                        eprintln!(
-                            "storage assurance failure report persistence failed: {report_error}"
-                        );
-                    }
-                }
-            }
-            gate.reset();
-            previous_io = read_linux_disk_io_bytes().ok();
-            previous_io_at = Instant::now();
-        }
-    })
+    spawn_disk_housekeeping_loop(config, live_status_registry, now_utc)
 }
 
-pub fn run_one_storage_assurance(
+pub type DiskHousekeepingConfig = StorageAssuranceConfig;
+pub type DiskHousekeepingAction = StorageAssuranceAction;
+pub type DiskHousekeepingReport = StorageAssuranceReport;
+
+pub fn run_one_disk_housekeeping(
     config: &StorageAssuranceConfig,
     live_status_registry: Arc<LiveStatusRegistry>,
     now_utc: &str,
@@ -295,7 +361,7 @@ pub fn run_one_storage_assurance(
             complete_assurance_drain_if_empty(&config.live_sqlite_path, &root.disk_id, now_utc)?;
         if completion.transitioned_to_retired {
             return Ok(StorageAssuranceReport {
-                schema: "dasobjectstore.storage_assurance.report.v1",
+                schema: "dasobjectstore.disk_housekeeping.report.v1",
                 completed_at_utc: now_utc.to_string(),
                 success: true,
                 action: StorageAssuranceAction::Evacuate,
@@ -326,7 +392,7 @@ pub fn run_one_storage_assurance(
             });
         }
         return Ok(StorageAssuranceReport {
-            schema: "dasobjectstore.storage_assurance.report.v1",
+            schema: "dasobjectstore.disk_housekeeping.report.v1",
             completed_at_utc: now_utc.to_string(),
             success: true,
             action: StorageAssuranceAction::Idle,
@@ -345,9 +411,17 @@ pub fn run_one_storage_assurance(
     let relative = safe_relative_path(&candidate.relative_path)?;
     let source_path = source_root.root_path.join(&relative);
     let expected_hash = normalize_sha256(&candidate.content_hash)?;
-    let source_hash = hash_file_sha256_controlled(&source_path, || {
-        assurance_should_preempt(config, &live_status_registry, now_utc)
-    })?;
+    let budget = std::sync::Mutex::new(IoBudget::new(config));
+    let source_hash = hash_file_sha256_controlled(
+        &source_path,
+        || assurance_should_preempt(config, &live_status_registry, now_utc),
+        |bytes_read| {
+            budget
+                .lock()
+                .expect("IO budget lock poisoned")
+                .consume(bytes_read)
+        },
+    )?;
     if source_hash != expected_hash {
         record_assurance_hash_failure(
             &config.live_sqlite_path,
@@ -424,10 +498,20 @@ pub fn run_one_storage_assurance(
         &destination_path,
         &expected_hash,
     );
-    let copy_result = write_verified_hdd_copy_with_controlled_progress(&request, |_| {
+    let mut previously_written = 0_u64;
+    let copy_result = write_verified_hdd_copy_with_controlled_progress(&request, |bytes_written| {
         if assurance_should_preempt(config, &live_status_registry, now_utc) {
             return Err(HddCopyError::Cancelled);
         }
+        // A relocation both reads the source and writes its destination. The
+        // copy callback reports cumulative written bytes, so account for both
+        // directions before allowing the next chunk.
+        budget.lock().expect("IO budget lock poisoned").consume(
+            bytes_written
+                .saturating_sub(previously_written)
+                .saturating_mul(2),
+        );
+        previously_written = bytes_written;
         Ok(())
     });
     if let Err(error) = copy_result {
@@ -480,6 +564,16 @@ pub fn run_one_storage_assurance(
     ))
 }
 
+/// Backwards-compatible entry point retained for callers compiled against the
+/// earlier storage-assurance delivery.
+pub fn run_one_storage_assurance(
+    config: &StorageAssuranceConfig,
+    live_status_registry: Arc<LiveStatusRegistry>,
+    now_utc: &str,
+) -> Result<StorageAssuranceReport, StorageAssuranceError> {
+    run_one_disk_housekeeping(config, live_status_registry, now_utc)
+}
+
 fn recover_assurance_operation(
     config: &StorageAssuranceConfig,
     roots: &[MeasuredRoot],
@@ -528,9 +622,17 @@ fn recover_assurance_operation(
             operation::remove(&config.operation_journal_path)?;
             return Ok(None);
         }
-        let actual_hash = hash_file_sha256_controlled(&destination_path, || {
-            assurance_should_preempt(config, &live_status_registry, now_utc)
-        })?;
+        let budget = std::sync::Mutex::new(IoBudget::new(config));
+        let actual_hash = hash_file_sha256_controlled(
+            &destination_path,
+            || assurance_should_preempt(config, &live_status_registry, now_utc),
+            |bytes_read| {
+                budget
+                    .lock()
+                    .expect("IO budget lock poisoned")
+                    .consume(bytes_read)
+            },
+        )?;
         if actual_hash != expected_hash {
             return Err(StorageAssuranceError::AmbiguousRecovery(
                 operation.operation_id,
@@ -559,9 +661,17 @@ fn recover_assurance_operation(
             operation::remove(&config.operation_journal_path)?;
             return Ok(None);
         }
-        let actual_hash = hash_file_sha256_controlled(&destination_path, || {
-            assurance_should_preempt(config, &live_status_registry, now_utc)
-        })?;
+        let budget = std::sync::Mutex::new(IoBudget::new(config));
+        let actual_hash = hash_file_sha256_controlled(
+            &destination_path,
+            || assurance_should_preempt(config, &live_status_registry, now_utc),
+            |bytes_read| {
+                budget
+                    .lock()
+                    .expect("IO budget lock poisoned")
+                    .consume(bytes_read)
+            },
+        )?;
         if actual_hash != expected_hash {
             return Err(StorageAssuranceError::HashMismatch {
                 object_id: operation.candidate.object_id.to_string(),
@@ -613,7 +723,9 @@ fn claim_kind(
 ) -> Result<DiskCapacityClaimKind, StorageAssuranceError> {
     match action {
         StorageAssuranceAction::Evacuate => Ok(DiskCapacityClaimKind::Evacuation),
-        StorageAssuranceAction::Rebalance => Ok(DiskCapacityClaimKind::Repair),
+        StorageAssuranceAction::Rebalance | StorageAssuranceAction::Rotate => {
+            Ok(DiskCapacityClaimKind::Repair)
+        }
         StorageAssuranceAction::Verify | StorageAssuranceAction::Idle => {
             Err(StorageAssuranceError::MissingAssuranceDestination)
         }
@@ -646,9 +758,50 @@ fn assurance_should_preempt(
         || assurance_primary_work_pending(&config.live_sqlite_path).unwrap_or(true)
 }
 
+/// A per-action rate governor.  It intentionally accounts IO by bytes rather
+/// than sleeping after an entire file, which keeps foreground preemption and
+/// bounded resource use effective for large placements.
+#[derive(Debug)]
+struct IoBudget {
+    bytes_per_second: u64,
+    observed_bytes: u64,
+    started_at: Instant,
+}
+
+impl IoBudget {
+    fn new(config: &StorageAssuranceConfig) -> Self {
+        Self {
+            bytes_per_second: config
+                .available_io_bytes_per_second
+                .saturating_mul(u64::from(config.io_percent))
+                .checked_div(100)
+                .unwrap_or(1)
+                .max(1),
+            observed_bytes: 0,
+            started_at: Instant::now(),
+        }
+    }
+
+    fn consume(&mut self, bytes: u64) {
+        self.observed_bytes = self.observed_bytes.saturating_add(bytes);
+        let target_elapsed = Duration::from_secs_f64(
+            self.observed_bytes as f64 / self.bytes_per_second.max(1) as f64,
+        );
+        if let Some(delay) = target_elapsed.checked_sub(self.started_at.elapsed()) {
+            thread::sleep(delay);
+        }
+    }
+
+    #[cfg(test)]
+    fn permitted_bytes_per_second(&self) -> u64 {
+        self.bytes_per_second
+    }
+}
+
 fn hash_file_sha256_controlled(
     path: &Path,
     mut should_cancel: impl FnMut() -> bool,
+    mut on_bytes_read: impl FnMut(u64),
 ) -> Result<String, StorageAssuranceError> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -662,6 +815,7 @@ fn hash_file_sha256_controlled(
             break;
         }
         hasher.update(&buffer[..read]);
+        on_bytes_read(u64::try_from(read).unwrap_or(u64::MAX));
     }
     Ok(format!("{:x}", hasher.finalize()))
 }
@@ -719,9 +873,9 @@ fn select_action<'a>(
             }
         }
     }
-    candidates
+    let stale = candidates
         .iter()
-        .find(|candidate| {
+        .filter(|candidate| {
             candidate
                 .verified_at_utc
                 .as_deref()
@@ -731,6 +885,15 @@ fn select_action<'a>(
                         >= i64::try_from(config.verify_after_seconds).unwrap_or(i64::MAX)
                 })
         })
+        .collect::<Vec<_>>();
+    for candidate in &stale {
+        if let Some(destination) = best_destination(config, roots, candidate) {
+            return Some((StorageAssuranceAction::Rotate, candidate, Some(destination)));
+        }
+    }
+    stale
+        .into_iter()
+        .next()
         .map(|candidate| (StorageAssuranceAction::Verify, candidate, None))
 }
 
@@ -832,7 +995,7 @@ fn report_for(
     message: &str,
 ) -> StorageAssuranceReport {
     StorageAssuranceReport {
-        schema: "dasobjectstore.storage_assurance.report.v1",
+        schema: "dasobjectstore.disk_housekeeping.report.v1",
         completed_at_utc: now_utc.to_string(),
         success: true,
         action,
@@ -898,6 +1061,22 @@ fn env_u64(name: &str, default: u64) -> Result<u64, StorageAssuranceError> {
     }
 }
 
+fn env_u64_with_legacy(
+    name: &str,
+    legacy_name: &str,
+    default: u64,
+) -> Result<u64, StorageAssuranceError> {
+    match std::env::var(name) {
+        Ok(value) => value.parse().map_err(|_| {
+            StorageAssuranceError::InvalidConfiguration(format!("{name} must be an integer"))
+        }),
+        Err(std::env::VarError::NotPresent) => env_u64(legacy_name, default),
+        Err(error) => Err(StorageAssuranceError::InvalidConfiguration(format!(
+            "{name}: {error}"
+        ))),
+    }
+}
+
 fn env_bool(name: &str, default: bool) -> Result<bool, StorageAssuranceError> {
     match std::env::var(name) {
         Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
@@ -908,6 +1087,26 @@ fn env_bool(name: &str, default: bool) -> Result<bool, StorageAssuranceError> {
             ))),
         },
         Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(error) => Err(StorageAssuranceError::InvalidConfiguration(format!(
+            "{name}: {error}"
+        ))),
+    }
+}
+
+fn env_bool_with_legacy(
+    name: &str,
+    legacy_name: &str,
+    default: bool,
+) -> Result<bool, StorageAssuranceError> {
+    match std::env::var(name) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err(StorageAssuranceError::InvalidConfiguration(format!(
+                "{name} must be true or false"
+            ))),
+        },
+        Err(std::env::VarError::NotPresent) => env_bool(legacy_name, default),
         Err(error) => Err(StorageAssuranceError::InvalidConfiguration(format!(
             "{name}: {error}"
         ))),
@@ -1082,6 +1281,40 @@ mod tests {
     }
 
     #[test]
+    fn stale_placement_rotates_before_falling_back_to_rehash() {
+        let config = test_config();
+        let roots = vec![root("disk-a", 50, 100), root("disk-b", 52, 100)];
+        let candidates = vec![candidate("disk-a")];
+        let selected = select_action(&config, &roots, &candidates, i64::MAX).expect("action");
+        assert_eq!(selected.0, StorageAssuranceAction::Rotate);
+        assert_eq!(selected.2.expect("destination").disk_id.as_str(), "disk-b");
+    }
+
+    #[test]
+    fn stale_placement_rehashes_when_copy_separation_leaves_no_target() {
+        let config = test_config();
+        let roots = vec![root("disk-a", 50, 100), root("disk-b", 52, 100)];
+        let mut placement = candidate("disk-a");
+        placement
+            .existing_disk_ids
+            .push("disk-b".parse().expect("disk id"));
+        let candidates = [placement];
+        let selected = select_action(&config, &roots, &candidates, i64::MAX).expect("action");
+        assert_eq!(selected.0, StorageAssuranceAction::Verify);
+        assert!(selected.2.is_none());
+    }
+
+    #[test]
+    fn housekeeping_io_budget_is_capped_at_ten_percent_of_declared_capacity() {
+        let mut config = test_config();
+        config.available_io_bytes_per_second = 1_000;
+        config.io_percent = 10;
+        assert_eq!(IoBudget::new(&config).permitted_bytes_per_second(), 100);
+        config.io_percent = 11;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
     fn large_placement_is_not_silently_excluded_from_evacuation_or_scrub() {
         let mut config = test_config();
         config.max_object_bytes = 1;
@@ -1101,10 +1334,14 @@ mod tests {
         let payload = root.join("payload");
         fs::write(&payload, vec![7_u8; 2 * 1024 * 1024]).expect("payload");
         let mut checks = 0;
-        let error = hash_file_sha256_controlled(&payload, || {
-            checks += 1;
-            checks > 1
-        })
+        let error = hash_file_sha256_controlled(
+            &payload,
+            || {
+                checks += 1;
+                checks > 1
+            },
+            |_| {},
+        )
         .expect_err("preempted");
         assert!(matches!(error, StorageAssuranceError::Preempted));
         fs::remove_dir_all(root).expect("cleanup");
@@ -1259,6 +1496,8 @@ mod tests {
             imbalance_basis_points: 500,
             max_object_bytes: 1024,
             idle_io_bytes_per_second: 1024,
+            available_io_bytes_per_second: 100 * 1024 * 1024,
+            io_percent: 10,
             live_sqlite_path: PathBuf::from("/live.sqlite"),
             hdd_root: PathBuf::from("/hdd"),
             latest_report_path: PathBuf::from("/state/latest.json"),

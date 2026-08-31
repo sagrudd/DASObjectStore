@@ -49,6 +49,7 @@ mod remote_sessions;
 mod remote_upload;
 mod service;
 mod service_reconciliation;
+mod ssd_residency;
 mod staging_inventory;
 mod storage_assurance;
 mod subobject_capacity_persistence;
@@ -346,10 +347,16 @@ pub use service_reconciliation::{
     garbage_collect_reconciliation_staging, ReconciliationGarbageCollectionDisposition,
     ReconciliationGarbageCollectionReport, ReconciliationGarbageCollectionSnapshot,
 };
+pub use ssd_residency::{
+    build_ssd_residency_report, persist_ssd_residency_report, SsdResidencyBucket,
+    SsdResidencyCoverage, SsdResidencyError, SsdResidencyReport, SSD_RESIDENCY_REPORT_SCHEMA,
+};
 pub use staging_inventory::build_staging_inventory;
 pub use storage_assurance::{
-    run_one_storage_assurance, spawn_storage_assurance_loop, StorageAssuranceAction,
-    StorageAssuranceConfig, StorageAssuranceError, StorageAssuranceReport,
+    run_one_disk_housekeeping, run_one_storage_assurance, spawn_disk_housekeeping_loop,
+    spawn_storage_assurance_loop, DiskHousekeepingAction, DiskHousekeepingConfig,
+    DiskHousekeepingReport, StorageAssuranceAction, StorageAssuranceConfig, StorageAssuranceError,
+    StorageAssuranceReport,
 };
 pub use subobject_capacity_persistence::{
     load_subobject_capacity_ledger, save_subobject_capacity_ledger,
