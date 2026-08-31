@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.176.9 - 2026-08-31
+
+- Restore autonomous durable settlement for SSD-bound artefacts stranded only
+  by a historical HDD capacity exhaustion. The daemon requeues one eligible
+  terminal job at a time without a user session, then applies ordinary
+  capacity selection, checksum verification, and immediate SSD eviction.
+  Checksum, path, policy, cancellation, and metadata failures remain
+  fail-closed in review.
+
 ## 0.176.8 - 2026-08-31
 
 - Preserve a package-managed QNAP DAS inventory in the Enclosures view when

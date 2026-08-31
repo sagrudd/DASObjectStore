@@ -15,7 +15,7 @@ use std::time::Duration;
 #[cfg(test)]
 use crate::destage_control::{
     pause_destage, renew_destage_and_scheduler_leases, resume_destage, retry_destage,
-    retry_needs_review_destage_for_store,
+    retry_needs_review_destage_for_store, retry_one_capacity_blocked_destage,
 };
 
 const PUBLICATION_BUSY_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1420,6 +1420,100 @@ mod tests {
                 ),
                 (
                     "object-c".into(),
+                    "needs_review".into(),
+                    3,
+                    "needs_review".into(),
+                    8
+                ),
+            ]
+        );
+        cleanup(path);
+    }
+
+    #[test]
+    fn autonomous_retry_only_requeues_uncancelled_capacity_reviews() {
+        let path = database("autonomous-capacity-review-retry");
+        prepare(&path, &["store-a"]);
+        for (object, job) in [
+            ("object-capacity", "job-capacity"),
+            ("object-checksum", "job-checksum"),
+            ("object-cancelled", "job-cancelled"),
+        ] {
+            commit(&path, "store-a", object, job, 5).expect("commit");
+        }
+        let connection = Connection::open(&path).expect("open");
+        connection
+            .execute(
+                "UPDATE destage_queue
+                 SET state='needs_review',attempt_count=max_attempts,
+                     last_error=CASE object_id
+                       WHEN 'object-capacity' THEN 'HDD copy IO failed: No space left on device (os error 28)'
+                       WHEN 'object-cancelled' THEN 'HDD copy IO failed: No space left on device (os error 28)'
+                       ELSE 'HDD copy checksum mismatch'
+                     END,
+                     cancellation_requested=CASE object_id
+                       WHEN 'object-cancelled' THEN 1 ELSE 0 END",
+                [],
+            )
+            .expect("terminal destage states");
+        connection
+            .execute(
+                "UPDATE scheduler_jobs SET state='needs_review',attempt_count=max_attempts",
+                [],
+            )
+            .expect("terminal scheduler states");
+        drop(connection);
+
+        assert_eq!(
+            retry_one_capacity_blocked_destage(&path, "2026-01-01T00:03:00Z")
+                .expect("autonomous retry"),
+            Some(ObjectId::new("object-capacity").expect("object id"))
+        );
+        assert_eq!(
+            retry_one_capacity_blocked_destage(&path, "2026-01-01T00:04:00Z")
+                .expect("no other safe capacity retry"),
+            None
+        );
+
+        let connection = Connection::open(&path).expect("open");
+        let states = connection
+            .prepare(
+                "SELECT d.object_id,d.state,d.attempt_count,s.state,s.attempt_count
+                 FROM destage_queue d JOIN scheduler_jobs s ON s.object_id=d.object_id
+                 ORDER BY d.object_id",
+            )
+            .expect("prepare")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
+                ))
+            })
+            .expect("query")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("states");
+        assert_eq!(
+            states,
+            vec![
+                (
+                    "object-cancelled".into(),
+                    "needs_review".into(),
+                    3,
+                    "needs_review".into(),
+                    8
+                ),
+                (
+                    "object-capacity".into(),
+                    "queued_for_hdd".into(),
+                    0,
+                    "queued".into(),
+                    0
+                ),
+                (
+                    "object-checksum".into(),
                     "needs_review".into(),
                     3,
                     "needs_review".into(),

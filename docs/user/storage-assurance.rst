@@ -99,7 +99,12 @@ legacy or crash-interrupted residue.
 The worker never deletes an SSD payload merely because it is old. It requires
 the durable HDD settlement state, required verified-copy count, and exact
 managed path to agree. A missing queue, path mismatch, unreadable entry, or
-``needs_review`` state is reported as orphaned and retained for repair.
+``needs_review`` state is reported as orphaned and retained for repair. The
+sole automatic exception is a terminal job whose recorded failure is an HDD
+capacity exhaustion: the daemon-owned durable destage worker requeues one such
+job without a user session, then performs the normal current-capacity
+selection, checksum verification, and post-settlement SSD deletion. Checksum,
+path, policy, cancellation, and metadata failures remain retained for review.
 
 When the last placement leaves a disk already marked ``Draining``, one SQLite
 transaction proves the disk empty and changes it to ``Retired``. A disk with
