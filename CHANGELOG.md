@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.176.1 - 2026-08-31
+
+- Delete each exact managed SSD payload in the same durable destage pass that
+  has verified and promoted its required HDD copy or copies. A regression test
+  proves that successful settlement records the eviction and leaves no staged
+  payload behind; failures remain proof-backed residue for safe retry.
+
 ## 0.176.0 - 2026-08-31
 
 - Canonicalize the Proxenos public Site Trust source URL in the remote-client

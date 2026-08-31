@@ -85,12 +85,12 @@ destage preempt it before the next chunk. Packaged appliances use a conservative
 available capacity for the appliance after commissioning so the ten-percent
 limit is exact for its disks.
 
-SSD settlement is not idle-only. The durable destage worker removes one
-proof-backed SSD payload before accepting another queued HDD copy. Therefore a
-continuously busy queue cannot indefinitely retain already-settled SSD bytes,
-while objects that still need HDD copies remain the next priority. A scheduled,
-evidence-based garbage-collection pass also runs every hour, rather than only
-at daemon startup.
+SSD settlement is not idle-only. Immediately after the durable destage worker
+has verified and promoted the required HDD copy or copies, that same settlement
+pass deletes the exact managed SSD payload and records the eviction. Therefore
+a continuously busy queue cannot retain newly settled SSD bytes. A scheduled,
+evidence-based garbage-collection pass also runs every hour to recover only
+legacy or crash-interrupted residue.
 
 The worker never deletes an SSD payload merely because it is old. It requires
 the durable HDD settlement state, required verified-copy count, and exact
