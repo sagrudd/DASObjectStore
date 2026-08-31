@@ -418,12 +418,14 @@ on the Spark and keep that terminal attached while the pairing is in progress:
    dasobjectstore-remote login 192.168.0.193 epic_collection \
      --username stephen --set-s3-config --no-browser
 
-The client prints an ``Open Monas approval URL (shows Pistis QR):`` line.  Open
-that URL in a browser that can reach the NUC, authenticate through the ordinary
-Monas session, and approve the one-time Pistis request on the enrolled phone.
-The QR is rendered only by the Monas host; it is never copied into the SSH
-terminal.  The client polls for the approved exchange and then prints that the
-short-lived session and AWS profile were committed.  ``--no-browser`` is
+The client prints an ``Open Monas approval URL (shows Pistis QR):`` line. Open
+that URL in a browser that can reach the NUC. Even when that browser already
+has an ordinary Monas session, Monas displays a fresh Pistis QR for this exact
+remote pairing; scan it and complete Face ID. The resulting approval is bound
+to the selected ObjectStore and cannot authorise a substituted or replayed
+pairing. The QR is rendered only by the Monas host; it is never copied into the
+SSH terminal. The client polls for the approved exchange and then prints that
+the short-lived session and AWS profile were committed. ``--no-browser`` is
 important on the headless Spark because the SSH session cannot launch a local
 browser.
 
