@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.175.0 - 2026-08-31
+
+- Add signed, process-local Monas Site Trust provisioning to
+  ``dasobjectstore-remote``. The standalone DEB/RPM verifies Proxenos PXCE/v1
+  before any HTTPS request and requires no remote Proxenos service or OS CA
+  store mutation.
+- Use provisioned Site Trust consistently for Monas EasyConnect login, retained
+  control-session renewal, generated AWS CLI profiles, direct AWS CLI calls,
+  and daemon-submitted S3 work.
+- Carry the verified public CA-bundle path into AWS profile verification so S3
+  traffic on compute hosts and read-only containers uses the same Site root.
+
 ## 0.174.0 - 2026-08-31
 
 - Promote the existing idle storage-assurance work into the named
