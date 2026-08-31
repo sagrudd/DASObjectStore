@@ -375,6 +375,9 @@ fn pinned_client_for_binding(
             base_url: binding.control_base_url.clone(),
         });
     }
+    if binding.tls_trust == crate::config::RemoteTlsTrust::ProvisionedSiteTrust {
+        return provisioned_site_trust_client_for_binding(binding);
+    }
     let appliance = RemotePairedAppliance {
         appliance_id: binding.appliance_id.clone(),
         display_name: binding.appliance_id.clone(),
@@ -410,6 +413,45 @@ fn pinned_client_for_binding(
         ));
     }
     Ok(transport)
+}
+
+fn provisioned_site_trust_client_for_binding(
+    binding: &crate::config::RemoteSessionBinding,
+) -> Result<PinnedControlTransport, RemoteControlError> {
+    let url = reqwest::Url::parse(&binding.control_base_url).map_err(|_| {
+        RemoteControlError::Configuration("authoritative control endpoint is malformed".to_string())
+    })?;
+    let host = url.host_str().ok_or_else(|| {
+        RemoteControlError::Configuration("authoritative control endpoint has no host".to_string())
+    })?;
+    let path = binding.site_trust_bundle_path.as_deref().ok_or_else(|| {
+        RemoteControlError::Configuration(
+            "site trust not provisioned: committed Monas session has no Site Trust record"
+                .to_string(),
+        )
+    })?;
+    let trust = crate::site_trust::load_record(
+        std::path::Path::new(path),
+        host,
+        url.port_or_known_default().unwrap_or(8443),
+    )
+    .map_err(|error| RemoteControlError::Configuration(error.to_string()))?;
+    let certificate = reqwest::Certificate::from_pem(
+        &std::fs::read(&trust.ca_bundle_path)
+            .map_err(|error| RemoteControlError::Configuration(error.to_string()))?,
+    )
+    .map_err(|_| {
+        RemoteControlError::Configuration("provisioned Site Trust CA bundle is invalid".to_string())
+    })?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .add_root_certificate(certificate)
+        .build()
+        .map_err(RemoteControlError::Transport)?;
+    Ok(PinnedControlTransport {
+        client,
+        base_url: binding.control_base_url.clone(),
+    })
 }
 
 fn rewrite_url_for_transport(

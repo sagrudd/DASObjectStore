@@ -196,9 +196,13 @@ fn validate_content_type(content_type: &str) -> Result<&str, RemoteS3Error> {
 pub fn execute_aws_plan(
     plan: &AwsS3CommandPlan,
     credentials: Option<&RemoteS3Credentials>,
+    ca_bundle_path: Option<&str>,
 ) -> Result<String, RemoteS3Error> {
     let mut command = Command::new(&plan.program);
     command.args(&plan.args);
+    if let Some(ca_bundle_path) = ca_bundle_path {
+        command.env("AWS_CA_BUNDLE", ca_bundle_path);
+    }
     if let Some(credentials) = credentials {
         command
             .env("AWS_ACCESS_KEY_ID", &credentials.access_key_id)

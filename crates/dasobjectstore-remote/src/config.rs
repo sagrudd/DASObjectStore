@@ -142,6 +142,7 @@ impl RemoteSessionBinding {
             addressing_style: self.addressing_style.clone(),
             s3_profile: self.s3_profile.clone(),
             tls_trust: self.tls_trust,
+            site_trust_bundle_path: self.site_trust_bundle_path.clone(),
             trust_fingerprint_sha256: self.trust_fingerprint_sha256.clone(),
             trust_spki_sha256: self.trust_spki_sha256.clone(),
             session: self.session.redacted(),
@@ -162,6 +163,8 @@ pub struct RemoteSessionBinding {
     pub s3_profile: Option<String>,
     #[serde(default)]
     pub tls_trust: RemoteTlsTrust,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_trust_bundle_path: Option<String>,
     pub trust_fingerprint_sha256: String,
     pub trust_spki_sha256: String,
     pub session: RemoteUploadSession,
@@ -173,6 +176,7 @@ pub enum RemoteTlsTrust {
     #[default]
     EnrolledCertificate,
     SystemPki,
+    ProvisionedSiteTrust,
 }
 
 impl RemoteConfig {
@@ -454,6 +458,7 @@ pub struct RedactedRemoteSessionBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_profile: Option<String>,
     pub tls_trust: RemoteTlsTrust,
+    pub site_trust_bundle_path: Option<String>,
     pub trust_fingerprint_sha256: String,
     pub trust_spki_sha256: String,
     pub session: RedactedRemoteUploadSession,

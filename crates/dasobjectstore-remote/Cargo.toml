@@ -17,9 +17,11 @@ base64.workspace = true
 clap.workspace = true
 dasobjectstore-core.workspace = true
 dasobjectstore-daemon.workspace = true
+hex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 rustls-pemfile.workspace = true
+proxenos.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -27,5 +29,7 @@ subtle.workspace = true
 x509-parser.workspace = true
 
 [dev-dependencies]
+coset = "0.3"
+ed25519-dalek = { version = "2.2", default-features = false }
 rcgen.workspace = true
 uuid.workspace = true

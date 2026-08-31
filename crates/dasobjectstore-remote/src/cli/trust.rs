@@ -14,6 +14,8 @@ impl TrustArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum TrustCommand {
+    /// Verify and persist one signed, public-only Site Trust without changing the OS CA store.
+    Provision(TrustProvisionArgs),
     /// Enrol first-use appliance TLS trust without requesting a password.
     Enroll(TrustEnrollArgs),
     /// Inspect trust for one appliance endpoint.
@@ -26,6 +28,46 @@ pub enum TrustCommand {
     Rotate(TrustRotateArgs),
     /// Repair certificate trust, renew the session, and optionally configure S3.
     Repair(TrustRepairArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TrustProvisionArgs {
+    host_or_ip: String,
+    #[arg(long, default_value_t = crate::easyconnect::DEFAULT_MONAS_HTTPS_PORT)]
+    https_port: u16,
+    /// Expected Site UUID from the organisation's signed Site Trust record.
+    #[arg(long, value_name = "32_HEX")]
+    site_uuid: String,
+    /// PXCE/v1 envelope transferred through the authenticated provisioning channel.
+    #[arg(long, value_name = "PATH")]
+    envelope: PathBuf,
+    /// SHA-256 independently observed over that authenticated channel.
+    #[arg(long, value_name = "64_HEX")]
+    authenticated_envelope_sha256: String,
+    /// Output Site Trust record; default is the package-owned per-endpoint path.
+    #[arg(long, value_name = "PATH")]
+    output: Option<PathBuf>,
+}
+
+impl TrustProvisionArgs {
+    pub fn host_or_ip(&self) -> &str {
+        &self.host_or_ip
+    }
+    pub fn https_port(&self) -> u16 {
+        self.https_port
+    }
+    pub fn site_uuid(&self) -> &str {
+        &self.site_uuid
+    }
+    pub fn envelope(&self) -> &Path {
+        &self.envelope
+    }
+    pub fn authenticated_envelope_sha256(&self) -> &str {
+        &self.authenticated_envelope_sha256
+    }
+    pub fn output(&self) -> Option<&Path> {
+        self.output.as_deref()
+    }
 }
 
 #[derive(Debug, Args)]

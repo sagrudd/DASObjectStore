@@ -22,6 +22,9 @@ pub(super) fn run_upload(
         args.progress(),
         route.credential_source,
     )?;
+    let ca_bundle_path = super::control_commands::provisioned_ca_bundle_path(
+        config.session_binding(&route.object_store)?,
+    )?;
     if args.dry_run() {
         writeln!(
             writer,
@@ -54,13 +57,14 @@ pub(super) fn run_upload(
             &plan,
             &config.region,
             credentials.as_ref(),
+            ca_bundle_path.as_deref(),
             args.source(),
             source_inventory,
         )?;
         write_daemon_upload_response(&response, args.progress(), writer)?;
         return Ok(());
     }
-    let output = execute_aws_plan(&plan, credentials.as_ref())?;
+    let output = execute_aws_plan(&plan, credentials.as_ref(), ca_bundle_path.as_deref())?;
     if !output.trim().is_empty() {
         writer.write_all(output.as_bytes())?;
     }
@@ -74,6 +78,7 @@ pub(super) fn submit_upload_plan_to_daemon<T: DaemonClientTransport>(
     plan: &crate::s3::AwsS3CommandPlan,
     region: &str,
     credentials: Option<&RemoteS3Credentials>,
+    ca_bundle_path: Option<&str>,
     source: &Path,
     source_inventory: RemoteSourceInventory,
 ) -> Result<RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteRunError> {
@@ -84,6 +89,7 @@ pub(super) fn submit_upload_plan_to_daemon<T: DaemonClientTransport>(
             plan,
             region,
             credentials,
+            ca_bundle_path,
             source,
             source_inventory,
         ))
@@ -96,6 +102,7 @@ pub(super) fn build_daemon_upload_request(
     plan: &crate::s3::AwsS3CommandPlan,
     region: &str,
     credentials: Option<&RemoteS3Credentials>,
+    ca_bundle_path: Option<&str>,
     source: &Path,
     source_inventory: RemoteSourceInventory,
 ) -> RemoteEasyconnectSubmitAwsCliUploadRequest {
@@ -143,7 +150,7 @@ pub(super) fn build_daemon_upload_request(
         program: plan.program.clone(),
         args: upload_args,
         display_args: redacted_upload_display_args(plan, source),
-        environment: daemon_upload_environment(credentials, region),
+        environment: daemon_upload_environment(credentials, region, ca_bundle_path),
         progress_telemetry: Some(RemoteEasyconnectUploadProgressTelemetry {
             source_scan_count: Some(source_inventory.file_count),
             staged_bytes: Some(source_inventory.total_bytes),
@@ -165,11 +172,18 @@ pub(super) fn completion_object_version(checksum: &str) -> u64 {
 pub(super) fn daemon_upload_environment(
     credentials: Option<&RemoteS3Credentials>,
     region: &str,
+    ca_bundle_path: Option<&str>,
 ) -> Vec<RemoteEasyconnectAwsCliEnvironmentVariable> {
     let mut environment = vec![RemoteEasyconnectAwsCliEnvironmentVariable {
         name: "AWS_DEFAULT_REGION".to_string(),
         value: region.to_string(),
     }];
+    if let Some(ca_bundle_path) = ca_bundle_path {
+        environment.push(RemoteEasyconnectAwsCliEnvironmentVariable {
+            name: "AWS_CA_BUNDLE".to_string(),
+            value: ca_bundle_path.to_string(),
+        });
+    }
     let Some(credentials) = credentials else {
         return environment;
     };

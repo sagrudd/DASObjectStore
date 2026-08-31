@@ -402,6 +402,7 @@ fn profile_association_from_binding(
         bucket: binding.bucket.clone(),
         region: binding.region.clone(),
         addressing_style: binding.addressing_style.clone(),
+        ca_bundle_path: None,
         temporary_credentials: binding.session.credentials.session_token.is_some(),
         expires_at: Some(binding.session.expires_at.clone()),
     })
@@ -680,6 +681,7 @@ fn migrate_legacy_sessions(config: &mut RemoteConfig) -> Result<(), RemoteConfig
                     .unwrap_or_else(|| "path".to_string()),
                 s3_profile: profile,
                 tls_trust: appliance.tls_trust,
+                site_trust_bundle_path: None,
                 trust_fingerprint_sha256: trust
                     .as_ref()
                     .map(|record| record.fingerprint_sha256.clone())
@@ -872,6 +874,7 @@ mod tests {
             addressing_style: "path".to_string(),
             s3_profile: Some("dasobjectstore-epic_collection".to_string()),
             tls_trust: crate::config::RemoteTlsTrust::EnrolledCertificate,
+            site_trust_bundle_path: None,
             trust_fingerprint_sha256: "AA:BB".to_string(),
             trust_spki_sha256: "CC:DD".to_string(),
             session: RemoteUploadSession {

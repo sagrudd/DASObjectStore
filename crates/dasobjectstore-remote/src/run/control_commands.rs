@@ -450,7 +450,59 @@ pub(super) fn connection_context_from_binding(
         renew_url: renewal.renew_url.clone(),
         renew_after_utc: renewal.renew_after.clone(),
         renewal_token: renewal.renewal_token.clone().unwrap_or_default(),
+        ca_bundle_path: provisioned_ca_bundle_path(binding)?,
     })
+}
+
+pub(super) fn provisioned_ca_bundle_path(
+    binding: &RemoteSessionBinding,
+) -> Result<Option<String>, RemoteRunError> {
+    if binding.tls_trust != crate::config::RemoteTlsTrust::ProvisionedSiteTrust {
+        return Ok(None);
+    }
+    let control_url = reqwest::Url::parse(&binding.control_base_url).map_err(|_| {
+        RemoteRunError::UploadRouting(
+            "configuration_migration_required: control endpoint is invalid".to_string(),
+        )
+    })?;
+    let record_path = binding.site_trust_bundle_path.as_deref().ok_or_else(|| {
+        RemoteRunError::UploadRouting(
+            "site trust not provisioned: committed Monas session has no Site Trust record"
+                .to_string(),
+        )
+    })?;
+    let trust = crate::site_trust::load_record(
+        std::path::Path::new(record_path),
+        control_url.host_str().unwrap_or_default(),
+        control_url.port_or_known_default().unwrap_or(8443),
+    )
+    .map_err(|error| RemoteRunError::UploadRouting(error.to_string()))?;
+    Ok(Some(trust.ca_bundle_path.display().to_string()))
+}
+
+pub(super) fn provisioned_ca_bundle_path_for_s3_endpoint(
+    config: &RemoteConfig,
+    endpoint_url: &str,
+) -> Result<Option<String>, RemoteRunError> {
+    let mut paths = config
+        .session_bindings
+        .iter()
+        .filter(|binding| binding.s3_endpoint_url == endpoint_url)
+        .map(provisioned_ca_bundle_path)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    match paths.as_slice() {
+        [] => Ok(None),
+        [path] => Ok(Some(path.clone())),
+        _ => Err(RemoteRunError::UploadRouting(
+            "configuration_migration_required: multiple Site Trust roots match this S3 endpoint"
+                .to_string(),
+        )),
+    }
 }
 
 pub(super) fn resolved_control_config_for_operation(

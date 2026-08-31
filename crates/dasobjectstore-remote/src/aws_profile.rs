@@ -19,6 +19,8 @@ pub struct AwsProfileAssociation {
     pub bucket: String,
     pub region: String,
     pub addressing_style: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_bundle_path: Option<String>,
     pub temporary_credentials: bool,
     pub expires_at: Option<String>,
 }
@@ -146,16 +148,18 @@ pub fn install_profile(
     } else {
         format!("profile {profile}")
     };
-    let config_after = replace_section(
-        &config_before,
-        &config_section,
-        &[
-            format!("region = {}", context.region),
-            format!("endpoint_url = {}", context.endpoint_url),
-            "s3 =".to_string(),
-            format!("    addressing_style = {}", context.addressing_style),
-        ],
-    );
+    let mut config_lines = vec![
+        format!("region = {}", context.region),
+        format!("endpoint_url = {}", context.endpoint_url),
+    ];
+    if let Some(ca_bundle_path) = &context.ca_bundle_path {
+        config_lines.push(format!("ca_bundle = {ca_bundle_path}"));
+    }
+    config_lines.extend([
+        "s3 =".to_string(),
+        format!("    addressing_style = {}", context.addressing_style),
+    ]);
+    let config_after = replace_section(&config_before, &config_section, &config_lines);
     let mut credential_lines = vec![
         format!("aws_access_key_id = {}", context.access_key_id),
         format!("aws_secret_access_key = {}", context.secret_access_key),
@@ -172,6 +176,7 @@ pub fn install_profile(
         bucket: context.bucket.clone(),
         region: context.region.clone(),
         addressing_style: context.addressing_style.clone(),
+        ca_bundle_path: context.ca_bundle_path.clone(),
         temporary_credentials: context.session_token.is_some(),
         expires_at: context
             .session_token
@@ -542,6 +547,12 @@ fn verify_profile(
         ])
         .env("AWS_CONFIG_FILE", &paths.config)
         .env("AWS_SHARED_CREDENTIALS_FILE", &paths.credentials)
+        .envs(
+            association
+                .ca_bundle_path
+                .as_ref()
+                .map(|path| ("AWS_CA_BUNDLE", path)),
+        )
         .stderr(Stdio::null())
         .output()
         .map_err(|error| {
@@ -577,6 +588,12 @@ fn verify_profile(
         ])
         .env("AWS_CONFIG_FILE", &paths.config)
         .env("AWS_SHARED_CREDENTIALS_FILE", &paths.credentials)
+        .envs(
+            association
+                .ca_bundle_path
+                .as_ref()
+                .map(|path| ("AWS_CA_BUNDLE", path)),
+        )
         .output()
         .map_err(|error| {
             verification_failure(association, "ListObjectsV2", None, &error.to_string())
@@ -619,6 +636,12 @@ fn verify_profile(
             ])
             .env("AWS_CONFIG_FILE", &paths.config)
             .env("AWS_SHARED_CREDENTIALS_FILE", &paths.credentials)
+            .envs(
+                association
+                    .ca_bundle_path
+                    .as_ref()
+                    .map(|path| ("AWS_CA_BUNDLE", path)),
+            )
             .stdout(Stdio::null())
             .output()
             .map_err(|error| {

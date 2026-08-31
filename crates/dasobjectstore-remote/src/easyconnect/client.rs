@@ -44,7 +44,7 @@ where
         callback_port: Some(callback_port),
     })?;
     let requested_object_store = options.requested_object_store.clone();
-    let transport = https_client(&contract.host_or_ip, options.https_port, options.tls_trust)?;
+    let transport = https_client(&contract.host_or_ip, options.https_port, &options.tls_trust)?;
     let discovery_url = transport_url(
         &contract.appliance_base_url,
         &transport.base_url,
@@ -344,12 +344,41 @@ struct PinnedHttpsClient {
 fn https_client(
     host: &str,
     port: u16,
-    tls_trust: RemoteEasyconnectTlsTrust,
+    tls_trust: &RemoteEasyconnectTlsTrust,
 ) -> Result<PinnedHttpsClient, RemoteEasyconnectPairingError> {
     match tls_trust {
         RemoteEasyconnectTlsTrust::SystemPki => system_pki_https_client(host, port),
         RemoteEasyconnectTlsTrust::EnrolledCertificate => pinned_https_client(host, port),
+        RemoteEasyconnectTlsTrust::ProvisionedSiteTrust(trust) => {
+            provisioned_site_trust_https_client(host, port, trust)
+        }
     }
+}
+
+fn provisioned_site_trust_https_client(
+    host: &str,
+    port: u16,
+    trust: &crate::site_trust::LoadedSiteTrust,
+) -> Result<PinnedHttpsClient, RemoteEasyconnectPairingError> {
+    if trust.record.endpoint_host != host || trust.record.endpoint_port != port {
+        return Err(RemoteEasyconnectPairingError::Trust(
+            "site trust is provisioned for a different HTTPS endpoint".to_string(),
+        ));
+    }
+    let certificate = reqwest::Certificate::from_pem(
+        &std::fs::read(&trust.ca_bundle_path)
+            .map_err(|error| RemoteEasyconnectPairingError::Trust(error.to_string()))?,
+    )
+    .map_err(|error| RemoteEasyconnectPairingError::Trust(error.to_string()))?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .add_root_certificate(certificate)
+        .build()
+        .map_err(|error| RemoteEasyconnectPairingError::Transport(error.to_string()))?;
+    Ok(PinnedHttpsClient {
+        client,
+        base_url: format!("https://{host}:{port}"),
+    })
 }
 
 fn system_pki_https_client(
@@ -477,7 +506,7 @@ mod tests {
 
     #[test]
     fn integrated_system_pki_transport_requires_no_enrollment_record() {
-        let transport = https_client("127.0.0.1", 8443, RemoteEasyconnectTlsTrust::SystemPki)
+        let transport = https_client("127.0.0.1", 8443, &RemoteEasyconnectTlsTrust::SystemPki)
             .expect("system-PKI client construction does not consult appliance trust");
         assert_eq!(transport.base_url, "https://127.0.0.1:8443");
     }
@@ -487,7 +516,7 @@ mod tests {
         let error = match https_client(
             "legacy-system-pki-regression.invalid",
             8448,
-            RemoteEasyconnectTlsTrust::EnrolledCertificate,
+            &RemoteEasyconnectTlsTrust::EnrolledCertificate,
         ) {
             Ok(_) => panic!("legacy transport must retain explicit enrollment"),
             Err(error) => error,
@@ -517,7 +546,7 @@ mod tests {
             let _ = connection.complete_io(&mut socket);
         });
 
-        let transport = https_client("127.0.0.1", port, RemoteEasyconnectTlsTrust::SystemPki)
+        let transport = https_client("127.0.0.1", port, &RemoteEasyconnectTlsTrust::SystemPki)
             .expect("system-PKI client construction");
         let error = transport
             .client

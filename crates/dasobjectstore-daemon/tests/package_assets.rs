@@ -147,7 +147,10 @@ fn packages_fail_closed_monas_access_boundary() {
 
 #[test]
 fn monas_managed_root_projection_is_read_only_and_marker_scoped() {
-    assert_contains(MONAS_ROOT_TRAVERSAL, "shared_group=\"mnemosyne-pistis-das\"");
+    assert_contains(
+        MONAS_ROOT_TRAVERSAL,
+        "shared_group=\"mnemosyne-pistis-das\"",
+    );
     assert_contains(
         MONAS_ROOT_TRAVERSAL,
         "setfacl -m \"g:${shared_group}:${permissions},m::rwx\"",

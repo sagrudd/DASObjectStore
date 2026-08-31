@@ -11,6 +11,14 @@
 - Enforce a bounded maintenance I/O rate of at most ten percent of the
   configured available capacity, and rotate verified HDD placements after nine
   weeks when copy separation permits it (otherwise re-hash them fail-closed).
+- Add signed, process-local Monas Site Trust provisioning to
+  ``dasobjectstore-remote``. The standalone DEB/RPM verifies Proxenos PXCE/v1
+  before any HTTPS request and requires no remote Proxenos service or OS CA
+  store mutation.
+- Use provisioned Site Trust consistently for Monas EasyConnect login, retained
+  control-session renewal, and generated AWS CLI profiles.
+- Carry the verified public CA-bundle path into AWS profile verification so S3
+  traffic on compute hosts and read-only containers uses the same Site root.
 
 ## 0.173.32 - 2026-08-31
 

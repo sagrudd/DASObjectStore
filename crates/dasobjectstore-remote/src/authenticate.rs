@@ -30,6 +30,8 @@ pub struct RemoteConnectionContext {
     pub renew_url: String,
     pub renew_after_utc: String,
     pub renewal_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_bundle_path: Option<String>,
 }
 
 impl RemoteConnectionContext {
@@ -49,6 +51,7 @@ impl RemoteConnectionContext {
             expires_at_utc: self.expires_at_utc.clone(),
             renew_url: self.renew_url.clone(),
             renew_after_utc: self.renew_after_utc.clone(),
+            ca_bundle_path: self.ca_bundle_path.clone(),
             credentials: "<redacted>".to_string(),
         }
     }
@@ -70,6 +73,7 @@ pub struct RedactedRemoteConnectionContext {
     pub expires_at_utc: String,
     pub renew_url: String,
     pub renew_after_utc: String,
+    pub ca_bundle_path: Option<String>,
     pub credentials: String,
 }
 
@@ -390,6 +394,7 @@ mod tests {
             renew_url: "/renew".to_string(),
             renew_after_utc: "2026-01-01T07:00:00Z".to_string(),
             renewal_token: "RENEW123".to_string(),
+            ca_bundle_path: None,
         };
         let redacted = serde_json::to_string(&context.redacted()).unwrap();
         assert!(!redacted.contains("SECRET123"));
