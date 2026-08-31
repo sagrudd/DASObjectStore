@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
+source "$repo_root/packaging/cargo-target-dir.sh"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
@@ -43,8 +44,9 @@ cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_ro
 cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement --manifest-path "$repo_root/Cargo.toml"
 cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement-finalize --manifest-path "$repo_root/Cargo.toml"
 
-rpm_root="$repo_root/target/rpm/rpmbuild"
-staging_root="$repo_root/target/rpm/staging"
+cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
+rpm_root="$cargo_target_dir/rpm/rpmbuild"
+staging_root="$cargo_target_dir/rpm/staging"
 payload_name="${package_name}-${version}"
 payload_root="$staging_root/$payload_name"
 spec_path="$rpm_root/SPECS/${package_name}.spec"
@@ -62,20 +64,20 @@ install -d \
   "$payload_root/usr/lib/tmpfiles.d" \
   "$payload_root/usr/share/doc/$package_name" \
   "$payload_root/usr/share/licenses/$package_name"
-install -m 0755 "$repo_root/target/release/dasobjectstore" "$payload_root/usr/bin/dasobjectstore"
-install -m 0755 "$repo_root/target/release/dasobjectstore-server" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore" "$payload_root/usr/bin/dasobjectstore"
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-server" \
   "$payload_root/usr/bin/dasobjectstore-server"
-install -m 0755 "$repo_root/target/release/dasobjectstore-s3-gateway" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-s3-gateway" \
   "$payload_root/usr/bin/dasobjectstore-s3-gateway"
-install -m 0755 "$repo_root/target/release/dasobjectstored" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstored" \
   "$payload_root/usr/bin/dasobjectstored"
-install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
-install -m 0755 "$repo_root/target/release/dasobjectstore-workspace-host" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-workspace-host" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-workspace-host"
-install -m 0755 "$repo_root/target/release/dasobjectstore-authority-retirement" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-authority-retirement" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement"
-install -m 0755 "$repo_root/target/release/dasobjectstore-authority-retirement-finalize" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-authority-retirement-finalize" \
   "$payload_root/usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize"
 install -m 0755 "$packaging_reporting/gnostikon-workflow-control" \
   "$payload_root/usr/libexec/dasobjectstore/gnostikon-workflow-control"

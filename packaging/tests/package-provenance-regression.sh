@@ -6,9 +6,16 @@ source "$repo_root/packaging/cargo-target-dir.sh"
 for builder in packaging/debian/build-deb.sh packaging/debian/build-remote-deb.sh packaging/rpm/build-rpm.sh packaging/rpm/build-remote-rpm.sh; do grep -q das_package_provenance_init "$repo_root/$builder"; grep -q das_package_normalize_tree "$repo_root/$builder"; done
 for builder in packaging/debian/build-deb.sh packaging/debian/build-remote-deb.sh; do grep -q 'SOURCE_DATE_EPOCH=.*dpkg-deb' "$repo_root/$builder"; done
 for builder in packaging/rpm/build-rpm.sh packaging/rpm/build-remote-rpm.sh; do grep -q -- '--sort=name --mtime=' "$repo_root/$builder"; done
-for builder in packaging/debian/build-remote-deb.sh packaging/rpm/build-remote-rpm.sh; do
+for builder in packaging/debian/build-deb.sh packaging/debian/build-remote-deb.sh packaging/rpm/build-rpm.sh packaging/rpm/build-remote-rpm.sh; do
   grep -Fq 'packaging/cargo-target-dir.sh' "$repo_root/$builder"
   grep -Fq 'das_cargo_target_dir' "$repo_root/$builder"
+  ! grep -Fq '"$repo_root/target/' "$repo_root/$builder"
+done
+for builder in packaging/debian/build-deb.sh packaging/rpm/build-rpm.sh; do
+  grep -Fq '"$cargo_target_dir/release/dasobjectstore"' "$repo_root/$builder"
+  grep -Fq '"$cargo_target_dir/release/dasobjectstored"' "$repo_root/$builder"
+done
+for builder in packaging/debian/build-remote-deb.sh packaging/rpm/build-remote-rpm.sh; do
   grep -Fq '"$cargo_target_dir/release/dasobjectstore-remote"' "$repo_root/$builder"
 done
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.176.6 - 2026-08-31
+
+- Make the full DASObjectStore DEB and RPM builders honour
+  ``CARGO_TARGET_DIR``, matching the standalone remote-client builders. Formal
+  external-target builds now package the binaries they actually compiled.
+
 ## 0.176.5 - 2026-08-31
 
 - Allow bounded HDD balancing to run alongside durable SSD-to-HDD destage.
