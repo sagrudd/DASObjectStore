@@ -7,13 +7,18 @@ use crate::home_aggregator::{
     capacity_for_root, capacity_summary, discover_hdd_roots, drive_count_summary, env_path,
     now_utc_string, DEFAULT_HDD_ROOT, DEFAULT_SSD_ROOT,
 };
+use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const DEFAULT_MANAGED_STORAGE_MANIFEST: &str = "/etc/dasobjectstore/managed-storage.v1.json";
 
 #[derive(Clone, Debug)]
 struct EnclosuresAggregatorConfig {
     ssd_root: PathBuf,
     hdd_root: PathBuf,
+    managed_storage_manifest: PathBuf,
     administrator: bool,
 }
 
@@ -22,9 +27,38 @@ impl EnclosuresAggregatorConfig {
         Self {
             ssd_root: env_path("DASOBJECTSTORE_SSD_ROOT", DEFAULT_SSD_ROOT),
             hdd_root: env_path("DASOBJECTSTORE_HDD_ROOT", DEFAULT_HDD_ROOT),
+            managed_storage_manifest: env_path(
+                "DASOBJECTSTORE_MANAGED_STORAGE_MANIFEST",
+                DEFAULT_MANAGED_STORAGE_MANIFEST,
+            ),
             administrator: env_flag("DASOBJECTSTORE_WEB_ADMINISTRATOR"),
         }
     }
+}
+
+/// Package-managed storage inventory. This is deliberately a read-only
+/// fallback for a USB DAS that the kernel presents as separate disks rather
+/// than as a `/sys/class/enclosure` device.
+#[derive(Clone, Debug, Deserialize)]
+struct ManagedStorageManifestV1 {
+    schema_version: u8,
+    ssd: ManagedStorageMemberV1,
+    hdds: Vec<ManagedStorageMemberV1>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ManagedStorageMemberV1 {
+    path: PathBuf,
+    label: String,
+    device: String,
+    filesystem: String,
+    role: String,
+    uuid: String,
+}
+
+#[derive(Clone, Debug)]
+struct ManagedStorageInventoryFallback {
+    hdds: Vec<ManagedStorageMemberV1>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -52,13 +86,54 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
     let mut hdd_roots = discover_hdd_roots(&config.hdd_root, &mut warnings);
     hdd_roots.sort();
 
-    let hdd_capacities = hdd_roots
-        .iter()
-        .filter_map(|root| capacity_for_root(root))
-        .collect::<Vec<_>>();
-    if hdd_roots
-        .iter()
-        .any(|root| capacity_for_root(root).is_none())
+    // A verified package manifest is retained even if a USB enclosure is
+    // temporarily unplugged or its mounts are unavailable.  Use it only when
+    // no live marker-backed roots exist, so it cannot overwrite live evidence
+    // or create/adopt any storage state.
+    let managed_storage_fallback = hdd_roots.is_empty().then(|| {
+        read_managed_storage_inventory_fallback(
+            &config.managed_storage_manifest,
+            &config.hdd_root,
+            &mut warnings,
+        )
+    });
+    let managed_storage_fallback = managed_storage_fallback.flatten();
+    if let Some(fallback) = &managed_storage_fallback {
+        warnings.retain(|warning| {
+            !matches!(
+                warning.code.as_str(),
+                "hdd_root_missing" | "hdd_inventory_empty" | "hdd_capacity_partial"
+            )
+        });
+        warnings.push(DashboardWarning::new(
+            "managed_storage_inventory_fallback",
+            format!(
+                "{} configured HDD member(s) are shown from the package-managed storage inventory because no live marker-backed enclosure roots are available. This read-only fallback does not mount, adopt, migrate, normalize, or delete ObjectStore data.",
+                fallback.hdds.len()
+            ),
+        ));
+    }
+
+    let hdd_capacities = managed_storage_fallback
+        .as_ref()
+        .map(|fallback| {
+            fallback
+                .hdds
+                .iter()
+                .filter(|member| manifest_member_is_marker_backed(member))
+                .filter_map(|member| capacity_for_root(&member.path))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| {
+            hdd_roots
+                .iter()
+                .filter_map(|root| capacity_for_root(root))
+                .collect::<Vec<_>>()
+        });
+    if managed_storage_fallback.is_none()
+        && hdd_roots
+            .iter()
+            .any(|root| capacity_for_root(root).is_none())
     {
         warnings.push(DashboardWarning::new(
             "hdd_capacity_partial",
@@ -89,7 +164,7 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
         .iter()
         .map(|root| marker_for_root(root))
         .collect::<Vec<_>>();
-    let managed_enclosure_known = !hdd_roots.is_empty();
+    let managed_enclosure_known = !hdd_roots.is_empty() || managed_storage_fallback.is_some();
     // A managed QNAP filesystem pool is the supported enclosure projection
     // for hosts where the enclosure itself is presented as independent USB
     // disks (and therefore has no /sys/class/enclosure entry).  The marker
@@ -105,7 +180,41 @@ fn build_enclosures_dashboard(config: EnclosuresAggregatorConfig) -> EnclosuresP
 
     let mut enclosures = Vec::new();
     let mut details = None;
-    let selected_enclosure_id = if hdd_roots.is_empty() {
+    let selected_enclosure_id = if let Some(fallback) = &managed_storage_fallback {
+        let identity =
+            enclosure_identity_for_roles(fallback.hdds.iter().map(|member| member.role.as_str()));
+        let enclosure_id = identity.enclosure_id.to_string();
+        let mounted_members = fallback
+            .hdds
+            .iter()
+            .filter(|member| manifest_member_is_marker_backed(member))
+            .count();
+        let drive_count = fallback_drive_count(fallback.hdds.len(), mounted_members);
+        enclosures.push(DasEnclosureCardView {
+            enclosure_id: enclosure_id.clone(),
+            display_name: format!("{} (managed-storage inventory)", identity.display_name),
+            mount_path: config.hdd_root.display().to_string(),
+            connection: EnclosureConnectionView {
+                bus: "managed-storage".to_string(),
+                protocol: "manifest fallback".to_string(),
+                link_speed: "not live-probed".to_string(),
+            },
+            health: DashboardHealthStateView::Watch,
+            drive_count,
+            capacity: capacity_summary(&hdd_capacities),
+            last_seen_at_utc: generated_at_utc.clone(),
+            warnings: warnings.clone(),
+        });
+        details = Some(DasEnclosureDetailView {
+            enclosure_id: enclosure_id.clone(),
+            vendor: identity.vendor.to_string(),
+            model: identity.model.to_string(),
+            serial: "configured-managed-storage-inventory".to_string(),
+            firmware: None,
+            slots: fallback_enclosure_slots(&fallback.hdds),
+        });
+        Some(enclosure_id)
+    } else if hdd_roots.is_empty() {
         None
     } else {
         let identity = enclosure_identity(&hdd_markers);
@@ -239,10 +348,18 @@ struct EnclosureIdentity {
 }
 
 fn enclosure_identity(hdd_markers: &[DeviceMarker]) -> EnclosureIdentity {
-    let looks_qnap = hdd_markers
-        .iter()
-        .filter_map(|marker| marker.disk_id())
-        .any(|disk_id| disk_id.starts_with("qnap-"));
+    enclosure_identity_for_roles(
+        hdd_markers
+            .iter()
+            .filter_map(|marker| marker.role.as_deref()),
+    )
+}
+
+fn enclosure_identity_for_roles<'a>(mut roles: impl Iterator<Item = &'a str>) -> EnclosureIdentity {
+    let looks_qnap = roles.any(|role| {
+        role.strip_prefix("hdd:")
+            .is_some_and(|id| id.starts_with("qnap-"))
+    });
 
     if looks_qnap {
         EnclosureIdentity {
@@ -267,6 +384,149 @@ fn enclosure_identity(hdd_markers: &[DeviceMarker]) -> EnclosureIdentity {
             link_speed: "host reported",
         }
     }
+}
+
+fn read_managed_storage_inventory_fallback(
+    path: &Path,
+    hdd_root: &Path,
+    warnings: &mut Vec<DashboardWarning>,
+) -> Option<ManagedStorageInventoryFallback> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            warnings.push(DashboardWarning::new(
+                "managed_storage_manifest_unreadable",
+                format!(
+                    "Managed-storage inventory {} could not be read: {error}.",
+                    path.display()
+                ),
+            ));
+            return None;
+        }
+    };
+    let manifest = match serde_json::from_str::<ManagedStorageManifestV1>(&contents) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            warnings.push(DashboardWarning::new(
+                "managed_storage_manifest_invalid",
+                format!(
+                    "Managed-storage inventory {} is not valid schema-v1 JSON: {error}.",
+                    path.display()
+                ),
+            ));
+            return None;
+        }
+    };
+    if let Err(message) = validate_managed_storage_manifest(&manifest, hdd_root) {
+        warnings.push(DashboardWarning::new(
+            "managed_storage_manifest_invalid",
+            format!(
+                "Managed-storage inventory {} cannot be used as a read-only fallback: {message}.",
+                path.display()
+            ),
+        ));
+        return None;
+    }
+
+    let mut hdds = manifest.hdds;
+    hdds.sort_by(|left, right| left.role.cmp(&right.role));
+    Some(ManagedStorageInventoryFallback { hdds })
+}
+
+fn validate_managed_storage_manifest(
+    manifest: &ManagedStorageManifestV1,
+    hdd_root: &Path,
+) -> Result<(), &'static str> {
+    if manifest.schema_version != 1 {
+        return Err("unsupported schema version");
+    }
+    if manifest.ssd.role != "ssd"
+        || manifest.ssd.path.as_os_str().is_empty()
+        || manifest.ssd.label.trim().is_empty()
+        || manifest.ssd.device.trim().is_empty()
+        || manifest.ssd.filesystem.trim().is_empty()
+        || manifest.ssd.uuid.trim().is_empty()
+    {
+        return Err("invalid SSD identity");
+    }
+    if manifest.hdds.is_empty() {
+        return Err("no configured HDD members");
+    }
+
+    let mut paths = BTreeSet::new();
+    let mut roles = BTreeSet::new();
+    let mut uuids = BTreeSet::new();
+    for member in &manifest.hdds {
+        if !member.role.starts_with("hdd:")
+            || member.path.parent() != Some(hdd_root)
+            || member.label.trim().is_empty()
+            || member.device.trim().is_empty()
+            || member.filesystem.trim().is_empty()
+            || member.uuid.trim().is_empty()
+        {
+            return Err("invalid HDD member");
+        }
+        if !paths.insert(member.path.clone())
+            || !roles.insert(member.role.clone())
+            || !uuids.insert(member.uuid.clone())
+        {
+            return Err("duplicate HDD identity");
+        }
+    }
+    Ok(())
+}
+
+fn manifest_member_is_marker_backed(member: &ManagedStorageMemberV1) -> bool {
+    let marker = marker_for_root(&member.path);
+    marker.role.as_deref() == Some(member.role.as_str())
+        && marker.device.as_deref() == Some(member.device.as_str())
+        && marker.filesystem.as_deref() == Some(member.filesystem.as_str())
+}
+
+fn fallback_drive_count(total: usize, mounted: usize) -> crate::dashboard::DriveCountSummaryView {
+    crate::dashboard::DriveCountSummaryView {
+        total,
+        mounted,
+        healthy: mounted,
+        watch: total.saturating_sub(mounted),
+        suspect: 0,
+        failed: 0,
+    }
+}
+
+fn fallback_enclosure_slots(hdds: &[ManagedStorageMemberV1]) -> Vec<EnclosureDriveSlotView> {
+    hdds.iter()
+        .enumerate()
+        .map(|(index, member)| {
+            let mounted = manifest_member_is_marker_backed(member);
+            EnclosureDriveSlotView {
+                slot_number: (index + 1).min(u8::MAX as usize) as u8,
+                drive_id: member
+                    .role
+                    .strip_prefix("hdd:")
+                    .unwrap_or(member.label.as_str())
+                    .to_string(),
+                role: "managed_storage_inventory".to_string(),
+                mount_path: member.path.display().to_string(),
+                device_path: Some(member.device.clone()),
+                filesystem: Some(member.filesystem.clone()),
+                size_tib: mounted
+                    .then(|| capacity_for_root(&member.path))
+                    .flatten()
+                    .map(|capacity| capacity_summary(&[capacity]).total_tib)
+                    .unwrap_or_else(|| "0.0".to_string()),
+                health: if mounted {
+                    "healthy".to_string()
+                } else {
+                    "unavailable".to_string()
+                },
+                mounted,
+                smart_warning_count: 0,
+                actions_available: vec!["inspect".to_string()],
+            }
+        })
+        .collect()
 }
 
 fn enclosure_slots(
@@ -405,6 +665,7 @@ mod tests {
         let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
             ssd_root,
             hdd_root,
+            managed_storage_manifest: root.join("missing-managed-storage.v1.json"),
             administrator: true,
         });
 
@@ -447,6 +708,7 @@ mod tests {
         let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
             ssd_root: root.join("missing-ssd"),
             hdd_root: root.join("missing-hdd"),
+            managed_storage_manifest: root.join("missing-managed-storage.v1.json"),
             administrator: false,
         });
 
@@ -465,6 +727,123 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.code == "hdd_root_missing"));
+    }
+
+    #[test]
+    fn enclosure_aggregator_preserves_unmounted_qnap_manifest_as_read_only_inventory() {
+        let root = temp_root("enclosures-managed-storage-fallback");
+        let ssd_root = root.join("missing-ssd");
+        let hdd_root = root.join("hdd");
+        let manifest = root.join("managed-storage.v1.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "ssd": {
+                    "path": ssd_root,
+                    "uuid": "ssd-uuid",
+                    "label": "DOS_SSD",
+                    "device": "/dev/disk/by-id/ssd",
+                    "filesystem": "ext4",
+                    "role": "ssd"
+                },
+                "hdds": [
+                    {
+                        "path": hdd_root.join("qnap-1057"),
+                        "uuid": "hdd-a-uuid",
+                        "label": "DOS_HDD_01",
+                        "device": "/dev/disk/by-id/qnap-1057",
+                        "filesystem": "ext4",
+                        "role": "hdd:qnap-1057"
+                    },
+                    {
+                        "path": hdd_root.join("qnap-1058"),
+                        "uuid": "hdd-b-uuid",
+                        "label": "DOS_HDD_02",
+                        "device": "/dev/disk/by-id/qnap-1058",
+                        "filesystem": "ext4",
+                        "role": "hdd:qnap-1058"
+                    }
+                ]
+            }))
+            .expect("manifest JSON"),
+        )
+        .expect("manifest");
+
+        let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
+            ssd_root,
+            hdd_root,
+            managed_storage_manifest: manifest,
+            administrator: true,
+        });
+
+        assert_eq!(view.enclosures.len(), 1);
+        assert_eq!(
+            view.enclosures[0].display_name,
+            "QNAP TL-D800C (managed-storage inventory)"
+        );
+        assert_eq!(view.enclosures[0].connection.protocol, "manifest fallback");
+        assert_eq!(view.enclosures[0].health, DashboardHealthStateView::Watch);
+        assert_eq!(view.enclosures[0].drive_count.total, 2);
+        assert_eq!(view.enclosures[0].drive_count.mounted, 0);
+        assert!(!view.add_enclosure.enabled);
+        assert_eq!(view.add_enclosure.state, "already_managed");
+        assert!(view.warnings.iter().any(|warning| {
+            warning.code == "managed_storage_inventory_fallback"
+                && warning
+                    .message
+                    .contains("does not mount, adopt, migrate, normalize, or delete")
+        }));
+        let detail = view.details.expect("fallback detail");
+        assert_eq!(detail.slots.len(), 2);
+        assert_eq!(detail.slots[0].drive_id, "qnap-1057");
+        assert_eq!(detail.slots[0].role, "managed_storage_inventory");
+        assert!(!detail.slots[0].mounted);
+        assert_eq!(detail.slots[0].health, "unavailable");
+        assert_eq!(detail.slots[0].actions_available, vec!["inspect"]);
+    }
+
+    #[test]
+    fn enclosure_aggregator_rejects_manifest_members_outside_the_managed_hdd_root() {
+        let root = temp_root("enclosures-invalid-managed-storage-fallback");
+        let manifest = root.join("managed-storage.v1.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "ssd": {
+                    "path": root.join("ssd"),
+                    "uuid": "ssd-uuid",
+                    "label": "DOS_SSD",
+                    "device": "/dev/disk/by-id/ssd",
+                    "filesystem": "ext4",
+                    "role": "ssd"
+                },
+                "hdds": [{
+                    "path": root.join("outside/qnap-1057"),
+                    "uuid": "hdd-a-uuid",
+                    "label": "DOS_HDD_01",
+                    "device": "/dev/disk/by-id/qnap-1057",
+                    "filesystem": "ext4",
+                    "role": "hdd:qnap-1057"
+                }]
+            }))
+            .expect("manifest JSON"),
+        )
+        .expect("manifest");
+
+        let view = build_enclosures_dashboard(EnclosuresAggregatorConfig {
+            ssd_root: root.join("missing-ssd"),
+            hdd_root: root.join("hdd"),
+            managed_storage_manifest: manifest,
+            administrator: true,
+        });
+
+        assert!(view.enclosures.is_empty());
+        assert!(view
+            .warnings
+            .iter()
+            .any(|warning| warning.code == "managed_storage_manifest_invalid"));
     }
 
     fn temp_root(label: &str) -> PathBuf {

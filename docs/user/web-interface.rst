@@ -375,6 +375,17 @@ slots from those root markers; managed disk IDs beginning with ``qnap-`` are
 presented as a QNAP TL-D800C enclosure until the deeper physical bay probe is
 available from the daemon.
 
+Some USB DAS bridges expose each member disk independently and do not provide
+a kernel enclosure device. If no live marker-backed HDD roots are available,
+the Enclosures page may show the package-managed
+``managed-storage.v1.json`` inventory as a clearly labelled
+``managed-storage inventory`` fallback. This records the configured QNAP
+members and their expected mounts as unavailable evidence; it does **not**
+claim that they are mounted or healthy. The fallback is read-only: viewing it
+cannot mount, adopt, migrate, normalize, rebalance, delete, or otherwise
+change an ObjectStore. It also disables Web enclosure preparation, so a
+retained configured enclosure cannot be mistaken for a new empty appliance.
+
 Selected enclosure detail panes render each SSD and HDD member as a drive card
 with bay label, role assignment, capacity, mount path, device path, filesystem,
 health, SMART warning count, and the daemon-managed actions currently available
