@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.176.2 - 2026-08-31
+
+- Require Terraform's standalone DEB/RPM staging route to prove and consume
+  every direct internal Cargo source: Prosopikon, Pistis, Proxenos and
+  Thesaurophylax. Package provenance now records all four immutable revisions;
+  ambient Cargo caches cannot satisfy the signed Site Trust client build.
+
 ## 0.176.1 - 2026-08-31
 
 - Delete each exact managed SSD payload in the same durable destage pass that
