@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
+source "$repo_root/packaging/cargo-target-dir.sh"
 package_name="dasobjectstore-remote"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-remote","version":"\([^"]*\)".*/\1/p')"
@@ -21,8 +22,9 @@ fi
 
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
-rpm_root="$repo_root/target/rpm/rpmbuild"
-staging_root="$repo_root/target/rpm/staging"
+cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
+rpm_root="$cargo_target_dir/rpm/rpmbuild"
+staging_root="$cargo_target_dir/rpm/staging"
 payload_name="${package_name}-${version}"
 payload_root="$staging_root/$payload_name"
 spec_path="$rpm_root/SPECS/${package_name}.spec"
@@ -33,7 +35,7 @@ install -d \
   "$payload_root/usr/bin" \
   "$payload_root/usr/share/doc/$package_name" \
   "$payload_root/usr/share/licenses/$package_name"
-install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
   "$payload_root/usr/bin/dasobjectstore-remote"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/docs/user/remote-client.rst" \

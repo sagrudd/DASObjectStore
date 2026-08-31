@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.176.4 - 2026-08-31
+
+- Make the standalone ``dasobjectstore-remote`` DEB and RPM builders honour
+  ``CARGO_TARGET_DIR``.  Formal builds can now isolate Cargo outputs outside
+  the source checkout while packaging the binary that Cargo actually built.
+
 ## 0.176.3 - 2026-08-31
 
 - Re-measure and fractionally rebalance each HDD destination immediately
