@@ -161,11 +161,20 @@ where
         }
         DaemonApiRequest::RemoteEasyconnectPairingStatus(request) => {
             let now_utc = handler.clock.now_utc();
-            match FileBackedRemoteEasyconnectPairingStore::new(
+            let store = FileBackedRemoteEasyconnectPairingStore::new(
                 &handler.remote_easyconnect_pairing_store_path,
-            )
-            .status(&request.pairing_id, &now_utc)
-            {
+            );
+            let result = match (
+                request.pairing_id.as_deref(),
+                request.browser_handoff_reference.as_deref(),
+            ) {
+                (Some(pairing_id), None) => store.status(pairing_id, &now_utc),
+                (None, Some(handoff)) => store.status_by_browser_handoff(handoff, &now_utc),
+                _ => Err(
+                    crate::runtime::RemoteEasyconnectPairingStoreError::BrowserHandoffUnavailable,
+                ),
+            };
+            match result {
                 Ok(response) => Ok(DaemonApiResponse::RemoteEasyconnectPairingStatus(response)),
                 Err(error) => Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     "remote_easyconnect_pairing_status_failed",
@@ -741,13 +750,22 @@ where
                 message,
             }
         })?;
+        let browser_handoff_reference =
+            random_easyconnect_value("handoff-", 32).map_err(|message| {
+                RemoteEasyconnectPairingStoreError::Json {
+                    path: self.remote_easyconnect_pairing_store_path.clone(),
+                    message,
+                }
+            })?;
         let store = FileBackedRemoteEasyconnectPairingStore::new(
             &self.remote_easyconnect_pairing_store_path,
         );
         store.create(RemoteEasyconnectPairingRecord {
             pairing_id: pairing_id.clone(),
+            browser_handoff_reference: browser_handoff_reference.clone(),
             client_name: request.client_name,
             callback_url: request.callback_url.clone(),
+            completion_mode: request.completion_mode,
             requested_object_store: request.requested_object_store,
             requested_session_lifetime_seconds: request.requested_session_lifetime_seconds,
             client_request_id: request.client_request_id,
@@ -760,9 +778,10 @@ where
         Ok(RemoteEasyconnectCreatePairingResponse {
             pairing_id: pairing_id.clone(),
             browser_login_url: format!(
-                "/products/dasobjectstore/remote/easyconnect/login?pairing_id={pairing_id}"
+                "/products/dasobjectstore/remote/easyconnect/login?handoff={browser_handoff_reference}"
             ),
             callback_url: request.callback_url,
+            completion_mode: request.completion_mode,
             expires_at_utc,
             polling_url: format!("/api/v1/remote/easyconnect/pairings/{pairing_id}"),
         })
@@ -803,8 +822,12 @@ where
 
         Ok(RemoteEasyconnectApprovePairingResponse {
             pairing_id: request.pairing_id,
-            exchange_code,
+            exchange_code: (pairing.completion_mode
+                == crate::api::RemoteEasyconnectCompletionMode::Callback)
+                .then_some(exchange_code),
             callback_url: pairing.callback_url,
+            completion_mode: pairing.completion_mode,
+            approval_reference: approval.context.correlation_id,
             expires_at_utc: approval.approval_expires_at_utc,
         })
     }

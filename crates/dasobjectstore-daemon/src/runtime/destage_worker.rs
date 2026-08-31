@@ -1124,12 +1124,15 @@ mod tests {
                 [],
             )
             .expect("store");
-        for disk_id in ["disk-a", "disk-b"] {
+        // The stale claim remains attached to disk-b, but that disk may no
+        // longer receive settlement writes.  This makes the recovery
+        // assertion deterministic: its replacement must target disk-a.
+        for (disk_id, state) in [("disk-a", "Healthy"), ("disk-b", "Draining")] {
             connection
                 .execute(
                     "INSERT INTO disks(disk_id,pool_id,role,state,created_at_utc,updated_at_utc)
-                     VALUES(?1,'pool-a','hdd_capacity','Healthy','now','now')",
-                    [disk_id],
+                     VALUES(?1,'pool-a','hdd_capacity',?2,'now','now')",
+                    [disk_id, state],
                 )
                 .expect("disk");
         }

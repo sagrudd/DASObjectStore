@@ -1086,12 +1086,12 @@ mod tests {
         ProfileBrowserResponse, ProfileInspectionRequest, ProfileInspectionResponse,
         ProfileInspectionRootState, ProfileS3MultipartCompletionRequest,
         ProfileS3MultipartCompletionResponse, ProfileS3MultipartPartRequest,
-        ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectCreatePairingRequest,
-        RemoteEasyconnectCreatePairingResponse, RemoteEasyconnectSubmitAwsCliUploadRequest,
-        RemoteEasyconnectSubmitAwsCliUploadResponse, RemoteEasyconnectUploadAdmissionDecision,
-        RemoteEasyconnectUploadAdmissionRequest, RemoteEasyconnectUploadBackpressureReason,
-        StoreInventoryRequest, StoreInventoryResponse, SubmitIngestFilesRequest,
-        UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
+        ProfileS3VerifyRequest, ProfileS3VerifyResponse, RemoteEasyconnectCompletionMode,
+        RemoteEasyconnectCreatePairingRequest, RemoteEasyconnectCreatePairingResponse,
+        RemoteEasyconnectSubmitAwsCliUploadRequest, RemoteEasyconnectSubmitAwsCliUploadResponse,
+        RemoteEasyconnectUploadAdmissionDecision, RemoteEasyconnectUploadAdmissionRequest,
+        RemoteEasyconnectUploadBackpressureReason, StoreInventoryRequest, StoreInventoryResponse,
+        SubmitIngestFilesRequest, UpsertEndpointInventoryRequest, UpsertEndpointInventoryResponse,
         DISK_LOCKDOWN_CONFIRMATION, ENCLOSURE_PREPARE_CONFIRMATION, ENDPOINT_RECORD_CONFIRMATION,
         OBJECT_STORE_CREATE_CONFIRMATION,
     };
@@ -1827,8 +1827,9 @@ mod tests {
             Ok(DaemonApiResponse::RemoteEasyconnectCreatePairing(
                 RemoteEasyconnectCreatePairingResponse {
                     pairing_id: "pair-1".to_string(),
-                    browser_login_url: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login?pairing_id=pair-1".to_string(),
-                    callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                    browser_login_url: "https://192.168.1.192:8448/products/dasobjectstore/remote/easyconnect/login?handoff=handoff-test".to_string(),
+                    callback_url: Some("http://127.0.0.1:49321/callback".to_string()),
+                    completion_mode: RemoteEasyconnectCompletionMode::Callback,
                     expires_at_utc: "2026-07-09T12:10:00Z".to_string(),
                     polling_url: "https://192.168.1.192:8448/api/v1/remote/easyconnect/pairings/pair-1".to_string(),
                 },
@@ -1839,7 +1840,8 @@ mod tests {
         let response = client
             .remote_easyconnect_create_pairing(RemoteEasyconnectCreatePairingRequest {
                 client_name: "macbook".to_string(),
-                callback_url: "http://127.0.0.1:49321/callback".to_string(),
+                callback_url: Some("http://127.0.0.1:49321/callback".to_string()),
+                completion_mode: RemoteEasyconnectCompletionMode::Callback,
                 requested_object_store: Some("zymo_fecal_2025.05".to_string()),
                 requested_session_lifetime_seconds: Some(28_800),
                 client_request_id: Some("request-1".to_string()),

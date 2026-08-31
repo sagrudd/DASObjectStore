@@ -61,7 +61,8 @@ it uses ``cmd /C start``. Remote-only packages do not install a browser or
 desktop opener. On headless sequencers, servers, containers, or SSH sessions,
 run easyconnect with ``--no-browser`` and open the printed URL from a browser
 that can reach the DAS appliance while the remote client keeps waiting for the
-loopback callback.
+authenticated appliance poll result. In that mode no browser calls the remote
+computer's loopback address.
 
 The remote computer must have one of the following credential paths:
 
@@ -96,16 +97,21 @@ To bind the request to one ObjectStore before browser approval:
      --object-store epic_collection
 
 The command resolves the standalone Web application URL using HTTPS port
-``8448`` by default. After authenticated approval in the browser, the remote
-client receives a one-time pairing result as a form-encoded loopback ``POST``.
-The exchange code never enters a URL and is neither printed nor retained after
-the one-time exchange.
+``8448`` by default. When it launches the browser itself, authenticated
+approval completes with a form-encoded loopback ``POST``. With ``--no-browser``
+the remote client polls the appliance HTTPS API, while the separately opened
+browser receives neither a loopback callback nor an exchange code. Its URL
+contains only a strong opaque server-issued handoff reference; pairing scope,
+expiry, and completion transport remain server state. In both modes the exchange
+code never enters a URL and is neither printed nor retained after the one-time
+exchange.
 
 The Monas/Pistis product boundary separates the routes deliberately:
 
 * pairing creation and one-time exchange are public, bounded JSON operations;
-* creation accepts only an exact loopback callback on ``127.0.0.1`` or ``::1``
-  with an explicit port and the fixed EasyConnect callback path;
+* callback completion accepts only an exact loopback callback on ``127.0.0.1``
+  or ``::1`` with an explicit port and the fixed EasyConnect callback path;
+  polling completion accepts no callback URL at all;
 * approval requires a live host browser session and its session-bound CSRF
   value;
 * the immutable Prosopikon principal remains the audit subject while a
@@ -424,17 +430,18 @@ local-password invocations fail with explicit remediation. It is deliberately
 not an alias around Pistis.
 
 Use ``--https-port`` only when a standalone appliance is intentionally deployed
-on a non-default Web port. Use ``--callback-port`` when firewall policy or a
-launcher requires a fixed loopback callback port; otherwise the client chooses
-an ephemeral loopback port. Use ``--timeout-seconds`` to change the pairing wait
-time. Use ``--no-browser`` on headless systems: the client prints the browser
-URL and still waits for the callback.
+on a non-default Web port. Use ``--callback-port`` when a local browser launcher
+requires a fixed loopback callback port; otherwise the client chooses an
+ephemeral loopback port. Use ``--timeout-seconds`` to change the pairing wait
+time. Use ``--no-browser`` on headless systems: the client prints an opaque
+browser handoff URL and waits over authenticated HTTPS. It does not bind a
+loopback listener, so the browser may run on another host.
 
 The easyconnect lifecycle is:
 
 * discover appliance pairing capabilities from the HTTPS Web API;
-* start a local loopback callback listener, or use polling fallback when
-  callback binding is unavailable;
+* start a local loopback callback listener when the client launches a browser,
+  or explicitly select appliance polling for ``--no-browser``;
 * open the appliance browser login and pairing approval page;
 * wait for authenticated approval without printing passwords or S3 credentials;
 * exchange the approved pairing for a remote upload session and accessible
@@ -453,15 +460,17 @@ on the Spark and keep that terminal attached while the pairing is in progress:
      --username stephen --set-s3-config --no-browser
 
 The client prints an ``Open Monas approval URL (shows Pistis QR):`` line. Open
-that URL in a browser that can reach the NUC. Even when that browser already
-has an ordinary Monas session, Monas displays a fresh Pistis QR for this exact
-remote pairing; scan it and complete Face ID. The resulting approval is bound
-to the selected ObjectStore and cannot authorise a substituted or replayed
-pairing. The QR is rendered only by the Monas host; it is never copied into the
-SSH terminal. The client polls for the approved exchange and then prints that
-the short-lived session and AWS profile were committed. ``--no-browser`` is
-important on the headless Spark because the SSH session cannot launch a local
-browser.
+that URL in a browser that can reach the NUC. The URL contains only a strong
+opaque handoff: its confirmation page has a safe approval reference, but no
+exchange capability and no form callback to the Spark's ``127.0.0.1``.
+Even when that browser already has an ordinary Monas session, Monas displays a
+fresh Pistis QR for this exact remote pairing; scan it and complete Face ID.
+The resulting approval is bound to the selected ObjectStore and cannot
+authorise a substituted or replayed pairing. The QR is rendered only by the
+Monas host; it is never copied into the SSH terminal. The client polls for the
+approved exchange and then prints that the short-lived session and AWS profile
+were committed. ``--no-browser`` is important on the headless Spark because
+the SSH session cannot launch a local browser.
 
 Verify the resulting profile from the Spark without exposing credentials:
 

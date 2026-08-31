@@ -157,12 +157,12 @@ pub(super) fn write_easyconnect_pairing_ready(
 ) -> Result<(), std::io::Error> {
     writeln!(writer, "Remote easyconnect pairing")?;
     writeln!(writer, "Appliance: {}", contract.appliance_base_url)?;
-    writeln!(
-        writer,
-        "Local callback bind: {}",
-        contract.local_callback_bind
-    )?;
     if open_browser {
+        writeln!(
+            writer,
+            "Local callback bind: {}",
+            contract.local_callback_bind
+        )?;
         writeln!(writer, "Browser launch: requested")?;
         writeln!(
             writer,
@@ -173,8 +173,22 @@ pub(super) fn write_easyconnect_pairing_ready(
             writer,
             "Open Monas approval URL (shows Pistis QR): {browser_login_url}"
         )?;
+        writeln!(
+            writer,
+            "Completion: secure server polling; the approval browser may run on another host and will never call its 127.0.0.1."
+        )?;
     }
-    writeln!(writer, "Waiting for browser-approved pairing callback...")?;
+    if open_browser {
+        writeln!(
+            writer,
+            "Waiting for browser-approved pairing callback or server poll..."
+        )?;
+    } else {
+        writeln!(
+            writer,
+            "Waiting for browser-approved pairing through the appliance HTTPS poll endpoint..."
+        )?;
+    }
     Ok(())
 }
 

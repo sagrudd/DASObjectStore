@@ -2,12 +2,52 @@ use super::*;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectPairingStatusRequest {
-    pub pairing_id: String,
+    pub pairing_id: Option<String>,
+    /// Opaque, single-purpose browser handoff. It is resolved only by the
+    /// package-owned pairing store and is never copied into an approval error.
+    pub browser_handoff_reference: Option<String>,
 }
 
 impl RemoteEasyconnectPairingStatusRequest {
     pub fn validate(&self) -> Result<(), RemoteEasyconnectValidationError> {
-        require_non_blank("pairing_id", &self.pairing_id)
+        match (
+            self.pairing_id
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+            self.browser_handoff_reference
+                .as_deref()
+                .filter(|value| !value.trim().is_empty()),
+        ) {
+            (Some(_), None) | (None, Some(_)) => Ok(()),
+            _ => Err(RemoteEasyconnectValidationError::InvalidPairingStatusReference),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RemoteEasyconnectPairingStatusRequest;
+
+    #[test]
+    fn status_requires_exactly_one_pairing_or_browser_handoff_reference() {
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: Some("pairing-1".to_string()),
+            browser_handoff_reference: None,
+        }
+        .validate()
+        .is_ok());
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: None,
+            browser_handoff_reference: Some("handoff-1".to_string()),
+        }
+        .validate()
+        .is_ok());
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: Some("pairing-1".to_string()),
+            browser_handoff_reference: Some("handoff-1".to_string()),
+        }
+        .validate()
+        .is_err());
     }
 }
 
@@ -25,6 +65,8 @@ pub struct RemoteEasyconnectPairingStatusResponse {
     pub pairing_id: String,
     pub state: RemoteEasyconnectPairingState,
     pub expires_at_utc: String,
+    pub requested_object_store: Option<String>,
+    pub completion_mode: RemoteEasyconnectCompletionMode,
     /// Returned only while an unexpired approval is ready for the holder of
     /// the 256-bit pairing capability.
     pub exchange_code: Option<String>,
@@ -93,8 +135,14 @@ impl RemoteEasyconnectApprovalContext {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteEasyconnectApprovePairingResponse {
     pub pairing_id: String,
-    pub exchange_code: String,
-    pub callback_url: String,
+    /// The exchange capability is returned only to a same-host callback flow.
+    /// A polling client obtains it from the capability-protected status route.
+    pub exchange_code: Option<String>,
+    pub callback_url: Option<String>,
+    pub completion_mode: RemoteEasyconnectCompletionMode,
+    /// Safe, durable host correlation reference for attended support. This is
+    /// never an exchange capability, credential, or identity secret.
+    pub approval_reference: String,
     pub expires_at_utc: String,
 }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.176.7 - 2026-08-31
+
+- Complete ``dasobjectstore-remote --no-browser`` pairing through the
+  appliance's authenticated status-poll route. An approval browser on a
+  separate host no longer receives or posts a DGX/container loopback callback.
+  Its URL contains only a strong opaque server-issued handoff reference; the
+  pairing, ObjectStore scope, transport, and expiry remain durable server state.
+
 ## 0.176.6 - 2026-08-31
 
 - Make the full DASObjectStore DEB and RPM builders honour
