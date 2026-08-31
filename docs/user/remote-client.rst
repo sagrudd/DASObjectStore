@@ -4,6 +4,8 @@ Remote Client CLI
 ``dasobjectstore-remote`` is the lightweight client for computers that are not
 the DAS appliance. It talks to object stores through the appliance's
 S3-compatible endpoint and uses the AWS CLI for object transfer operations.
+It is a DASObjectStore workspace member (``crates/dasobjectstore-remote``), not
+a separately sourced project; only its DEB/RPM distribution is standalone.
 
 The remote client is intended for workstations, sequencers, analysis servers,
 and other hosts that need to list accessible object stores and upload files or
