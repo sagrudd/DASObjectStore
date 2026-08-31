@@ -34,6 +34,7 @@ build_deb="$repo_root/packaging/debian/build-deb.sh"
 build_rpm="$repo_root/packaging/rpm/build-rpm.sh"
 build_remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
 build_remote_rpm="$repo_root/packaging/rpm/build-remote-rpm.sh"
+cargo_target_dir_helper="$repo_root/packaging/cargo-target-dir.sh"
 prepare_web_dist="$repo_root/packaging/web/prepare-web-dist.sh"
 package_auth_guard="$repo_root/packaging/validate-package-auth-content.sh"
 pinned_sources="$repo_root/packaging/pinned-mnemosyne-package-sources.sh"
@@ -405,14 +406,19 @@ require_text "$build_rpm" 'sudo dnf install cargo rust clang clang-devel'
 
 require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."
-require_text "$build_remote_deb" 'target/release/dasobjectstore-remote'
+require_file "$cargo_target_dir_helper"
+require_text "$build_remote_deb" 'packaging/cargo-target-dir.sh'
+require_text "$build_remote_deb" 'das_cargo_target_dir'
+require_text "$build_remote_deb" '"$cargo_target_dir/release/dasobjectstore-remote"'
 require_text "$build_remote_deb" 'docs/user/remote-client.rst'
 require_text "$build_remote_deb" 'Package: $package_name'
 require_text "$build_remote_deb" 'Suggests: awscli'
 
 require_text "$build_remote_rpm" "rpmbuild is required to build the DASObjectStore remote RPM."
 require_text "$build_remote_rpm" "cargo build --release -p dasobjectstore-remote"
-require_text "$build_remote_rpm" 'target/release/dasobjectstore-remote'
+require_text "$build_remote_rpm" 'packaging/cargo-target-dir.sh'
+require_text "$build_remote_rpm" 'das_cargo_target_dir'
+require_text "$build_remote_rpm" '"$cargo_target_dir/release/dasobjectstore-remote"'
 require_text "$build_remote_rpm" 'docs/user/remote-client.rst'
 require_text "$build_remote_rpm" '/usr/bin/dasobjectstore-remote'
 require_text "$build_remote_rpm" 'Recommends:      awscli'

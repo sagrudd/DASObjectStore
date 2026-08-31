@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
+source "$repo_root/packaging/cargo-target-dir.sh"
 package_name="dasobjectstore-remote"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-remote","version":"\([^"]*\)".*/\1/p')"
@@ -18,8 +19,9 @@ ERROR
 fi
 
 arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
-build_root="$repo_root/target/deb/${package_name}_${version}_${arch}"
-package_path="$repo_root/target/deb/${package_name}_${version}_${arch}.deb"
+cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
+build_root="$cargo_target_dir/deb/${package_name}_${version}_${arch}"
+package_path="$cargo_target_dir/deb/${package_name}_${version}_${arch}.deb"
 
 cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
@@ -28,7 +30,7 @@ install -d \
   "$build_root/DEBIAN" \
   "$build_root/usr/bin" \
   "$build_root/usr/share/doc/$package_name"
-install -m 0755 "$repo_root/target/release/dasobjectstore-remote" \
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/docs/user/remote-client.rst" \
