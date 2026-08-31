@@ -103,7 +103,7 @@ clients should renew within the final five minutes. Revocation propagation is
 therefore at most 15 minutes, with 30 seconds of clock skew accepted only for
 binding boundary evaluation.
 
-### Generated-output binding (pre-admission only)
+### Generated-output binding admission foundation (not yet live)
 
 The product-owner-approved output boundary is deliberately separate from the
 read identity above. DASObjectStore owns the proposed
@@ -124,14 +124,27 @@ authority revisions, and unknown fields. The only code path that can use the
 result must compare it to independently obtained current authority before
 provider mutation.
 
-This is a source-level validation foundation, not a live output capability.
-It does not register an identity or key, issue an opaque capability, expose an
-HTTP route, transfer bytes, or create a receipt. It cannot be used until the
-separate identity and public key are registered by the DASObjectStore owner,
-the output binding is formally admitted, Limen supplies its authenticated
-logical route, and the coordinated Kanon/lockset/Terraform release gates have
-passed. The existing reader identity and v1/v2 input contracts remain
-unchanged; no migration is required.
+The daemon source now has a distinct local admission operation for this
+binding. A non-dry-run admission requires a local DASObjectStore administrator;
+the daemon revalidates the binding against its own clock, the distinct active
+output identity and matching dynamic policy, and at least one current
+compatible public credential. It persistently records public policy metadata
+in a private daemon-owned file and returns the redacted
+`das-output-binding-admission` receipt defined by
+`docs/schemas/dasobjectstore.generated-output-binding-admission-receipt.v1.schema.json`.
+The receipt contains the binding digest and identity, but no key identifier,
+key material, token, endpoint, bucket, or managed path.
+
+This is still a source-level admission foundation, not a live output
+capability. It does not register an identity or key, issue an opaque
+capability, expose a public HTTP route, transfer bytes, or settle an object.
+There is deliberately no public output route in this release. It cannot be
+used for governed output until the DASObjectStore owner performs the separate
+identity and public-credential registrations, formally admits the real
+binding, Limen supplies and proves its authenticated logical route, and the
+coordinated Kanon/lockset/Terraform release gates have passed. The existing
+reader identity and v1/v2 input contracts remain unchanged; no migration is
+required.
 
 Successful registration returns a non-secret registration record alongside
 the identity. It documents the contract revision, limits, correlation/audit

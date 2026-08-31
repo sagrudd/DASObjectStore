@@ -35,6 +35,7 @@ where
         | DaemonApiRequest::RenewErgasterionCapability(_)
         | DaemonApiRequest::DiscoverErgasterionCapability
         | DaemonApiRequest::AdmitGovernedBindingAuthority(_)
+        | DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(_)
         | DaemonApiRequest::ErgasterionObjectSnapshot(_)
         | DaemonApiRequest::ErgasterionObjectGroupStatus(_)) => {
             ergasterion::request(handler, governed_request, actor)

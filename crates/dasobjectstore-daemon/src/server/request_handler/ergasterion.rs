@@ -2,16 +2,18 @@ use super::*;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use dasobjectstore_core::application_auth::{
-    ApplicationIdentity, ApplicationKeyDescriptor, ApplicationOperation,
+    ApplicationCredentialKind, ApplicationIdentity, ApplicationKeyAlgorithm,
+    ApplicationKeyDescriptor, ApplicationOperation,
 };
 use dasobjectstore_core::application_auth_v2::{
     ErgasterionCapabilityDiscoveryStateV1, ErgasterionCapabilityDiscoveryV1,
     ErgasterionCapabilityExchangeRequestV1, ErgasterionCapabilityRenewalRequestV1,
-    ErgasterionCapabilityResponseV1, ErgasterionRequestedScopeV1, ERGASTERION_APPLICATION_ID,
-    ERGASTERION_CAPABILITY_AUDIENCE, ERGASTERION_CAPABILITY_CLOCK_SKEW_SECONDS,
-    ERGASTERION_CAPABILITY_DISCOVERY_SCHEMA_VERSION,
+    ErgasterionCapabilityResponseV1, ErgasterionRequestedScopeV1, GeneratedOutputBindingV1,
+    ERGASTERION_APPLICATION_ID, ERGASTERION_CAPABILITY_AUDIENCE,
+    ERGASTERION_CAPABILITY_CLOCK_SKEW_SECONDS, ERGASTERION_CAPABILITY_DISCOVERY_SCHEMA_VERSION,
     ERGASTERION_CAPABILITY_EXCHANGE_SCHEMA_VERSION, ERGASTERION_CAPABILITY_RENEWAL_WINDOW_SECONDS,
-    GOVERNED_BINDING_SCHEMA_VERSION_V2,
+    ERGASTERION_GENERATED_OUTPUT_AUDIENCE, ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE,
+    ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1, GOVERNED_BINDING_SCHEMA_VERSION_V2,
 };
 
 pub(super) fn request<S, C>(
@@ -48,6 +50,9 @@ where
     match request {
         DaemonApiRequest::AdmitGovernedBindingAuthority(request) => {
             admit_binding_authority(handler, request, actor)
+        }
+        DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(request) => {
+            admit_generated_output_binding_authority(handler, request, actor)
         }
         DaemonApiRequest::DiscoverErgasterionCapability => discover(handler),
         DaemonApiRequest::ExchangeErgasterionCapability(request) => {
@@ -177,6 +182,150 @@ where
             active: !request.dry_run,
         },
     ))
+}
+
+fn admit_generated_output_binding_authority<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    request: crate::api::GeneratedOutputBindingAuthorityAdmissionRequest,
+    actor: Option<&DaemonLocalActor>,
+) -> Result<DaemonApiResponse, DaemonRequestHandlerError>
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    let now = now_unix_seconds(handler)?;
+    request
+        .binding
+        .validate_at(now)
+        .map_err(|error| safe_error("invalid_request", error.to_string()))?;
+    validate_generated_output_application_authority(handler, &request.binding, now)?;
+    if !request.dry_run && !actor.is_some_and(|actor| actor.is_administrator()) {
+        return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+            "administrator_authorization_required",
+            "generated-output binding admission requires a local DASObjectStore administrator",
+        )));
+    }
+    let digest = generated_output_binding_digest(&request.binding)?;
+    if !request.dry_run {
+        crate::runtime::upsert_trusted_generated_output_binding_authority(
+            &handler.generated_output_binding_authority_path,
+            crate::runtime::TrustedGeneratedOutputBindingAuthority {
+                binding: request.binding.clone(),
+                binding_digest_sha256: digest.clone(),
+                admitted_at_unix_seconds: now,
+                active: true,
+            },
+        )
+        .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    }
+    record_application_audit_event(
+        &handler.application_audit_log_path,
+        &handler.clock.now_utc(),
+        "admit_generated_output_binding_authority",
+        &request.binding.application_id,
+        None,
+        actor.map(DaemonLocalActor::display_name).as_deref(),
+        "trusted generated-output binding authority admission",
+        request.dry_run,
+    )
+    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    Ok(DaemonApiResponse::AdmitGeneratedOutputBindingAuthority(
+        crate::api::GeneratedOutputBindingAuthorityAdmissionResponse {
+            receipt_schema_version:
+                crate::api::GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_SCHEMA_VERSION.to_string(),
+            receipt_kind: crate::api::GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_KIND.to_string(),
+            binding_id: request.binding.binding_id,
+            application_id: request.binding.application_id,
+            object_store_id: request.binding.object_store_id,
+            binding_digest_sha256: digest,
+            admitted_at_unix_seconds: now,
+            dry_run: request.dry_run,
+            active: !request.dry_run,
+        },
+    ))
+}
+
+/// The binding is only trusted if the separate output-completion application
+/// remains current and has an enrolled public credential compatible with its
+/// declared authentication method. No key identifier is selected here, so
+/// overlapping rotation descriptors remain possible without binding a policy
+/// to a transient credential.
+fn validate_generated_output_application_authority<S, C>(
+    handler: &DaemonRequestHandler<S, C>,
+    binding: &GeneratedOutputBindingV1,
+    now: u64,
+) -> Result<(), DaemonRequestHandlerError>
+where
+    S: DaemonServiceOrchestrator,
+    C: DaemonClock,
+{
+    let identity = read_application_identity(
+        &handler.application_identity_registry_path,
+        &binding.application_id,
+    )
+    .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+    let Some(identity) = identity else {
+        return Err(safe_error(
+            "authority_unavailable",
+            "generated-output application identity is unavailable",
+        ));
+    };
+    let policy = identity.dynamic_binding.as_ref();
+    let policy_matches = policy.is_some_and(|policy| {
+        policy.schema_version == ERGASTERION_GENERATED_OUTPUT_BINDING_SCHEMA_VERSION_V1
+            && policy.audience == ERGASTERION_GENERATED_OUTPUT_AUDIENCE
+            && policy.audit_purpose == ERGASTERION_GENERATED_OUTPUT_AUDIT_PURPOSE
+            && policy.max_object_bytes >= binding.max_object_bytes
+            && policy.max_total_bytes >= binding.max_total_bytes
+    });
+    if !identity.active
+        || now < identity.issued_at_unix_seconds
+        || now >= identity.expires_at_unix_seconds
+        || identity.validate().is_err()
+        || !policy_matches
+    {
+        return Err(safe_error(
+            "authority_unavailable",
+            "generated-output application identity is inactive or does not match the binding policy",
+        ));
+    }
+    let enrolled_key_exists = list_application_keys(&handler.application_key_registry_path)
+        .map_err(DaemonRequestHandlerError::ServiceRuntime)?
+        .iter()
+        .any(|key| generated_output_key_is_current_for_identity(key, &identity, now));
+    if enrolled_key_exists {
+        Ok(())
+    } else {
+        Err(safe_error(
+            "authority_unavailable",
+            "generated-output application has no current enrolled public credential",
+        ))
+    }
+}
+
+fn generated_output_key_is_current_for_identity(
+    key: &ApplicationKeyDescriptor,
+    identity: &ApplicationIdentity,
+    now: u64,
+) -> bool {
+    if key.application_id != identity.application_id
+        || !key.active
+        || now < key.issued_at_unix_seconds
+        || now >= key.expires_at_unix_seconds
+        || key.validate().is_err()
+    {
+        return false;
+    }
+    match (identity.credential_kind, key.algorithm) {
+        (ApplicationCredentialKind::AsymmetricKey, ApplicationKeyAlgorithm::Ed25519)
+        | (ApplicationCredentialKind::AsymmetricKey, ApplicationKeyAlgorithm::EcdsaP256Sha256) => {
+            key.public_key_material.is_some()
+        }
+        (ApplicationCredentialKind::MtlsCertificate, ApplicationKeyAlgorithm::MtlsCertificate) => {
+            true
+        }
+        _ => false,
+    }
 }
 
 fn discover<S, C>(
@@ -672,6 +821,16 @@ fn validate_identity_scope(
 
 fn binding_digest(
     binding: &dasobjectstore_core::application_auth_v2::GovernedObjectStoreBindingV2,
+) -> Result<String, DaemonRequestHandlerError> {
+    crate::ergasterion_proof_verifier::canonical_value_sha256(
+        &serde_json::to_value(binding)
+            .map_err(|_| safe_error("invalid_request", "binding cannot be canonicalized"))?,
+    )
+    .map_err(|error| safe_error("invalid_request", error))
+}
+
+fn generated_output_binding_digest(
+    binding: &GeneratedOutputBindingV1,
 ) -> Result<String, DaemonRequestHandlerError> {
     crate::ergasterion_proof_verifier::canonical_value_sha256(
         &serde_json::to_value(binding)

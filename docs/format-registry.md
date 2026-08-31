@@ -74,7 +74,8 @@ older readers should treat unknown reasons as unavailable rather than idle.
 | --- | --- | --- | --- |
 | Host storage boundary | `mnemosyne.host_storage_boundary.v1` | `schema_version` field | Declares Synoptikon object-store boundary semantics. |
 | floundeR telemetry chart contract | `mnemosyne.flounder.telemetry_chart_contract.v1` | `schema_version` field | Product-neutral chart grammar for gap-aware telemetry plots shared by DASObjectStore, Monas, Synoptikon, Mnematikon, Grammateus reports, and future Mnemosyne products. |
-| Ergasterion generated-output binding | `docs/schemas/ergasterion.generated-output-binding.v1.schema.json` | Proposed, `schemaVersion` field | DASObjectStore-owned pre-admission generated-output scope. It is validation-only until a coordinated Kanon lockset, provider registration, and Limen route conformance make it supported. |
+| Ergasterion generated-output binding | `docs/schemas/ergasterion.generated-output-binding.v1.schema.json` | Proposed, `schemaVersion` field | DASObjectStore-owned generated-output scope. It has daemon-local admission support but no public capability or provider route until a coordinated Kanon lockset, provider registration, and Limen route conformance make it supported. |
+| Ergasterion generated-output binding-admission receipt | `docs/schemas/dasobjectstore.generated-output-binding-admission-receipt.v1.schema.json` | Proposed, `receiptSchemaVersion` field | Redacted provider receipt from the daemon-local admission foundation. It is not evidence of a live capability, route, or settled output. |
 | Mneion object-store create request | Pre-1.0 draft | Mneion contract and adapter version | Exported by `dasobjectstore mnemosyne export`. |
 | Mneion object-store link request | Pre-1.0 draft | Mneion contract and adapter version | Exported with the binding snippet. |
 

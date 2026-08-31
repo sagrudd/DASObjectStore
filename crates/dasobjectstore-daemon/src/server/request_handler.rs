@@ -170,6 +170,7 @@ pub struct DaemonRequestHandler<S, C> {
     application_upload_capability_path: PathBuf,
     application_capability_replay_path: PathBuf,
     governed_binding_authority_path: PathBuf,
+    generated_output_binding_authority_path: PathBuf,
     application_capability_ledger_path: PathBuf,
     application_capability_master_key_path: PathBuf,
     synoptikon_projection_ledger_path: PathBuf,
@@ -233,6 +234,8 @@ where
             governed_binding_authority_path: crate::runtime::governed_binding_authority_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            generated_output_binding_authority_path:
+                crate::runtime::generated_output_binding_authority_path(DEFAULT_DAEMON_STATE_DIR),
             application_capability_ledger_path: crate::runtime::application_capability_ledger_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -289,6 +292,8 @@ where
             governed_binding_authority_path: crate::runtime::governed_binding_authority_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
+            generated_output_binding_authority_path:
+                crate::runtime::generated_output_binding_authority_path(DEFAULT_DAEMON_STATE_DIR),
             application_capability_ledger_path: crate::runtime::application_capability_ledger_path(
                 DEFAULT_DAEMON_STATE_DIR,
             ),
@@ -6083,6 +6088,185 @@ mod tests {
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].operation, "register_key");
         assert_eq!(audit[0].key_id.as_deref(), Some("key-1"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn generated_output_binding_admission_requires_current_identity_and_public_credential() {
+        let root = temp_root("generated-output-binding-admission");
+        let identity_registry = root.join("application-identities.json");
+        let key_registry = root.join("application-keys.json");
+        let admission_registry = root.join("generated-output-binding-authority.json");
+        let audit_path = root.join("application-audit.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-08-01T10:00:00Z"),
+        )
+        .with_application_identity_registry_path(&identity_registry)
+        .with_application_key_registry_path(&key_registry)
+        .with_generated_output_binding_authority_path(&admission_registry)
+        .with_application_audit_log_path(&audit_path);
+        let application_id = "ergasterion-output-completion";
+        upsert_application_identity(
+            &identity_registry,
+            ApplicationIdentity {
+                schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+                application_id: application_id.to_string(),
+                owner: "ergasterion".to_string(),
+                purpose: "governed output completion".to_string(),
+                environment: ApplicationEnvironment::Production,
+                credential_kind: ApplicationCredentialKind::AsymmetricKey,
+                scope: ApplicationScope {
+                    store_ids: Vec::new(),
+                    prefixes: Vec::new(),
+                    object_types: Vec::new(),
+                    operations: vec![
+                        ApplicationOperation::Write,
+                        ApplicationOperation::CompleteUpload,
+                        ApplicationOperation::Verify,
+                    ],
+                    ingress_origin: dasobjectstore_core::ingress::IngressOrigin::Mneion,
+                    max_object_bytes: None,
+                    max_total_bytes: None,
+                },
+                dynamic_binding: Some(
+                    dasobjectstore_core::application_auth::DynamicBindingPolicy {
+                        schema_version: "ergasterion.generated-output-binding.v1".to_string(),
+                        audience: "ergasterion-governed-output-service".to_string(),
+                        audit_purpose: "ergasterion.governed-output-completion".to_string(),
+                        max_object_bytes: 4096,
+                        max_total_bytes: 8192,
+                    },
+                ),
+                issued_at_unix_seconds: 1_785_578_300,
+                expires_at_unix_seconds: 1_785_581_000,
+                active: true,
+            },
+        )
+        .expect("identity fixture");
+        let binding = dasobjectstore_core::application_auth_v2::GeneratedOutputBindingV1 {
+            schema_version: "ergasterion.generated-output-binding.v1".to_string(),
+            binding_id: "generated-output-rna".to_string(),
+            application_id: application_id.to_string(),
+            host_authority: dasobjectstore_core::application_auth_v2::GovernedHostAuthorityV2 {
+                mode: dasobjectstore_core::application_auth_v2::GovernedHostModeV2::Monas,
+                authority_id: "1fda5cc0-7180-4cef-aef3-4942458f7a9e".to_string(),
+                project_id: "project-rna".to_string(),
+                project_revision: 7,
+            },
+            prosopikon_authority:
+                dasobjectstore_core::application_auth_v2::GovernedProsopikonAuthorityV2 {
+                    authority_id: "8b1aaf69-74b8-48bc-a163-883fd3c693a3".to_string(),
+                    authority_revision: 11,
+                },
+            tenant_id: "6dd29575-9763-4e2b-8255-6bf7380f3813".to_string(),
+            object_store_id: StoreId::new("science").expect("store id"),
+            scope: dasobjectstore_core::application_auth::GovernedObjectStoreBindingScope {
+                prefixes: vec!["project-rna/outputs".to_string()],
+                operations: vec![
+                    ApplicationOperation::Write,
+                    ApplicationOperation::CompleteUpload,
+                    ApplicationOperation::Verify,
+                ],
+            },
+            policy_class: "generated_data".to_string(),
+            max_object_bytes: 4096,
+            max_total_bytes: 8192,
+            issued_at: "2026-08-01T09:59:00Z".to_string(),
+            expires_at: "2026-08-01T10:10:00Z".to_string(),
+            status: dasobjectstore_core::application_auth::GovernedBindingStatus::Active,
+        };
+        let request = crate::api::GeneratedOutputBindingAuthorityAdmissionRequest {
+            binding: binding.clone(),
+            dry_run: false,
+            confirmation: crate::api::GENERATED_OUTPUT_BINDING_AUTHORITY_ADMISSION_CONFIRMATION
+                .to_string(),
+        };
+
+        let no_key = handler
+            .handle(DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(
+                request.clone(),
+            ))
+            .expect("typed rejection");
+        assert!(matches!(
+            no_key,
+            DaemonApiResponse::Error(error) if error.code == "authority_unavailable"
+        ));
+        assert!(!admission_registry.exists());
+
+        let public_key = [13_u8; 32];
+        let fingerprint = Sha256::digest(public_key)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        upsert_application_key(
+            &key_registry,
+            ApplicationKeyDescriptor {
+                schema_version: APPLICATION_AUTH_SCHEMA_VERSION.to_string(),
+                application_id: application_id.to_string(),
+                key_id: "output-ed25519-2026".to_string(),
+                algorithm: ApplicationKeyAlgorithm::Ed25519,
+                public_key_fingerprint: format!("sha256:{fingerprint}"),
+                public_key_material: Some(BASE64.encode(public_key)),
+                issued_at_unix_seconds: 1_785_578_300,
+                expires_at_unix_seconds: 1_785_581_000,
+                active: true,
+            },
+        )
+        .expect("public credential fixture");
+
+        let mut dry_run_request = request.clone();
+        dry_run_request.dry_run = true;
+        let dry_run = handler
+            .handle(DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(
+                dry_run_request,
+            ))
+            .expect("dry-run admission");
+        let DaemonApiResponse::AdmitGeneratedOutputBindingAuthority(dry_run_receipt) = dry_run
+        else {
+            panic!("expected generated-output dry-run receipt");
+        };
+        assert!(dry_run_receipt.dry_run);
+        assert!(!dry_run_receipt.active);
+        assert!(!admission_registry.exists());
+
+        let unauthorised = handler
+            .handle(DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(
+                request.clone(),
+            ))
+            .expect("typed rejection");
+        assert!(matches!(
+            unauthorised,
+            DaemonApiResponse::Error(error)
+                if error.code == "administrator_authorization_required"
+        ));
+
+        let administrator = DaemonLocalActor::new(1000).with_groups(["dasobjectstore-admin"]);
+        let response = handler
+            .handle_with_progress_for_actor(
+                DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(request),
+                Some(&administrator),
+                |_| Ok(()),
+            )
+            .expect("admission");
+        let DaemonApiResponse::AdmitGeneratedOutputBindingAuthority(receipt) = response else {
+            panic!("expected generated-output binding admission receipt");
+        };
+        assert_eq!(receipt.receipt_kind, "das-output-binding-admission");
+        assert_eq!(receipt.application_id, application_id);
+        assert_eq!(receipt.object_store_id, binding.object_store_id);
+        assert!(receipt.active);
+        assert!(!receipt.dry_run);
+        let rendered = serde_json::to_string(&receipt).expect("receipt serializes");
+        assert!(!rendered.contains("private_key"));
+        assert!(!rendered.contains("output-ed25519-2026"));
+        let audit = read_application_audit_events(&audit_path).expect("read audit");
+        assert!(audit.iter().any(|event| {
+            event.operation == "admit_generated_output_binding_authority"
+                && event.application_id == application_id
+                && !event.dry_run
+        }));
+        assert!(admission_registry.exists());
         cleanup(&root);
     }
 

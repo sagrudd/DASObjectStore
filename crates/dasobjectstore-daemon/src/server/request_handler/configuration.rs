@@ -26,6 +26,15 @@ where
         self.application_capability_master_key_path = capability_master_key_path.into();
         self
     }
+
+    pub fn with_generated_output_binding_authority_path(
+        mut self,
+        generated_output_binding_authority_path: impl Into<PathBuf>,
+    ) -> Self {
+        self.generated_output_binding_authority_path =
+            generated_output_binding_authority_path.into();
+        self
+    }
     pub fn with_live_sqlite_path(mut self, live_sqlite_path: impl Into<PathBuf>) -> Self {
         self.live_sqlite_path = live_sqlite_path.into();
         self

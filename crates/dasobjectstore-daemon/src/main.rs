@@ -2,8 +2,8 @@ use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     build_ssd_residency_report, build_staging_inventory, default_hdd_root, default_ssd_root,
-    garbage_collect_reconciliation_staging, persist_ssd_residency_report,
-    profile_binding_registry_path, reconcile_workspace_cleanups,
+    garbage_collect_reconciliation_staging, generated_output_binding_authority_path,
+    persist_ssd_residency_report, profile_binding_registry_path, reconcile_workspace_cleanups,
     reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
     reconcile_workspace_promotions, reconcile_workspace_provision_operations,
     run_garbage_collection, run_one_durable_destage, spawn_disk_housekeeping_loop,
@@ -332,6 +332,9 @@ fn run() -> Result<(), String> {
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
     .with_application_key_registry_path(application_key_registry_path(&config.state_dir))
     .with_application_audit_log_path(application_audit_log_path(&config.state_dir))
+    .with_generated_output_binding_authority_path(generated_output_binding_authority_path(
+        &config.state_dir,
+    ))
     .with_live_status_registry(Arc::clone(&live_status_registry));
     let multipart_recovery = handler.recover_multipart_completion_workers();
     if multipart_recovery.discovered > 0 || multipart_recovery.retained_unsafe > 0 {

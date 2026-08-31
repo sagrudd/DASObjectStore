@@ -35,7 +35,8 @@ use crate::api::{
     ErgasterionCapabilityExchangeRequest, ErgasterionCapabilityExchangeResponse,
     ErgasterionCapabilityRenewalRequest, ErgasterionObjectGroupStatusRequest,
     ErgasterionObjectGroupStatusResponse, ErgasterionObjectSnapshotRequest,
-    ErgasterionObjectSnapshotResponse, GovernedBindingAuthorityAdmissionRequest,
+    ErgasterionObjectSnapshotResponse, GeneratedOutputBindingAuthorityAdmissionRequest,
+    GeneratedOutputBindingAuthorityAdmissionResponse, GovernedBindingAuthorityAdmissionRequest,
     GovernedBindingAuthorityAdmissionResponse, IngestControlRequest, IngestControlResponse,
     IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
     IngestQueueDrainResponse, JenkinsDossierEvidenceSettlementRequest,
@@ -531,6 +532,21 @@ where
         }
     }
 
+    pub fn admit_generated_output_binding_authority(
+        &self,
+        request: GeneratedOutputBindingAuthorityAdmissionRequest,
+    ) -> Result<GeneratedOutputBindingAuthorityAdmissionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::AdmitGeneratedOutputBindingAuthority(
+            request,
+        ))? {
+            DaemonApiResponse::AdmitGeneratedOutputBindingAuthority(response) => Ok(response),
+            response => Err(unexpected(
+                "admit_generated_output_binding_authority",
+                response,
+            )),
+        }
+    }
+
     pub fn ergasterion_object_snapshot(
         &self,
         request: ErgasterionObjectSnapshotRequest,
@@ -971,6 +987,9 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::RenewErgasterionCapability(_) => "renew_ergasterion_capability",
         DaemonApiResponse::DiscoverErgasterionCapability(_) => "discover_ergasterion_capability",
         DaemonApiResponse::AdmitGovernedBindingAuthority(_) => "admit_governed_binding_authority",
+        DaemonApiResponse::AdmitGeneratedOutputBindingAuthority(_) => {
+            "admit_generated_output_binding_authority"
+        }
         DaemonApiResponse::ErgasterionObjectSnapshot(_) => "ergasterion_object_snapshot",
         DaemonApiResponse::ErgasterionObjectGroupStatus(_) => "ergasterion_object_group_status",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",

@@ -28,6 +28,14 @@ pub const ERGASTERION_OBJECT_READ_ROUTE: &str =
     "/api/v1/application-auth/ergasterion/objects/{store_id}/{version}/{*object_key}";
 pub const GOVERNED_BINDING_AUTHORITY_ADMISSION_CONFIRMATION: &str =
     "ADMIT TRUSTED GOVERNED BINDING AUTHORITY";
+/// Explicit acknowledgement required before a validated generated-output
+/// binding becomes daemon-trusted. This admission does not mint a capability
+/// and does not expose an output route.
+pub const GENERATED_OUTPUT_BINDING_AUTHORITY_ADMISSION_CONFIRMATION: &str =
+    "ADMIT TRUSTED GENERATED OUTPUT BINDING AUTHORITY";
+pub const GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_SCHEMA_VERSION: &str =
+    "dasobjectstore.generated-output-binding-admission-receipt.v1";
+pub const GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_KIND: &str = "das-output-binding-admission";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -55,6 +63,45 @@ pub struct GovernedBindingAuthorityAdmissionResponse {
     pub binding_id: String,
     pub object_store_id: dasobjectstore_core::ids::StoreId,
     pub binding_digest_sha256: String,
+    pub dry_run: bool,
+    pub active: bool,
+}
+
+/// Administrator-controlled registration of a generated-output binding. The
+/// dynamic application identity and at least one valid public credential are
+/// rechecked by the daemon before a non-dry-run record is written.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneratedOutputBindingAuthorityAdmissionRequest {
+    pub binding: dasobjectstore_core::application_auth_v2::GeneratedOutputBindingV1,
+    #[serde(default)]
+    pub dry_run: bool,
+    pub confirmation: String,
+}
+
+impl GeneratedOutputBindingAuthorityAdmissionRequest {
+    pub fn validate(&self) -> Result<(), DaemonRequestValidationError> {
+        if self.confirmation != GENERATED_OUTPUT_BINDING_AUTHORITY_ADMISSION_CONFIRMATION {
+            return Err(DaemonRequestValidationError::ConfirmationMismatch {
+                expected: GENERATED_OUTPUT_BINDING_AUTHORITY_ADMISSION_CONFIRMATION,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Redacted, provider-produced evidence of a binding-admission decision.
+/// It contains neither a credential nor storage topology.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GeneratedOutputBindingAuthorityAdmissionResponse {
+    pub receipt_schema_version: String,
+    pub receipt_kind: String,
+    pub binding_id: String,
+    pub application_id: String,
+    pub object_store_id: dasobjectstore_core::ids::StoreId,
+    pub binding_digest_sha256: String,
+    pub admitted_at_unix_seconds: u64,
     pub dry_run: bool,
     pub active: bool,
 }

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dasobjectstore.mnemosyne.example/contracts/dasobjectstore-generated-output-binding-admission-receipt-v1.schema.json",
+  "title": "DASObjectStore Generated Output Binding Admission Receipt v1",
+  "description": "Redacted evidence of daemon-local generated-output binding admission. It does not prove that a capability, output route, or object settlement exists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["receiptSchemaVersion", "receiptKind", "bindingId", "applicationId", "objectStoreId", "bindingDigestSha256", "admittedAtUnixSeconds", "dryRun", "active"],
+  "allOf": [
+    {
+      "if": { "properties": { "dryRun": { "const": true } }, "required": ["dryRun"] },
+      "then": { "properties": { "active": { "const": false } } },
+      "else": { "properties": { "active": { "const": true } } }
+    }
+  ],
+  "properties": {
+    "receiptSchemaVersion": { "const": "dasobjectstore.generated-output-binding-admission-receipt.v1" },
+    "receiptKind": { "const": "das-output-binding-admission" },
+    "bindingId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "applicationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "objectStoreId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "bindingDigestSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "admittedAtUnixSeconds": { "type": "integer", "minimum": 1 },
+    "dryRun": { "type": "boolean" },
+    "active": { "type": "boolean" }
+  }
+}

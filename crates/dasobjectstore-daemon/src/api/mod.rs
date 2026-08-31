@@ -120,11 +120,16 @@ pub use ergasterion_capability::{
     ErgasterionCapabilityExchangeResponse, ErgasterionCapabilityRenewalRequest,
     ErgasterionObjectGroupStatusRequest, ErgasterionObjectGroupStatusResponse,
     ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
-    GovernedBindingAuthorityAdmissionRequest, GovernedBindingAuthorityAdmissionResponse,
-    OpaqueApplicationCapability, ERGASTERION_CAPABILITY_DISCOVERY_ROUTE,
-    ERGASTERION_CAPABILITY_EXCHANGE_ROUTE, ERGASTERION_CAPABILITY_RENEWAL_ROUTE,
-    ERGASTERION_OBJECT_GROUP_STATUS_ROUTE, ERGASTERION_OBJECT_READ_ROUTE,
-    ERGASTERION_OBJECT_SNAPSHOT_ROUTE, GOVERNED_BINDING_AUTHORITY_ADMISSION_CONFIRMATION,
+    GeneratedOutputBindingAuthorityAdmissionRequest,
+    GeneratedOutputBindingAuthorityAdmissionResponse, GovernedBindingAuthorityAdmissionRequest,
+    GovernedBindingAuthorityAdmissionResponse, OpaqueApplicationCapability,
+    ERGASTERION_CAPABILITY_DISCOVERY_ROUTE, ERGASTERION_CAPABILITY_EXCHANGE_ROUTE,
+    ERGASTERION_CAPABILITY_RENEWAL_ROUTE, ERGASTERION_OBJECT_GROUP_STATUS_ROUTE,
+    ERGASTERION_OBJECT_READ_ROUTE, ERGASTERION_OBJECT_SNAPSHOT_ROUTE,
+    GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_KIND,
+    GENERATED_OUTPUT_BINDING_ADMISSION_RECEIPT_SCHEMA_VERSION,
+    GENERATED_OUTPUT_BINDING_AUTHORITY_ADMISSION_CONFIRMATION,
+    GOVERNED_BINDING_AUTHORITY_ADMISSION_CONFIRMATION,
 };
 pub use health::{
     DaemonApiWarning, DaemonDiskHealthSummary, DaemonHealthSummaryRequest,
@@ -392,6 +397,7 @@ pub enum DaemonApiRequest {
     RenewErgasterionCapability(ErgasterionCapabilityRenewalRequest),
     DiscoverErgasterionCapability,
     AdmitGovernedBindingAuthority(GovernedBindingAuthorityAdmissionRequest),
+    AdmitGeneratedOutputBindingAuthority(GeneratedOutputBindingAuthorityAdmissionRequest),
     ErgasterionObjectSnapshot(ErgasterionObjectSnapshotRequest),
     ErgasterionObjectGroupStatus(ErgasterionObjectGroupStatusRequest),
     IssueApplicationUploadCapability(ApplicationUploadCapabilityIssueRequest),
@@ -482,6 +488,9 @@ impl DaemonApiRequest {
             Self::RenewErgasterionCapability(_) => "renew_ergasterion_capability",
             Self::DiscoverErgasterionCapability => "discover_ergasterion_capability",
             Self::AdmitGovernedBindingAuthority(_) => "admit_governed_binding_authority",
+            Self::AdmitGeneratedOutputBindingAuthority(_) => {
+                "admit_generated_output_binding_authority"
+            }
             Self::ErgasterionObjectSnapshot(_) => "ergasterion_object_snapshot",
             Self::ErgasterionObjectGroupStatus(_) => "ergasterion_object_group_status",
             Self::IssueApplicationUploadCapability(_) => "issue_application_upload_capability",
@@ -594,6 +603,7 @@ impl DaemonApiRequest {
             Self::ExchangeErgasterionCapability(request) => request.validate(),
             Self::RenewErgasterionCapability(request) => request.validate(),
             Self::AdmitGovernedBindingAuthority(request) => request.validate(),
+            Self::AdmitGeneratedOutputBindingAuthority(request) => request.validate(),
             Self::ErgasterionObjectSnapshot(request) => request.validate(),
             Self::ErgasterionObjectGroupStatus(request) => request.validate(),
             Self::IssueApplicationUploadCapability(request) => request
@@ -788,6 +798,7 @@ pub enum DaemonApiResponse {
     RenewErgasterionCapability(ErgasterionCapabilityExchangeResponse),
     DiscoverErgasterionCapability(ErgasterionCapabilityDiscoveryResponse),
     AdmitGovernedBindingAuthority(GovernedBindingAuthorityAdmissionResponse),
+    AdmitGeneratedOutputBindingAuthority(GeneratedOutputBindingAuthorityAdmissionResponse),
     ErgasterionObjectSnapshot(ErgasterionObjectSnapshotResponse),
     ErgasterionObjectGroupStatus(ErgasterionObjectGroupStatusResponse),
     PrepareEnclosure(PrepareEnclosureResponse),

@@ -26,6 +26,7 @@ mod folder_backend;
 mod folder_catalogue;
 mod folder_paths;
 mod garbage_collection;
+mod generated_output_binding_authority;
 mod governed_binding_authority;
 mod ingest_files;
 mod live_status;
@@ -189,6 +190,11 @@ pub use garbage_collection::{
     GarbageCollectError, GarbageCollectItem, GarbageCollectKind, GarbageCollectMode,
     GarbageCollectReport, GarbageCollectTrigger, GarbageCollectorConfig, PerformanceGcMarker,
     GARBAGE_COLLECTION_REPORT_SCHEMA, PERFORMANCE_GC_MARKER_FILE, PERFORMANCE_GC_MARKER_SCHEMA,
+};
+pub use generated_output_binding_authority::{
+    generated_output_binding_authority_path, upsert_trusted_generated_output_binding_authority,
+    TrustedGeneratedOutputBindingAuthority, GENERATED_OUTPUT_BINDING_AUTHORITY_FILE_NAME,
+    GENERATED_OUTPUT_BINDING_AUTHORITY_SCHEMA,
 };
 pub use governed_binding_authority::{
     governed_binding_authority_path, governed_binding_authority_ready,
