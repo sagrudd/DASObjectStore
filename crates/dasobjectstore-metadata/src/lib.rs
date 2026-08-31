@@ -47,8 +47,8 @@ pub mod workspace_operations;
 pub mod workspace_promotions;
 
 pub use assurance::{
-    assurance_primary_work_pending, commit_assurance_relocation, list_assurance_disk_states,
-    list_assurance_placement_candidates, record_assurance_hash_failure,
+    assurance_destage_copying, assurance_primary_work_pending, commit_assurance_relocation,
+    list_assurance_disk_states, list_assurance_placement_candidates, record_assurance_hash_failure,
     record_assurance_verification, AssuranceDiskState, AssuranceMetadataError,
     AssurancePlacementCandidate,
 };

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.176.4 - 2026-08-31
+
+- Allow bounded HDD balancing to run alongside durable SSD-to-HDD destage.
+  Rebalancing continues to take maintenance action precedence, while foreground
+  ingest and garbage collection preempt it. The housekeeping worker remains
+  capped at ten percent of the configured available I/O capacity.
+
 ## 0.176.3 - 2026-08-31
 
 - Re-measure and fractionally rebalance each HDD destination immediately

@@ -129,6 +129,25 @@ pub fn assurance_primary_work_pending(
     Ok(pending_destage)
 }
 
+/// Whether a durable SSD-to-HDD copy is actively consuming disk I/O. This is
+/// intentionally narrower than [`assurance_primary_work_pending`]: queued or
+/// retry-wait work must not hide unrelated host I/O from housekeeping.
+pub fn assurance_destage_copying(
+    live_sqlite_path: impl AsRef<Path>,
+) -> Result<bool, AssuranceMetadataError> {
+    let connection = Connection::open_with_flags(
+        live_sqlite_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM destage_queue WHERE state='hdd_copying')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
 pub fn record_assurance_verification(
     live_sqlite_path: impl AsRef<Path>,
     placement_id: &PlacementId,
