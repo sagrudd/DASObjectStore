@@ -152,10 +152,15 @@ struct EasyconnectBrowserApprovalQuery {
     expires_at_utc: String,
 }
 
+/// The bounded remote pairing target approved by a browser ceremony.
+///
+/// The Monas host consumes this same contract before it forwards an approval
+/// to DASObjectStore, so a fresh Pistis ceremony can be bound to the exact
+/// pairing and ObjectStore rather than to a browser session alone.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-struct EasyconnectBrowserApprovalIntent {
-    pairing_id: String,
-    object_store: String,
+pub struct EasyconnectBrowserApprovalIntent {
+    pub pairing_id: String,
+    pub object_store: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

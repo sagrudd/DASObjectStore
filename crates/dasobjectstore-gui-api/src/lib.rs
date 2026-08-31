@@ -57,8 +57,9 @@ pub use auth_routes::{
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate,
     host_composed_gui_api_router, pistis_easyconnect_approval_router,
     pistis_easyconnect_approval_router_with_daemon, standalone_auth_router,
-    standalone_gui_api_router, AuthRouteError, EasyconnectDaemonEndpoint,
-    EasyconnectS3EndpointConfig, GuiApiHostMode, StandaloneS3ConnectionDescriptor,
+    standalone_gui_api_router, AuthRouteError, EasyconnectBrowserApprovalIntent,
+    EasyconnectDaemonEndpoint, EasyconnectS3EndpointConfig, GuiApiHostMode,
+    StandaloneS3ConnectionDescriptor,
 };
 pub use das_role_policy::{DasCapability, DasRolePolicy};
 pub use dashboard::{

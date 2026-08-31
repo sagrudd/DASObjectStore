@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.173.32 - 2026-08-31
+
+- Restored the protected DASObjectStore remote-connection approval action by
+  deriving a valid CSP nonce from the host CSRF binding rather than placing the
+  `sha256:` prefix in the nonce source.
+- Aligned the remote approval screen with the Mnemosyne design language and
+  made failures visible rather than leaving the approval control inert.
+
 ## 0.173.31 - 2026-08-30
 
 - Repair historical ACL masks on retained SSD and HDD marker directories so
