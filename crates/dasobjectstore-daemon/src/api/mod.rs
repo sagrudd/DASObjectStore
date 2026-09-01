@@ -241,8 +241,10 @@ pub use profile_migration::{
     PROFILE_MIGRATION_CONFIRMATION,
 };
 pub use profile_readiness::{
-    ProfileLifecycleState, ProfileReadinessRequest, ProfileReadinessResponse,
-    PROFILE_READINESS_ROUTE, PROFILE_READINESS_SCHEMA_VERSION,
+    validate_phoreus_limited_profile_binding_contract, ProfileLifecycleState,
+    ProfileReadinessRequest, ProfileReadinessResponse, PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+    PHOREUS_LIMITED_PROFILE_BINDING_VERSION, PROFILE_READINESS_ROUTE,
+    PROFILE_READINESS_SCHEMA_VERSION,
 };
 pub use profile_s3::{
     ProfileS3DeleteRequest, ProfileS3DeleteResponse, ProfileS3HeadRequest, ProfileS3HeadResponse,
