@@ -424,6 +424,16 @@ root-owned; it is not an end-user form):
      "site_uuid": "<authority-managed-32-lower-hex>"
    }
 
+The source profile is installed **before** this command by an independently
+authenticated organisation deployment route: a signed host-specific package
+plus protected identity delivery, an authenticated configuration-management
+transaction, or a read-only platform secret/configuration mount. The private
+SSH identity is per-host secret material and is never embedded in a generic
+remote-client package. There is intentionally no ``trust source import`` CLI:
+letting a caller supply its own SSH pin or identity would turn untrusted local
+data into the HTTPS trust root. Do not hand-edit these files; ask the
+organisation deployment route to install or replace the complete profile.
+
 The source account must be restricted by the authority package to the exact
 ``/usr/libexec/mnemosyne-domain-cert-site-trust-export-v1`` command. It returns
 only one bounded public envelope and grants neither a shell nor authority

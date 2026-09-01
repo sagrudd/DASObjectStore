@@ -35,11 +35,11 @@ pub struct TrustProvisionArgs {
     host_or_ip: String,
     #[arg(long, default_value_t = crate::easyconnect::DEFAULT_MONAS_HTTPS_PORT)]
     https_port: u16,
-    /// Explicitly select the root-owned pinned-SSH source record.
+    /// Explicitly select a root-owned, organisation-provisioned pinned-SSH source record.
     ///
     /// Omit this for the package-owned per-endpoint source record. This option
-    /// does not accept an HTTPS URL because appliance HTTPS cannot bootstrap
-    /// its own Site trust.
+    /// does not import or create records and does not accept an HTTPS URL
+    /// because appliance HTTPS cannot bootstrap its own Site trust.
     #[arg(long, value_name = "PATH", conflicts_with = "air_gap")]
     source: Option<PathBuf>,
     /// Use an already authenticated, mounted Site Trust envelope instead of

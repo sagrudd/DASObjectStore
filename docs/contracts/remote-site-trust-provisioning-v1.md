@@ -25,6 +25,46 @@ regular file with no group/other access.
 The machine-readable schema is
 [`dasobjectstore.remote-site-trust-source.v1.schema.json`](../schemas/dasobjectstore.remote-site-trust-source.v1.schema.json).
 
+## Source-profile onboarding
+
+Before the normal one-command provision is available, the organisation must
+install the complete endpoint source profile through an *independently
+authenticated* administration channel. Accepted channels are:
+
+- an organisation-signed, host-specific DEB/RPM configuration payload for the
+  public source record and pinned known-hosts file, plus a separately protected
+  host-specific identity delivery mechanism;
+- a configuration-management transaction already authenticated to the remote
+  host, which atomically writes the source record and known-hosts file
+  root-owned and installs the identity mode `0600`; or
+- a read-only secret/configuration mount established by the container or HPC
+  platform's authenticated deployment control plane.
+
+The public source record and known-hosts data may be delivered in a signed
+package. A private SSH identity must **not** be embedded in a generic DEB/RPM,
+committed to source control, copied through appliance HTTPS, or printed in a
+terminal; it is per-host secret material delivered by the protected channel.
+
+There is deliberately no ``dasobjectstore-remote trust source import`` command.
+Such a command could only turn an arbitrary local file, copied pin, or
+untrusted HTTPS response into the root of the subsequent HTTPS trust decision.
+That would defeat the independent authentication property. The remote client
+only reads and validates a pre-existing source profile; it never creates,
+rewrites, repairs, or rotates the source record, known-hosts file, or identity.
+
+Consequently the ordinary user/automation workflow remains exactly one command
+after organisational onboarding:
+
+```text
+sudo dasobjectstore-remote trust provision HOST
+```
+
+The command derives the Site UUID and envelope digest from the installed source
+profile and the authenticated SSH response. A missing profile produces the
+specific ``site trust provisioning source is not configured`` error and must be
+resolved by the organisation deployment channel, not by hand-editing files or
+accepting an appliance HTTPS certificate.
+
 The SSH account is fixed: `mnemosyne-site-trust-export`. The remote client uses
 OpenSSH with an empty global configuration, strict host-key checking, only the
 pinned known-hosts file, the configured identity, no password or keyboard

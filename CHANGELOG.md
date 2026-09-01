@@ -18,6 +18,11 @@
   unsupported authority export capability, malformed or substituted envelopes,
   foreign Site UUIDs, and HTTPS bootstrap attempts now fail with precise,
   non-secret diagnostics without changing trust state.
+- Require source-record onboarding through an independently authenticated
+  organisation package, configuration-management run, or read-only container
+  mount. The remote client deliberately has no ``trust source import`` command:
+  accepting a caller-supplied SSH pin or identity would weaken the bootstrap
+  boundary it is intended to establish.
 
 ## 0.176.11 - 2026-09-01
 

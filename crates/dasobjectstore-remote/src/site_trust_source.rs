@@ -100,6 +100,11 @@ fn load_source(
     port: u16,
     explicit_path: Option<&Path>,
 ) -> Result<PinnedSshProvisioningSource, SiteTrustError> {
+    // This command intentionally has no source-record import or creation
+    // path. Creating a pin or provisioning identity from caller-supplied data
+    // would make an untrusted local input the root of the HTTPS trust chain.
+    // An independently authenticated organisation deployment channel owns the
+    // source record and its adjacent known-hosts/identity files.
     let path = explicit_path
         .map(Path::to_path_buf)
         .unwrap_or(default_source_path(host, port)?);
@@ -510,6 +515,10 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Refusing untrusted appliance HTTPS bootstrap"));
+        assert!(
+            !path.exists(),
+            "the client must never create a source record from untrusted local input"
+        );
     }
 
     #[test]
