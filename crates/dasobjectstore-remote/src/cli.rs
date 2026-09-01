@@ -1154,12 +1154,6 @@ mod tests {
             "trust",
             "provision",
             "192.168.0.193",
-            "--site-uuid",
-            "11111111111111111111111111111111",
-            "--envelope",
-            "/mnt/site-trust/monas.pxce",
-            "--authenticated-envelope-sha256",
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "--output",
             "/run/das/site-trust.json",
         ])
@@ -1172,11 +1166,36 @@ mod tests {
         };
         assert_eq!(args.host_or_ip(), "192.168.0.193");
         assert_eq!(args.https_port(), 8443);
-        assert_eq!(args.site_uuid(), "11111111111111111111111111111111");
+        assert!(!args.air_gap());
+        assert_eq!(args.site_uuid(), None);
+        assert_eq!(args.source(), None);
         assert_eq!(
             args.output().and_then(|path| path.to_str()),
             Some("/run/das/site-trust.json")
         );
+
+        let air_gap = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "trust",
+            "provision",
+            "192.168.0.193",
+            "--air-gap",
+            "--site-uuid",
+            "11111111111111111111111111111111",
+            "--envelope",
+            "/mnt/site-trust/monas.pxce",
+            "--authenticated-envelope-sha256",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ])
+        .expect("air-gap Site Trust provision parses");
+        let RemoteCommand::Trust(args) = air_gap.command() else {
+            panic!("expected trust command");
+        };
+        let TrustCommand::Provision(args) = args.command() else {
+            panic!("expected Site Trust provision command");
+        };
+        assert!(args.air_gap());
+        assert_eq!(args.site_uuid(), Some("11111111111111111111111111111111"));
 
         let enroll = RemoteCli::try_parse_from([
             "dasobjectstore-remote",

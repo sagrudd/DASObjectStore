@@ -32,6 +32,8 @@ source_path="$rpm_root/SOURCES/${payload_name}.tar.gz"
 
 rm -rf "$payload_root"
 install -d \
+  "$payload_root/etc/dasobjectstore-remote/site-trust.d" \
+  "$payload_root/etc/dasobjectstore-remote/site-trust-sources.d" \
   "$payload_root/usr/bin" \
   "$payload_root/usr/share/doc/$package_name" \
   "$payload_root/usr/share/licenses/$package_name"
@@ -42,6 +44,10 @@ install -m 0644 "$repo_root/docs/user/remote-client.rst" \
   "$payload_root/usr/share/doc/$package_name/remote-client.rst"
 install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
   "$payload_root/usr/share/doc/$package_name/remote-s3-uploads.rst"
+install -m 0644 "$repo_root/docs/contracts/remote-site-trust-provisioning-v1.md" \
+  "$payload_root/usr/share/doc/$package_name/remote-site-trust-provisioning-v1.md"
+install -m 0644 "$repo_root/docs/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json" \
+  "$payload_root/usr/share/doc/$package_name/remote-site-trust-source-v1.schema.json"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
@@ -60,6 +66,7 @@ URL:            https://github.com/sagrudd/DASObjectStore
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       ca-certificates
+Requires:       openssh-clients
 Recommends:      awscli
 
 %description
@@ -77,10 +84,15 @@ rm -rf %{buildroot}
 cp -a . %{buildroot}/
 
 %files
+%dir /etc/dasobjectstore-remote
+%dir /etc/dasobjectstore-remote/site-trust.d
+%dir /etc/dasobjectstore-remote/site-trust-sources.d
 /usr/bin/dasobjectstore-remote
 %doc /usr/share/doc/dasobjectstore-remote/README.md
 %doc /usr/share/doc/dasobjectstore-remote/remote-client.rst
 %doc /usr/share/doc/dasobjectstore-remote/remote-s3-uploads.rst
+%doc /usr/share/doc/dasobjectstore-remote/remote-site-trust-provisioning-v1.md
+%doc /usr/share/doc/dasobjectstore-remote/remote-site-trust-source-v1.schema.json
 %license /usr/share/licenses/dasobjectstore-remote/LICENSE
 
 %changelog

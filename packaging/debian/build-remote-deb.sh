@@ -28,6 +28,8 @@ cargo build --release --locked -p dasobjectstore-remote --manifest-path "$repo_r
 rm -rf "$build_root"
 install -d \
   "$build_root/DEBIAN" \
+  "$build_root/etc/dasobjectstore-remote/site-trust.d" \
+  "$build_root/etc/dasobjectstore-remote/site-trust-sources.d" \
   "$build_root/usr/bin" \
   "$build_root/usr/share/doc/$package_name"
 install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
@@ -37,6 +39,10 @@ install -m 0644 "$repo_root/docs/user/remote-client.rst" \
   "$build_root/usr/share/doc/$package_name/remote-client.rst"
 install -m 0644 "$repo_root/docs/user/remote-s3-uploads.rst" \
   "$build_root/usr/share/doc/$package_name/remote-s3-uploads.rst"
+install -m 0644 "$repo_root/docs/contracts/remote-site-trust-provisioning-v1.md" \
+  "$build_root/usr/share/doc/$package_name/remote-site-trust-provisioning-v1.md"
+install -m 0644 "$repo_root/docs/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json" \
+  "$build_root/usr/share/doc/$package_name/remote-site-trust-source-v1.schema.json"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$build_root"
 das_package_normalize_tree "$build_root"
@@ -48,7 +54,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates
+Depends: ca-certificates, openssh-client
 Suggests: awscli
 Homepage: https://github.com/sagrudd/DASObjectStore
 Description: remote upload client for DASObjectStore object services

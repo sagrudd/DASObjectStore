@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnemosyne.co.uk/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json",
+  "title": "DASObjectStore Remote Site Trust Source v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "endpoint_host",
+    "endpoint_port",
+    "transport",
+    "ssh_host",
+    "ssh_port",
+    "ssh_user",
+    "ssh_known_hosts_file",
+    "ssh_identity_file",
+    "site_uuid"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dasobjectstore.remote_site_trust_source.v1"
+    },
+    "endpoint_host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "endpoint_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "transport": {
+      "const": "pinned-ssh-domain-cert-public-export-v1"
+    },
+    "ssh_host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "ssh_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "ssh_user": {
+      "const": "mnemosyne-site-trust-export"
+    },
+    "ssh_known_hosts_file": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "ssh_identity_file": {
+      "type": "string",
+      "pattern": "^/"
+    },
+    "site_uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    }
+  }
+}

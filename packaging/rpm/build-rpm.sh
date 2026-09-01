@@ -55,6 +55,8 @@ source_path="$rpm_root/SOURCES/${payload_name}.tar.gz"
 rm -rf "$payload_root"
 install -d \
   "$payload_root/etc/dasobjectstore" \
+  "$payload_root/etc/dasobjectstore-remote/site-trust.d" \
+  "$payload_root/etc/dasobjectstore-remote/site-trust-sources.d" \
   "$payload_root/opt/dasobjectstore" \
   "$payload_root/opt/dasobjectstore/web" \
   "$payload_root/usr/bin" \
@@ -94,6 +96,10 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integ
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
   "$payload_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 install -m 0644 "$repo_root/README.md" "$payload_root/usr/share/doc/$package_name/README.md"
+install -m 0644 "$repo_root/docs/contracts/remote-site-trust-provisioning-v1.md" \
+  "$payload_root/usr/share/doc/$package_name/remote-site-trust-provisioning-v1.md"
+install -m 0644 "$repo_root/docs/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json" \
+  "$payload_root/usr/share/doc/$package_name/remote-site-trust-source-v1.schema.json"
 install -m 0644 "$repo_root/LICENSE" "$payload_root/usr/share/licenses/$package_name/LICENSE"
 install -m 0644 "$packaging_linux/etc/dasobjectstore/daemon.json" \
   "$payload_root/etc/dasobjectstore/daemon.json"
@@ -160,6 +166,7 @@ BuildRequires:  rust
 # target; those are usually installed through rustup/cargo rather than RPM.
 Requires:       acl
 Requires:       ca-certificates
+Requires:       openssh-clients
 Requires:       /usr/bin/docker
 Requires:       docker-buildx-plugin
 Requires:       mergerfs
@@ -429,6 +436,9 @@ fi
 %config(noreplace) /etc/dasobjectstore/s3-gateway.json
 %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /opt/dasobjectstore/config.json
+%dir /etc/dasobjectstore-remote
+%dir /etc/dasobjectstore-remote/site-trust.d
+%dir /etc/dasobjectstore-remote/site-trust-sources.d
 /opt/dasobjectstore/web
 /usr/bin/dasobjectstore
 /usr/bin/dasobjectstore-server
@@ -459,6 +469,8 @@ fi
 /usr/lib/sysusers.d/dasobjectstore.conf
 /usr/lib/tmpfiles.d/dasobjectstore.conf
 %doc /usr/share/doc/dasobjectstore/README.md
+%doc /usr/share/doc/dasobjectstore/remote-site-trust-provisioning-v1.md
+%doc /usr/share/doc/dasobjectstore/remote-site-trust-source-v1.schema.json
 %license /usr/share/licenses/dasobjectstore/LICENSE
 
 %changelog
