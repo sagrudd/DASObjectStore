@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "base64",
  "chrono",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "base64",
  "chrono",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "axum",
  "axum-server",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "axum",
  "chrono",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "serde",
  "serde_json",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "base64",
  "clap",
@@ -967,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.176.10"
+version = "0.176.11"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -1651,9 +1651,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.15"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb093c84e8bd9b188d4c4a8cb6579fc016968d14c99882163cd3ff402a4f155"
+checksum = "a9f37a958b41b3b19ee2707c06439c0e9e547e847223eb791ecb0cb821c65e27"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -2858,15 +2858,15 @@ dependencies = [
 
 [[package]]
 name = "proxenos"
-version = "0.56.0"
-source = "git+https://github.com/sagrudd/proxenos.git?rev=27b587001742d9e345eb94c2a6fc7ae9b8450acc#27b587001742d9e345eb94c2a6fc7ae9b8450acc"
+version = "0.56.1"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=4d5dc7e4cc4ed7bb3d55ea83754a0cef46886a70#4d5dc7e4cc4ed7bb3d55ea83754a0cef46886a70"
 dependencies = [
  "base64",
  "const-oid",
  "coset",
  "der",
  "ed25519-dalek",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "nix 0.30.1",
  "p256",
  "rand_core 0.6.4",
@@ -3803,8 +3803,8 @@ dependencies = [
 
 [[package]]
 name = "thesaurophylax-api"
-version = "0.70.2"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=544e657a71997b92e7f0e4d1984bf4300f5dbfda#544e657a71997b92e7f0e4d1984bf4300f5dbfda"
+version = "0.72.3"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
 dependencies = [
  "base64",
  "ciborium",
@@ -3821,21 +3821,21 @@ dependencies = [
 
 [[package]]
 name = "thesaurophylax-core"
-version = "0.70.2"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=544e657a71997b92e7f0e4d1984bf4300f5dbfda#544e657a71997b92e7f0e4d1984bf4300f5dbfda"
+version = "0.72.3"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
 
 [[package]]
 name = "thesaurophylax-policy"
-version = "0.70.2"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=544e657a71997b92e7f0e4d1984bf4300f5dbfda#544e657a71997b92e7f0e4d1984bf4300f5dbfda"
+version = "0.72.3"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
 dependencies = [
  "thesaurophylax-core",
 ]
 
 [[package]]
 name = "thesaurophylax-store"
-version = "0.70.2"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=544e657a71997b92e7f0e4d1984bf4300f5dbfda#544e657a71997b92e7f0e4d1984bf4300f5dbfda"
+version = "0.72.3"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
 dependencies = [
  "thesaurophylax-core",
 ]

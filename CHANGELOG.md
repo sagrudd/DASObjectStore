@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.176.11 - 2026-09-01
+
+- Pin the package and remote-client dependency closure to Proxenos 0.56.1
+  from protected ``main`` and its exact Thesaurophylax 0.72.3 custody source.
+  Every DEB/RPM builder now rejects a substituted, stale, split, or unlocked
+  Proxenos/Thesaurophylax closure before compiling a payload.
+- Update the compatible locked ``h2`` transport dependency to 0.4.16, which
+  remedies RUSTSEC-2026-0258 before the appliance or remote client is built.
+
 ## 0.176.10 - 2026-09-01
 
 - Publish the path-free, producer-owned DASObjectStore contract for Monas's

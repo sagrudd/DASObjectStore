@@ -20,7 +20,7 @@ ERROR
   exit 1
 fi
 
-cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
 cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
 rpm_root="$cargo_target_dir/rpm/rpmbuild"

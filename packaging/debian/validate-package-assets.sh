@@ -268,7 +268,7 @@ require_text "$prerm" 'systemctl disable --now'
 require_text "$postrm" 'systemctl daemon-reload'
 require_text "$postrm" 'package removal is never that'
 
-require_text "$build_deb" "cargo build --release --no-default-features -p dasobjectstore-daemon"
+require_text "$build_deb" "cargo build --release --locked --no-default-features -p dasobjectstore-daemon"
 for builder in "$build_deb" "$build_rpm" "$build_remote_deb" "$build_remote_rpm"; do
   require_text "$builder" "pinned-mnemosyne-package-sources.sh"
   require_text "$builder" "das_package_configure_pinned_mnemosyne_sources"
@@ -281,7 +281,7 @@ require_text "$pinned_sources" 'DAS_PACKAGE_THESAUROPHYLAX_REVISION'
 require_text "$pinned_sources" 'mnemosyne.dasobjectstore.package-dependencies.v2'
 require_text "$repo_root/Cargo.toml" 'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
 require_text "$repo_root/Cargo.toml" 'prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = '
-require_text "$repo_root/Cargo.toml" 'proxenos = { git = "https://github.com/sagrudd/proxenos.git", rev = '
+require_text "$repo_root/Cargo.toml" 'proxenos = { version = "='
 require_absent "$repo_root/Cargo.toml" '[patch."https://github.com/sagrudd/pistis.git"]'
 require_text "$repo_root/Cargo.toml" 'pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = '
 require_text "$build_deb" 'das_package_write_pinned_dependency_provenance'
@@ -289,7 +289,7 @@ require_text "$build_rpm" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_deb" 'das_package_write_pinned_dependency_provenance'
 require_text "$build_remote_rpm" 'das_package_write_pinned_dependency_provenance'
 "$pinned_sources_test" "$pinned_sources"
-require_text "$build_deb" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_deb" "cargo build --release --locked -p dasobjectstore-remote"
 require_text "$build_deb" "dpkg-deb is required to build the DASObjectStore Debian package."
 require_text "$build_deb" '"$cargo_target_dir/release/dasobjectstored"'
 require_text "$build_deb" '"$cargo_target_dir/release/dasobjectstore-remote"'
@@ -366,9 +366,9 @@ require_text "$reporting_wrapper" 'grammateus_markdown_pdf'
 require_text "$reporting_wrapper" 'docker_args=(run --rm'
 
 require_text "$build_rpm" "rpmbuild"
-require_text "$build_rpm" "cargo build --release --no-default-features -p dasobjectstore-daemon"
-require_text "$build_rpm" "cargo build --release -p dasobjectstore-remote"
-require_text "$build_rpm" "cargo build --release -p dasobjectstore-workspace-host"
+require_text "$build_rpm" "cargo build --release --locked --no-default-features -p dasobjectstore-daemon"
+require_text "$build_rpm" "cargo build --release --locked -p dasobjectstore-remote"
+require_text "$build_rpm" "cargo build --release --locked -p dasobjectstore-workspace-host"
 require_text "$build_rpm" 'Requires:       quota'
 require_text "$build_rpm" 'Requires:       mergerfs'
 require_text "$build_rpm" 'Requires:       nfs-utils'
@@ -404,7 +404,7 @@ require_text "$build_rpm" 'Requires:       docker-buildx-plugin'
 require_text "$build_rpm" 'Recommends:      awscli'
 require_text "$build_rpm" 'sudo dnf install cargo rust clang clang-devel'
 
-require_text "$build_remote_deb" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_remote_deb" "cargo build --release --locked -p dasobjectstore-remote"
 require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectStore remote Debian package."
 require_file "$cargo_target_dir_helper"
 require_text "$build_remote_deb" 'packaging/cargo-target-dir.sh'
@@ -415,7 +415,7 @@ require_text "$build_remote_deb" 'Package: $package_name'
 require_text "$build_remote_deb" 'Suggests: awscli'
 
 require_text "$build_remote_rpm" "rpmbuild is required to build the DASObjectStore remote RPM."
-require_text "$build_remote_rpm" "cargo build --release -p dasobjectstore-remote"
+require_text "$build_remote_rpm" "cargo build --release --locked -p dasobjectstore-remote"
 require_text "$build_remote_rpm" 'packaging/cargo-target-dir.sh'
 require_text "$build_remote_rpm" 'das_cargo_target_dir'
 require_text "$build_remote_rpm" '"$cargo_target_dir/release/dasobjectstore-remote"'
