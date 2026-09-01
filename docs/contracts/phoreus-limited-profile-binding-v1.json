@@ -1,0 +1,32 @@
+{
+  "schema_version": "dasobjectstore.phoreus-limited-profile-binding.v1",
+  "contract_version": "1.0.0",
+  "producer": {
+    "product_id": "dasobjectstore",
+    "compatible_package_range": ">=0.176.10,<0.177.0"
+  },
+  "readiness_evidence": {
+    "schema_version": "dasobjectstore.profile_readiness.v1",
+    "route": "/api/v1/profile-readiness/stores/{store_id}",
+    "allowed_store_id": "phoreus",
+    "allowed_preverified_host_subject": "mnemosyne-monas",
+    "response_is_path_free": true,
+    "response_contains_provider_credentials": false
+  },
+  "semantics": {
+    "kind": "read_only_point_in_time_readiness",
+    "freshness_owner": "monas_signed_host_context",
+    "consumer_compatibility_range": ">=1.0.0,<2.0.0"
+  },
+  "excluded_surfaces": [
+    "backend_path_disclosure",
+    "credential_delivery",
+    "phoreus_governed_work_admission",
+    "compute_submission",
+    "package_qualification",
+    "runtime_readiness_claim",
+    "full_phoreus_monolith"
+  ],
+  "refusal": "wrong producer identifier, incompatible contract version, non-Monas peer, non-phoreus store, missing proof, or unready lifecycle is not usable as limited-profile evidence",
+  "source_provenance": "resolved only by Kanon from immutable merged-main source revisions and manifest digests"
+}

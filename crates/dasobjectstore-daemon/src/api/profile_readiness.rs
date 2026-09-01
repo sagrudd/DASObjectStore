@@ -6,6 +6,13 @@ use serde::{Deserialize, Serialize};
 
 pub const PROFILE_READINESS_SCHEMA_VERSION: &str = "dasobjectstore.profile_readiness.v1";
 pub const PROFILE_READINESS_ROUTE: &str = "/api/v1/profile-readiness/stores/{store_id}";
+/// Public producer declaration consumed by the limited Monas-to-Phoreus
+/// forwarding profile. It is deliberately a readiness binding, not a storage
+/// credential, backend-root disclosure, work-admission capability, or package
+/// qualification statement.
+pub const PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT: &str =
+    "dasobjectstore.phoreus-limited-profile-binding.v1";
+pub const PHOREUS_LIMITED_PROFILE_BINDING_VERSION: &str = "1.0.0";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +73,36 @@ impl ProfileReadinessResponse {
     }
 }
 
+/// Reject any declaration other than a compatible v1 limited-binding producer
+/// contract. This keeps consumers from upgrading a path-free readiness result
+/// into a claim from a substituted or future-major interface.
+pub fn validate_phoreus_limited_profile_binding_contract(
+    contract_id: &str,
+    contract_version: &str,
+) -> Result<(), &'static str> {
+    if contract_id != PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT {
+        return Err("unsupported Phoreus limited-profile binding contract");
+    }
+    if !phoreus_limited_profile_binding_version_is_compatible(contract_version) {
+        return Err("unsupported Phoreus limited-profile binding contract version");
+    }
+    Ok(())
+}
+
+fn phoreus_limited_profile_binding_version_is_compatible(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(_minor) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    let Some(_patch) = parts.next().and_then(|part| part.parse::<u64>().ok()) else {
+        return false;
+    };
+    parts.next().is_none() && major == 1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +155,64 @@ mod tests {
             serde_json::from_value(payload).expect("legacy readiness");
         assert_eq!(response.lifecycle_state, ProfileLifecycleState::Active);
         response.validate().expect("legacy response validates");
+    }
+
+    #[test]
+    fn limited_phoreus_binding_rejects_substitution_and_incompatible_versions() {
+        validate_phoreus_limited_profile_binding_contract(
+            PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+            PHOREUS_LIMITED_PROFILE_BINDING_VERSION,
+        )
+        .expect("current v1 declaration");
+        validate_phoreus_limited_profile_binding_contract(
+            PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+            "1.99.99",
+        )
+        .expect("compatible v1 declaration");
+        assert!(validate_phoreus_limited_profile_binding_contract(
+            "dasobjectstore.profile_binding_registry.v1",
+            PHOREUS_LIMITED_PROFILE_BINDING_VERSION,
+        )
+        .is_err());
+        assert!(validate_phoreus_limited_profile_binding_contract(
+            PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+            "0.9.9",
+        )
+        .is_err());
+        assert!(validate_phoreus_limited_profile_binding_contract(
+            PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+            "2.0.0",
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn published_limited_profile_declaration_matches_the_api_producer() {
+        let declaration: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/contracts/phoreus-limited-profile-binding-v1.json"
+        ))
+        .expect("valid public declaration");
+        assert_eq!(
+            declaration["schema_version"],
+            PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT
+        );
+        assert_eq!(
+            declaration["contract_version"],
+            PHOREUS_LIMITED_PROFILE_BINDING_VERSION
+        );
+        assert_eq!(
+            declaration["producer"]["compatible_package_range"],
+            ">=0.176.10,<0.177.0"
+        );
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.176.10");
+        assert_eq!(
+            declaration["readiness_evidence"]["schema_version"],
+            PROFILE_READINESS_SCHEMA_VERSION
+        );
+        assert!(declaration["excluded_surfaces"]
+            .as_array()
+            .expect("excluded surfaces")
+            .iter()
+            .any(|value| value == "full_phoreus_monolith"));
     }
 }

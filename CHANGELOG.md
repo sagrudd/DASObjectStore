@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.176.10 - 2026-09-01
+
+- Publish the path-free, producer-owned DASObjectStore contract for Monas's
+  limited Phoreus authenticated-entry readiness binding. It exposes neither a
+  backend path nor a credential, and does not qualify a Phoreus package,
+  runtime, full monolith, governed-work admission, or compute submission.
+- Make the public v1 compatibility range executable so substituted, stale, and
+  future-major binding declarations are rejected before a consumer can treat
+  readiness as Phoreus evidence.
+
 ## 0.176.9 - 2026-08-31
 
 - Restore autonomous durable settlement for SSD-bound artefacts stranded only
