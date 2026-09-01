@@ -339,12 +339,15 @@ fn read_bounded(mut reader: impl Read, maximum: usize) -> Result<BoundedRead, Fe
 enum FetchError {
     Authentication,
     CapabilityUnavailable,
+    CurrentEnvelopeUnavailable,
     Transport(String),
 }
 
 fn classify_ssh_failure(stderr: &[u8]) -> FetchError {
     let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
-    if text.contains("__das_site_trust_export_capability_unavailable__")
+    if text.contains("__das_site_trust_export_envelope_unavailable__") {
+        FetchError::CurrentEnvelopeUnavailable
+    } else if text.contains("__das_site_trust_export_capability_unavailable__")
         || text.contains("mnemosyne-domain-cert-site-trust-export-v1: not found")
         || text.contains("mnemosyne-domain-cert-site-trust-export-v1: command not found")
     {
@@ -369,6 +372,10 @@ fn map_fetch_error(error: FetchError) -> SiteTrustError {
         ),
         FetchError::CapabilityUnavailable => SiteTrustError::ProvisioningChannel(
             "configured Site authority does not support domain-cert site-root public-export; install a qualified domain-cert release before retrying"
+                .to_string(),
+        ),
+        FetchError::CurrentEnvelopeUnavailable => SiteTrustError::ProvisioningChannel(
+            "configured Site authority could not produce the current public Site Trust envelope; Site Trust was not changed"
                 .to_string(),
         ),
         FetchError::Transport(message) => SiteTrustError::ProvisioningChannel(message),
@@ -631,6 +638,21 @@ mod tests {
             argument
                 == "/usr/libexec/mnemosyne-domain-cert-site-trust-export-v1 01010101010101010101010101010101"
         }));
+    }
+
+    #[test]
+    fn ssh_failure_distinguishes_an_unsupported_exporter_from_an_unavailable_envelope() {
+        assert!(matches!(
+            classify_ssh_failure(b"__DAS_SITE_TRUST_EXPORT_CAPABILITY_UNAVAILABLE__"),
+            FetchError::CapabilityUnavailable
+        ));
+        assert!(matches!(
+            classify_ssh_failure(b"__DAS_SITE_TRUST_EXPORT_ENVELOPE_UNAVAILABLE__"),
+            FetchError::CurrentEnvelopeUnavailable
+        ));
+        assert!(map_fetch_error(FetchError::CurrentEnvelopeUnavailable)
+            .to_string()
+            .contains("could not produce the current public Site Trust envelope"));
     }
 
     fn source(site_uuid: [u8; 16]) -> PinnedSshProvisioningSource {
