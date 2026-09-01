@@ -225,14 +225,47 @@ fn run_site_trust_provision(
     args: &TrustProvisionArgs,
     writer: &mut impl Write,
 ) -> Result<(), RemoteRunError> {
-    let trust = crate::site_trust::provision(crate::site_trust::ProvisionRequest {
-        host: args.host_or_ip(),
-        port: args.https_port(),
-        site_uuid_hex: args.site_uuid(),
-        envelope_path: args.envelope(),
-        authenticated_envelope_sha256_hex: args.authenticated_envelope_sha256(),
-        output: args.output(),
-    })?;
+    let manual_fields_present = args.site_uuid().is_some()
+        || args.envelope().is_some()
+        || args.authenticated_envelope_sha256().is_some();
+    let trust = if args.air_gap() {
+        let (site_uuid, envelope, envelope_sha256) = (
+            args.site_uuid(),
+            args.envelope(),
+            args.authenticated_envelope_sha256(),
+        );
+        let (Some(site_uuid), Some(envelope), Some(envelope_sha256)) =
+            (site_uuid, envelope, envelope_sha256)
+        else {
+            return Err(RemoteRunError::UploadRouting(
+                "--air-gap requires --site-uuid, --envelope, and --authenticated-envelope-sha256"
+                    .to_string(),
+            ));
+        };
+        crate::site_trust::provision(crate::site_trust::ProvisionRequest {
+            host: args.host_or_ip(),
+            port: args.https_port(),
+            site_uuid_hex: site_uuid,
+            envelope_path: envelope,
+            authenticated_envelope_sha256_hex: envelope_sha256,
+            output: args.output(),
+        })?
+    } else {
+        if manual_fields_present {
+            return Err(RemoteRunError::UploadRouting(
+                "manual Site Trust fields require --air-gap; normal provisioning uses the configured pinned SSH source"
+                    .to_string(),
+            ));
+        }
+        crate::site_trust_source::provision_from_configured_source(
+            crate::site_trust_source::ConfiguredProvisionRequest {
+                host: args.host_or_ip(),
+                port: args.https_port(),
+                source: args.source(),
+                output: args.output(),
+            },
+        )?
+    };
     writeln!(
         writer,
         "Signed Site Trust provisioned for {}:{}.",

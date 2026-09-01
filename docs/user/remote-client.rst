@@ -386,27 +386,77 @@ DAS Web/API listener on 8448 closed. ``--authority-profile legacy-standalone``
 is required to select the legacy 8448 boundary explicitly.
 
 Integrated Monas requires a one-time signed Site Trust provision before the
-first login. On the Monas authority, ``domain-cert site-root public-export``
-emits a short-lived public-only ``PXCE/v1`` envelope and prints its SHA-256.
-Transfer the envelope and SHA-256 through the independently authenticated
-host/container provisioning channel, then run:
+first login. The normal route is one command on the remote host:
 
 .. code-block:: console
 
-   dasobjectstore-remote trust provision 192.168.0.193 \
+   sudo dasobjectstore-remote trust provision 192.168.0.193
+
+The command reads the root-owned source record for the requested endpoint from
+``/etc/dasobjectstore-remote/site-trust-sources.d/``. That record pins the
+authority SSH host key, the authority-only SSH identity, and the expected Site
+UUID. It invokes the constrained Domain Cert public-export command over that
+already authenticated SSH route, computes the envelope digest locally, then
+verifies the signed ``PXCE/v1`` envelope, current receipt-key registration,
+expiry, action, root fingerprint, and canonical CA before writing a public Site
+Trust record and PEM bundle.
+
+Neither the user nor an automation caller types a Site UUID, envelope path, or
+envelope digest in the normal workflow. The remote package owns both
+``/etc/dasobjectstore-remote/site-trust.d/`` and the source-record directory;
+the organisation's signed deployment profile installs the endpoint-specific
+source record, pinned ``known_hosts`` file, and least-privilege SSH identity.
+The standard record has this shape (configuration management writes it
+root-owned; it is not an end-user form):
+
+.. code-block:: json
+
+   {
+     "schema": "dasobjectstore.remote_site_trust_source.v1",
+     "endpoint_host": "192.168.0.193",
+     "endpoint_port": 8443,
+     "transport": "pinned-ssh-domain-cert-public-export-v1",
+     "ssh_host": "192.168.0.193",
+     "ssh_port": 22,
+     "ssh_user": "mnemosyne-site-trust-export",
+     "ssh_known_hosts_file": "/etc/dasobjectstore-remote/site-trust-sources.d/192_168_0_193-22.known_hosts",
+     "ssh_identity_file": "/etc/dasobjectstore-remote/site-trust-sources.d/192_168_0_193-export",
+     "site_uuid": "<authority-managed-32-lower-hex>"
+   }
+
+The source account must be restricted by the authority package to the exact
+``/usr/libexec/mnemosyne-domain-cert-site-trust-export-v1`` command. It returns
+only one bounded public envelope and grants neither a shell nor authority
+custody. That authority command wraps ``domain-cert site-root public-export``;
+an authority still running a release without the required export capability
+fails with a precise upgrade message and no local trust mutation.
+
+The remote client never contacts appliance HTTPS to discover the Site UUID,
+envelope, digest, CA, or a replacement source. If the root-owned pinned source
+record is absent it fails before network discovery with ``site trust
+provisioning source is not configured ... Refusing untrusted appliance HTTPS
+bootstrap``. Supplying an HTTPS source is rejected for the same reason.
+
+The command does not modify the OS CA store, does not start a daemon, and does
+not receive a Site private key, GitHub credential, Pistis identity, or S3
+credential. A container or HPC host may mount the generated record and PEM
+read-only and pass its record path with ``--site-trust-bundle`` (or set
+``DASOBJECTSTORE_REMOTE_SITE_TRUST_BUNDLE``). A missing record still fails
+before any HTTPS request with ``site trust not provisioned``.
+
+Air-gapped systems retain an explicit, separately authenticated route. It is
+deliberately opt-in so a caller cannot mistake a mounted bundle for the normal
+pinned SSH workflow:
+
+.. code-block:: console
+
+   sudo dasobjectstore-remote trust provision 192.168.0.193 --air-gap \
      --site-uuid SITE_UUID \
      --envelope /secure-mount/site-trust.pxce \
      --authenticated-envelope-sha256 SHA256_FROM_THE_AUTHENTICATED_CHANNEL
 
-The command verifies the Site UUID, signed envelope, current receipt-key
-registration, expiry, action, root fingerprint, and canonical CA before writing
-a public Site Trust record and PEM bundle. It does not modify the OS CA store,
-does not start a daemon, and does not receive a Site private key, GitHub
-credential, Pistis identity, or S3 credential. A container or HPC host may
-mount that generated record and PEM read-only and pass its record path with
-``--site-trust-bundle`` (or set
-``DASOBJECTSTORE_REMOTE_SITE_TRUST_BUNDLE``). A missing record fails before any
-HTTPS request with ``site trust not provisioned``.
+The air-gap caller obtains all three facts from its independently authenticated
+transport. The remote client still verifies them before writing anything.
 
 After successful provisioning, the normal command remains fully automated
 apart from its intentional browser/Pistis approval:

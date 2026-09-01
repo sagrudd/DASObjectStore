@@ -52,6 +52,8 @@ rm -rf "$build_root"
 install -d \
   "$build_root/DEBIAN" \
   "$build_root/etc/dasobjectstore" \
+  "$build_root/etc/dasobjectstore-remote/site-trust.d" \
+  "$build_root/etc/dasobjectstore-remote/site-trust-sources.d" \
   "$build_root/lib/systemd/system" \
   "$build_root/opt/dasobjectstore" \
   "$build_root/opt/dasobjectstore/web" \
@@ -59,6 +61,7 @@ install -d \
   "$build_root/usr/libexec/dasobjectstore" \
   "$build_root/usr/lib/sysusers.d" \
   "$build_root/usr/lib/tmpfiles.d" \
+  "$build_root/usr/share/doc/$package_name" \
   "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection"
 install -m 0755 "$cargo_target_dir/release/dasobjectstore" "$build_root/usr/bin/dasobjectstore"
 install -m 0755 "$cargo_target_dir/release/dasobjectstore-server" \
@@ -90,6 +93,10 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integ
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
   "$build_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
+install -m 0644 "$repo_root/docs/contracts/remote-site-trust-provisioning-v1.md" \
+  "$build_root/usr/share/doc/$package_name/remote-site-trust-provisioning-v1.md"
+install -m 0644 "$repo_root/docs/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json" \
+  "$build_root/usr/share/doc/$package_name/remote-site-trust-source-v1.schema.json"
 install -m 0644 "$repo_root/docs/schemas/dasobjectstore.synoptikon-projection.v1.schema.json" \
   "$build_root/usr/share/doc/$package_name/contracts/synoptikon-projection/schema-v1.json"
 install -m 0644 "$repo_root/crates/dasobjectstore-core/fixtures/synoptikon-projection/request-v1.json" \
@@ -153,7 +160,7 @@ Section: utils
 Priority: optional
 Architecture: $arch
 Maintainer: DASObjectStore contributors
-Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
+Depends: ca-certificates, openssh-client, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin
 Provides: dasobjectstore-remote
 Conflicts: dasobjectstore-remote
 Replaces: dasobjectstore-remote

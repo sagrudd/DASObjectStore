@@ -10,6 +10,7 @@ pub mod easyconnect;
 pub mod run;
 pub mod s3;
 pub mod site_trust;
+pub mod site_trust_source;
 pub mod trust;
 
 /// Returns the remote client crate version.

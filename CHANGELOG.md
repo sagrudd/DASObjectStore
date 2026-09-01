@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.177.0 - 2026-09-01
+
+- Make ``dasobjectstore-remote trust provision HOST`` the normal one-command
+  Site Trust bootstrap. The remote client now obtains a bounded public
+  ``PXCE/v1`` envelope only through a root-owned, pinned-SSH provisioning
+  source, computes its authenticated digest locally, verifies it before any
+  appliance HTTPS request, and writes only its process-local record and CA
+  bundle.
+- Preserve the existing manually transported bundle as explicit
+  ``--air-gap`` mode. Normal provisioning no longer accepts manually typed Site
+  UUID, envelope path, or digest fields, and it never falls back to untrusted
+  appliance HTTPS.
+- Package the process-local Site Trust and pinned-source directories plus the
+  shared authority/client provisioning contract in standalone remote DEB/RPM
+  payloads. Missing source records, SSH host-key/authentication failures,
+  unsupported authority export capability, malformed or substituted envelopes,
+  foreign Site UUIDs, and HTTPS bootstrap attempts now fail with precise,
+  non-secret diagnostics without changing trust state.
+
 ## 0.176.11 - 2026-09-01
 
 - Pin the package and remote-client dependency closure to Proxenos 0.56.1

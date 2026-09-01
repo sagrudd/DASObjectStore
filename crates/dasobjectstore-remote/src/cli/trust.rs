@@ -35,15 +35,27 @@ pub struct TrustProvisionArgs {
     host_or_ip: String,
     #[arg(long, default_value_t = crate::easyconnect::DEFAULT_MONAS_HTTPS_PORT)]
     https_port: u16,
-    /// Expected Site UUID from the organisation's signed Site Trust record.
+    /// Explicitly select the root-owned pinned-SSH source record.
+    ///
+    /// Omit this for the package-owned per-endpoint source record. This option
+    /// does not accept an HTTPS URL because appliance HTTPS cannot bootstrap
+    /// its own Site trust.
+    #[arg(long, value_name = "PATH", conflicts_with = "air_gap")]
+    source: Option<PathBuf>,
+    /// Use an already authenticated, mounted Site Trust envelope instead of
+    /// the normal pinned-SSH provisioning source.
+    #[arg(long)]
+    air_gap: bool,
+    /// Expected Site UUID from the independently authenticated air-gap bundle.
+    #[arg(long, value_name = "32_HEX", requires = "air_gap")]
     #[arg(long, value_name = "32_HEX")]
-    site_uuid: String,
-    /// PXCE/v1 envelope transferred through the authenticated provisioning channel.
-    #[arg(long, value_name = "PATH")]
-    envelope: PathBuf,
-    /// SHA-256 independently observed over that authenticated channel.
-    #[arg(long, value_name = "64_HEX")]
-    authenticated_envelope_sha256: String,
+    site_uuid: Option<String>,
+    /// PXCE/v1 envelope transferred through the authenticated air-gap channel.
+    #[arg(long, value_name = "PATH", requires = "air_gap")]
+    envelope: Option<PathBuf>,
+    /// SHA-256 independently observed over that authenticated air-gap channel.
+    #[arg(long, value_name = "64_HEX", requires = "air_gap")]
+    authenticated_envelope_sha256: Option<String>,
     /// Output Site Trust record; default is the package-owned per-endpoint path.
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
@@ -56,14 +68,20 @@ impl TrustProvisionArgs {
     pub fn https_port(&self) -> u16 {
         self.https_port
     }
-    pub fn site_uuid(&self) -> &str {
-        &self.site_uuid
+    pub fn source(&self) -> Option<&Path> {
+        self.source.as_deref()
     }
-    pub fn envelope(&self) -> &Path {
-        &self.envelope
+    pub fn air_gap(&self) -> bool {
+        self.air_gap
     }
-    pub fn authenticated_envelope_sha256(&self) -> &str {
-        &self.authenticated_envelope_sha256
+    pub fn site_uuid(&self) -> Option<&str> {
+        self.site_uuid.as_deref()
+    }
+    pub fn envelope(&self) -> Option<&Path> {
+        self.envelope.as_deref()
+    }
+    pub fn authenticated_envelope_sha256(&self) -> Option<&str> {
+        self.authenticated_envelope_sha256.as_deref()
     }
     pub fn output(&self) -> Option<&Path> {
         self.output.as_deref()

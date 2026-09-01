@@ -55,6 +55,12 @@ pub enum SiteTrustError {
         port: u16,
         path: PathBuf,
     },
+    ProvisioningSourceNotConfigured {
+        host: String,
+        port: u16,
+        path: PathBuf,
+    },
+    ProvisioningChannel(String),
     Invalid(String),
     Io(io::Error),
     Json(serde_json::Error),
@@ -68,6 +74,12 @@ impl fmt::Display for SiteTrustError {
                 "site trust not provisioned for {host}:{port}; expected signed Site Trust record {}",
                 path.display()
             ),
+            Self::ProvisioningSourceNotConfigured { host, port, path } => write!(
+                out,
+                "site trust provisioning source is not configured for {host}:{port}; expected root-owned pinned SSH source record {}. Refusing untrusted appliance HTTPS bootstrap.",
+                path.display()
+            ),
+            Self::ProvisioningChannel(message) => out.write_str(message),
             Self::Invalid(message) => out.write_str(message),
             Self::Io(error) => write!(out, "site trust I/O failed: {error}"),
             Self::Json(error) => write!(out, "invalid provisioned Site Trust record: {error}"),
@@ -96,7 +108,38 @@ pub struct ProvisionRequest<'a> {
     pub output: Option<&'a Path>,
 }
 
+/// A verified PXCE/v1 envelope already obtained through an independently
+/// authenticated channel. Callers must provide the Site UUID and SHA-256 from
+/// that same channel; this type deliberately has no HTTPS source field.
+pub struct ProvisionEnvelopeRequest<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub site_uuid_hex: &'a str,
+    pub envelope: &'a [u8],
+    pub authenticated_envelope_sha256_hex: &'a str,
+    pub output: Option<&'a Path>,
+}
+
 pub fn provision(request: ProvisionRequest<'_>) -> Result<LoadedSiteTrust, SiteTrustError> {
+    let envelope = read_safe_file(request.envelope_path, MAXIMUM_ENVELOPE_BYTES)?;
+    provision_envelope(ProvisionEnvelopeRequest {
+        host: request.host,
+        port: request.port,
+        site_uuid_hex: request.site_uuid_hex,
+        envelope: &envelope,
+        authenticated_envelope_sha256_hex: request.authenticated_envelope_sha256_hex,
+        output: request.output,
+    })
+}
+
+/// Verify and persist a PXCE/v1 envelope acquired by a trusted source.
+///
+/// This is intentionally separate from [`provision`] so a pinned provisioning
+/// transport never has to materialise a short-lived envelope as a local input
+/// file before verification.
+pub fn provision_envelope(
+    request: ProvisionEnvelopeRequest<'_>,
+) -> Result<LoadedSiteTrust, SiteTrustError> {
     let host = canonical_host(request.host)?;
     if request.port == 0 {
         return Err(SiteTrustError::Invalid(
@@ -108,15 +151,19 @@ pub fn provision(request: ProvisionRequest<'_>) -> Result<LoadedSiteTrust, SiteT
         request.authenticated_envelope_sha256_hex,
         "authenticated envelope SHA-256",
     )?;
-    let envelope = read_safe_file(request.envelope_path, MAXIMUM_ENVELOPE_BYTES)?;
-    let envelope_digest: [u8; 32] = Sha256::digest(&envelope).into();
+    if request.envelope.is_empty() || request.envelope.len() > MAXIMUM_ENVELOPE_BYTES as usize {
+        return Err(SiteTrustError::Invalid(
+            "authenticated Site Trust envelope is empty or exceeds its bounded size".to_string(),
+        ));
+    }
+    let envelope_digest: [u8; 32] = Sha256::digest(request.envelope).into();
     if envelope_digest != authenticated_sha {
         return Err(SiteTrustError::Invalid(
             "authenticated Site Trust envelope SHA-256 mismatch".to_string(),
         ));
     }
     let verified = verify_site_root_public_consumer_envelope_v1(
-        &envelope,
+        request.envelope,
         now_millis()?,
         expected_site,
         authenticated_sha,
@@ -400,7 +447,7 @@ fn decode_exact<const N: usize>(value: &str, label: &str) -> Result<[u8; N], Sit
         .map_err(|_| SiteTrustError::Invalid(format!("{label} must be exactly {N} bytes")))
 }
 
-fn now_millis() -> Result<u64, SiteTrustError> {
+pub(crate) fn now_millis() -> Result<u64, SiteTrustError> {
     u64::try_from(
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
