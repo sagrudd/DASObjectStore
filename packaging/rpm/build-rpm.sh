@@ -35,14 +35,14 @@ packaging_reporting="$repo_root/packaging/reporting"
 web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
-cargo build --release -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-cli --manifest-path "$repo_root/Cargo.toml"
 # Package builds are deliberately feature-minimal: development self-signing
 # is a workspace-only test aid and must never enter an RPM payload.
-cargo build --release --no-default-features -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
-cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
-cargo build --release -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
-cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement --manifest-path "$repo_root/Cargo.toml"
-cargo build --release -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement-finalize --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked --no-default-features -p dasobjectstore-daemon --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-workspace-host --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-mnemosyne --bin dasobjectstore-authority-retirement-finalize --manifest-path "$repo_root/Cargo.toml"
 
 cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
 rpm_root="$cargo_target_dir/rpm/rpmbuild"

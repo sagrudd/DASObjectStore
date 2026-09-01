@@ -37,6 +37,10 @@ const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
+const BUILD_REMOTE_DEB: &str = include_str!("../../../packaging/debian/build-remote-deb.sh");
+const BUILD_REMOTE_RPM: &str = include_str!("../../../packaging/rpm/build-remote-rpm.sh");
+const PINNED_MNEMOSYNE_SOURCES: &str =
+    include_str!("../../../packaging/pinned-mnemosyne-package-sources.sh");
 const PACKAGE_AUTH_GUARD: &str =
     include_str!("../../../packaging/validate-package-auth-content.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
@@ -78,6 +82,74 @@ fn workspace_pins_one_prosopikon_type_identity() {
         2,
         "prosopikon-core and prosopikon-yew must resolve from one revision"
     );
+}
+
+#[test]
+fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
+    const PROXENOS_VERSION: &str = "0.56.1";
+    const PROXENOS_REVISION: &str = "4d5dc7e4cc4ed7bb3d55ea83754a0cef46886a70";
+    const THESAUROPHYLAX_VERSION: &str = "0.72.3";
+    const THESAUROPHYLAX_REVISION: &str = "0bfb16857d135d2830de2cf53d245b68ed2d051f";
+
+    assert_contains(
+        WORKSPACE_MANIFEST,
+        &format!(
+            "proxenos = {{ version = \"={PROXENOS_VERSION}\", git = \"https://github.com/sagrudd/proxenos.git\", rev = \"{PROXENOS_REVISION}\" }}"
+        ),
+    );
+    assert_locked_git_package(
+        "proxenos",
+        PROXENOS_VERSION,
+        "https://github.com/sagrudd/proxenos.git",
+        PROXENOS_REVISION,
+    );
+    for package in [
+        "thesaurophylax-api",
+        "thesaurophylax-core",
+        "thesaurophylax-policy",
+        "thesaurophylax-store",
+    ] {
+        assert_locked_git_package(
+            package,
+            THESAUROPHYLAX_VERSION,
+            "https://github.com/sagrudd/thesaurophylax.git",
+            THESAUROPHYLAX_REVISION,
+        );
+    }
+    assert_not_contains(WORKSPACE_LOCK, "27b587001742d9e345eb94c2a6fc7ae9b8450acc");
+    assert_not_contains(WORKSPACE_LOCK, "544e657a71997b92e7f0e4d1984bf4300f5dbfda");
+    assert_contains(PINNED_MNEMOSYNE_SOURCES, "das_require_locked_git_package");
+    for builder in [BUILD_DEB, BUILD_RPM, BUILD_REMOTE_DEB, BUILD_REMOTE_RPM] {
+        assert_contains(builder, "cargo build --release --locked");
+        assert_contains(builder, "das_package_configure_pinned_mnemosyne_sources");
+    }
+}
+
+#[test]
+fn workspace_lock_remediates_the_h2_empty_data_frame_advisory() {
+    let h2 = locked_package("h2");
+    assert_contains(h2, "version = \"0.4.16\"");
+    assert_not_contains(WORKSPACE_LOCK, "name = \"h2\"\nversion = \"0.4.15\"");
+}
+
+fn assert_locked_git_package(name: &str, version: &str, repository: &str, revision: &str) {
+    let package = locked_package(name);
+    assert_contains(package, &format!("version = \"{version}\""));
+    assert_contains(
+        package,
+        &format!("source = \"git+{repository}?rev={revision}#{revision}\""),
+    );
+}
+
+fn locked_package(name: &str) -> &str {
+    WORKSPACE_LOCK
+        .split("[[package]]")
+        .find(|package| {
+            package
+                .lines()
+                .any(|line| line == format!("name = \"{name}\""))
+        })
+        .unwrap_or_else(|| panic!("Cargo.lock must contain {name}"))
 }
 
 #[test]
@@ -672,9 +744,12 @@ fn package_installs_das_owned_report_renderer_wrapper() {
 fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(
         BUILD_DEB,
-        "cargo build --release --no-default-features -p dasobjectstore-daemon",
+        "cargo build --release --locked --no-default-features -p dasobjectstore-daemon",
     );
-    assert_contains(BUILD_DEB, "cargo build --release -p dasobjectstore-remote");
+    assert_contains(
+        BUILD_DEB,
+        "cargo build --release --locked -p dasobjectstore-remote",
+    );
     assert_contains(
         BUILD_DEB,
         "dpkg-deb is required to build the DASObjectStore Debian package.",
@@ -718,9 +793,12 @@ fn rpm_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_RPM, "rpmbuild");
     assert_contains(
         BUILD_RPM,
-        "cargo build --release --no-default-features -p dasobjectstore-daemon",
+        "cargo build --release --locked --no-default-features -p dasobjectstore-daemon",
     );
-    assert_contains(BUILD_RPM, "cargo build --release -p dasobjectstore-remote");
+    assert_contains(
+        BUILD_RPM,
+        "cargo build --release --locked -p dasobjectstore-remote",
+    );
     assert_contains(BUILD_RPM, "packaging/cargo-target-dir.sh");
     assert_contains(BUILD_RPM, "das_cargo_target_dir");
     assert_contains(BUILD_RPM, "\"$cargo_target_dir/release/dasobjectstored\"");

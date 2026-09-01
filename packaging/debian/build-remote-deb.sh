@@ -23,7 +23,7 @@ cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
 build_root="$cargo_target_dir/deb/${package_name}_${version}_${arch}"
 package_path="$cargo_target_dir/deb/${package_name}_${version}_${arch}.deb"
 
-cargo build --release -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+cargo build --release --locked -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
