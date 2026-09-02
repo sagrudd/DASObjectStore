@@ -56,7 +56,7 @@ const PRERM: &str = include_str!("../../../packaging/debian/prerm");
 const POSTRM: &str = include_str!("../../../packaging/debian/postrm");
 const MAKEFILE: &str = include_str!("../../../Makefile");
 const DEBIAN_RUNTIME_DEPENDENCIES: &str =
-    "Depends: ca-certificates, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
+    "Depends: ca-certificates, openssh-client, acl, mergerfs, nfs-kernel-server, python3, quota, smartmontools, udisks2, docker.io | docker-ce, docker-buildx | docker-buildx-plugin";
 const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
     "Provides: dasobjectstore-remote",
     "Conflicts: dasobjectstore-remote",
@@ -86,8 +86,8 @@ fn workspace_pins_one_prosopikon_type_identity() {
 
 #[test]
 fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.57.0";
-    const PROXENOS_REVISION: &str = "e4ff70dcc25fdea6949b779ede2c39394be2991b";
+    const PROXENOS_VERSION: &str = "0.58.0";
+    const PROXENOS_REVISION: &str = "d88522b67919f73b9910c844947c8b3cdf4ea07a";
     const THESAUROPHYLAX_VERSION: &str = "0.72.3";
     const THESAUROPHYLAX_REVISION: &str = "0bfb16857d135d2830de2cf53d245b68ed2d051f";
 

@@ -534,6 +534,12 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let envelope_path = directory.join("trust.pxce");
         fs::write(&envelope_path, envelope).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(&envelope_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
         let record_path = directory.join("trust.json");
         let trust = provision(ProvisionRequest {
             host: "192.168.0.193",

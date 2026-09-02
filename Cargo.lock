@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "axum",
  "axum-server",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "base64",
  "chrono",
@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "base64",
  "chrono",
@@ -827,7 +827,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "axum",
  "axum-server",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "axum",
  "chrono",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "dasobjectstore-core",
  "serde",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "dasobjectstore-core",
  "plist",
@@ -934,7 +934,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "base64",
  "clap",
@@ -967,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.177.1"
+version = "0.177.2"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -1181,7 +1181,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2858,8 +2858,8 @@ dependencies = [
 
 [[package]]
 name = "proxenos"
-version = "0.57.0"
-source = "git+https://github.com/sagrudd/proxenos.git?rev=e4ff70dcc25fdea6949b779ede2c39394be2991b#e4ff70dcc25fdea6949b779ede2c39394be2991b"
+version = "0.58.0"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=d88522b67919f73b9910c844947c8b3cdf4ea07a#d88522b67919f73b9910c844947c8b3cdf4ea07a"
 dependencies = [
  "base64",
  "const-oid",
@@ -2944,7 +2944,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3277,7 +3277,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

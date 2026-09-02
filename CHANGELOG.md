@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.177.2 - 2026-09-02
+
+- Pin the appliance and standalone Remote client to merged-main Proxenos
+  0.58.0. This is the exact public Site Trust exporter capability required by
+  the Domain Certificate 0.17.0 NUC package; no storage schema, object data,
+  remote CLI syntax, or trust-record format changes.
+
 ## 0.177.1 - 2026-09-02
 
 - Pin the appliance and standalone Remote client to Proxenos 0.57.0 from
