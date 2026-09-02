@@ -66,8 +66,8 @@ def lock_authority(mapping: dict[str, Any], label: str) -> tuple[str, str, str]:
     return lockset_id, content_digest, registry_digest
 
 
-def lockset_authority(mapping: dict[str, Any]) -> tuple[str, str, str]:
-    lockset_id = value_at(mapping, "TERRAFORM_SUCCESSOR_LOCKSET", "source_lockset_id")
+def canonical_lockset_authority(mapping: dict[str, Any]) -> tuple[str, str, str]:
+    lockset_id = value_at(mapping, "TERRAFORM_SUCCESSOR_LOCKSET", "id")
     content_digest = value_at(mapping, "TERRAFORM_SUCCESSOR_LOCKSET", "content_digest")
     registry_digest = value_at(mapping, "TERRAFORM_SUCCESSOR_LOCKSET", "registry_digest")
     if not SHA256.fullmatch(content_digest):
@@ -75,7 +75,7 @@ def lockset_authority(mapping: dict[str, Any]) -> tuple[str, str, str]:
     if not SHA256.fullmatch(registry_digest):
         fail("TERRAFORM_SUCCESSOR_LOCKSET has an invalid registry_digest")
     if any(character.isspace() for character in lockset_id):
-        fail("TERRAFORM_SUCCESSOR_LOCKSET has an invalid source_lockset_id")
+        fail("TERRAFORM_SUCCESSOR_LOCKSET has an invalid id")
     return lockset_id, content_digest, registry_digest
 
 
@@ -166,9 +166,9 @@ def main() -> None:
         fail(f"TERRAFORM_SUCCESSOR_LOCKSET is invalid: {error}")
     if not isinstance(lockset, dict):
         fail("TERRAFORM_SUCCESSOR_LOCKSET must contain a TOML table")
-    if lockset.get("schema_version") != "mnemosyne.terraform.kanon-lockset-projection.v1":
-        fail("TERRAFORM_SUCCESSOR_LOCKSET is not a Kanon lockset projection")
-    authority = lockset_authority(lockset)
+    if lockset.get("schema_version") != "mnemosyne.kanon.lockset.v1alpha2":
+        fail("TERRAFORM_SUCCESSOR_LOCKSET is not a canonical Kanon lockset")
+    authority = canonical_lockset_authority(lockset)
     components = lockset.get("components")
     if not isinstance(components, list):
         fail("TERRAFORM_SUCCESSOR_LOCKSET is missing components")

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.177.4 - 2026-09-02
+
+- Correct the formal remote package guard to consume the canonical Kanon
+  lockset passed by Terraform successor builds. Its authoritative ``id`` and
+  digests must still agree exactly with the Terraform-generated catalogue and
+  sources lock before compilation.
+
 ## 0.177.3 - 2026-09-02
 
 - Make the remote DEB and RPM entry points formal-release only. They now

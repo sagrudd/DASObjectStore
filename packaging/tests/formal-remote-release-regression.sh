@@ -33,8 +33,8 @@ registry_digest = "sha256:" + "b" * 64
 (root / "lockset.toml").write_text(
     "\n".join(
         [
-            'schema_version = "mnemosyne.terraform.kanon-lockset-projection.v1"',
-            'source_lockset_id = "das-test-lockset"',
+            'schema_version = "mnemosyne.kanon.lockset.v1alpha2"',
+            'id = "das-test-lockset"',
             f'content_digest = "{content_digest}"',
             f'registry_digest = "{registry_digest}"',
             "",
