@@ -28,14 +28,14 @@ proxenos_revision="$(make_checkout "$workspace/proxenos" "thesaurophylax-api = {
 mkdir -p "$workspace/dasobjectstore"
 cat >"$workspace/dasobjectstore/Cargo.toml" <<EOF
 prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
-proxenos = { version = "=0.56.1", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
+proxenos = { version = "=0.57.0", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
 EOF
 cat >"$workspace/dasobjectstore/Cargo.lock" <<EOF
 version = 4
 
 [[package]]
 name = "proxenos"
-version = "0.56.1"
+version = "0.57.0"
 source = "git+https://github.com/sagrudd/proxenos.git?rev=$proxenos_revision#$proxenos_revision"
 
 [[package]]

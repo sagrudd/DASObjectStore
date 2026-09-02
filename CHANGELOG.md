@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.177.1 - 2026-09-02
+
+- Pin the appliance and standalone Remote client to Proxenos 0.57.0 from
+  protected ``main``. This aligns the checked-in Cargo graph, package-builder
+  preflight and Kanon dependency closure used by retained Site Root receipt
+  completion; substituted, stale or split Proxenos/Thesaurophylax sources
+  remain a hard build failure.
+- Correct the published, non-qualifying Phoreus limited-profile readiness
+  declaration so its compatible producer package range is the actual 0.177.1
+  patch release rather than a stale 0.176.11 assertion.
+
 ## 0.177.0 - 2026-09-01
 
 - Make ``dasobjectstore-remote trust provision HOST`` the normal one-command
