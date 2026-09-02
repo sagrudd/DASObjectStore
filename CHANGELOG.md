@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.177.4 - 2026-09-02
+
+- Correct the formal remote package guard to consume the canonical Kanon
+  lockset passed by Terraform successor builds. Its authoritative ``id`` and
+  digests must still agree exactly with the Terraform-generated catalogue and
+  sources lock before compilation.
+
+## 0.177.3 - 2026-09-02
+
+- Make the remote DEB and RPM entry points formal-release only. They now
+  reject an unbumped source revision and require a matching, explicit
+  Terraform successor lockset, product catalogue, and sources lock before
+  compiling. Remote package provenance records the validated lock authority,
+  package version, and exact source revision.
+- Align the DASObjectStore product manifest with the workspace package
+  version, and make the release version guard reject future manifest drift.
+
 ## 0.177.2 - 2026-09-02
 
 - Pin the appliance and standalone Remote client to merged-main Proxenos
