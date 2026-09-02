@@ -204,7 +204,7 @@ mod tests {
             declaration["producer"]["compatible_package_range"],
             ">=0.177.1,<0.178.0"
         );
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.177.2");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.177.3");
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
             PROFILE_READINESS_SCHEMA_VERSION

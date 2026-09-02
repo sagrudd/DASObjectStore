@@ -2,13 +2,26 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
-source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
-source "$repo_root/packaging/cargo-target-dir.sh"
+"$repo_root/packaging/validate-release-version.sh" "$repo_root"
 package_name="dasobjectstore-remote"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-remote","version":"\([^"]*\)".*/\1/p')"
 version="${version:-0.4.2}"
+: "${TERRAFORM_SUCCESSOR_LOCKSET:?formal remote Debian package requires TERRAFORM_SUCCESSOR_LOCKSET}"
+: "${TERRAFORM_CATALOGUE:?formal remote Debian package requires TERRAFORM_CATALOGUE}"
+: "${TERRAFORM_SOURCES_LOCK:?formal remote Debian package requires TERRAFORM_SOURCES_LOCK}"
+read -r DAS_PACKAGE_LOCKSET_ID DAS_PACKAGE_LOCKSET_CONTENT_DIGEST DAS_PACKAGE_LOCKSET_REGISTRY_DIGEST DAS_PACKAGE_RELEASE_SOURCE_REVISION < <(
+  python3 "$repo_root/packaging/validate-formal-remote-release.py" \
+    --repo-root "$repo_root" \
+    --lockset "$TERRAFORM_SUCCESSOR_LOCKSET" \
+    --catalogue "$TERRAFORM_CATALOGUE" \
+    --sources-lock "$TERRAFORM_SOURCES_LOCK" \
+    --package-version "$version"
+)
+export DAS_PACKAGE_LOCKSET_ID DAS_PACKAGE_LOCKSET_CONTENT_DIGEST DAS_PACKAGE_LOCKSET_REGISTRY_DIGEST DAS_PACKAGE_RELEASE_SOURCE_REVISION
+source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
+source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
+source "$repo_root/packaging/cargo-target-dir.sh"
 
 if ! command -v dpkg-deb >/dev/null 2>&1; then
   cat >&2 <<ERROR
@@ -64,6 +77,6 @@ Description: remote upload client for DASObjectStore object services
 CONTROL
 
 SOURCE_DATE_EPOCH="$DAS_PACKAGE_SOURCE_EPOCH" dpkg-deb --build --root-owner-group "$build_root" "$package_path"
-das_package_write_provenance "$package_path" remote "$arch"
+das_package_write_formal_remote_provenance "$package_path" "$arch" "$version"
 das_package_write_pinned_dependency_provenance "$package_path"
 printf '%s\n' "$package_path"

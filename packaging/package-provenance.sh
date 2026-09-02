@@ -23,3 +23,18 @@ das_package_write_provenance() {
   local package_path="$1" profile="$2" arch="$3"
   printf '{"schema":"mnemosyne.dasobjectstore.package-provenance.v1","source_revision":"%s","source_date_epoch":%s,"profile":"%s","architecture":"%s","package_sha256":"%s"}\n' "$DAS_PACKAGE_SOURCE_REVISION" "$DAS_PACKAGE_SOURCE_EPOCH" "$profile" "$arch" "$(sha256sum "$package_path" | awk '{print $1}')" >"$package_path.provenance.json"
 }
+das_package_write_formal_remote_provenance() {
+  local package_path="$1" arch="$2" package_version="$3"
+  : "${DAS_PACKAGE_LOCKSET_ID:?formal remote package provenance requires a lockset id}"
+  : "${DAS_PACKAGE_LOCKSET_CONTENT_DIGEST:?formal remote package provenance requires a lockset content digest}"
+  : "${DAS_PACKAGE_LOCKSET_REGISTRY_DIGEST:?formal remote package provenance requires a lockset registry digest}"
+  : "${DAS_PACKAGE_RELEASE_SOURCE_REVISION:?formal remote package provenance requires a release source revision}"
+  if [[ "$DAS_PACKAGE_SOURCE_REVISION" != "$DAS_PACKAGE_RELEASE_SOURCE_REVISION" ]]; then
+    echo "formal remote package provenance source revision does not match release input" >&2
+    return 1
+  fi
+  printf '{"schema":"mnemosyne.dasobjectstore.package-provenance.v2","component_id":"dasobjectstore-remote","package_name":"dasobjectstore-remote","package_version":"%s","source_revision":"%s","source_date_epoch":%s,"profile":"remote","architecture":"%s","lockset_id":"%s","lockset_content_digest":"%s","lockset_registry_digest":"%s","package_sha256":"%s"}\n' \
+    "$package_version" "$DAS_PACKAGE_SOURCE_REVISION" "$DAS_PACKAGE_SOURCE_EPOCH" "$arch" \
+    "$DAS_PACKAGE_LOCKSET_ID" "$DAS_PACKAGE_LOCKSET_CONTENT_DIGEST" "$DAS_PACKAGE_LOCKSET_REGISTRY_DIGEST" \
+    "$(sha256sum "$package_path" | awk '{print $1}')" >"$package_path.provenance.json"
+}
