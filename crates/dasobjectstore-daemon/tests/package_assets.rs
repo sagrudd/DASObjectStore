@@ -86,8 +86,8 @@ fn workspace_pins_one_prosopikon_type_identity() {
 
 #[test]
 fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.57.0";
-    const PROXENOS_REVISION: &str = "e4ff70dcc25fdea6949b779ede2c39394be2991b";
+    const PROXENOS_VERSION: &str = "0.58.0";
+    const PROXENOS_REVISION: &str = "d88522b67919f73b9910c844947c8b3cdf4ea07a";
     const THESAUROPHYLAX_VERSION: &str = "0.72.3";
     const THESAUROPHYLAX_REVISION: &str = "0bfb16857d135d2830de2cf53d245b68ed2d051f";
 
