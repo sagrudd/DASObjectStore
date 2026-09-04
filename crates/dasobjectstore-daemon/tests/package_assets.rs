@@ -855,6 +855,25 @@ fn rpm_build_installs_daemon_boundary_assets() {
 }
 
 #[test]
+fn r237_bootstrap_observer_is_packaged_as_a_binary_only() {
+    const OBSERVER: &str = "dasobjectstore-r237-bootstrap-observer";
+    for builder in [BUILD_DEB, BUILD_RPM] {
+        assert_contains(
+            builder,
+            "\"$cargo_target_dir/release/dasobjectstore-r237-bootstrap-observer\"",
+        );
+        assert_not_contains(builder, "dasobjectstore-r237-bootstrap-observer.service");
+        assert_not_contains(builder, "dasobjectstore-r237-bootstrap-observer.socket");
+        assert_not_contains(builder, "dasobjectstore-r237-bootstrap-observer.json");
+        assert_not_contains(builder, "dasobjectstore-r237-bootstrap-observer.conf");
+        assert_not_contains(builder, "sudo dasobjectstore-r237-bootstrap-observer");
+        assert_not_contains(builder, "mnemosyne-r237-custody-marker");
+        assert_not_contains(builder, "r237-bootstrap-observer-credential");
+        assert_contains(builder, OBSERVER);
+    }
+}
+
+#[test]
 fn web_dist_preparation_requires_real_trunk_assets_for_packages() {
     assert_contains(PREPARE_WEB_DIST, "trunk build --release");
     assert_contains(PREPARE_WEB_DIST, "DASOBJECTSTORE_PREBUILT_WEB_DIST");
