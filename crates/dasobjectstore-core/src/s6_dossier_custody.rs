@@ -26,9 +26,6 @@ pub const S6_DOSSIER_CUSTODY_BINDING_V1_SCHEMA: &str =
     "mnemosyne.expedition.s6-dossier-custody-binding.v1";
 pub const S6_DOSSIER_READBACK_RECEIPT_V1_SCHEMA: &str =
     "mnemosyne.das.s6-dossier-readback-receipt.v1";
-pub const S6_SEALED_SUCCESSOR_PLAN_V2_SCHEMA: &str = "mnemosyne.terraform.sealed-successor-plan.v2";
-pub const S6_SIGNING_AUTHORITY_SELECTION_V1_SCHEMA: &str =
-    "mnemosyne.terraform.s6-signing-authority-selection.v1";
 pub const S6_DOSSIER_FIXED_PEER_GRANT_V1_SCHEMA: &str =
     "dasobjectstore.s6-dossier-fixed-peer-grant.v1";
 pub const S6_DOSSIER_ACCEPTED_AUTHORITY_V1_SCHEMA: &str =
@@ -47,14 +44,14 @@ const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SUBJECT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CUSTODY_BINDING_BYTES: u64 = 64 * 1024;
 const MAX_ACCEPTED_AUTHORITY_BYTES: u64 = 64 * 1024;
-const MAX_SEALED_PLAN_BYTES: u64 = 16 * 1024 * 1024;
 const SUBJECT_DOMAIN_PREFIX: &[u8] = b"mnemosyne.expedition.s6-dossier-subject.v1\0";
 const ACCEPTED_AUTHORITY_PURPOSE: &str = "release-train-s6-dossier-v1";
 // These are public verification anchors, not signing material.  They are the
 // two distinct authorities specified by the Programme S6 contract: the
 // Kleidophylax release-record signer and the Expedition S3 attestation
 // verifier.  Keeping them as exact raw PEM bytes prevents a self-consistent
-// corpus from selecting its own authority before S2-v2 selection is available.
+// corpus from selecting its own authority before a shared typed S2 verifier is
+// available.
 const FIXED_KLEIDOPHYLAX_S6_AUTHORITY_PEM: &[u8] =
     include_bytes!("../../../trust/kleidophylax-release-authority.pub");
 const FIXED_EXPEDITION_S3_AUTHORITY_PEM: &[u8] =
@@ -300,7 +297,6 @@ pub struct VerifiedS6DossierCorpusV1 {
     authority_record_raw: Option<Vec<u8>>,
     authority_pem_raw: Option<Vec<u8>>,
     s3_authority_pem_raw: Option<Vec<u8>>,
-    sealed_plan_raw: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -458,7 +454,6 @@ pub fn inspect_s6_dossier_custody(
         &subject.release.signing_authority.authority_record,
         &subject.release.signing_authority.public_key_pem,
         &subject.s3.authority_pem,
-        &subject.s2.sealed_plan,
     )?;
     if verified.manifest_sha256 != subject.corpus.manifest_sha256
         || verified.manifest.members != subject.corpus.members
@@ -484,10 +479,6 @@ pub fn inspect_s6_dossier_custody(
             .s3_authority_pem_raw
             .as_deref()
             .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?,
-        verified
-            .sealed_plan_raw
-            .as_deref()
-            .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?,
     )?;
     let _structural = S6DossierCustodyPreflightV1 {
         storage_key: canonical_storage_key(&verified.corpus_sha256)?,
@@ -496,9 +487,10 @@ pub fn inspect_s6_dossier_custody(
         custody_binding: binding,
         corpus: verified,
     };
-    // The S2 v2 Terraform plan and its cross-bound typed stage validators are
-    // not available in this source release.  Do not turn a structural parse
-    // into an authority decision before that immutable selection exists.
+    // This source release never deserialises or evaluates the raw S2 plan
+    // member. A shared, cross-language typed verifier and its cross-bound
+    // evidence are required before a structural parse can become an authority
+    // decision.
     Err(S6DossierCustodyError::TypedStageValidationRequired)
 }
 
@@ -618,7 +610,7 @@ pub fn verify_s6_dossier_corpus(
     reader: &mut dyn Read,
     custody_binding_ref: &S6DossierMemberRefV1,
 ) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
-    verify_s6_dossier_corpus_captured(reader, custody_binding_ref, None, None, None, None)
+    verify_s6_dossier_corpus_captured(reader, custody_binding_ref, None, None, None)
 }
 
 fn verify_s6_dossier_corpus_with_authority(
@@ -627,7 +619,6 @@ fn verify_s6_dossier_corpus_with_authority(
     authority_record_ref: &S6DossierMemberRefV1,
     authority_pem_ref: &S6DossierMemberRefV1,
     s3_authority_pem_ref: &S6DossierMemberRefV1,
-    sealed_plan_ref: &S6DossierMemberRefV1,
 ) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
     verify_s6_dossier_corpus_captured(
         reader,
@@ -635,7 +626,6 @@ fn verify_s6_dossier_corpus_with_authority(
         Some(authority_record_ref),
         Some(authority_pem_ref),
         Some(s3_authority_pem_ref),
-        Some(sealed_plan_ref),
     )
 }
 
@@ -645,14 +635,12 @@ fn verify_s6_dossier_corpus_captured(
     authority_record_ref: Option<&S6DossierMemberRefV1>,
     authority_pem_ref: Option<&S6DossierMemberRefV1>,
     s3_authority_pem_ref: Option<&S6DossierMemberRefV1>,
-    sealed_plan_ref: Option<&S6DossierMemberRefV1>,
 ) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
     validate_member_ref(custody_binding_ref).map_err(|_| S6DossierCustodyError::InvalidSubject)?;
     for reference in [
         authority_record_ref,
         authority_pem_ref,
         s3_authority_pem_ref,
-        sealed_plan_ref,
     ]
     .into_iter()
     .flatten()
@@ -699,7 +687,6 @@ fn verify_s6_dossier_corpus_captured(
     let mut authority_record_raw = None;
     let mut authority_pem_raw = None;
     let mut s3_authority_pem_raw = None;
-    let mut sealed_plan_raw = None;
     for member in &manifest.members {
         let member_size =
             parse_size(&member.size).map_err(|_| S6DossierCustodyError::InvalidManifest)?;
@@ -710,13 +697,10 @@ fn verify_s6_dossier_corpus_captured(
             authority_pem_ref.is_some_and(|reference| member_matches_ref(member, reference));
         let s3_authority_pem_capture =
             s3_authority_pem_ref.is_some_and(|reference| member_matches_ref(member, reference));
-        let sealed_plan_capture =
-            sealed_plan_ref.is_some_and(|reference| member_matches_ref(member, reference));
         let capture_count = usize::from(binding_capture)
             + usize::from(authority_record_capture)
             + usize::from(authority_pem_capture)
-            + usize::from(s3_authority_pem_capture)
-            + usize::from(sealed_plan_capture);
+            + usize::from(s3_authority_pem_capture);
         if capture_count > 1 {
             return Err(S6DossierCustodyError::InvalidSubject);
         }
@@ -727,9 +711,6 @@ fn verify_s6_dossier_corpus_captured(
         if (authority_record_capture || authority_pem_capture || s3_authority_pem_capture)
             && member_size > MAX_ACCEPTED_AUTHORITY_BYTES
         {
-            return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
-        }
-        if sealed_plan_capture && member_size > MAX_SEALED_PLAN_BYTES {
             return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
         }
         let (member_sha256, captured) = stream_member(
@@ -774,14 +755,6 @@ fn verify_s6_dossier_corpus_captured(
         {
             return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
         }
-        if sealed_plan_capture
-            && (member.media_type != "application/json"
-                || sealed_plan_raw
-                    .replace(captured.unwrap_or_default())
-                    .is_some())
-        {
-            return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
-        }
     }
     let mut extra = [0_u8; 1];
     match reader.read(&mut extra) {
@@ -793,7 +766,6 @@ fn verify_s6_dossier_corpus_captured(
     if authority_record_ref.is_some() && authority_record_raw.is_none()
         || authority_pem_ref.is_some() && authority_pem_raw.is_none()
         || s3_authority_pem_ref.is_some() && s3_authority_pem_raw.is_none()
-        || sealed_plan_ref.is_some() && sealed_plan_raw.is_none()
     {
         return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
     }
@@ -806,7 +778,6 @@ fn verify_s6_dossier_corpus_captured(
         authority_record_raw,
         authority_pem_raw,
         s3_authority_pem_raw,
-        sealed_plan_raw,
     })
 }
 
@@ -889,7 +860,6 @@ fn validate_s6_dossier_accepted_authority_material(
     authority_record_jcs: &[u8],
     public_key_pem: &[u8],
     s3_authority_pem: &[u8],
-    sealed_plan_jcs: &[u8],
 ) -> Result<(), S6DossierCustodyError> {
     let record: S6DossierAcceptedAuthorityV1 = strict_jcs(
         authority_record_jcs,
@@ -910,73 +880,7 @@ fn validate_s6_dossier_accepted_authority_material(
         return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
     }
     validate_canonical_ed25519_spki_pem(public_key_pem)?;
-    validate_canonical_ed25519_spki_pem(s3_authority_pem)?;
-    validate_s2_v2_authority_selection(
-        sealed_plan_jcs,
-        authority,
-        authority_record_jcs,
-        public_key_pem,
-    )
-}
-
-fn validate_s2_v2_authority_selection(
-    sealed_plan_jcs: &[u8],
-    authority: &S6DossierSigningAuthorityV1,
-    authority_record_jcs: &[u8],
-    public_key_pem: &[u8],
-) -> Result<(), S6DossierCustodyError> {
-    let sealed_plan: serde_json::Value = strict_jcs(
-        sealed_plan_jcs,
-        S6DossierCustodyError::InvalidAcceptedAuthority,
-    )?;
-    let plan = sealed_plan
-        .as_object()
-        .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?;
-    if plan.get("schema").and_then(serde_json::Value::as_str)
-        != Some(S6_SEALED_SUCCESSOR_PLAN_V2_SCHEMA)
-    {
-        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
-    }
-    let selection = plan
-        .get("s6_signing_authority")
-        .and_then(serde_json::Value::as_object)
-        .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?;
-    const REQUIRED_FIELDS: [&str; 6] = [
-        "schema",
-        "authority_id",
-        "algorithm",
-        "purpose",
-        "authority_record_sha256",
-        "public_key_sha256",
-    ];
-    if selection.len() != REQUIRED_FIELDS.len()
-        || REQUIRED_FIELDS
-            .iter()
-            .any(|field| !selection.contains_key(*field))
-        || selection.get("schema").and_then(serde_json::Value::as_str)
-            != Some(S6_SIGNING_AUTHORITY_SELECTION_V1_SCHEMA)
-        || selection
-            .get("authority_id")
-            .and_then(serde_json::Value::as_str)
-            != Some(authority.authority_id.as_str())
-        || selection
-            .get("algorithm")
-            .and_then(serde_json::Value::as_str)
-            != Some("ed25519")
-        || selection.get("purpose").and_then(serde_json::Value::as_str)
-            != Some(ACCEPTED_AUTHORITY_PURPOSE)
-        || selection
-            .get("authority_record_sha256")
-            .and_then(serde_json::Value::as_str)
-            != Some(raw_digest(authority_record_jcs).as_str())
-        || selection
-            .get("public_key_sha256")
-            .and_then(serde_json::Value::as_str)
-            != Some(raw_digest(public_key_pem).as_str())
-    {
-        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
-    }
-    Ok(())
+    validate_canonical_ed25519_spki_pem(s3_authority_pem)
 }
 
 fn validate_canonical_ed25519_spki_pem(raw: &[u8]) -> Result<(), S6DossierCustodyError> {
@@ -1651,6 +1555,16 @@ mod tests {
     }
 
     fn records(binding_raw: &[u8]) -> Vec<(String, String, Vec<u8>)> {
+        records_with_raw_s2_plan(
+            binding_raw,
+            br#"{"fixture":"unvalidated-raw-s2-plan"}"#.to_vec(),
+        )
+    }
+
+    fn records_with_raw_s2_plan(
+        binding_raw: &[u8],
+        raw_s2_plan: Vec<u8>,
+    ) -> Vec<(String, String, Vec<u8>)> {
         let authority_pem = FIXED_KLEIDOPHYLAX_S6_AUTHORITY_PEM;
         let authority_record = jcs(
             &S6DossierAcceptedAuthorityV1 {
@@ -1663,18 +1577,6 @@ mod tests {
             S6DossierCustodyError::InvalidAcceptedAuthority,
         )
         .unwrap();
-        let sealed_plan = serde_json::json!({
-            "schema": S6_SEALED_SUCCESSOR_PLAN_V2_SCHEMA,
-            "s6_signing_authority": {
-                "schema": S6_SIGNING_AUTHORITY_SELECTION_V1_SCHEMA,
-                "authority_id": "s6-authority",
-                "algorithm": "ed25519",
-                "purpose": ACCEPTED_AUTHORITY_PURPOSE,
-                "authority_record_sha256": digest(&authority_record),
-                "public_key_sha256": digest(authority_pem),
-            },
-        });
-        let sealed_plan = serde_jcs::to_vec(&sealed_plan).unwrap();
         let mut records = vec![
             (
                 "a-authority.json".to_owned(),
@@ -1709,7 +1611,7 @@ mod tests {
             (
                 "f-s2-plan.json".to_owned(),
                 "application/json".to_owned(),
-                sealed_plan,
+                raw_s2_plan,
             ),
             (
                 "g-s2-preflight.json".to_owned(),
@@ -1855,8 +1757,19 @@ mod tests {
         S6DossierPeerChannelV1,
         S6DossierPeerChannelV1,
     ) {
+        fixture_with_raw_s2_plan(br#"{"fixture":"unvalidated-raw-s2-plan"}"#.to_vec())
+    }
+
+    fn fixture_with_raw_s2_plan(
+        raw_s2_plan: Vec<u8>,
+    ) -> (
+        Vec<u8>,
+        Vec<u8>,
+        S6DossierPeerChannelV1,
+        S6DossierPeerChannelV1,
+    ) {
         let binding_raw = jcs(&binding(), S6DossierCustodyError::InvalidCustodyBinding).unwrap();
-        let records = records(&binding_raw);
+        let records = records_with_raw_s2_plan(&binding_raw, raw_s2_plan);
         let members: Vec<_> = records
             .iter()
             .map(|(name, media, bytes)| member(name, media, bytes))
@@ -2287,7 +2200,7 @@ mod tests {
     }
 
     #[test]
-    fn two_fixed_authorities_and_s2_v2_selection_are_required_before_inspection() {
+    fn two_fixed_authorities_reject_self_selected_key_before_typed_stage_denial() {
         let (subject_raw, _corpus, _writer, _reader) = fixture();
         let subject: S6DossierSubjectV1 =
             strict_jcs(&subject_raw, S6DossierCustodyError::InvalidSubject).unwrap();
@@ -2311,12 +2224,6 @@ mod tests {
             .unwrap()
             .2
             .clone();
-        let sealed_plan = records
-            .iter()
-            .find(|(name, _, _)| name == "f-s2-plan.json")
-            .unwrap()
-            .2
-            .clone();
         assert_ne!(pem, s3_pem, "S3 and Kleidophylax anchors must differ");
         assert_eq!(
             digest(FIXED_KLEIDOPHYLAX_S6_AUTHORITY_PEM),
@@ -2331,7 +2238,6 @@ mod tests {
             &record,
             &pem,
             &s3_pem,
-            &sealed_plan,
         )
         .unwrap();
         let caller_pem = b"-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n-----END PUBLIC KEY-----\n";
@@ -2352,46 +2258,113 @@ mod tests {
                 &caller_record,
                 caller_pem,
                 &s3_pem,
-                &sealed_plan,
             ),
             Err(S6DossierCustodyError::InvalidAcceptedAuthority)
         );
-        let v1_plan = serde_jcs::to_vec(&serde_json::json!({
-            "schema": "mnemosyne.terraform.sealed-successor-plan.v1"
-        }))
-        .unwrap();
-        assert_eq!(
-            validate_s6_dossier_accepted_authority_material(
-                &subject.release.signing_authority,
-                &record,
-                &pem,
-                &s3_pem,
-                &v1_plan,
+    }
+
+    #[test]
+    fn raw_s2_plan_variants_cannot_select_an_authority_or_reach_ports() {
+        // These are raw-member variants, not a local reimplementation of
+        // Terraform's sealed-plan grammar. They prove that no caller-shaped
+        // v2-looking object, including altered or incomplete selection data,
+        // becomes an accepted authority before the shared typed boundary.
+        let selection = serde_json::json!({
+            "schema": "mnemosyne.terraform.s6-signing-authority-selection.v1",
+            "authority_id": "self-selected-authority",
+            "algorithm": "ed25519",
+            "purpose": "release-train-s6-dossier-v1",
+            "authority_record_sha256": format!("sha256:{}", "a".repeat(64)),
+            "public_key_sha256": format!("sha256:{}", "b".repeat(64)),
+        });
+        let variants = vec![
+            (
+                "bare-self-made-v2",
+                serde_jcs::to_vec(&serde_json::json!({
+                    "schema": "mnemosyne.terraform.sealed-successor-plan.v2",
+                    "s6_signing_authority": selection.clone(),
+                }))
+                .unwrap(),
             ),
-            Err(S6DossierCustodyError::InvalidAcceptedAuthority)
-        );
-        let mismatched_selection = serde_jcs::to_vec(&serde_json::json!({
-            "schema": S6_SEALED_SUCCESSOR_PLAN_V2_SCHEMA,
-            "s6_signing_authority": {
-                "schema": S6_SIGNING_AUTHORITY_SELECTION_V1_SCHEMA,
-                "authority_id": subject.release.signing_authority.authority_id,
-                "algorithm": "ed25519",
-                "purpose": ACCEPTED_AUTHORITY_PURPOSE,
-                "authority_record_sha256": digest(&record),
-                "public_key_sha256": format!("sha256:{}", "0".repeat(64)),
-            },
-        }))
-        .unwrap();
-        assert_eq!(
-            validate_s6_dossier_accepted_authority_material(
-                &subject.release.signing_authority,
-                &record,
-                &pem,
-                &s3_pem,
-                &mismatched_selection,
+            (
+                "missing-selection-fields",
+                serde_jcs::to_vec(&serde_json::json!({
+                    "schema": "mnemosyne.terraform.sealed-successor-plan.v2",
+                    "s6_signing_authority": { "authority_id": "missing-fields" },
+                }))
+                .unwrap(),
             ),
-            Err(S6DossierCustodyError::InvalidAcceptedAuthority)
-        );
+            (
+                "extra-selection-fields",
+                serde_jcs::to_vec(&serde_json::json!({
+                    "schema": "mnemosyne.terraform.sealed-successor-plan.v2",
+                    "s6_signing_authority": selection.clone(),
+                    "untrusted_extra": true,
+                }))
+                .unwrap(),
+            ),
+            (
+                "stale-unsealed-selection-mutation",
+                serde_jcs::to_vec(&serde_json::json!({
+                    "schema": "mnemosyne.terraform.sealed-successor-plan.v2",
+                    "seal_digest": format!("sha256:{}", "c".repeat(64)),
+                    "s6_signing_authority": {
+                        "authority_id": "stale-mutated-authority",
+                    },
+                }))
+                .unwrap(),
+            ),
+            (
+                "bad-seal-digest",
+                serde_jcs::to_vec(&serde_json::json!({
+                    "schema": "mnemosyne.terraform.sealed-successor-plan.v2",
+                    "seal_digest": "sha256:not-a-digest",
+                    "s6_signing_authority": selection.clone(),
+                }))
+                .unwrap(),
+            ),
+        ];
+
+        for (name, raw_s2_plan) in variants {
+            let (subject, corpus, writer_channel, reader_channel) =
+                fixture_with_raw_s2_plan(raw_s2_plan);
+            let mut writer = MemoryWriter {
+                store_id: "dossiers".to_owned(),
+                peer: "s6-writer".to_owned(),
+                ..Default::default()
+            };
+            let mut reader = MemoryReader {
+                store_id: "dossiers".to_owned(),
+                peer: "s6-reader".to_owned(),
+                objects: BTreeMap::new(),
+                reads: 0,
+            };
+            assert_eq!(
+                inspect_s6_dossier_custody(&subject, &corpus),
+                Err(S6DossierCustodyError::TypedStageValidationRequired),
+                "{name} must not produce an accepted inspection result"
+            );
+            assert_eq!(
+                preflight_s6_dossier_custody(&subject, &corpus, &writer_channel, &reader_channel),
+                Err(S6DossierCustodyError::TypedStageValidationRequired),
+                "{name} must not produce a usable preflight"
+            );
+            assert_eq!(
+                retain_s6_dossier_corpus(
+                    &subject,
+                    &corpus,
+                    &writer_channel,
+                    &reader_channel,
+                    "2030-01-01T00:00:00Z",
+                    &mut writer,
+                    &mut reader,
+                ),
+                Err(S6DossierCustodyError::TypedStageValidationRequired),
+                "{name} must deny before any writer or reader port call"
+            );
+            assert_eq!(writer.writes, 0, "{name} must not write");
+            assert_eq!(reader.reads, 0, "{name} must not read");
+        }
     }
 
     #[test]

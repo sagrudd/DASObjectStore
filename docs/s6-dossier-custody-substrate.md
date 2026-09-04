@@ -1,6 +1,6 @@
 # S6 dossier-custody substrate
 
-Version 0.179.0 provides a source-only Rust core adapter for the proposed S6
+Version 0.179.1 provides a source-only Rust core adapter for the proposed S6
 dossier-custody contract. It is intentionally not a service operation. The
 adapter has no socket listener, command, provider configuration, storage
 backend, filesystem path, credential, Pistis client, package-builder hook, or
@@ -23,24 +23,26 @@ It accepts only this interoperability tuple:
 
 This validation is not an assertion that the 0.178.0 package has been built,
 signed, selected, installed, or accepted. In particular it does not make the
-0.179.0 custody-substrate source release part of that candidate. The
+0.179.1 custody-substrate source release part of that candidate. The
 historical r237/r7 Remote profile, product identity, `0.177.4` package
 coordinate, and arm64 architecture are each rejected.
 
-The parser rejects noncanonical or duplicate JSON, unknown/missing fields,
-bad envelope magic/version/lengths, overflow, truncation, trailing bytes,
-unsorted or duplicate inventory facts, ambiguous paths or media types, member
-digest mismatches, a substituted profile/product/package tuple (including any
+The subject, manifest, custody binding, and accepted-authority records reject
+noncanonical or duplicate JSON, unknown/missing fields, bad envelope
+magic/version/lengths, overflow, truncation, trailing bytes, unsorted or
+duplicate inventory facts, ambiguous paths or media types, member digest
+mismatches, a substituted profile/product/package tuple (including any
 selection of DASObjectStore Remote), and an absent or inconsistent custody
-binding. It keeps the two authority roles distinct: the release authority must
-equal the fixed public Kleidophylax S6 PEM and the S3 authority must equal the
-fixed public Expedition S3 PEM. Both raw public anchors are retained under
-`trust/` and are separately checked as canonical Ed25519 SPKI. The captured
-S2 plan must be strict-JCS
-`mnemosyne.terraform.sealed-successor-plan.v2` with an exact
-`mnemosyne.terraform.s6-signing-authority-selection.v1` that binds the raw
-authority-record and PEM digests. A v1 plan, a self-consistent caller key, a
-selection mismatch, or an attempt to reuse one PEM for both roles is denied.
+binding. They keep the two authority roles distinct: the release authority
+must equal the fixed public Kleidophylax S6 PEM and the S3 authority must equal
+the fixed public Expedition S3 PEM. Both raw public anchors are retained under
+`trust/` and are separately checked as canonical Ed25519 SPKI. The raw S2
+plan remains an inventory member named by the external subject, but this module
+does not capture, parse, validate, or treat it as a selected authority. A bare
+or self-made v2 plan, missing or extra selection fields, a stale or unsealed
+selection mutation, and a bad seal digest all reach the same typed-stage denial
+and cannot reach a custody port. This preserves the fixed public-anchor check
+without attempting to reproduce Terraform's seal canonicalisation in Rust.
 Continuity is
 unambiguous: a signed predecessor carries an explicit JSON `null` reason and
 a source fallback carries a member reference; absence is rejected. It uses the
@@ -57,15 +59,17 @@ is derived only from the complete envelope digest:
 `expedition/release-trains/<corpus-digest>`.
 
 This is a fail-closed boundary, not an opt-in switch: raw S0--S5 member
-inventory, even with the S2-v2 authority selection, and a caller Boolean or
-ad-hoc validator cannot authorise custody. The Programme requires the full
-typed S0--S5 cross-bindings and the Jenkins typed-evidence path; those are not
-yet available in this source release. Therefore this module cannot create,
+inventory, including a raw S2 plan, and a caller Boolean or ad-hoc validator
+cannot authorise custody. The Programme requires a future shared typed
+Terraform v2 verifier/evidence boundary, full typed S0--S5 cross-bindings, and
+the Jenkins typed-evidence path; no current source module can validate a
+selected plan. Therefore this module cannot create,
 read back, receipt, append S6, or claim S6 completion.
 
-The port traits are deliberately not implemented by DASObjectStore 0.179.0.
-A later separately approved delivery must first add the real typed S0--S5
-validators, bind the fixed-peer grant shape to actual Unix peers and live
+The port traits are deliberately not implemented by DASObjectStore 0.179.1.
+A later separately approved delivery must first introduce the shared typed
+Terraform v2 verifier/evidence boundary and the real typed S0--S5 validators,
+bind the fixed-peer grant shape to actual Unix peers and live
 Pistis/Prosopikon authority, retain the raw receipt attachments in the selected
 immutable store, and obtain independent Jenkins review. That later work also
 requires its own Kanon candidate/lock and package provenance. Existing Kanon
