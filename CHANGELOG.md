@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.179.1 - 2026-09-04
+
+- Correct the source-only S6 custody substrate so that it never captures,
+  parses, or treats a raw S2 sealed-plan member as an accepted signing-authority
+  selection. Every raw S2 variant fails at the mandatory typed-stage boundary
+  before any writer or reader port can be called. A future shared typed
+  Terraform-v2 verifier/evidence boundary is required; this release does not
+  create it or qualify any candidate, package, host, or S6 transaction.
+
+## 0.179.0 - 2026-09-04
+
+- Add a source-only, fail-closed S6 dossier-custody substrate. It strictly
+  stream-verifies the deterministic ``MNS6DCRP`` corpus envelope, external
+  pre-custody JCS subject, complete manifest inventory, authority record/PEM,
+  and required custody binding. Operational preflight and retention always
+  deny until published typed S0--S5 validators and Jenkins evidence exist.
+- Bind the two distinct public authorities required by the S6 source contract:
+  the Kleidophylax release-record authority and Expedition S3 attestation
+  authority. Reject a self-selected key or conflated authorities before the
+  structural boundary fails closed.
+- The substrate accepts only the isolated ``dasobjectstore-0180-nuc-debian``
+  DAS-only Debian/AMD64 corpus shape as an interoperability fixture. It does
+  not alter or qualify the historical r237/r7 Remote train.
+- This release contains no daemon endpoint, Pistis lookup, provider backend,
+  store configuration, package, lock, signing, custody result, S6 transition,
+  NUC/DGX action, or deployment path. A separately reviewed formal delivery
+  remains required before any custody substrate can be used for a release.
+
 ## 0.178.0 - 2026-09-04
 
 - Add ``dasobjectstore-r237-bootstrap-observer``, a fixed local-root Linux

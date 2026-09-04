@@ -9,6 +9,7 @@ repository.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+base64.workspace = true
 chrono.workspace = true
 libc.workspace = true
 serde.workspace = true
@@ -19,5 +20,4 @@ x509-parser.workspace = true
 dasobjectstore-reference.workspace = true
 
 [dev-dependencies]
-base64.workspace = true
 rcgen.workspace = true
