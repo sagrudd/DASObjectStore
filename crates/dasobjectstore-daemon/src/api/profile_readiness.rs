@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn published_limited_profile_declaration_matches_the_api_producer() {
+    fn legacy_limited_phoreus_declaration_excludes_the_01791_custody_substrate() {
         let declaration: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../docs/contracts/phoreus-limited-profile-binding-v1.json"
         ))
@@ -204,7 +204,10 @@ mod tests {
             declaration["producer"]["compatible_package_range"],
             ">=0.177.1,<0.179.0"
         );
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.179.0");
+        // The retained readiness declaration is intentionally not widened for
+        // the source-only 0.179.1 S6 custody substrate.  It must not be read
+        // as a Phoreus compatibility claim for this release.
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.179.1");
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
             PROFILE_READINESS_SCHEMA_VERSION
