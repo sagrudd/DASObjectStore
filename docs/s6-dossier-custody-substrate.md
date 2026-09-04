@@ -28,31 +28,40 @@ signed, selected, installed, or accepted. In particular it does not make the
 The parser rejects noncanonical or duplicate JSON, unknown/missing fields,
 bad envelope magic/version/lengths, overflow, truncation, trailing bytes,
 unsorted or duplicate inventory facts, ambiguous paths or media types, member
-digest mismatches, a substituted profile/product/package tuple, and an absent
-or inconsistent custody binding. It uses the exact 43-byte domain prefix
-defined by the Programme contract when calculating the external subject
-digest.
+digest mismatches, a substituted profile/product/package tuple (including any
+selection of DASObjectStore Remote), and an absent or inconsistent custody
+binding. It also requires the S3 authority PEM reference to be identical to
+the release signing-authority PEM reference, then parses the corpus-captured
+accepted-authority JCS record and canonical Ed25519 SPKI PEM. Continuity is
+unambiguous: a signed predecessor carries an explicit JSON `null` reason and
+a source fallback carries a member reference; absence is rejected. It uses the
+exact 43-byte domain prefix defined by the Programme contract when calculating
+the external subject digest.
 
 ## Retention seam and non-authority
 
-`retain_s6_dossier_corpus` is a pure port seam. A caller supplies separate
-writer and reader ports plus redacted, fixed-peer grant/channel facts. Before
-it calls the writer, the adapter requires distinct writer/reader identities,
-sessions, principals, entitlement assignments, credential bindings, processes,
-caches, upload handles, and staging identifiers. It accepts the canonical
-`expedition/release-trains/<train>/<corpus-digest>` key only.
+`inspect_s6_dossier_custody` is the only enabled operation. It performs the
+structural parse and returns no durable evidence. Its canonical object key is
+derived only from the complete envelope digest:
+`expedition/release-trains/<corpus-digest>`.
 
-The writer port can report `created`, `already exists`, or conflict. Both a
-new object and an equal replay require a complete readback through the separate
-reader port. The reader must reparse and rehash the complete envelope; a
-provider name, ETag, cache, size, or digest summary alone cannot complete the
-operation. On success the adapter produces strict JCS receipt bytes and the
-two raw DAS reference attachments, cross-checked against the custody binding.
+`preflight_s6_dossier_custody` and `retain_s6_dossier_corpus` deliberately
+return `typed_stage_validation_required` before examining a writer or reader
+port. This is a fail-closed boundary, not an opt-in switch: raw S0--S5 member
+inventory and a caller Boolean or ad-hoc validator cannot authorise custody.
+The Programme requires those records to pass their own published versioned
+schemas and cross-bindings; those schemas and the Jenkins typed-evidence path
+are not yet available in this source release. Therefore this module cannot
+create, read back, receipt, append S6, or claim S6 completion.
 
-The ports are deliberately not implemented by DASObjectStore 0.179.0. A later,
-separately approved daemon/Pistis delivery must bind the grant shape to actual
-fixed Unix peers and live Pistis/Prosopikon authority, retain the raw receipt
-attachments in the selected immutable store, and obtain the independent
-Jenkins review. Until then this module has no authority to contact a NUC or
-DGX, open a transport, provision or write an ObjectStore, issue durable
-evidence, append S6, sign a package, or permit S8.
+The port traits are deliberately not implemented by DASObjectStore 0.179.0.
+A later separately approved delivery must first add the real typed S0--S5
+validators, bind the fixed-peer grant shape to actual Unix peers and live
+Pistis/Prosopikon authority, retain the raw receipt attachments in the selected
+immutable store, and obtain independent Jenkins review. That later work also
+requires its own Kanon candidate/lock and package provenance. Existing Kanon
+registration identifies `dasobjectstore`; it does not register this source
+module as a candidate, profile, lock, package, or delivery-ready S6 path.
+Until then this module has no authority to contact a NUC or DGX, open a
+transport, provision or write an ObjectStore, issue durable evidence, sign a
+package, or permit S8.

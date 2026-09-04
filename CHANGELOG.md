@@ -2,11 +2,11 @@
 
 ## 0.179.0 - 2026-09-04
 
-- Add a source-only S6 dossier-custody substrate. It strictly stream-verifies
-  the deterministic ``MNS6DCRP`` corpus envelope, external pre-custody JCS
-  subject, complete manifest inventory, required custody binding, fixed-peer
-  separation, immutable create/replay semantics, independently supplied
-  read-back path, and receipt/reference attachment cross-checks.
+- Add a source-only, fail-closed S6 dossier-custody substrate. It strictly
+  stream-verifies the deterministic ``MNS6DCRP`` corpus envelope, external
+  pre-custody JCS subject, complete manifest inventory, authority record/PEM,
+  and required custody binding. Operational preflight and retention always
+  deny until published typed S0--S5 validators and Jenkins evidence exist.
 - The substrate accepts only the isolated ``dasobjectstore-0180-nuc-debian``
   DAS-only Debian/AMD64 corpus shape as an interoperability fixture. It does
   not alter or qualify the historical r237/r7 Remote train.

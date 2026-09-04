@@ -10,6 +10,7 @@ use crate::{
     AuthorityScopeV1, DigestV1, EvidenceRefV1, JenkinsDossierEvidenceProjectionV1, ObjectRefV1,
     JENKINS_DOSSIER_EVIDENCE_PROJECTION_V1_SCHEMA,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::DateTime;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -27,6 +28,8 @@ pub const S6_DOSSIER_READBACK_RECEIPT_V1_SCHEMA: &str =
     "mnemosyne.das.s6-dossier-readback-receipt.v1";
 pub const S6_DOSSIER_FIXED_PEER_GRANT_V1_SCHEMA: &str =
     "dasobjectstore.s6-dossier-fixed-peer-grant.v1";
+pub const S6_DOSSIER_ACCEPTED_AUTHORITY_V1_SCHEMA: &str =
+    "mnemosyne.kleidophylax.expedition-s6-accepted-authority.v1";
 pub const S6_DOSSIER_PROFILE_ID: &str = "dasobjectstore-0180-nuc-debian";
 pub const S6_DOSSIER_PACKAGE_VERSION: &str = "0.178.0";
 pub const S6_DOSSIER_OBJECT_PREFIX: &str = "expedition/release-trains";
@@ -40,7 +43,12 @@ const ENVELOPE_VERSION: u8 = 1;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SUBJECT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CUSTODY_BINDING_BYTES: u64 = 64 * 1024;
+const MAX_ACCEPTED_AUTHORITY_BYTES: u64 = 64 * 1024;
 const SUBJECT_DOMAIN_PREFIX: &[u8] = b"mnemosyne.expedition.s6-dossier-subject.v1\0";
+const ACCEPTED_AUTHORITY_PURPOSE: &str = "release-train-s6-dossier-v1";
+const ED25519_SPKI_DER_PREFIX: &[u8] = &[
+    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
+];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -72,6 +80,18 @@ pub struct S6DossierSigningAuthorityV1 {
     pub authority_id: String,
     pub authority_record: S6DossierMemberRefV1,
     pub public_key_pem: S6DossierMemberRefV1,
+}
+
+/// The approved signing-authority record is separate from the PEM so that a
+/// corpus binds both the named authority policy and exact public bytes.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct S6DossierAcceptedAuthorityV1 {
+    pub schema: String,
+    pub authority_id: String,
+    pub algorithm: String,
+    pub purpose: String,
+    pub public_key_sha256: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -138,7 +158,17 @@ pub struct S6DossierS4V1 {
 pub struct S6DossierContinuityV1 {
     pub kind: String,
     pub record: S6DossierMemberRefV1,
-    pub fallback_reason: Option<S6DossierMemberRefV1>,
+    /// This deliberately distinguishes a required JSON `null` from a missing
+    /// field. A signed predecessor must say `null`; a source fallback must
+    /// name its reason member.
+    pub fallback_reason: S6DossierFallbackReasonV1,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum S6DossierFallbackReasonV1 {
+    ExplicitNull(()),
+    Member(S6DossierMemberRefV1),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -254,6 +284,8 @@ pub struct VerifiedS6DossierCorpusV1 {
     pub corpus_sha256: String,
     pub corpus_size: u64,
     custody_binding_raw: Vec<u8>,
+    authority_record_raw: Option<Vec<u8>>,
+    authority_pem_raw: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -357,6 +389,11 @@ pub enum S6DossierCustodyError {
     ReadbackUnavailable,
     ReadbackMismatch,
     InvalidReceipt,
+    InvalidAcceptedAuthority,
+    /// The Programme has not yet published typed, cross-bound S0--S5 record
+    /// schemas. Raw inventory membership is not sufficient authority to
+    /// custody a dossier, so all operational entry points deny here.
+    TypedStageValidationRequired,
 }
 
 impl Display for S6DossierCustodyError {
@@ -377,20 +414,20 @@ impl Display for S6DossierCustodyError {
             Self::ReadbackUnavailable => "readback_unavailable",
             Self::ReadbackMismatch => "readback_mismatch",
             Self::InvalidReceipt => "invalid_receipt",
+            Self::InvalidAcceptedAuthority => "invalid_accepted_authority",
+            Self::TypedStageValidationRequired => "typed_stage_validation_required",
         })
     }
 }
 
 impl std::error::Error for S6DossierCustodyError {}
 
-/// Parse the raw external subject, stream-verify the envelope, and prove the
-/// fixed-peer preconditions.  It has no writer or reader parameter and hence
-/// no storage side effect.
-pub fn preflight_s6_dossier_custody(
+/// Inspect the raw external subject and stream-verify its corpus without any
+/// writer or reader. This is a structural interoperability check only; it is
+/// not an S6 preflight or custody authorisation.
+pub fn inspect_s6_dossier_custody(
     subject_jcs: &[u8],
     corpus: &[u8],
-    writer: &S6DossierPeerChannelV1,
-    reader: &S6DossierPeerChannelV1,
 ) -> Result<S6DossierCustodyPreflightV1, S6DossierCustodyError> {
     if subject_jcs.len() > MAX_SUBJECT_BYTES {
         return Err(S6DossierCustodyError::InvalidSubject);
@@ -400,7 +437,12 @@ pub fn preflight_s6_dossier_custody(
     validate_subject_shape(&subject)?;
     let dossier_subject_sha256 = domain_digest(SUBJECT_DOMAIN_PREFIX, subject_jcs);
     let mut cursor = Cursor::new(corpus);
-    let verified = verify_s6_dossier_corpus(&mut cursor, &subject.custody_binding)?;
+    let verified = verify_s6_dossier_corpus_with_authority(
+        &mut cursor,
+        &subject.custody_binding,
+        &subject.release.signing_authority.authority_record,
+        &subject.release.signing_authority.public_key_pem,
+    )?;
     if verified.manifest_sha256 != subject.corpus.manifest_sha256
         || verified.manifest.members != subject.corpus.members
     {
@@ -411,9 +453,19 @@ pub fn preflight_s6_dossier_custody(
         S6DossierCustodyError::InvalidCustodyBinding,
     )?;
     validate_binding(&binding, &subject, &verified)?;
-    validate_peer_channels(writer, reader, &binding, &dossier_subject_sha256)?;
+    validate_s6_dossier_accepted_authority_material(
+        &subject.release.signing_authority,
+        verified
+            .authority_record_raw
+            .as_deref()
+            .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?,
+        verified
+            .authority_pem_raw
+            .as_deref()
+            .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?,
+    )?;
     Ok(S6DossierCustodyPreflightV1 {
-        storage_key: canonical_storage_key(&subject.train_id, &verified.corpus_sha256)?,
+        storage_key: canonical_storage_key(&verified.corpus_sha256)?,
         subject,
         dossier_subject_sha256,
         custody_binding: binding,
@@ -421,9 +473,31 @@ pub fn preflight_s6_dossier_custody(
     })
 }
 
-/// Complete the source-only immutable custody transaction through separately
-/// supplied ports.  Both creation and an equal replay require an independent
-/// byte-for-byte readback before the strict receipt is returned.
+/// The future operational preflight boundary. It intentionally always denies:
+/// current source contains a parser for the documented corpus shape, but not
+/// the versioned, typed and cross-bound S0--S5 validators required by the
+/// Programme to authorise custody. There is no caller flag, public validator,
+/// or port implementation that can bypass this denial.
+pub fn preflight_s6_dossier_custody(
+    subject_jcs: &[u8],
+    corpus: &[u8],
+    writer: &S6DossierPeerChannelV1,
+    reader: &S6DossierPeerChannelV1,
+) -> Result<S6DossierCustodyPreflightV1, S6DossierCustodyError> {
+    let inspected = inspect_s6_dossier_custody(subject_jcs, corpus)?;
+    validate_peer_channels(
+        writer,
+        reader,
+        &inspected.custody_binding,
+        &inspected.dossier_subject_sha256,
+    )?;
+    Err(S6DossierCustodyError::TypedStageValidationRequired)
+}
+
+/// Reserved operational custody transaction. It currently always denies at
+/// `preflight_s6_dossier_custody` before a writer or reader port is examined.
+/// A future separately reviewed source change must introduce non-forgeable
+/// typed S0--S5 validation before this seam can become usable.
 pub fn retain_s6_dossier_corpus(
     subject_jcs: &[u8],
     corpus: &[u8],
@@ -515,7 +589,36 @@ pub fn verify_s6_dossier_corpus(
     reader: &mut dyn Read,
     custody_binding_ref: &S6DossierMemberRefV1,
 ) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
+    verify_s6_dossier_corpus_captured(reader, custody_binding_ref, None, None)
+}
+
+fn verify_s6_dossier_corpus_with_authority(
+    reader: &mut dyn Read,
+    custody_binding_ref: &S6DossierMemberRefV1,
+    authority_record_ref: &S6DossierMemberRefV1,
+    authority_pem_ref: &S6DossierMemberRefV1,
+) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
+    verify_s6_dossier_corpus_captured(
+        reader,
+        custody_binding_ref,
+        Some(authority_record_ref),
+        Some(authority_pem_ref),
+    )
+}
+
+fn verify_s6_dossier_corpus_captured(
+    reader: &mut dyn Read,
+    custody_binding_ref: &S6DossierMemberRefV1,
+    authority_record_ref: Option<&S6DossierMemberRefV1>,
+    authority_pem_ref: Option<&S6DossierMemberRefV1>,
+) -> Result<VerifiedS6DossierCorpusV1, S6DossierCustodyError> {
     validate_member_ref(custody_binding_ref).map_err(|_| S6DossierCustodyError::InvalidSubject)?;
+    for reference in [authority_record_ref, authority_pem_ref]
+        .into_iter()
+        .flatten()
+    {
+        validate_member_ref(reference).map_err(|_| S6DossierCustodyError::InvalidSubject)?;
+    }
     let mut envelope_hasher = Sha256::new();
     let mut corpus_size = 0_u64;
     let mut magic = [0_u8; 8];
@@ -553,12 +656,30 @@ pub fn verify_s6_dossier_corpus(
     validate_manifest(&manifest)?;
     let manifest_sha256 = raw_digest(&manifest_raw);
     let mut binding_raw = None;
+    let mut authority_record_raw = None;
+    let mut authority_pem_raw = None;
     for member in &manifest.members {
         let member_size =
             parse_size(&member.size).map_err(|_| S6DossierCustodyError::InvalidManifest)?;
-        let capture = member_matches_ref(member, custody_binding_ref);
-        if capture && member_size > MAX_CUSTODY_BINDING_BYTES {
+        let binding_capture = member_matches_ref(member, custody_binding_ref);
+        let authority_record_capture =
+            authority_record_ref.is_some_and(|reference| member_matches_ref(member, reference));
+        let authority_pem_capture =
+            authority_pem_ref.is_some_and(|reference| member_matches_ref(member, reference));
+        let capture_count = usize::from(binding_capture)
+            + usize::from(authority_record_capture)
+            + usize::from(authority_pem_capture);
+        if capture_count > 1 {
+            return Err(S6DossierCustodyError::InvalidSubject);
+        }
+        let capture = capture_count == 1;
+        if binding_capture && member_size > MAX_CUSTODY_BINDING_BYTES {
             return Err(S6DossierCustodyError::InvalidCustodyBinding);
+        }
+        if (authority_record_capture || authority_pem_capture)
+            && member_size > MAX_ACCEPTED_AUTHORITY_BYTES
+        {
+            return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
         }
         let (member_sha256, captured) = stream_member(
             reader,
@@ -570,11 +691,29 @@ pub fn verify_s6_dossier_corpus(
         if format!("sha256:{member_sha256}") != member.sha256 {
             return Err(S6DossierCustodyError::InvalidEnvelope);
         }
-        if capture
+        if binding_capture
             && (member.media_type != "application/json"
-                || binding_raw.replace(captured.unwrap_or_default()).is_some())
+                || binding_raw
+                    .replace(captured.clone().unwrap_or_default())
+                    .is_some())
         {
             return Err(S6DossierCustodyError::InvalidCustodyBinding);
+        }
+        if authority_record_capture
+            && (member.media_type != "application/json"
+                || authority_record_raw
+                    .replace(captured.clone().unwrap_or_default())
+                    .is_some())
+        {
+            return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
+        }
+        if authority_pem_capture
+            && (member.media_type != "application/x-pem-file"
+                || authority_pem_raw
+                    .replace(captured.unwrap_or_default())
+                    .is_some())
+        {
+            return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
         }
     }
     let mut extra = [0_u8; 1];
@@ -584,12 +723,19 @@ pub fn verify_s6_dossier_corpus(
         Err(_) => return Err(S6DossierCustodyError::TruncatedEnvelope),
     }
     let custody_binding_raw = binding_raw.ok_or(S6DossierCustodyError::InvalidCustodyBinding)?;
+    if authority_record_ref.is_some() && authority_record_raw.is_none()
+        || authority_pem_ref.is_some() && authority_pem_raw.is_none()
+    {
+        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
+    }
     Ok(VerifiedS6DossierCorpusV1 {
         manifest,
         manifest_sha256,
         corpus_sha256: format!("sha256:{:x}", envelope_hasher.finalize()),
         corpus_size,
         custody_binding_raw,
+        authority_record_raw,
+        authority_pem_raw,
     })
 }
 
@@ -663,6 +809,60 @@ pub fn verify_s6_dossier_readback_receipt(
     Ok(receipt)
 }
 
+/// Validate the exact public authority material named by the subject. The
+/// caller supplies only raw bytes already captured from the verified corpus;
+/// this function does not load a key, contact a trust service, or accept a
+/// caller-provided authority decision.
+fn validate_s6_dossier_accepted_authority_material(
+    authority: &S6DossierSigningAuthorityV1,
+    authority_record_jcs: &[u8],
+    public_key_pem: &[u8],
+) -> Result<(), S6DossierCustodyError> {
+    let record: S6DossierAcceptedAuthorityV1 = strict_jcs(
+        authority_record_jcs,
+        S6DossierCustodyError::InvalidAcceptedAuthority,
+    )?;
+    if record.schema != S6_DOSSIER_ACCEPTED_AUTHORITY_V1_SCHEMA
+        || record.authority_id != authority.authority_id
+        || record.algorithm != "ed25519"
+        || record.purpose != ACCEPTED_AUTHORITY_PURPOSE
+        || record.public_key_sha256 != raw_digest(public_key_pem)
+        || authority.authority_record.sha256 != raw_digest(authority_record_jcs)
+        || authority.authority_record.size != authority_record_jcs.len().to_string()
+        || authority.public_key_pem.sha256 != raw_digest(public_key_pem)
+        || authority.public_key_pem.size != public_key_pem.len().to_string()
+    {
+        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
+    }
+    validate_canonical_ed25519_spki_pem(public_key_pem)
+}
+
+fn validate_canonical_ed25519_spki_pem(raw: &[u8]) -> Result<(), S6DossierCustodyError> {
+    let text =
+        std::str::from_utf8(raw).map_err(|_| S6DossierCustodyError::InvalidAcceptedAuthority)?;
+    let encoded = text
+        .strip_prefix("-----BEGIN PUBLIC KEY-----\n")
+        .and_then(|value| value.strip_suffix("\n-----END PUBLIC KEY-----\n"))
+        .ok_or(S6DossierCustodyError::InvalidAcceptedAuthority)?;
+    if encoded.len() != 60
+        || !encoded
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+    {
+        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
+    }
+    let der = BASE64_STANDARD
+        .decode(encoded)
+        .map_err(|_| S6DossierCustodyError::InvalidAcceptedAuthority)?;
+    if der.len() != 44
+        || !der.starts_with(ED25519_SPKI_DER_PREFIX)
+        || BASE64_STANDARD.encode(&der) != encoded
+    {
+        return Err(S6DossierCustodyError::InvalidAcceptedAuthority);
+    }
+    Ok(())
+}
+
 fn validate_subject_shape(subject: &S6DossierSubjectV1) -> Result<(), S6DossierCustodyError> {
     if subject.schema != S6_DOSSIER_SUBJECT_V1_SCHEMA
         || !valid_identifier(&subject.train_id)
@@ -671,6 +871,7 @@ fn validate_subject_shape(subject: &S6DossierSubjectV1) -> Result<(), S6DossierC
         || subject.release.package_format != "deb"
         || subject.release.architecture != "amd64"
         || !valid_identifier(&subject.release.signing_authority.authority_id)
+        || subject.s3.authority_pem != subject.release.signing_authority.public_key_pem
         || subject.s5.packages.len() != 1
         || subject.s2.s0_manifest != subject.s0.release_input
     {
@@ -697,10 +898,16 @@ fn validate_subject_shape(subject: &S6DossierSubjectV1) -> Result<(), S6DossierC
             package.continuity.kind.as_str(),
             "signed-predecessor" | "source-fallback"
         )
-        || (package.continuity.kind == "signed-predecessor"
-            && package.continuity.fallback_reason.is_some())
-        || (package.continuity.kind == "source-fallback"
-            && package.continuity.fallback_reason.is_none())
+        || !matches!(
+            (
+                &package.continuity.kind[..],
+                &package.continuity.fallback_reason
+            ),
+            (
+                "signed-predecessor",
+                S6DossierFallbackReasonV1::ExplicitNull(())
+            ) | ("source-fallback", S6DossierFallbackReasonV1::Member(_))
+        )
     {
         return Err(S6DossierCustodyError::InvalidSubject);
     }
@@ -760,7 +967,8 @@ fn subject_member_refs(subject: &S6DossierSubjectV1) -> Vec<&S6DossierMemberRefV
         &package.continuity.record,
         &subject.custody_binding,
     ];
-    if let Some(fallback_reason) = &package.continuity.fallback_reason {
+    if let S6DossierFallbackReasonV1::Member(fallback_reason) = &package.continuity.fallback_reason
+    {
         references.push(fallback_reason);
     }
     references
@@ -1107,16 +1315,10 @@ fn stream_member(
     Ok((format!("{:x}", member_hasher.finalize()), captured))
 }
 
-fn canonical_storage_key(
-    train_id: &str,
-    corpus_sha256: &str,
-) -> Result<String, S6DossierCustodyError> {
-    if !valid_identifier(train_id) {
-        return Err(S6DossierCustodyError::InvalidSubject);
-    }
+fn canonical_storage_key(corpus_sha256: &str) -> Result<String, S6DossierCustodyError> {
     validate_digest(corpus_sha256).map_err(|_| S6DossierCustodyError::InvalidEnvelope)?;
     Ok(format!(
-        "{S6_DOSSIER_OBJECT_PREFIX}/{train_id}/{}",
+        "{S6_DOSSIER_OBJECT_PREFIX}/{}",
         corpus_sha256.trim_start_matches("sha256:")
     ))
 }
@@ -1229,6 +1431,7 @@ mod tests {
         store_id: String,
         peer: String,
         objects: BTreeMap<String, Vec<u8>>,
+        reads: usize,
     }
 
     impl S6DossierReaderPortV1 for MemoryReader {
@@ -1244,6 +1447,7 @@ mod tests {
             &mut self,
             storage_key: &str,
         ) -> Result<Box<dyn Read>, S6DossierCustodyError> {
+            self.reads += 1;
             let bytes = self
                 .objects
                 .get(storage_key)
@@ -1305,16 +1509,28 @@ mod tests {
     }
 
     fn records(binding_raw: &[u8]) -> Vec<(String, String, Vec<u8>)> {
+        let authority_pem = b"-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n-----END PUBLIC KEY-----\n";
+        let authority_record = jcs(
+            &S6DossierAcceptedAuthorityV1 {
+                schema: S6_DOSSIER_ACCEPTED_AUTHORITY_V1_SCHEMA.to_owned(),
+                authority_id: "s6-authority".to_owned(),
+                algorithm: "ed25519".to_owned(),
+                purpose: ACCEPTED_AUTHORITY_PURPOSE.to_owned(),
+                public_key_sha256: digest(authority_pem),
+            },
+            S6DossierCustodyError::InvalidAcceptedAuthority,
+        )
+        .unwrap();
         let mut records = vec![
             (
                 "a-authority.json".to_owned(),
                 "application/json".to_owned(),
-                b"{}".to_vec(),
+                authority_record,
             ),
             (
-                "b-pem.json".to_owned(),
-                "application/json".to_owned(),
-                b"{}".to_vec(),
+                "b-pem.pem".to_owned(),
+                "application/x-pem-file".to_owned(),
+                authority_pem.to_vec(),
             ),
             (
                 "c-release.json".to_owned(),
@@ -1506,7 +1722,7 @@ mod tests {
             continuity: S6DossierContinuityV1 {
                 kind: "signed-predecessor".to_owned(),
                 record: get("ze-continuity.json"),
-                fallback_reason: None,
+                fallback_reason: S6DossierFallbackReasonV1::ExplicitNull(()),
             },
         };
         let manifest = S6DossierCorpusManifestV1 {
@@ -1525,7 +1741,7 @@ mod tests {
                 signing_authority: S6DossierSigningAuthorityV1 {
                     authority_id: "s6-authority".to_owned(),
                     authority_record: get("a-authority.json"),
-                    public_key_pem: get("b-pem.json"),
+                    public_key_pem: get("b-pem.pem"),
                 },
             },
             s0: S6DossierS0V1 {
@@ -1553,7 +1769,7 @@ mod tests {
                 acceptance_attestation: get("q-s3-attestation.json"),
                 accepted_lock: get("r-s3-lock.json"),
                 canonical_main_witness: get("s-s3-main.json"),
-                authority_pem: get("b-pem.json"),
+                authority_pem: get("b-pem.pem"),
             },
             s4: S6DossierS4V1 {
                 projection: get("t-s4-projection.json"),
@@ -1614,9 +1830,9 @@ mod tests {
     }
 
     #[test]
-    fn preflight_streams_the_exact_scoped_0180_corpus_without_side_effects() {
+    fn inspection_streams_the_exact_scoped_0180_corpus_without_side_effects() {
         let (subject, corpus, writer, reader) = fixture();
-        let preflight = preflight_s6_dossier_custody(&subject, &corpus, &writer, &reader).unwrap();
+        let preflight = inspect_s6_dossier_custody(&subject, &corpus).unwrap();
         assert_eq!(preflight.subject.release.profile_id, S6_DOSSIER_PROFILE_ID);
         assert_eq!(
             preflight.subject.release.selected_product_ids,
@@ -1625,13 +1841,17 @@ mod tests {
         assert_eq!(
             preflight.storage_key,
             format!(
-                "{S6_DOSSIER_OBJECT_PREFIX}/{TRAIN}/{}",
+                "{S6_DOSSIER_OBJECT_PREFIX}/{}",
                 preflight.corpus.corpus_sha256.trim_start_matches("sha256:")
             )
         );
         assert!(preflight
             .storage_key
             .starts_with("expedition/release-trains/"));
+        assert_eq!(
+            preflight_s6_dossier_custody(&subject, &corpus, &writer, &reader),
+            Err(S6DossierCustodyError::TypedStageValidationRequired)
+        );
     }
 
     #[test]
@@ -1659,6 +1879,7 @@ mod tests {
             store_id: "dossiers".to_owned(),
             peer: "s6-reader".to_owned(),
             objects: BTreeMap::new(),
+            reads: 0,
         };
         let mut cases = Vec::new();
         cases.push(corpus[..16].to_vec());
@@ -1687,49 +1908,19 @@ mod tests {
     }
 
     #[test]
-    fn immutable_create_equal_replay_and_different_conflict_require_independent_readback() {
+    fn operational_entry_points_deny_before_any_writer_or_reader_side_effect() {
         let (subject, corpus, writer_channel, reader_channel) = fixture();
         let mut writer = MemoryWriter {
             store_id: "dossiers".to_owned(),
             peer: "s6-writer".to_owned(),
             ..Default::default()
         };
-        let key = preflight_s6_dossier_custody(&subject, &corpus, &writer_channel, &reader_channel)
-            .unwrap()
-            .storage_key;
         let mut reader = MemoryReader {
             store_id: "dossiers".to_owned(),
             peer: "s6-reader".to_owned(),
             objects: BTreeMap::new(),
+            reads: 0,
         };
-        // A real fixed-peer backend makes the created corpus visible only to
-        // the independent reader. The test double exposes it through a
-        // different reader map, never through the writer buffer.
-        reader.objects.insert(key.clone(), corpus.clone());
-        let created = retain_s6_dossier_corpus(
-            &subject,
-            &corpus,
-            &writer_channel,
-            &reader_channel,
-            "2030-01-01T00:00:00Z",
-            &mut writer,
-            &mut reader,
-        )
-        .unwrap();
-        assert_eq!(created.receipt.write_outcome, "created");
-        assert_eq!(writer.writes, 1);
-        let replay = retain_s6_dossier_corpus(
-            &subject,
-            &corpus,
-            &writer_channel,
-            &reader_channel,
-            "2030-01-01T00:00:00Z",
-            &mut writer,
-            &mut reader,
-        )
-        .unwrap();
-        assert_eq!(replay.receipt.write_outcome, "existing-equal");
-        writer.force_conflict = true;
         assert_eq!(
             retain_s6_dossier_corpus(
                 &subject,
@@ -1740,13 +1931,16 @@ mod tests {
                 &mut writer,
                 &mut reader,
             ),
-            Err(S6DossierCustodyError::ImmutableConflict)
+            Err(S6DossierCustodyError::TypedStageValidationRequired)
         );
+        assert_eq!(writer.writes, 0);
+        assert_eq!(reader.reads, 0);
     }
 
     #[test]
     fn shared_identity_credential_process_cache_upload_or_staging_denies() {
         let (subject, corpus, writer, mut reader) = fixture();
+        let inspected = inspect_s6_dossier_custody(&subject, &corpus).unwrap();
         for field in 0..9 {
             let mut candidate = reader.clone();
             match field {
@@ -1764,68 +1958,157 @@ mod tests {
                 _ => candidate.staging_path_id = writer.staging_path_id.clone(),
             }
             assert!(matches!(
-                preflight_s6_dossier_custody(&subject, &corpus, &writer, &candidate),
+                validate_peer_channels(
+                    &writer,
+                    &candidate,
+                    &inspected.custody_binding,
+                    &inspected.dossier_subject_sha256,
+                ),
                 Err(S6DossierCustodyError::SharedPeerChannel)
                     | Err(S6DossierCustodyError::InvalidFixedPeerGrant)
             ));
         }
         reader.grant.capability = S6_DOSSIER_WRITE_CAPABILITY.to_owned();
         assert_eq!(
-            preflight_s6_dossier_custody(&subject, &corpus, &writer, &reader),
+            validate_peer_channels(
+                &writer,
+                &reader,
+                &inspected.custody_binding,
+                &inspected.dossier_subject_sha256,
+            ),
             Err(S6DossierCustodyError::InvalidFixedPeerGrant)
         );
     }
 
     #[test]
-    fn receipt_is_strict_jcs_and_cross_checks_raw_reference_attachments() {
+    fn source_only_module_does_not_make_a_receipt_or_sixth_stage_claim() {
         let (subject, corpus, writer_channel, reader_channel) = fixture();
-        let preflight =
-            preflight_s6_dossier_custody(&subject, &corpus, &writer_channel, &reader_channel)
-                .unwrap();
-        let mut writer = MemoryWriter {
-            store_id: "dossiers".to_owned(),
-            peer: "s6-writer".to_owned(),
-            objects: BTreeMap::new(),
-            writes: 0,
-            force_conflict: false,
-        };
-        writer
-            .objects
-            .insert(preflight.storage_key.clone(), corpus.clone());
-        let mut reader = MemoryReader {
-            store_id: "dossiers".to_owned(),
-            peer: "s6-reader".to_owned(),
-            objects: BTreeMap::from([(preflight.storage_key.clone(), corpus)]),
-        };
-        let corpus_for_replay = reader.objects.get(&preflight.storage_key).unwrap().clone();
-        let result = retain_s6_dossier_corpus(
-            &subject,
-            &corpus_for_replay,
-            &writer_channel,
-            &reader_channel,
-            "2030-01-01T00:00:00Z",
-            &mut writer,
-            &mut reader,
-        )
-        .unwrap();
-        verify_s6_dossier_readback_receipt(
-            &result.receipt_jcs,
-            &result.preflight,
-            &result.object_ref_jcs,
-            &result.evidence_ref_jcs,
-        )
-        .unwrap();
-        let mut receipt: serde_json::Value = serde_json::from_slice(&result.receipt_jcs).unwrap();
-        receipt["reader_identity"] = serde_json::Value::String("s6-writer".to_owned());
-        let tampered = serde_jcs::to_vec(&receipt).unwrap();
+        assert!(inspect_s6_dossier_custody(&subject, &corpus).is_ok());
         assert_eq!(
-            verify_s6_dossier_readback_receipt(
-                &tampered,
-                &result.preflight,
-                &result.object_ref_jcs,
-                &result.evidence_ref_jcs
+            preflight_s6_dossier_custody(&subject, &corpus, &writer_channel, &reader_channel),
+            Err(S6DossierCustodyError::TypedStageValidationRequired)
+        );
+    }
+
+    #[test]
+    fn continuity_requires_explicit_null_or_a_reason_member_and_never_absence() {
+        let (subject, corpus, writer, reader) = fixture();
+        let decoded: serde_json::Value = serde_json::from_slice(&subject).unwrap();
+
+        let mut absent = decoded.clone();
+        absent["s5"]["packages"][0].as_object_mut().unwrap()["continuity"]
+            .as_object_mut()
+            .unwrap()
+            .remove("fallback_reason");
+        assert_eq!(
+            preflight_s6_dossier_custody(
+                &serde_jcs::to_vec(&absent).unwrap(),
+                &corpus,
+                &writer,
+                &reader
             ),
-            Err(S6DossierCustodyError::InvalidReceipt)
+            Err(S6DossierCustodyError::InvalidSubject)
+        );
+
+        let mut signed_member = decoded.clone();
+        signed_member["s5"]["packages"][0]["continuity"]["fallback_reason"] =
+            signed_member["s5"]["packages"][0]["continuity"]["record"].clone();
+        assert_eq!(
+            preflight_s6_dossier_custody(
+                &serde_jcs::to_vec(&signed_member).unwrap(),
+                &corpus,
+                &writer,
+                &reader,
+            ),
+            Err(S6DossierCustodyError::InvalidSubject)
+        );
+
+        let mut source_null = decoded.clone();
+        source_null["s5"]["packages"][0]["continuity"]["kind"] =
+            serde_json::Value::String("source-fallback".to_owned());
+        assert_eq!(
+            preflight_s6_dossier_custody(
+                &serde_jcs::to_vec(&source_null).unwrap(),
+                &corpus,
+                &writer,
+                &reader,
+            ),
+            Err(S6DossierCustodyError::InvalidSubject)
+        );
+
+        let mut source_member = source_null;
+        source_member["s5"]["packages"][0]["continuity"]["fallback_reason"] =
+            source_member["s5"]["packages"][0]["continuity"]["record"].clone();
+        assert!(
+            inspect_s6_dossier_custody(&serde_jcs::to_vec(&source_member).unwrap(), &corpus)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn authority_and_product_selection_are_bound_and_remote_is_not_selectable() {
+        let (subject, corpus, writer, reader) = fixture();
+        let decoded: serde_json::Value = serde_json::from_slice(&subject).unwrap();
+
+        let mut mismatched_s3_pem = decoded.clone();
+        mismatched_s3_pem["s3"]["authority_pem"]["logical_name"] =
+            serde_json::Value::String("a-authority.json".to_owned());
+        assert_eq!(
+            preflight_s6_dossier_custody(
+                &serde_jcs::to_vec(&mismatched_s3_pem).unwrap(),
+                &corpus,
+                &writer,
+                &reader,
+            ),
+            Err(S6DossierCustodyError::InvalidSubject)
+        );
+
+        let mut remote_selected = decoded;
+        remote_selected["release"]["selected_product_ids"] =
+            serde_json::json!(["dasobjectstore", "dasobjectstore-remote"]);
+        assert_eq!(
+            preflight_s6_dossier_custody(
+                &serde_jcs::to_vec(&remote_selected).unwrap(),
+                &corpus,
+                &writer,
+                &reader,
+            ),
+            Err(S6DossierCustodyError::InvalidSubject)
+        );
+    }
+
+    #[test]
+    fn accepted_authority_record_and_exact_ed25519_pem_are_parsed_and_bound() {
+        let (subject_raw, _corpus, _writer, _reader) = fixture();
+        let subject: S6DossierSubjectV1 =
+            strict_jcs(&subject_raw, S6DossierCustodyError::InvalidSubject).unwrap();
+        let binding_raw = jcs(&binding(), S6DossierCustodyError::InvalidCustodyBinding).unwrap();
+        let records = records(&binding_raw);
+        let record = records
+            .iter()
+            .find(|(name, _, _)| name == "a-authority.json")
+            .unwrap()
+            .2
+            .clone();
+        let pem = records
+            .iter()
+            .find(|(name, _, _)| name == "b-pem.pem")
+            .unwrap()
+            .2
+            .clone();
+        validate_s6_dossier_accepted_authority_material(
+            &subject.release.signing_authority,
+            &record,
+            &pem,
+        )
+        .unwrap();
+        assert_eq!(
+            validate_s6_dossier_accepted_authority_material(
+                &subject.release.signing_authority,
+                &record,
+                b"not a public key",
+            ),
+            Err(S6DossierCustodyError::InvalidAcceptedAuthority)
         );
     }
 
@@ -1852,7 +2135,7 @@ mod tests {
     }
 
     #[test]
-    fn every_required_s2_member_and_store_binding_is_a_prewrite_gate() {
+    fn every_required_s2_member_is_an_inspection_gate() {
         let (subject, corpus, writer_channel, reader_channel) = fixture();
         let decoded: serde_json::Value = serde_json::from_slice(&subject).unwrap();
         for field in [
@@ -1895,28 +2178,9 @@ mod tests {
             Err(S6DossierCustodyError::InvalidSubject)
         );
 
-        let mut writer = MemoryWriter {
-            store_id: "other-store".to_owned(),
-            peer: "s6-writer".to_owned(),
-            ..Default::default()
-        };
-        let mut reader = MemoryReader {
-            store_id: "dossiers".to_owned(),
-            peer: "s6-reader".to_owned(),
-            objects: BTreeMap::new(),
-        };
         assert_eq!(
-            retain_s6_dossier_corpus(
-                &subject,
-                &corpus,
-                &writer_channel,
-                &reader_channel,
-                "2030-01-01T00:00:00Z",
-                &mut writer,
-                &mut reader,
-            ),
-            Err(S6DossierCustodyError::StoreMismatch)
+            preflight_s6_dossier_custody(&subject, &corpus, &writer_channel, &reader_channel,),
+            Err(S6DossierCustodyError::TypedStageValidationRequired)
         );
-        assert_eq!(writer.writes, 0, "store mismatch must precede create");
     }
 }
