@@ -7,6 +7,11 @@
   pre-custody JCS subject, complete manifest inventory, authority record/PEM,
   and required custody binding. Operational preflight and retention always
   deny until published typed S0--S5 validators and Jenkins evidence exist.
+- Bind the two distinct public authorities required by the S6 source contract:
+  the Kleidophylax release-record authority and Expedition S3 attestation
+  authority. Require the S2-v2 signing-authority selection before the
+  structural boundary fails closed; reject a self-selected key, a v1 plan, a
+  selection mismatch, or conflated authorities.
 - The substrate accepts only the isolated ``dasobjectstore-0180-nuc-debian``
   DAS-only Debian/AMD64 corpus shape as an interoperability fixture. It does
   not alter or qualify the historical r237/r7 Remote train.
