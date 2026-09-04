@@ -9,6 +9,7 @@ pub mod macos;
 pub mod macos_health;
 pub mod model;
 pub mod probe;
+pub mod r237_bootstrap_observer;
 
 pub use drive::{
     validate_drive_profile, DriveProfileObservation, DriveProfileValidationError,
@@ -20,6 +21,7 @@ pub use model::{
     PartitionHint, ProbeReport, ProbeWarning, Transport,
 };
 pub use probe::{ProbeError, ProbeProvider};
+pub use r237_bootstrap_observer::{LinuxR237BootstrapObserver, R237BootstrapReadOnlyObserver};
 
 /// Returns the platform crate version.
 pub fn version() -> &'static str {

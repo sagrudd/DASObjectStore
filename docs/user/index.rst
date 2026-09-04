@@ -33,6 +33,7 @@ stabilized in the current MVP.
    storage-assurance
    remote-upload
    remote-s3-uploads
+   r237-bootstrap-storage-plan
    direct-s3-ingress
    remote-client
    programmatic-access

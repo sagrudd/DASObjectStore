@@ -3,7 +3,7 @@
   "contract_version": "1.0.0",
   "producer": {
     "product_id": "dasobjectstore",
-    "compatible_package_range": ">=0.177.1,<0.178.0"
+    "compatible_package_range": ">=0.177.1,<0.179.0"
   },
   "readiness_evidence": {
     "schema_version": "dasobjectstore.profile_readiness.v1",

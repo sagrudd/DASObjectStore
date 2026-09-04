@@ -68,6 +68,8 @@ install -m 0755 "$cargo_target_dir/release/dasobjectstore-server" \
   "$build_root/usr/bin/dasobjectstore-server"
 install -m 0755 "$cargo_target_dir/release/dasobjectstore-s3-gateway" \
   "$build_root/usr/bin/dasobjectstore-s3-gateway"
+install -m 0755 "$cargo_target_dir/release/dasobjectstore-r237-bootstrap-observer" \
+  "$build_root/usr/bin/dasobjectstore-r237-bootstrap-observer"
 install -m 0755 "$cargo_target_dir/release/dasobjectstored" \
   "$build_root/usr/bin/dasobjectstored"
 install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
