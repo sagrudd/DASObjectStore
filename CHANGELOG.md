@@ -2,16 +2,16 @@
 
 ## 0.178.0 - 2026-09-04
 
-- Add ``dasobjectstore store r237-bootstrap-plan``: a fixed, offline and
-  strictly non-mutating assessment of the reviewed r237 NUC bootstrap tuple.
-  It accepts only a no-atime/no-follow Linux read of a strict inventory
-  snapshot, binds the NUC identity plus the canonical programme-main and
-  transaction-document revisions/digest, rejects incomplete or conflicting
-  namespace evidence, and emits a redacted JCS SHA-256 plan only when three
-  healthy distinct physical HDD members meet the reviewed capacity threshold.
-- The plan is explicitly non-WORM, is not S4 evidence, has no apply path, and
-  advertises ``later_guarded_apply_compatible=false`` because current DAS APIs
-  cannot bind an actual provisioned placement to exact physical HDD members.
+- Add ``dasobjectstore-r237-bootstrap-observer``, a fixed local-root Linux
+  observer with no arguments, input inventory, apply path, daemon connection,
+  remote transport, or mutable operation. It uses descriptor-safe local reads
+  and bounded read-only disk/S.M.A.R.T. probes to bind available NUC evidence
+  to the reviewed r237 tuple and emits a redacted self-excluding JCS report.
+- The observer is deliberately deny-only: complete Garage bucket inventory and
+  exact future physical-placement proof are unavailable under current
+  authority contracts. Its report is explicitly not S4, custody acceptance,
+  remote deployment, or service activation; it cannot advance a release or
+  provision storage.
 
 ## 0.177.4 - 2026-09-02
 

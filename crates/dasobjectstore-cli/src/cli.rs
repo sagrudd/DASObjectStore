@@ -45,8 +45,8 @@ pub(crate) use store::{
     StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs, StoreIngestPolicyArgs, StoreListArgs,
     StoreProfileBindingArgs, StoreProfileBrowserArgs, StoreProfileHeadArgs, StoreProfileHealthArgs,
     StoreProfileInspectionArgs, StoreProfileMigrationArgs, StoreProfileReadinessArgs,
-    StoreR237BootstrapPlanArgs, StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs,
-    StoreValidateArgs, StoreVerifyArgs,
+    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
+    StoreVerifyArgs,
 };
 pub(crate) use subobject::{
     SubobjectArgs, SubobjectCommand, SubobjectCreateArgs, SubobjectListArgs, SubobjectSearchArgs,

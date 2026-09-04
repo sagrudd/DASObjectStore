@@ -53,9 +53,6 @@ pub(crate) enum StoreCommand {
     /// Inspect objects and aggregate folder sizes in a store.
     #[command(alias = "objects", alias = "list-contents")]
     Contents(StoreContentsArgs),
-    /// Assess the fixed r237 NUC bootstrap tuple from a read-only inventory.
-    #[command(name = "r237-bootstrap-plan")]
-    R237BootstrapPlan(StoreR237BootstrapPlanArgs),
     /// Create or update a system-managed object store.
     Create(StoreCreateArgs),
     /// Delete all objects and payload files in a store.
@@ -771,21 +768,6 @@ impl StoreDeleteArgs {
     }
 }
 
-/// This command is intentionally an offline assessment, not a daemon dry run.
-/// It accepts no target, bucket, class, disk, credential, or apply override.
-#[derive(Debug, Eq, PartialEq, Args)]
-pub(crate) struct StoreR237BootstrapPlanArgs {
-    /// Linux-owned, read-only r237 inventory JSON gathered by an attended audit.
-    #[arg(long)]
-    inventory: PathBuf,
-}
-
-impl StoreR237BootstrapPlanArgs {
-    pub(crate) fn inventory(&self) -> &Path {
-        &self.inventory
-    }
-}
-
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct StoreCreateArgs {
     /// Store identifier to create or update.
@@ -1413,28 +1395,6 @@ mod tests {
         };
         assert_eq!(args.store_id().as_str(), "xenognostikon");
         assert_eq!(args.prefix(), Some("PRJEB33511"));
-    }
-
-    #[test]
-    fn parses_fixed_r237_bootstrap_plan_without_mutation_overrides() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "store",
-            "r237-bootstrap-plan",
-            "--inventory",
-            "/var/lib/dasobjectstore/r237-inventory.json",
-        ])
-        .expect("fixed bootstrap plan parses");
-        let Some(Command::Store(args)) = cli.command() else {
-            panic!("store command");
-        };
-        let Some(StoreCommand::R237BootstrapPlan(plan)) = args.command() else {
-            panic!("fixed bootstrap plan command");
-        };
-        assert_eq!(
-            plan.inventory(),
-            Path::new("/var/lib/dasobjectstore/r237-inventory.json")
-        );
     }
 
     #[test]

@@ -927,9 +927,11 @@ name = "dasobjectstore-platform"
 version = "0.178.0"
 dependencies = [
  "dasobjectstore-core",
+ "libc",
  "plist",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

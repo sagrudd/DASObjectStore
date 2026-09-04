@@ -15,12 +15,11 @@ use crate::cli::{
     StoreCreateArgs, StoreDeduplicateArgs, StoreDefaultsArgs, StoreDeleteArgs, StoreDrainArgs,
     StoreIngestPolicyArgs, StoreListArgs, StoreProfileBindingArgs, StoreProfileBrowserArgs,
     StoreProfileHeadArgs, StoreProfileHealthArgs, StoreProfileInspectionArgs,
-    StoreProfileMigrationArgs, StoreProfileReadinessArgs, StoreR237BootstrapPlanArgs,
-    StoreRepairArgs, StoreS3UploadArgs, StoreUserServicePlanArgs, StoreValidateArgs,
-    StoreVerifyArgs, SubobjectArgs, SubobjectCreateArgs, TrustCommand,
+    StoreProfileMigrationArgs, StoreProfileReadinessArgs, StoreRepairArgs, StoreS3UploadArgs,
+    StoreUserServicePlanArgs, StoreValidateArgs, StoreVerifyArgs, SubobjectArgs,
+    SubobjectCreateArgs, TrustCommand,
 };
 mod application_auth;
-mod bootstrap_plan;
 mod command_handlers;
 mod connection_status;
 mod health;
@@ -99,7 +98,6 @@ use self::performance_ssd_stage_then_drain::benchmark_ssd_stage_then_drain;
 use self::probe::run_probe;
 
 use self::application_auth::run_application_auth;
-use self::bootstrap_plan::run_store_r237_bootstrap_plan;
 use self::command_handlers::{
     probe_current_platform, run_mnemosyne_export, run_mnemosyne_validate_nas_nfs_endpoint,
     run_object_export, run_object_inspect, run_object_put, run_service_render_compose,
@@ -319,9 +317,6 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
             }
             Some(StoreCommand::UserServicePlan(args)) => run_store_user_service_plan(args, writer),
             Some(StoreCommand::Contents(args)) => run_store_contents(args, writer),
-            Some(StoreCommand::R237BootstrapPlan(args)) => {
-                run_store_r237_bootstrap_plan(args, writer)
-            }
             Some(StoreCommand::Create(args)) => run_store_create(args, writer),
             Some(StoreCommand::Drain(args)) => run_store_drain(args, writer),
             Some(StoreCommand::Delete(args)) => run_store_delete(args, writer),

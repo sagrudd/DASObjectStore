@@ -48,13 +48,15 @@ pub use backend::{
     ObjectStoreBackend,
 };
 pub use bootstrap_plan::{
-    assess_r237_nuc_bootstrap_plan, R237BootstrapPlanAssessmentV1, R237BootstrapPlanDenialReasonV1,
-    R237BootstrapPlanHddMemberV1, R237BootstrapPlanInventoryV1, R237BootstrapPlanTargetV1,
-    R237BootstrapProvisionPlanOutputV1, R237BootstrapProvisionPlanV1,
-    R237BootstrapProvisionTupleV1, R237_BOOTSTRAP_PLAN_INVENTORY_V1_SCHEMA,
-    R237_BOOTSTRAP_PROVISION_PLAN_V1_SCHEMA, R237_BUCKET_NAME,
-    R237_CANONICAL_PROGRAMME_MAIN_REVISION, R237_NUC_HOST, R237_STORE_ID,
-    R237_TRANSACTION_DOCUMENT_SHA256, R237_TRANSACTION_DOCUMENT_SOURCE_REVISION,
+    assess_r237_bootstrap_local_observation, canonical_r237_bootstrap_observer_report,
+    R237BootstrapLocalObservationV1, R237BootstrapObserverDenialV1,
+    R237BootstrapObserverDispositionV1, R237BootstrapObserverReportBodyV1,
+    R237BootstrapObserverReportV1, R237HddObservationV1, R237ObservationCheckV1,
+    R237ObservationStatusV1, R237ObservedMediaV1, R237ReviewedBootstrapTupleV1,
+    R237_BOOTSTRAP_LOCAL_OBSERVATION_V1_SCHEMA, R237_BOOTSTRAP_OBSERVER_REPORT_V1_SCHEMA,
+    R237_BUCKET_NAME, R237_CANONICAL_PROGRAMME_MAIN_REVISION, R237_NUC_HOST,
+    R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD, R237_STORE_ID, R237_TRANSACTION_DOCUMENT_SHA256,
+    R237_TRANSACTION_DOCUMENT_SOURCE_REVISION, R237_WRITER_GROUP,
 };
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,
