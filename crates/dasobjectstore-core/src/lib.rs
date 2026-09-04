@@ -27,6 +27,7 @@ pub mod remote_upload;
 pub mod repair;
 pub mod retained_dossier_prerequisite;
 pub mod risk;
+pub mod s6_dossier_custody;
 pub mod store;
 pub mod subobject_capacity;
 pub mod synoptikon_projection;
@@ -97,6 +98,17 @@ pub use protection::ProtectionPolicy;
 pub use retained_dossier_prerequisite::{
     JenkinsRetainedDossierDasPrerequisiteV1, RetainedDossierPrerequisiteError,
     VerifiedRetainedDossierDasReadbackV1, JENKINS_RETAINED_DOSSIER_DAS_PREREQUISITE_V1_SCHEMA,
+};
+pub use s6_dossier_custody::{
+    preflight_s6_dossier_custody, retain_s6_dossier_corpus, verify_s6_dossier_corpus,
+    verify_s6_dossier_readback_receipt, S6DossierCorpusManifestV1, S6DossierCreateOutcomeV1,
+    S6DossierCustodyBindingV1, S6DossierCustodyError, S6DossierCustodyPreflightV1,
+    S6DossierFixedPeerGrantV1, S6DossierMemberRefV1, S6DossierMemberV1, S6DossierPeerChannelV1,
+    S6DossierRawAttachmentV1, S6DossierReadbackReceiptV1, S6DossierReaderPortV1,
+    S6DossierRetentionResultV1, S6DossierSubjectV1, S6DossierWriterPortV1,
+    S6_DOSSIER_CORPUS_V1_SCHEMA, S6_DOSSIER_CUSTODY_BINDING_V1_SCHEMA,
+    S6_DOSSIER_FIXED_PEER_GRANT_V1_SCHEMA, S6_DOSSIER_MANIFEST_V1_SCHEMA, S6_DOSSIER_OBJECT_PREFIX,
+    S6_DOSSIER_PROFILE_ID, S6_DOSSIER_READBACK_RECEIPT_V1_SCHEMA, S6_DOSSIER_SUBJECT_V1_SCHEMA,
 };
 pub use store::LogicalObjectVersionCharge;
 pub use subobject_capacity::{

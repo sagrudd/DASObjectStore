@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.179.0 - 2026-09-04
+
+- Add a source-only S6 dossier-custody substrate. It strictly stream-verifies
+  the deterministic ``MNS6DCRP`` corpus envelope, external pre-custody JCS
+  subject, complete manifest inventory, required custody binding, fixed-peer
+  separation, immutable create/replay semantics, independently supplied
+  read-back path, and receipt/reference attachment cross-checks.
+- The substrate accepts only the isolated ``dasobjectstore-0180-nuc-debian``
+  DAS-only Debian/AMD64 corpus shape as an interoperability fixture. It does
+  not alter or qualify the historical r237/r7 Remote train.
+- This release contains no daemon endpoint, Pistis lookup, provider backend,
+  store configuration, package, lock, signing, custody result, S6 transition,
+  NUC/DGX action, or deployment path. A separately reviewed formal delivery
+  remains required before any custody substrate can be used for a release.
+
 ## 0.178.0 - 2026-09-04
 
 - Add ``dasobjectstore-r237-bootstrap-observer``, a fixed local-root Linux
