@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.178.0 - 2026-09-04
+
+- Add ``dasobjectstore store r237-bootstrap-plan``: a fixed, offline and
+  strictly non-mutating assessment of the reviewed r237 NUC bootstrap tuple.
+  It accepts only a no-atime/no-follow Linux read of a strict inventory
+  snapshot, binds the NUC identity plus the canonical programme-main and
+  transaction-document revisions/digest, rejects incomplete or conflicting
+  namespace evidence, and emits a redacted JCS SHA-256 plan only when three
+  healthy distinct physical HDD members meet the reviewed capacity threshold.
+- The plan is explicitly non-WORM, is not S4 evidence, has no apply path, and
+  advertises ``later_guarded_apply_compatible=false`` because current DAS APIs
+  cannot bind an actual provisioned placement to exact physical HDD members.
+
 ## 0.177.4 - 2026-09-02
 
 - Correct the formal remote package guard to consume the canonical Kanon

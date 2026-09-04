@@ -202,9 +202,9 @@ mod tests {
         );
         assert_eq!(
             declaration["producer"]["compatible_package_range"],
-            ">=0.177.1,<0.178.0"
+            ">=0.177.1,<0.179.0"
         );
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.177.4");
+        assert_eq!(env!("CARGO_PKG_VERSION"), "0.178.0");
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
             PROFILE_READINESS_SCHEMA_VERSION
