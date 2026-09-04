@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.178.0 - 2026-09-04
+
+- Add ``dasobjectstore-r237-bootstrap-observer``, a fixed local-root Linux
+  observer with no arguments, input inventory, apply path, daemon connection,
+  remote transport, or mutable operation. It uses descriptor-safe local reads
+  and bounded read-only disk/S.M.A.R.T. probes to bind available NUC evidence
+  to the reviewed r237 tuple and emits a redacted self-excluding JCS report.
+- The observer is deliberately deny-only: complete Garage bucket inventory and
+  exact future physical-placement proof are unavailable under current
+  authority contracts. Its report is explicitly not S4, custody acceptance,
+  remote deployment, or service activation; it cannot advance a release or
+  provision storage.
+- Harden the root observer command boundary: only fixed executable paths for
+  ``lsblk`` and ``smartctl`` with verified root-owned, non-writable directory
+  ancestors and final executable are accepted; inherited environment is
+  cleared, and missing or untrusted tools fail closed rather than using PATH.
+
 ## 0.177.4 - 2026-09-02
 
 - Correct the formal remote package guard to consume the canonical Kanon

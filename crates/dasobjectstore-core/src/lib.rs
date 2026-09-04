@@ -3,6 +3,7 @@
 pub mod application_auth;
 pub mod application_auth_v2;
 pub mod backend;
+pub mod bootstrap_plan;
 pub mod capacity;
 pub mod config;
 pub mod demo_prerequisite;
@@ -45,6 +46,17 @@ pub use backend::{
     catalogue_logical_used_bytes, BackendCapabilities, BackendError, BackendHealth,
     BackendObjectKey, BackendObjectRecord, BackendOperation, ObjectCatalogueAuthority,
     ObjectStoreBackend,
+};
+pub use bootstrap_plan::{
+    assess_r237_bootstrap_local_observation, canonical_r237_bootstrap_observer_report,
+    R237BootstrapLocalObservationV1, R237BootstrapObserverDenialV1,
+    R237BootstrapObserverDispositionV1, R237BootstrapObserverReportBodyV1,
+    R237BootstrapObserverReportV1, R237HddObservationV1, R237ObservationCheckV1,
+    R237ObservationStatusV1, R237ObservedMediaV1, R237ReviewedBootstrapTupleV1,
+    R237_BOOTSTRAP_LOCAL_OBSERVATION_V1_SCHEMA, R237_BOOTSTRAP_OBSERVER_REPORT_V1_SCHEMA,
+    R237_BUCKET_NAME, R237_CANONICAL_PROGRAMME_MAIN_REVISION, R237_NUC_HOST,
+    R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD, R237_STORE_ID, R237_TRANSACTION_DOCUMENT_SHA256,
+    R237_TRANSACTION_DOCUMENT_SOURCE_REVISION, R237_WRITER_GROUP,
 };
 pub use config::{
     DEFAULT_PRODUCT_ROOT, DEFAULT_STANDALONE_BIND_ADDRESS, DEFAULT_STANDALONE_CONFIG_PATH,
