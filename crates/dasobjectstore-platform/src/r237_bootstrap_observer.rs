@@ -464,7 +464,7 @@ fn trusted_observer_command(path: &str) -> bool {
 /// file, non-root owner, missing execute bit, or group/world writable binary.
 #[cfg(target_os = "linux")]
 fn trusted_root_owned_executable(path: &str) -> bool {
-    let Ok((parent, leaf)) = open_absolute_parent(path) else {
+    let Ok((parent, leaf)) = open_trusted_executable_parent(path) else {
         return false;
     };
     let Ok(leaf) = CString::new(leaf) else {
@@ -489,13 +489,100 @@ fn trusted_root_owned_executable(path: &str) -> bool {
     let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
     let trusted = unsafe { libc::fstat(fd, stat.as_mut_ptr()) == 0 } && {
         let stat = unsafe { stat.assume_init() };
-        stat.st_mode & libc::S_IFMT == libc::S_IFREG
-            && stat.st_uid == 0
-            && stat.st_mode & 0o022 == 0
-            && stat.st_mode & 0o111 != 0
+        trusted_root_owned_executable_metadata(&stat)
     };
     unsafe { libc::close(fd) };
     trusted
+}
+
+/// Walk the absolute executable path through no-follow descriptors. Unlike
+/// evidence files, command ancestors are themselves part of the execution
+/// trust boundary: every ancestor (including `/`) must be a root-owned,
+/// non-group/world-writable directory. This prevents an unprivileged writer
+/// from replacing the final command through an otherwise safe-looking path.
+#[cfg(target_os = "linux")]
+fn open_trusted_executable_parent(path: &str) -> Result<(libc::c_int, String), ()> {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return Err(());
+    }
+    let parts: Vec<String> = path
+        .components()
+        .filter_map(|part| match part {
+            Component::Normal(value) => value.to_str().map(ToOwned::to_owned),
+            Component::RootDir => None,
+            _ => Some(String::new()),
+        })
+        .collect();
+    if parts.is_empty() || parts.iter().any(String::is_empty) {
+        return Err(());
+    }
+    let root = CString::new("/").map_err(|_| ())?;
+    let mut fd = unsafe {
+        libc::open(
+            root.as_ptr(),
+            libc::O_RDONLY
+                | libc::O_DIRECTORY
+                | libc::O_CLOEXEC
+                | libc::O_NOFOLLOW
+                | libc::O_NOATIME,
+        )
+    };
+    if fd < 0 || !trusted_root_owned_directory_fd(fd) {
+        if fd >= 0 {
+            unsafe { libc::close(fd) };
+        }
+        return Err(());
+    }
+    for component in &parts[..parts.len() - 1] {
+        let component = match CString::new(component.as_str()) {
+            Ok(component) => component,
+            Err(_) => {
+                unsafe { libc::close(fd) };
+                return Err(());
+            }
+        };
+        let next = unsafe {
+            libc::openat(
+                fd,
+                component.as_ptr(),
+                libc::O_RDONLY
+                    | libc::O_DIRECTORY
+                    | libc::O_CLOEXEC
+                    | libc::O_NOFOLLOW
+                    | libc::O_NOATIME,
+            )
+        };
+        unsafe { libc::close(fd) };
+        if next < 0 || !trusted_root_owned_directory_fd(next) {
+            if next >= 0 {
+                unsafe { libc::close(next) };
+            }
+            return Err(());
+        }
+        fd = next;
+    }
+    Ok((fd, parts.last().expect("non-empty path parts").clone()))
+}
+
+#[cfg(target_os = "linux")]
+fn trusted_root_owned_directory_fd(fd: libc::c_int) -> bool {
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    (unsafe { libc::fstat(fd, stat.as_mut_ptr()) == 0 })
+        && trusted_root_owned_directory_metadata(&unsafe { stat.assume_init() })
+}
+
+#[cfg(target_os = "linux")]
+fn trusted_root_owned_directory_metadata(stat: &libc::stat) -> bool {
+    stat.st_mode & libc::S_IFMT == libc::S_IFDIR && stat.st_uid == 0 && stat.st_mode & 0o022 == 0
+}
+
+#[cfg(target_os = "linux")]
+fn trusted_root_owned_executable_metadata(stat: &libc::stat) -> bool {
+    stat.st_mode & libc::S_IFMT == libc::S_IFREG
+        && stat.st_uid == 0
+        && stat.st_mode & 0o022 == 0
+        && stat.st_mode & 0o111 != 0
 }
 
 /// Safe path-walk: each parent is opened with `openat` and `O_NOFOLLOW`, then
@@ -1260,6 +1347,23 @@ mod tests {
         symlink(&ordinary, &link).expect("fixture link");
         assert!(!trusted_root_owned_executable(link.to_str().expect("path")));
         fs::remove_dir_all(root).expect("remove fixture directory");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn safe_root_executable_under_writable_ancestor_is_not_trusted() {
+        let mut executable = unsafe { std::mem::zeroed::<libc::stat>() };
+        executable.st_mode = libc::S_IFREG | 0o755;
+        executable.st_uid = 0;
+        assert!(trusted_root_owned_executable_metadata(&executable));
+
+        let mut writable_ancestor = unsafe { std::mem::zeroed::<libc::stat>() };
+        writable_ancestor.st_mode = libc::S_IFDIR | 0o777;
+        writable_ancestor.st_uid = 0;
+        assert!(
+            !trusted_root_owned_directory_metadata(&writable_ancestor),
+            "a root-owned final executable is still denied if an ancestor is writable"
+        );
     }
 
     #[cfg(target_os = "linux")]

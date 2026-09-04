@@ -12,8 +12,9 @@
   authority contracts. Its report is explicitly not S4, custody acceptance,
   remote deployment, or service activation; it cannot advance a release or
   provision storage.
-- Harden the root observer command boundary: only verified fixed executable
-  paths for ``lsblk`` and ``smartctl`` are accepted, inherited environment is
+- Harden the root observer command boundary: only fixed executable paths for
+  ``lsblk`` and ``smartctl`` with verified root-owned, non-writable directory
+  ancestors and final executable are accepted; inherited environment is
   cleared, and missing or untrusted tools fail closed rather than using PATH.
 
 ## 0.177.4 - 2026-09-02
