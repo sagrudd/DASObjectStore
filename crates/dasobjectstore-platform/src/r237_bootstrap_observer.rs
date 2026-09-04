@@ -6,7 +6,7 @@
 //! daemon socket, calls Garage/S3/Docker, or executes a provisioning command.
 
 use crate::linux_smart::{parse_smartctl_json, smartctl_health_args, SMARTCTL_COMMAND};
-use crate::probe::{CommandRunner, SystemCommandRunner};
+use crate::probe::{CommandRunner, ProbeError};
 use dasobjectstore_core::{
     R237BootstrapLocalObservationV1, R237HddObservationV1, R237ObservationCheckV1,
     R237ObservationStatusV1, R237ObservedMediaV1, R237_BOOTSTRAP_LOCAL_OBSERVATION_V1_SCHEMA,
@@ -25,6 +25,8 @@ use std::io::Read;
 use std::os::fd::FromRawFd;
 #[cfg(target_os = "linux")]
 use std::path::{Component, Path};
+#[cfg(target_os = "linux")]
+use std::process::Command;
 
 const MACHINE_ID_PATH: &str = "/etc/machine-id";
 const APPLIANCE_IDENTITY_PATH: &str = "/var/lib/dasobjectstore/appliance-identity.json";
@@ -34,7 +36,10 @@ const GROUP_PATH: &str = "/etc/group";
 const PASSWD_PATH: &str = "/etc/passwd";
 const MOUNTINFO_PATH: &str = "/proc/self/mountinfo";
 const MARKER_ROOT: &str = "/var/lib/mnemosyne-r237-custody-marker";
-const LSBLK_COMMAND: &str = "lsblk";
+const TRUSTED_LSBLK_PATH: &str = "/usr/bin/lsblk";
+const TRUSTED_SMARTCTL_PATH: &str = "/usr/sbin/smartctl";
+#[cfg(target_os = "linux")]
+const TRUSTED_COMMAND_PATH: &str = "/usr/sbin:/usr/bin";
 const LSBLK_ARGS: [&str; 6] = [
     "--json",
     "--bytes",
@@ -50,15 +55,98 @@ pub trait R237BootstrapReadOnlyObserver {
     fn observe(&self) -> R237BootstrapLocalObservationV1;
 }
 
+/// The only command runner used by the production observer. It accepts only
+/// fixed absolute paths, verifies their root-owned non-writable regular-file
+/// identity without following symlinks, and clears inherited environment.
+/// Tests may supply a narrower `CommandRunner` fake through `new`.
 #[derive(Debug, Default)]
-pub struct LinuxR237BootstrapObserver<R = SystemCommandRunner> {
+pub struct TrustedR237CommandRunner;
+
+impl CommandRunner for TrustedR237CommandRunner {
+    fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
+        #[cfg(target_os = "linux")]
+        {
+            if !trusted_observer_command(command) {
+                return Err(ProbeError::CommandFailed {
+                    command: command.to_owned(),
+                    message: "untrusted or unavailable fixed observer executable".to_owned(),
+                });
+            }
+            let output = Command::new(command)
+                .env_clear()
+                .env("PATH", TRUSTED_COMMAND_PATH)
+                .env("LC_ALL", "C")
+                .args(args)
+                .output()
+                .map_err(|error| ProbeError::CommandFailed {
+                    command: command.to_owned(),
+                    message: error.to_string(),
+                })?;
+            if !output.status.success() {
+                return Err(ProbeError::CommandFailed {
+                    command: command.to_owned(),
+                    message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+                });
+            }
+            return String::from_utf8(output.stdout).map_err(|error| ProbeError::ParseFailed {
+                source: command.to_owned(),
+                message: error.to_string(),
+            });
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (command, args);
+            Err(ProbeError::UnsupportedPlatform {
+                platform: std::env::consts::OS.to_owned(),
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+trait R237LocalReadOnlyAccess {
+    fn is_root(&self) -> bool;
+    fn local_ipv4_addresses(&self) -> Option<BTreeSet<String>>;
+    fn read_regular_noatime(&self, path: &str) -> SafeRead;
+    fn marker_root_state(&self, path: &str) -> Option<R237ObservationStatusV1>;
+    fn statvfs_available_bytes(&self, path: &str) -> Option<u64>;
+}
+
+#[cfg(target_os = "linux")]
+struct SystemR237LocalReadOnlyAccess;
+
+#[cfg(target_os = "linux")]
+impl R237LocalReadOnlyAccess for SystemR237LocalReadOnlyAccess {
+    fn is_root(&self) -> bool {
+        (unsafe { libc::geteuid() }) == 0
+    }
+
+    fn local_ipv4_addresses(&self) -> Option<BTreeSet<String>> {
+        local_ipv4_addresses()
+    }
+
+    fn read_regular_noatime(&self, path: &str) -> SafeRead {
+        read_regular_noatime(path)
+    }
+
+    fn marker_root_state(&self, path: &str) -> Option<R237ObservationStatusV1> {
+        marker_root_state_at(path)
+    }
+
+    fn statvfs_available_bytes(&self, path: &str) -> Option<u64> {
+        statvfs_available_bytes(path)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LinuxR237BootstrapObserver<R = TrustedR237CommandRunner> {
     runner: R,
 }
 
-impl LinuxR237BootstrapObserver<SystemCommandRunner> {
+impl LinuxR237BootstrapObserver<TrustedR237CommandRunner> {
     pub fn system() -> Self {
         Self {
-            runner: SystemCommandRunner,
+            runner: TrustedR237CommandRunner,
         }
     }
 }
@@ -76,39 +164,46 @@ where
     fn observe(&self) -> R237BootstrapLocalObservationV1 {
         #[cfg(target_os = "linux")]
         {
-            if unsafe { libc::geteuid() } != 0 {
-                return unavailable_observation();
-            }
-            let target_ip = observe_target_ip();
-            let machine_identity = observe_machine_identity();
-            let appliance_identity = observe_appliance_identity();
-            let store_registry_namespace = observe_store_registry_namespace();
-            let marker_root = observe_marker_root();
-            let writer_group = observe_writer_group();
-            let hdd_members = observe_hdd_members(&self.runner);
-            return R237BootstrapLocalObservationV1 {
-                schema_version: R237_BOOTSTRAP_LOCAL_OBSERVATION_V1_SCHEMA.to_owned(),
-                target_ip,
-                machine_identity,
-                appliance_identity,
-                // No local-only source can compare this appliance to an
-                // independently retained NUC identity baseline.
-                clone_detection: unavailable_check(),
-                store_registry_namespace,
-                marker_root,
-                writer_group,
-                hdd_members,
-                // Deliberately do not scrape Garage, Docker, S3, or a control
-                // endpoint. Those would be a different authority contract.
-                garage_bucket_inventory: unavailable_check(),
-                exact_physical_placement: unavailable_check(),
-            };
+            return collect_r237_local_observation(&self.runner, &SystemR237LocalReadOnlyAccess);
         }
         #[cfg(not(target_os = "linux"))]
         {
             let _ = &self.runner;
             unavailable_observation()
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn collect_r237_local_observation<R: CommandRunner, A: R237LocalReadOnlyAccess>(
+    runner: &R,
+    access: &A,
+) -> R237BootstrapLocalObservationV1 {
+    if !access.is_root() {
+        return unavailable_observation();
+    }
+    let target_ip = observe_target_ip(access);
+    let machine_identity = observe_machine_identity(access);
+    let appliance_identity = observe_appliance_identity(access);
+    let store_registry_namespace = observe_store_registry_namespace(access);
+    let marker_root = observe_marker_root(access);
+    let writer_group = observe_writer_group(access);
+    let hdd_members = observe_hdd_members(runner, access);
+    R237BootstrapLocalObservationV1 {
+        schema_version: R237_BOOTSTRAP_LOCAL_OBSERVATION_V1_SCHEMA.to_owned(),
+        target_ip,
+        machine_identity,
+        appliance_identity,
+        // No local-only source can compare this appliance to an independently
+        // retained NUC identity baseline.
+        clone_detection: unavailable_check(),
+        store_registry_namespace,
+        marker_root,
+        writer_group,
+        hdd_members,
+        // Deliberately do not scrape Garage, Docker, S3, or a control endpoint.
+        garage_bucket_inventory: unavailable_check(),
+        exact_physical_placement: unavailable_check(),
     }
 }
 
@@ -143,8 +238,8 @@ fn check(status: R237ObservationStatusV1, bytes: &[u8]) -> R237ObservationCheckV
 }
 
 #[cfg(target_os = "linux")]
-fn observe_target_ip() -> R237ObservationCheckV1 {
-    match local_ipv4_addresses() {
+fn observe_target_ip(access: &impl R237LocalReadOnlyAccess) -> R237ObservationCheckV1 {
+    match access.local_ipv4_addresses() {
         Some(addresses) => {
             let evidence = addresses
                 .iter()
@@ -165,8 +260,8 @@ fn observe_target_ip() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_machine_identity() -> R237ObservationCheckV1 {
-    match read_regular_noatime(MACHINE_ID_PATH) {
+fn observe_machine_identity(access: &impl R237LocalReadOnlyAccess) -> R237ObservationCheckV1 {
+    match access.read_regular_noatime(MACHINE_ID_PATH) {
         SafeRead::Bytes(bytes) if valid_machine_id(&bytes) => {
             check(R237ObservationStatusV1::Verified, &bytes)
         }
@@ -176,8 +271,8 @@ fn observe_machine_identity() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_appliance_identity() -> R237ObservationCheckV1 {
-    match read_regular_noatime(APPLIANCE_IDENTITY_PATH) {
+fn observe_appliance_identity(access: &impl R237LocalReadOnlyAccess) -> R237ObservationCheckV1 {
+    match access.read_regular_noatime(APPLIANCE_IDENTITY_PATH) {
         SafeRead::Bytes(bytes) => match serde_json::from_slice::<ApplianceIdentity>(&bytes) {
             Ok(identity)
                 if identity.schema_version == "dasobjectstore.appliance_identity.v1"
@@ -203,8 +298,10 @@ fn observe_appliance_identity() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_store_registry_namespace() -> R237ObservationCheckV1 {
-    match read_regular_noatime(STORE_REGISTRY_PATH) {
+fn observe_store_registry_namespace(
+    access: &impl R237LocalReadOnlyAccess,
+) -> R237ObservationCheckV1 {
+    match access.read_regular_noatime(STORE_REGISTRY_PATH) {
         SafeRead::Absent => check(R237ObservationStatusV1::Absent, b"registry-absent"),
         SafeRead::Bytes(bytes) => match registry_namespace_state(&bytes) {
             Some(R237ObservationStatusV1::Absent) => check(R237ObservationStatusV1::Absent, &bytes),
@@ -216,8 +313,8 @@ fn observe_store_registry_namespace() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_marker_root() -> R237ObservationCheckV1 {
-    match marker_root_state_at(MARKER_ROOT) {
+fn observe_marker_root(access: &impl R237LocalReadOnlyAccess) -> R237ObservationCheckV1 {
+    match access.marker_root_state(MARKER_ROOT) {
         Some(R237ObservationStatusV1::Absent) => {
             check(R237ObservationStatusV1::Absent, b"marker-absent")
         }
@@ -227,16 +324,16 @@ fn observe_marker_root() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_writer_group() -> R237ObservationCheckV1 {
-    let SafeRead::Bytes(nsswitch) = read_regular_noatime(NSSWITCH_PATH) else {
+fn observe_writer_group(access: &impl R237LocalReadOnlyAccess) -> R237ObservationCheckV1 {
+    let SafeRead::Bytes(nsswitch) = access.read_regular_noatime(NSSWITCH_PATH) else {
         return unavailable_check();
     };
     if !nss_group_is_local_files_only(&nsswitch) {
         return check(R237ObservationStatusV1::Unavailable, b"nonlocal-nss");
     }
     let (SafeRead::Bytes(groups), SafeRead::Bytes(passwd)) = (
-        read_regular_noatime(GROUP_PATH),
-        read_regular_noatime(PASSWD_PATH),
+        access.read_regular_noatime(GROUP_PATH),
+        access.read_regular_noatime(PASSWD_PATH),
     ) else {
         return unavailable_check();
     };
@@ -250,11 +347,14 @@ fn observe_writer_group() -> R237ObservationCheckV1 {
 }
 
 #[cfg(target_os = "linux")]
-fn observe_hdd_members<R: CommandRunner>(runner: &R) -> Vec<R237HddObservationV1> {
-    let Ok(lsblk) = runner.run(LSBLK_COMMAND, &LSBLK_ARGS) else {
+fn observe_hdd_members<R: CommandRunner, A: R237LocalReadOnlyAccess>(
+    runner: &R,
+    access: &A,
+) -> Vec<R237HddObservationV1> {
+    let Ok(lsblk) = runner.run(TRUSTED_LSBLK_PATH, &LSBLK_ARGS) else {
         return Vec::new();
     };
-    let mountinfo = match read_regular_noatime(MOUNTINFO_PATH) {
+    let mountinfo = match access.read_regular_noatime(MOUNTINFO_PATH) {
         SafeRead::Bytes(bytes) => String::from_utf8(bytes).ok(),
         _ => None,
     };
@@ -266,13 +366,14 @@ fn observe_hdd_members<R: CommandRunner>(runner: &R) -> Vec<R237HddObservationV1
     };
     disks
         .into_iter()
-        .map(|disk| observed_hdd_from_disk(runner, &mountinfo, disk))
+        .map(|disk| observed_hdd_from_disk(runner, access, &mountinfo, disk))
         .collect()
 }
 
 #[cfg(target_os = "linux")]
-fn observed_hdd_from_disk<R: CommandRunner>(
+fn observed_hdd_from_disk<R: CommandRunner, A: R237LocalReadOnlyAccess>(
     runner: &R,
+    access: &A,
     mountinfo: &str,
     disk: LinuxDisk,
 ) -> R237HddObservationV1 {
@@ -282,11 +383,11 @@ fn observed_hdd_from_disk<R: CommandRunner>(
         .iter()
         .find(|mount| mountinfo_contains_writable_mapping(mountinfo, mount));
     let available_bytes = mount_point
-        .and_then(|mount| statvfs_available_bytes(&mount.mount_point))
+        .and_then(|mount| access.statvfs_available_bytes(&mount.mount_point))
         .unwrap_or(0);
     let smart_args = smartctl_health_args(&disk.path);
     let smart_arg_refs: Vec<_> = smart_args.iter().map(String::as_str).collect();
-    let smart = match runner.run(SMARTCTL_COMMAND, &smart_arg_refs) {
+    let smart = match runner.run(TRUSTED_SMARTCTL_PATH, &smart_arg_refs) {
         Ok(output) => match parse_smartctl_json(&output) {
             Ok(health)
                 if health.smart_passed == Some(true) && health.signals.smart_warnings == 0 =>
@@ -350,6 +451,51 @@ enum SafeRead {
     Absent,
     Bytes(Vec<u8>),
     Unavailable,
+}
+
+#[cfg(target_os = "linux")]
+fn trusted_observer_command(path: &str) -> bool {
+    matches!(path, TRUSTED_LSBLK_PATH | TRUSTED_SMARTCTL_PATH)
+        && trusted_root_owned_executable(path)
+}
+
+/// Verify the final path entry through a no-follow descriptor. A root observer
+/// never resolves a program through PATH and refuses a symlink, non-regular
+/// file, non-root owner, missing execute bit, or group/world writable binary.
+#[cfg(target_os = "linux")]
+fn trusted_root_owned_executable(path: &str) -> bool {
+    let Ok((parent, leaf)) = open_absolute_parent(path) else {
+        return false;
+    };
+    let Ok(leaf) = CString::new(leaf) else {
+        unsafe { libc::close(parent) };
+        return false;
+    };
+    let fd = unsafe {
+        libc::openat(
+            parent,
+            leaf.as_ptr(),
+            libc::O_RDONLY
+                | libc::O_CLOEXEC
+                | libc::O_NOFOLLOW
+                | libc::O_NOATIME
+                | libc::O_NONBLOCK,
+        )
+    };
+    unsafe { libc::close(parent) };
+    if fd < 0 {
+        return false;
+    }
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::zeroed();
+    let trusted = unsafe { libc::fstat(fd, stat.as_mut_ptr()) == 0 } && {
+        let stat = unsafe { stat.assume_init() };
+        stat.st_mode & libc::S_IFMT == libc::S_IFREG
+            && stat.st_uid == 0
+            && stat.st_mode & 0o022 == 0
+            && stat.st_mode & 0o111 != 0
+    };
+    unsafe { libc::close(fd) };
+    trusted
 }
 
 /// Safe path-walk: each parent is opened with `openat` and `O_NOFOLLOW`, then
@@ -817,7 +963,8 @@ mod tests {
             R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD,
             40 * 1024 * 1024 * 1024
         );
-        assert_eq!(LSBLK_COMMAND, "lsblk");
+        assert_eq!(TRUSTED_LSBLK_PATH, "/usr/bin/lsblk");
+        assert_eq!(TRUSTED_SMARTCTL_PATH, "/usr/sbin/smartctl");
         assert_eq!(SMARTCTL_COMMAND, "smartctl");
     }
 
@@ -923,6 +1070,13 @@ mod tests {
             registry_namespace_state(br#"[{"store_id":"a"},{"store_id":"a"}]"#),
             Some(R237ObservationStatusV1::Conflicted)
         );
+        assert_eq!(
+            registry_namespace_state(
+                br#"[{"store_id":"another_store","bucket_name":"dos-r237-s4-bootstrap-custody"}]"#
+            ),
+            Some(R237ObservationStatusV1::Present),
+            "the target bucket is a conflict even under a different store"
+        );
         assert_eq!(registry_namespace_state(b"not-json"), None);
     }
 
@@ -942,13 +1096,17 @@ mod tests {
             }],
         };
         let observed = observed_hdd_from_disk(
-            &RecordingRunner,
+            &UnavailableSmartRunner,
+            &RecordingAccess::default(),
             "45 1 8:1 / /definitely-not-a-mounted-fixture rw,relatime - ext4 /dev/sda1 rw",
             disk,
         );
         assert_eq!(observed.media, R237ObservedMediaV1::Hdd);
         assert_eq!(observed.smart, R237ObservationStatusV1::Unavailable);
-        assert_eq!(observed.available_bytes, 0);
+        assert_eq!(
+            observed.available_bytes,
+            R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -1076,6 +1234,35 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    #[test]
+    fn trusted_commands_are_absolute_whitelisted_and_fail_closed() {
+        assert!(!trusted_observer_command("lsblk"));
+        assert!(!trusted_observer_command("/tmp/lsblk"));
+        assert!(!trusted_observer_command("/usr/bin/smartctl"));
+        assert!(
+            TrustedR237CommandRunner.run("lsblk", &[]).is_err(),
+            "ambient PATH name must not be accepted"
+        );
+        assert!(
+            TrustedR237CommandRunner.run("/tmp/lsblk", &[]).is_err(),
+            "untrusted executable must not be accepted"
+        );
+        assert!(!trusted_root_owned_executable(
+            "/definitely-missing-r237-observer-tool"
+        ));
+        let root = test_directory("untrusted-tool");
+        let ordinary = root.join("tool");
+        fs::write(&ordinary, b"not an approved executable").expect("fixture tool");
+        assert!(!trusted_root_owned_executable(
+            ordinary.to_str().expect("path")
+        ));
+        let link = root.join("tool-link");
+        symlink(&ordinary, &link).expect("fixture link");
+        assert!(!trusted_root_owned_executable(link.to_str().expect("path")));
+        fs::remove_dir_all(root).expect("remove fixture directory");
+    }
+
+    #[cfg(target_os = "linux")]
     fn test_directory(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "dasobjectstore-r237-observer-{name}-{}-{}",
@@ -1089,13 +1276,92 @@ mod tests {
         path
     }
 
-    struct RecordingRunner;
+    #[cfg(target_os = "linux")]
+    #[derive(Default)]
+    struct RecordingAccess {
+        reads: std::cell::RefCell<Vec<String>>,
+        writes: std::cell::Cell<usize>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl R237LocalReadOnlyAccess for RecordingAccess {
+        fn is_root(&self) -> bool {
+            self.reads.borrow_mut().push("geteuid".to_owned());
+            true
+        }
+
+        fn local_ipv4_addresses(&self) -> Option<BTreeSet<String>> {
+            self.reads.borrow_mut().push("getifaddrs".to_owned());
+            Some(BTreeSet::from([R237_NUC_HOST.to_owned()]))
+        }
+
+        fn read_regular_noatime(&self, path: &str) -> SafeRead {
+            self.reads.borrow_mut().push(path.to_owned());
+            match path {
+                MACHINE_ID_PATH => SafeRead::Bytes(b"0123456789abcdef0123456789abcdef\n".to_vec()),
+                APPLIANCE_IDENTITY_PATH => SafeRead::Bytes(
+                    br#"{"schema_version":"dasobjectstore.appliance_identity.v1","appliance_id":"das-appliance-test"}"#.to_vec(),
+                ),
+                STORE_REGISTRY_PATH => SafeRead::Bytes(b"[]".to_vec()),
+                NSSWITCH_PATH => SafeRead::Bytes(b"group: files\n".to_vec()),
+                GROUP_PATH => SafeRead::Bytes(b"other:x:2:\n".to_vec()),
+                PASSWD_PATH => SafeRead::Bytes(b"root:x:0:0::/:/bin/sh\n".to_vec()),
+                MOUNTINFO_PATH => SafeRead::Bytes(
+                    b"45 1 8:1 / /fixture rw,relatime - ext4 /dev/sda1 rw\n".to_vec(),
+                ),
+                _ => SafeRead::Unavailable,
+            }
+        }
+
+        fn marker_root_state(&self, path: &str) -> Option<R237ObservationStatusV1> {
+            self.reads.borrow_mut().push(path.to_owned());
+            Some(R237ObservationStatusV1::Absent)
+        }
+
+        fn statvfs_available_bytes(&self, path: &str) -> Option<u64> {
+            self.reads.borrow_mut().push(path.to_owned());
+            Some(R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[derive(Default)]
+    struct RecordingRunner {
+        calls: std::cell::RefCell<Vec<(String, Vec<String>)>>,
+    }
+
+    #[cfg(target_os = "linux")]
     impl CommandRunner for RecordingRunner {
         fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
-            assert!(matches!(command, LSBLK_COMMAND | SMARTCTL_COMMAND));
+            self.calls.borrow_mut().push((
+                command.to_owned(),
+                args.iter().map(|arg| (*arg).to_owned()).collect(),
+            ));
+            assert!(matches!(
+                command,
+                TRUSTED_LSBLK_PATH | TRUSTED_SMARTCTL_PATH
+            ));
             assert!(!args
                 .iter()
                 .any(|arg| arg.contains("--create") || arg.contains("--write")));
+            match command {
+                TRUSTED_LSBLK_PATH => Ok(
+                    r#"{"blockdevices":[{"path":"/dev/sda","type":"disk","wwn":"wwn-a","serial":"serial-a","rota":1,"ro":0,"mountpoints":[null],"children":[{"path":"/dev/sda1","type":"part","ro":0,"mountpoints":["/fixture"]}]}]}"#.to_owned(),
+                ),
+                TRUSTED_SMARTCTL_PATH => Ok(r#"{"smart_status":{"passed":true}}"#.to_owned()),
+                _ => unreachable!("whitelisted above"),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    struct UnavailableSmartRunner;
+
+    #[cfg(target_os = "linux")]
+    impl CommandRunner for UnavailableSmartRunner {
+        fn run(&self, command: &str, args: &[&str]) -> Result<String, ProbeError> {
+            assert_eq!(command, TRUSTED_SMARTCTL_PATH);
+            assert_eq!(args.last().copied(), Some("/dev/sda"));
             Err(ProbeError::CommandFailed {
                 command: command.to_owned(),
                 message: "fixture unavailable".to_owned(),
@@ -1103,13 +1369,41 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
-    fn fake_runner_permits_only_bounded_read_only_commands() {
-        let observer = LinuxR237BootstrapObserver::new(RecordingRunner);
-        let observation = observer.observe();
+    fn recording_observer_uses_only_the_fixed_read_set_and_no_effect_paths() {
+        let access = RecordingAccess::default();
+        let runner = RecordingRunner::default();
+        let observation = collect_r237_local_observation(&runner, &access);
         assert_eq!(
             observation.garage_bucket_inventory.status,
             R237ObservationStatusV1::Unavailable
         );
+        assert_eq!(access.writes.get(), 0, "read-only access has no write path");
+        let expected_reads = [
+            "geteuid",
+            "getifaddrs",
+            MACHINE_ID_PATH,
+            APPLIANCE_IDENTITY_PATH,
+            STORE_REGISTRY_PATH,
+            MARKER_ROOT,
+            NSSWITCH_PATH,
+            GROUP_PATH,
+            PASSWD_PATH,
+            MOUNTINFO_PATH,
+            "/fixture",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        assert_eq!(access.reads.into_inner(), expected_reads);
+        let calls = runner.calls.into_inner();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, TRUSTED_LSBLK_PATH);
+        assert_eq!(calls[1].0, TRUSTED_SMARTCTL_PATH);
+        assert_eq!(calls[1].1.last().map(String::as_str), Some("/dev/sda"));
+        assert!(calls.iter().all(|(path, _)| {
+            matches!(path.as_str(), TRUSTED_LSBLK_PATH | TRUSTED_SMARTCTL_PATH)
+        }));
     }
 }

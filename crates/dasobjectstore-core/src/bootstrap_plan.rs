@@ -205,11 +205,14 @@ pub fn assess_r237_bootstrap_local_observation(
     if verified_hdd_member_count(&observation.hdd_members) < R237_REQUIRED_HDD_MEMBERS {
         denials.push(R237BootstrapObserverDenialV1::InsufficientVerifiedHdds);
     }
-    if observation.garage_bucket_inventory.status != R237ObservationStatusV1::Verified {
-        denials.push(R237BootstrapObserverDenialV1::GarageBucketInventoryUnavailable);
-    }
-    if observation.exact_physical_placement.status != R237ObservationStatusV1::Verified {
-        denials.push(R237BootstrapObserverDenialV1::ExactPhysicalPlacementUnavailable);
+    denials.push(R237BootstrapObserverDenialV1::GarageBucketInventoryUnavailable);
+    denials.push(R237BootstrapObserverDenialV1::ExactPhysicalPlacementUnavailable);
+    // These proofs have no trusted producer in 0.178. A caller-supplied
+    // `Verified` status is invalid and is never reflected in the report.
+    if observation.garage_bucket_inventory.status != R237ObservationStatusV1::Unavailable
+        || observation.exact_physical_placement.status != R237ObservationStatusV1::Unavailable
+    {
+        denials.push(R237BootstrapObserverDenialV1::InvalidObservation);
     }
     denials.sort_by_key(|value| *value as u8);
     denials.dedup();
@@ -227,8 +230,8 @@ pub fn assess_r237_bootstrap_local_observation(
         observation_jcs_sha256,
         disposition: R237BootstrapObserverDispositionV1::Denied,
         denials,
-        garage_bucket_inventory_status: observation.garage_bucket_inventory.status,
-        exact_physical_placement_status: observation.exact_physical_placement.status,
+        garage_bucket_inventory_status: R237ObservationStatusV1::Unavailable,
+        exact_physical_placement_status: R237ObservationStatusV1::Unavailable,
         not_s4: true,
         not_custody_acceptance: true,
         not_remote_deployment: true,
@@ -437,6 +440,59 @@ mod tests {
             .report
             .denials
             .contains(&R237BootstrapObserverDenialV1::WriterGroupUnverified));
+
+        let mut forged_external_proof = observation();
+        forged_external_proof.garage_bucket_inventory = check(R237ObservationStatusV1::Verified);
+        forged_external_proof.exact_physical_placement = check(R237ObservationStatusV1::Verified);
+        let report = assess_r237_bootstrap_local_observation(&forged_external_proof);
+        assert_eq!(
+            report.report.garage_bucket_inventory_status,
+            R237ObservationStatusV1::Unavailable
+        );
+        assert_eq!(
+            report.report.exact_physical_placement_status,
+            R237ObservationStatusV1::Unavailable
+        );
+        assert!(report
+            .report
+            .denials
+            .contains(&R237BootstrapObserverDenialV1::InvalidObservation));
+        assert!(report
+            .report
+            .denials
+            .contains(&R237BootstrapObserverDenialV1::GarageBucketInventoryUnavailable));
+        assert!(report
+            .report
+            .denials
+            .contains(&R237BootstrapObserverDenialV1::ExactPhysicalPlacementUnavailable));
+    }
+
+    #[test]
+    fn report_never_leaks_raw_observation_values_to_json_debug_or_digest() {
+        let raw = "TOPSECRET:/srv/das/wwn-0x5000cca123/serial-99/smart-warning";
+        let mut untrusted = observation();
+        untrusted.schema_version = raw.to_owned();
+        untrusted.target_ip.evidence_sha256 = Some(raw.to_owned());
+        untrusted.hdd_members[0].physical_member_sha256 = raw.to_owned();
+        let report = assess_r237_bootstrap_local_observation(&untrusted);
+        let json = String::from_utf8(
+            canonical_r237_bootstrap_observer_report(&report).expect("canonical report"),
+        )
+        .expect("utf8 report");
+        let debug = format!("{report:?}");
+        for forbidden in [
+            raw,
+            "TOPSECRET",
+            "/srv/das",
+            "wwn-0x5000cca123",
+            "serial-99",
+            "smart-warning",
+        ] {
+            assert!(!json.contains(forbidden));
+            assert!(!debug.contains(forbidden));
+            assert!(!report.report_sha256.contains(forbidden));
+            assert!(!report.report.observation_jcs_sha256.contains(forbidden));
+        }
     }
 
     #[test]

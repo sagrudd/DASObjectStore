@@ -52,6 +52,11 @@ physical disk facts. Protected files use descriptor-relative
 or missing evidence fails closed. Disk facts require a WWN and serial,
 rotational physical disk, writable verified mount mapping, ``statvfs``
 capacity, and a read-only ``smartctl --json --health --attributes`` result.
+The root observer never resolves those commands from an inherited ``PATH``:
+it accepts only fixed ``/usr/bin/lsblk`` and ``/usr/sbin/smartctl`` paths after
+no-follow verification of a root-owned, non-writable regular executable, and
+executes with a cleared, minimal environment. A missing, symlinked, writable,
+or otherwise untrusted tool leaves the related proof unavailable.
 
 The binary does not contact a NUC or DGX remotely, Garage, Docker, S3, a DAS
 daemon, or a service socket. It does not create or change a registry, ACL,
