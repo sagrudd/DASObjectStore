@@ -121,12 +121,42 @@ handler has independently rediscovered custody semantics. Any future route
 that introduces a new normal store-definition or registry mutation boundary
 must use the same central guard and is a review-required change.
 
-When the packaged daemon configuration declares the custody plane active, the
-direct CLI refuses to run rather than reading or writing a normal registry with
-a fallback catalog. Its only supported normal control plane in that state is
-the daemon server, which has received the same explicit canonical binding at
-composition time. This is a deliberate availability trade-off for a fail-closed
-boundary; it is not a way to activate or administer custody from the CLI.
+The daemon injects that exact binding into normal capacity status, admission
+and lease maintenance; ingest endpoint resolution and resource-gated ingest;
+profile creation/adoption and migration; object-store creation intent; store
+drain/delete/repair/reconciliation/deduplication; queue drain and destage
+retry; and startup profile publication, reactivation, and retirement recovery.
+The guard runs before a registry, intent, capacity, backend-root, metadata, or
+profile-binding effect. An unscoped normal operation is denied while the
+catalog contains any custody entry, because it cannot prove that its later
+scan excludes the sealed target. This remains an isolated source contract:
+the Pistis grant reader is a read-only grant projection and owns no normal
+storage mutation, capacity, lifecycle, or registry-write route.
+
+Before an enabled custody daemon composes any custody component, it atomically
+creates a private, hash-only active-plane marker at the canonical packaged
+daemon state path (`/var/lib/dasobjectstore/custody-activation.json` on Linux).
+The path is not derived from `dasobjectstored --config`, a daemon
+`state_dir` override, environment, or a caller-selected CLI option. The marker
+binds only a random activation identifier, activation time, and canonical
+digest of the complete custody configuration; it contains no raw path,
+credential, plan, or ledger material. A restart may reuse only an exact marker;
+a malformed, unreadable, symlinked, foreign, or different-binding marker blocks
+an enabled daemon rather than being overwritten or adopted.
+
+Legacy CLI control independently reads only that canonical marker. A present
+valid active marker denies normal CLI control before any direct registry or
+layout route; an unreadable or malformed marker also denies. A caller-supplied
+`--daemon-config` is retained only as parsing compatibility and is never used
+as authority. When no marker exists, an inactive legacy installation retains
+its existing CLI behaviour. The same startup guard applies to every daemon
+configuration: a later inactive or alternate configuration is denied while the
+active marker remains, before normal registry, capacity, or Garage service
+composition. The marker survives daemon stop and restart. There is no CLI,
+normal API, package, or service lifecycle removal path in this source release:
+only a future separately authorised attended deactivation transaction may
+remove it. The daemon server, which receives the exact catalog binding at
+composition, remains the supported normal control plane while it is active.
 
 The only daemon data mutation is `CustodyRetainRequest`. It contains two
 opaque, distinct writer and reader handoff references but no raw credential,
@@ -140,9 +170,12 @@ provisioning step. Its sole production resolver reads opaque file names from
 systemd's private
 `CREDENTIALS_DIRECTORY`; it has no filesystem-path, registry, Keychain,
 network, environment-secret, or API fallback. It atomically creates a
-hash-only, empty one-use marker before reading the handoff. Thus a race,
-restart, malformed handoff, or binding mismatch is terminal without
-persisting raw credential material. The in-memory resolver remains solely for
+hash-only, empty one-use marker keyed only by the opaque reference before
+reading the handoff or checking role/store/configuration. Thus a race, restart,
+or any valid-opaque-reference binding mismatch terminally consumes that same
+reference and cannot be followed by a correctly-bound retry; no raw credential
+material is persisted. Syntactically invalid non-opaque references are rejected
+before a marker can be named. The in-memory resolver remains solely for
 regression tests.
 
 The source includes, but packages do not install, a custody Garage Compose
@@ -254,6 +287,14 @@ gate consumes the identifier, one-use marker digest, and raw-evidence digest
 together through an atomic external marker. Reuse, mismatch, and a
 crash-partial marker are terminal failures.
 
+The production formal consumer accepts only the strict v2 journal records.
+The old v1 generic observation/checkpoint types are compiled only as private
+test fixtures and have no production export or formal-gate authority. V2 binds
+the durable issued and attempt-start timestamps such that `issued <= started <
+expiry`, and a passing observation lies from that attempt start through both
+acceptance and formal consumption. Pre-issued, pre-start, stale, future, or
+post-expiry observations are terminal and cannot be substituted later.
+
 The verifier state must be held outside the NUC, Garage, BaseCamp, and their
 ordinary backup/restore paths, and must atomically compare-and-store the prior
 checkpoint.  Replayed nonce, expired observation, wrong target or authority,
@@ -299,6 +340,18 @@ also cover raw-JCS Ed25519 authority binding, nonce issuance, one-terminal
 attempt consumption, timeout/replacement denial, monotonic sequence,
 previous-hash continuity, expiry, full-measurement substitution, and atomic
 formal consumption.
+
+They additionally cover an active non-default catalog through normal capacity
+status/admission/lease and ingest; pre-effect normal profile-binding and
+object-store creation denial for both the sealed store ID and a bucket alias;
+central destructive-route and startup-recovery denial; opaque
+writer/reader-reference substitution before handoff consumption; the fixed
+daemon-owned activation marker (absent permits inactive legacy CLI behaviour;
+active, malformed, or unreadable state denies direct control irrespective of a
+caller-supplied `--daemon-config`); v2 start/observation/expiry timing; and the
+test-only status of the retired v1 fixtures. These source tests do not qualify
+a running Garage endpoint, provider Object Lock, systemd credential handoff,
+package, NUC, DGX, or formal release gate.
 
 The deployment/integration suite still required before a candidate can be
 considered must exercise a real isolated Garage service, process/credential

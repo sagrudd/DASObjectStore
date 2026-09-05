@@ -188,19 +188,14 @@ impl SystemdServiceCredentialHandoffResolver {
         Ok(self.credentials_directory.join(name))
     }
 
-    fn consume_marker_path(
-        &self,
-        role: CustodyRuntimeCredentialRole,
-        handoff_reference: &str,
-        store_id: &str,
-        configuration_sha256: &str,
-    ) -> Result<PathBuf, ObjectServiceError> {
-        let handoff_name = handoff_credential_name(handoff_reference)?;
-        let role = match role {
-            CustodyRuntimeCredentialRole::Writer => "writer",
-            CustodyRuntimeCredentialRole::Reader => "reader",
-        };
-        let binding = format!("v1\\0{role}\\0{handoff_name}\\0{store_id}\\0{configuration_sha256}");
+    /// Returns the sole durable one-use marker for an opaque systemd
+    /// credential reference.  Deliberately do not include the requested
+    /// role, store, configuration, or operation in this key: an attempted
+    /// use with any wrong binding must terminally consume the same handoff,
+    /// rather than leaving it available for a later, correctly-bound retry.
+    fn consume_marker_path(&self, handoff_reference: &str) -> Result<PathBuf, ObjectServiceError> {
+        handoff_credential_name(handoff_reference)?;
+        let binding = format!("dasobjectstore-custody-handoff-reference-v2\\0{handoff_reference}");
         Ok(self
             .consumption_root
             .join(format!("{}.consumed", sha256_hex(binding.as_bytes()))))
@@ -215,10 +210,11 @@ impl CustodyRuntimeCredentialResolver for SystemdServiceCredentialHandoffResolve
         store_id: &str,
         configuration_sha256: &str,
     ) -> Result<CustodyRuntimeCredential, ObjectServiceError> {
-        let credential_path = self.credential_path(handoff_reference)?;
-        let marker_path =
-            self.consume_marker_path(role, handoff_reference, store_id, configuration_sha256)?;
+        // Claim by opaque reference before loading or validating the secret.
+        // This is the terminal boundary for malformed or wrong-bound use.
+        let marker_path = self.consume_marker_path(handoff_reference)?;
         claim_systemd_handoff_marker(&marker_path)?;
+        let credential_path = self.credential_path(handoff_reference)?;
         let handoff = read_systemd_handoff(&credential_path)?;
         if handoff.role != role
             || handoff.store_id != store_id
@@ -254,20 +250,14 @@ impl CustodyAdmissionProvisioningAuthority for SystemdServiceCredentialHandoffRe
         handoff_reference: &str,
         definition: &CustodyStoreDefinitionV1,
     ) -> Result<CustodyGarageProvisioningRequest, ObjectServiceError> {
-        let configuration_sha256 = custody_store_definition_sha256(definition)?;
-        let credential_path = self.credential_path(handoff_reference)?;
-        let handoff_name = handoff_credential_name(handoff_reference)?;
-        let marker_path = self.consumption_root.join(format!(
-            "{}.consumed",
-            sha256_hex(
-                format!(
-                    "v1\\0provisioner\\0{handoff_name}\\0{}\\0{configuration_sha256}",
-                    definition.store_id
-                )
-                .as_bytes(),
-            )
-        ));
+        // Do not hash the caller-selected definition into the marker.  The
+        // marker belongs to the opaque attended handoff itself, so a wrong
+        // store/configuration/role attempt cannot be followed by a correct
+        // reuse of the same capability.
+        let marker_path = self.consume_marker_path(handoff_reference)?;
         claim_systemd_handoff_marker(&marker_path)?;
+        let credential_path = self.credential_path(handoff_reference)?;
+        let configuration_sha256 = custody_store_definition_sha256(definition)?;
         let handoff = read_systemd_provisioning_handoff(&credential_path)?;
         if handoff.store_id != definition.store_id.to_string()
             || handoff.configuration_sha256 != configuration_sha256
@@ -1312,6 +1302,79 @@ mod tests {
     }
 
     #[test]
+    fn systemd_runtime_handoff_wrong_binding_terminally_consumes_the_same_opaque_reference() {
+        let root = std::env::temp_dir().join(format!(
+            "das-custody-systemd-terminal-binding-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let credential_directory = root.join("credentials");
+        let consumption_root = root.join("consumed");
+        fs::create_dir_all(&credential_directory).expect("credential dir");
+        let digest = "a".repeat(64);
+
+        for (suffix, wrong_role, wrong_store, wrong_digest) in [
+            (
+                "wrong-role",
+                CustodyRuntimeCredentialRole::Reader,
+                "custody-store",
+                digest.clone(),
+            ),
+            (
+                "wrong-store",
+                CustodyRuntimeCredentialRole::Writer,
+                "other-store",
+                digest.clone(),
+            ),
+            (
+                "wrong-configuration",
+                CustodyRuntimeCredentialRole::Writer,
+                "custody-store",
+                "b".repeat(64),
+            ),
+        ] {
+            let reference = format!("systemd-credential://writer-{suffix}");
+            let credential_path = credential_directory.join(format!("writer-{suffix}"));
+            fs::write(
+                &credential_path,
+                format!(
+                    "version=1\nrole=writer\nstore_id=custody-store\nconfiguration_sha256={digest}\nidentity=custody-writer\naws_access_key_id=writer-access\naws_secret_access_key=writer-secret\n"
+                ),
+            )
+            .expect("credential fixture");
+            #[cfg(unix)]
+            fs::set_permissions(&credential_path, fs::Permissions::from_mode(0o600))
+                .expect("credential mode");
+            let resolver = SystemdServiceCredentialHandoffResolver::from_test_credential_directory(
+                credential_directory.clone(),
+                consumption_root.clone(),
+            )
+            .expect("systemd resolver");
+
+            assert!(resolver
+                .consume_one_use(wrong_role, &reference, wrong_store, &wrong_digest)
+                .is_err());
+            assert!(resolver
+                .consume_one_use(
+                    CustodyRuntimeCredentialRole::Writer,
+                    &reference,
+                    "custody-store",
+                    &digest,
+                )
+                .is_err());
+        }
+        let markers = fs::read_dir(&consumption_root)
+            .expect("marker root")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("marker entries");
+        assert_eq!(markers.len(), 3);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn systemd_provisioning_handoff_is_server_only_one_use_and_never_exposes_a_plan() {
         let root = std::env::temp_dir().join(format!(
             "das-custody-systemd-provisioning-{}-{}",
@@ -1378,6 +1441,68 @@ mod tests {
         assert!(fs::read(markers[0].path())
             .expect("marker bytes")
             .is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn systemd_provisioning_handoff_wrong_definition_terminally_consumes_the_same_reference() {
+        let root = std::env::temp_dir().join(format!(
+            "das-custody-systemd-provisioning-terminal-binding-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let credential_directory = root.join("credentials");
+        let consumption_root = root.join("consumed");
+        fs::create_dir_all(&credential_directory).expect("credential dir");
+        let mut request = provisioning_request();
+        request.profile.provisioner_credential_reference =
+            "systemd-credential://provision-terminal".to_string();
+        request.provisioner.credential_reference =
+            request.profile.provisioner_credential_reference.clone();
+        let definition = CustodyStoreDefinitionV1 {
+            store_id: request.store_id.clone(),
+            bucket_name: request.bucket_name.clone(),
+            profile: request.profile.clone(),
+        };
+        let digest = custody_store_definition_sha256(&definition).expect("definition digest");
+        let credential_path = credential_directory.join("provision-terminal");
+        fs::write(
+            &credential_path,
+            format!(
+                "version=1\nrole=provisioner\nstore_id={}\nconfiguration_sha256={digest}\nprovisioner_identity={}\nwriter_access_key_id={}\nwriter_secret_access_key=writer-secret\nreader_access_key_id={}\nreader_secret_access_key=reader-secret\n",
+                definition.store_id,
+                definition.profile.provisioner_identity,
+                request.writer.access_key_id,
+                request.reader.access_key_id,
+            ),
+        )
+        .expect("credential fixture");
+        #[cfg(unix)]
+        fs::set_permissions(&credential_path, fs::Permissions::from_mode(0o600))
+            .expect("credential mode");
+        let resolver = SystemdServiceCredentialHandoffResolver::from_test_credential_directory(
+            credential_directory,
+            consumption_root,
+        )
+        .expect("systemd resolver");
+        let mut wrong_definition = definition.clone();
+        wrong_definition.bucket_name = "other-custody-bucket".to_string();
+
+        assert!(resolver
+            .consume_one_use_provisioning_request(
+                &definition.profile.provisioner_credential_reference,
+                &wrong_definition,
+            )
+            .is_err());
+        assert!(resolver
+            .consume_one_use_provisioning_request(
+                &definition.profile.provisioner_credential_reference,
+                &definition,
+            )
+            .is_err());
         let _ = fs::remove_dir_all(root);
     }
 

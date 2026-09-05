@@ -1,5 +1,6 @@
 use dasobjectstore_daemon::{
-    DaemonRuntimeConfig, DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_SERVICE_USER,
+    custody_activation_marker_path_for_state_dir, DaemonRuntimeConfig,
+    CUSTODY_ACTIVATION_MARKER_FILE_NAME, DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_SERVICE_USER,
     LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR,
     LINUX_DAEMON_STATE_DIR,
 };
@@ -173,6 +174,11 @@ fn package_daemon_config_matches_runtime_defaults() {
 #[test]
 fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
     assert!(!DaemonRuntimeConfig::linux_packaged().custody.enabled);
+    assert_eq!(
+        custody_activation_marker_path_for_state_dir(LINUX_DAEMON_STATE_DIR),
+        std::path::Path::new(LINUX_DAEMON_STATE_DIR).join(CUSTODY_ACTIVATION_MARKER_FILE_NAME),
+        "the activation marker has one fixed packaged location, never a config-selected path"
+    );
     assert_contains(CUSTODY_SERVICE_TEMPLATE, "dasobjectstore-custody");
     assert_contains(CUSTODY_SERVICE_TEMPLATE, "garage-custody");
     assert_not_contains(CUSTODY_SERVICE_TEMPLATE, "[Install]");
@@ -211,6 +217,7 @@ fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
         assert_not_contains(build, "dasobjectstore-custody-garage.service.template");
         assert_not_contains(build, "custody-garage.compose.yml.template");
         assert_not_contains(build, "dasobjectstored-custody-credentials.conf.template");
+        assert_not_contains(build, CUSTODY_ACTIVATION_MARKER_FILE_NAME);
     }
 }
 

@@ -7,10 +7,11 @@ use dasobjectstore_daemon::runtime::{
     reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
     reconcile_workspace_promotions, reconcile_workspace_provision_operations,
     run_garbage_collection, run_one_durable_destage, spawn_disk_housekeeping_loop,
-    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
-    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
-    SystemdServiceCredentialHandoffResolver, WorkspaceCleanupWorkerConfig,
-    WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig, DEFAULT_WORKSPACE_HOST_SOCKET,
+    validate_daemon_custody_activation, DurableDestageOutcome, DurableDestageWorkerConfig,
+    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
+    LiveStatusRegistry, StorageAssuranceConfig, SystemdServiceCredentialHandoffResolver,
+    WorkspaceCleanupWorkerConfig, WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig,
+    DEFAULT_WORKSPACE_HOST_SOCKET,
 };
 use dasobjectstore_daemon::{
     admin_job_registry_path, appliance_telemetry_state_path, profile_catalogue_live_sqlite_path,
@@ -25,7 +26,7 @@ use dasobjectstore_daemon::{
     UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
-use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
+use dasobjectstore_object_service::{CustodyCatalogBinding, DEFAULT_GARAGE_CONFIG_PATH};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
@@ -198,9 +199,24 @@ fn run() -> Result<(), String> {
 
     verify_managed_storage_resources()?;
 
-    let capacity_provider = Arc::new(FileBackedCapacityAdmissionProvider::for_daemon(
-        &config.state_dir,
-    ));
+    // Before composing any normal or custody component, validate the canonical
+    // daemon-owned lifecycle marker. An enabled config writes/validates it;
+    // an inactive or alternate config is denied if the durable active marker
+    // exists. This prevents a `--config` split from reaching normal registry,
+    // capacity, or service composition beside custody.
+    validate_daemon_custody_activation(&config.custody, &current_utc_timestamp())
+        .map_err(|error| format!("custody activation is denied: {error}"))?;
+
+    // Resolve once at daemon composition.  All normal registry, capacity,
+    // ingress, recovery, and custody paths receive this exact identity; no
+    // later component is allowed to re-select an environment/default alias.
+    let custody_catalog_binding = CustodyCatalogBinding::new(&config.custody.catalog_path)
+        .map_err(|error| format!("daemon custody catalog configuration is denied: {error}"))?;
+
+    let capacity_provider = Arc::new(
+        FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir)
+            .with_custody_catalog_binding(custody_catalog_binding.clone()),
+    );
     let mut garage =
         GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner)
             .with_capacity_admission_provider(capacity_provider.clone())
@@ -218,7 +234,7 @@ fn run() -> Result<(), String> {
         );
         garage = garage
             .with_custody_plane_config(custody_garage_runtime_config(&config)?)
-            .try_with_custody_catalog_path(config.custody.catalog_path.clone())
+            .try_with_custody_catalog_binding(custody_catalog_binding.clone())
             .map_err(|error| format!("custody activation is denied: {error}"))?
             .with_custody_admission_provisioning_authority(resolver.clone())
             .with_custody_runtime_credential_resolver(resolver);
@@ -304,9 +320,12 @@ fn run() -> Result<(), String> {
             ingest_capacity_recovery.unrecognized_owners_retained,
         );
     }
-    let retirement_recovery =
-        recover_profile_retirements(&profile_registry, profile_catalogue_live_sqlite_path())
-            .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
+    let retirement_recovery = recover_profile_retirements(
+        &profile_registry,
+        &custody_catalog_binding,
+        profile_catalogue_live_sqlite_path(),
+    )
+    .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
     if retirement_recovery.retirements_completed > 0 {
         eprintln!(
             "completed {} interrupted profile retirement(s)",
@@ -316,6 +335,7 @@ fn run() -> Result<(), String> {
     let reactivation_recovery = recover_profile_reactivations(
         &profile_registry,
         dasobjectstore_object_service::default_store_registry_path(),
+        &custody_catalog_binding,
         profile_catalogue_live_sqlite_path(),
         &current_utc_timestamp(),
     )
@@ -329,6 +349,7 @@ fn run() -> Result<(), String> {
     let recovery = recover_profile_catalogue_publications(
         &profile_registry,
         dasobjectstore_object_service::default_store_registry_path(),
+        &custody_catalog_binding,
         profile_catalogue_live_sqlite_path(),
         &current_utc_timestamp(),
     )
@@ -345,7 +366,7 @@ fn run() -> Result<(), String> {
         SystemDaemonClock,
         admin_job_registry,
     )
-    .try_with_active_custody_catalog_binding(config.custody.catalog_path.clone())
+    .try_with_custody_catalog_binding(custody_catalog_binding.clone())
     .map_err(|error| format!("normal daemon custody catalog binding is denied: {error}"))?
     .with_profile_binding_registry_path(profile_registry)
     .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))

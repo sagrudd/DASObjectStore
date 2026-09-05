@@ -165,10 +165,20 @@ where
     /// Set only by daemon composition or isolated tests. The API request never
     /// supplies this path, so a client cannot redirect sealed custody state.
     pub fn try_with_custody_catalog_path(
-        mut self,
+        self,
         path: impl AsRef<Path>,
     ) -> Result<Self, DaemonServiceRuntimeError> {
         let binding = CustodyCatalogBinding::new(path)?;
+        self.try_with_custody_catalog_binding(binding)
+    }
+
+    /// Preserve one daemon-composed resolved binding across every normal and
+    /// custody-plane dependency. Accepting a binding avoids resolving the
+    /// configured path a second time after composition.
+    pub fn try_with_custody_catalog_binding(
+        mut self,
+        binding: CustodyCatalogBinding,
+    ) -> Result<Self, DaemonServiceRuntimeError> {
         if self.custody_catalog_explicitly_bound && self.custody_catalog != binding {
             return Err(DaemonServiceRuntimeError::UnsupportedOperation {
                 operation: "multiple custody catalog bindings are forbidden".to_string(),
@@ -340,6 +350,13 @@ where
             emit_progress,
             self.capacity_admission_provider.clone(),
             self.ingest_resource_gate.clone(),
+            Some(
+                self.normal_custody_catalog_binding()
+                    .map_err(|error| {
+                        DaemonIngestFilesRuntimeError::CommandFailed(error.to_string())
+                    })?
+                    .clone(),
+            ),
         )
     }
 
@@ -503,6 +520,18 @@ where
                 "custody admission preflight",
             )?;
         } else {
+            // The opaque API reference is itself sealed configuration, not a
+            // selector for an otherwise definition-shaped credential.  Check
+            // it before touching the one-use authority so a client cannot
+            // consume a different valid provisioner handoff for this store.
+            if request.provisioner_handoff_reference
+                != request.definition.profile.provisioner_credential_reference
+            {
+                return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "custody admission provisioner handoff reference is not the exact sealed profile reference"
+                        .to_string(),
+                });
+            }
             let authority = self
                 .custody_admission_provisioning_authority
                 .as_ref()
@@ -639,6 +668,18 @@ where
         {
             return Err(DaemonServiceRuntimeError::UnsupportedOperation {
                 operation: "custody catalog and sealed ledger binding disagree".to_string(),
+            });
+        }
+        // The request transports only opaque one-use references.  Match them
+        // to the sealed definition *before* resolving either handoff so a
+        // same-store/role-looking attacker reference cannot consume authority
+        // or cause a Garage effect.
+        if request.writer_handoff_reference != entry.definition.profile.writer_credential_reference
+            || request.reader_handoff_reference
+                != entry.definition.profile.reader_credential_reference
+        {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "custody retain handoff references must exactly match the sealed writer and reader profile references".to_string(),
             });
         }
         let resolver = self
@@ -1634,7 +1675,8 @@ mod tests {
         CUSTODY_RETAIN_CONFIRMATION,
     };
     use crate::runtime::{
-        CustodyRuntimeCredential, CustodyRuntimeCredentialRole,
+        CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredential,
+        CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole,
         TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
         TestOnlyCustodyRuntimeCredentialResolver,
     };
@@ -2015,7 +2057,7 @@ mod tests {
             TestOnlyCustodyRuntimeCredentialResolver::new(vec![
                 TestOnlyCustodyRuntimeCredentialHandoff {
                     role: CustodyRuntimeCredentialRole::Writer,
-                    handoff_reference: "attended://writer-once".to_string(),
+                    handoff_reference: "attended://writer".to_string(),
                     store_id: definition.store_id.to_string(),
                     configuration_sha256: definition_digest.clone(),
                     credential: CustodyRuntimeCredential::new(
@@ -2025,8 +2067,19 @@ mod tests {
                     .expect("writer credential"),
                 },
                 TestOnlyCustodyRuntimeCredentialHandoff {
+                    role: CustodyRuntimeCredentialRole::Writer,
+                    handoff_reference: "attended://attacker-writer".to_string(),
+                    store_id: definition.store_id.to_string(),
+                    configuration_sha256: definition_digest.clone(),
+                    credential: CustodyRuntimeCredential::new(
+                        definition.profile.writer_identity.clone(),
+                        vec![("AWS_ACCESS_KEY_ID".to_string(), "attacker-key".to_string())],
+                    )
+                    .expect("attacker-shaped test credential"),
+                },
+                TestOnlyCustodyRuntimeCredentialHandoff {
                     role: CustodyRuntimeCredentialRole::Reader,
-                    handoff_reference: "attended://reader-once".to_string(),
+                    handoff_reference: "attended://reader".to_string(),
                     store_id: definition.store_id.to_string(),
                     configuration_sha256: definition_digest,
                     credential: CustodyRuntimeCredential::new(
@@ -2052,7 +2105,7 @@ mod tests {
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical")
             .with_custody_admission_provisioning_authority(provisioner)
-            .with_custody_runtime_credential_resolver(resolver);
+            .with_custody_runtime_credential_resolver(resolver.clone());
 
         controller
             .admit_custody_store(
@@ -2075,11 +2128,28 @@ mod tests {
                 bytes: b"sealed custody bytes".to_vec(),
                 retained_at_utc: "2026-09-05T12:01:00Z".to_string(),
             },
-            writer_handoff_reference: "attended://writer-once".to_string(),
-            reader_handoff_reference: "attended://reader-once".to_string(),
+            writer_handoff_reference: "attended://writer".to_string(),
+            reader_handoff_reference: "attended://reader".to_string(),
             verified_subject: None,
             confirmation_marker: CUSTODY_RETAIN_CONFIRMATION.to_string(),
         };
+        let calls_before_denial = controller.runner.calls.lock().expect("calls").len();
+        let mut attacker_request = request.clone();
+        attacker_request.writer_handoff_reference = "attended://attacker-writer".to_string();
+        assert!(controller.retain_custody_object(attacker_request).is_err());
+        assert_eq!(
+            controller.runner.calls.lock().expect("calls").len(),
+            calls_before_denial,
+            "mismatched sealed handoff reference must deny before any Garage command"
+        );
+        resolver
+            .consume_one_use(
+                CustodyRuntimeCredentialRole::Writer,
+                "attended://attacker-writer",
+                definition.store_id.as_str(),
+                &custody_store_definition_sha256(&definition).expect("definition digest"),
+            )
+            .expect("attacker-shaped handoff was not consumed by denied request");
         let response = controller
             .retain_custody_object(request.clone())
             .expect("readback receipt");
@@ -2145,7 +2215,13 @@ mod tests {
             .admit_custody_store(
                 CustodyAdmissionRequest {
                     definition: definition.clone(),
-                    provisioner_handoff_reference: "attended://detached-proof".to_string(),
+                    // Use the sealed reference so this fixture proves the
+                    // *absence* of daemon authority, rather than the earlier
+                    // caller-reference equality denial.
+                    provisioner_handoff_reference: definition
+                        .profile
+                        .provisioner_credential_reference
+                        .clone(),
                     dry_run: false,
                     verified_subject: None,
                     confirmation_marker: CUSTODY_ADMISSION_CONFIRMATION.to_string(),
@@ -2156,6 +2232,58 @@ mod tests {
 
         assert!(error.to_string().contains("daemon-owned attended"));
         assert!(!catalog.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn custody_admission_rejects_alternate_provisioner_reference_before_consumption_or_effect() {
+        let root = temp_root();
+        let catalog = root.join("sealed/custody-catalog.jsonl");
+        let definition = custody_definition();
+        let attacker_reference = "attended://attacker-provisioner";
+        let provisioner = Arc::new(
+            TestOnlyCustodyAdmissionProvisioningAuthority::new([
+                (
+                    attacker_reference.to_string(),
+                    custody_provisioning_request(&definition),
+                ),
+                (
+                    definition.profile.provisioner_credential_reference.clone(),
+                    custody_provisioning_request(&definition),
+                ),
+            ])
+            .expect("independent provisioner handoffs"),
+        );
+        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
+            .with_custody_plane_config(custody_config())
+            .try_with_custody_catalog_path(&catalog)
+            .expect("custom test catalog is canonical")
+            .with_custody_admission_provisioning_authority(provisioner.clone());
+
+        let error = controller
+            .admit_custody_store(
+                CustodyAdmissionRequest {
+                    definition: definition.clone(),
+                    provisioner_handoff_reference: attacker_reference.to_string(),
+                    dry_run: false,
+                    verified_subject: None,
+                    confirmation_marker: CUSTODY_ADMISSION_CONFIRMATION.to_string(),
+                },
+                "2026-09-05T12:00:00Z",
+            )
+            .expect_err("a definition-shaped alternate provisioner handoff must be denied");
+        assert!(error.to_string().contains("exact sealed profile reference"));
+        assert!(
+            !catalog.exists(),
+            "denied reference must precede claim, ledger, and catalog creation"
+        );
+        assert!(
+            controller.runner.calls.lock().expect("calls").is_empty(),
+            "denied reference must precede every Garage command"
+        );
+        provisioner
+            .consume_one_use_provisioning_request(attacker_reference, &definition)
+            .expect("alternate handoff must remain unconsumed after denial");
         let _ = fs::remove_dir_all(root);
     }
 

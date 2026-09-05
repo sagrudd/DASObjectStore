@@ -11,7 +11,9 @@ use super::{
 use dasobjectstore_core::deployment::DeploymentProfile;
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::migration::{MigrationState, StoreMigration};
-use dasobjectstore_object_service::read_store_registry;
+use dasobjectstore_object_service::{
+    read_store_registry_with_custody_catalog, CustodyCatalogBinding,
+};
 use std::fmt::{self, Display};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -60,6 +62,7 @@ pub fn migrate_registered_folder_store(
     destination_store_id: &StoreId,
     profile_binding_registry_path: &Path,
     store_registry_path: &Path,
+    custody_catalog: &CustodyCatalogBinding,
     live_sqlite_path: &Path,
     migration_state_root: &Path,
     verified_at_utc: &str,
@@ -94,8 +97,9 @@ pub fn migrate_registered_folder_store(
         return Err(RegisteredProfileMigrationError::UnsupportedProfile);
     }
 
-    let definitions = read_store_registry(store_registry_path)
-        .map_err(|error| RegisteredProfileMigrationError::StoreRegistry(error.to_string()))?;
+    let definitions =
+        read_store_registry_with_custody_catalog(store_registry_path, custody_catalog)
+            .map_err(|error| RegisteredProfileMigrationError::StoreRegistry(error.to_string()))?;
     let source_capacity = definitions
         .iter()
         .find(|definition| definition.store_id == *source_store_id)
@@ -317,6 +321,8 @@ mod tests {
 
         let source_id = StoreId::new("source-store").expect("source id");
         let destination_id = StoreId::new("destination-store").expect("destination id");
+        let custody_catalog = CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+            .expect("test catalog binding");
         for _ in 0..2 {
             let report = migrate_registered_folder_store(
                 "promotion-1",
@@ -324,6 +330,7 @@ mod tests {
                 &destination_id,
                 &binding_registry,
                 &store_registry,
+                &custody_catalog,
                 &live_sqlite,
                 &root.join("migration-state"),
                 "2026-07-15T18:00:00Z",

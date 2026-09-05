@@ -8,6 +8,7 @@ use crate::api::{
     DaemonIngestResourcePolicy, DaemonIngestResourceReservation,
     DaemonIngestResourceReservationError,
 };
+use dasobjectstore_object_service::CustodyCatalogBinding;
 use std::sync::{Arc, OnceLock};
 
 pub(crate) fn submit_ingest_files_with_resource_gate(
@@ -16,9 +17,11 @@ pub(crate) fn submit_ingest_files_with_resource_gate(
     progress: impl FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonIngestFilesRuntimeError>,
     capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     resource_gate: Option<Arc<DaemonIngestResourceGate>>,
+    custody_catalog: Option<CustodyCatalogBinding>,
 ) -> Result<SubmitIngestFilesResponse, DaemonIngestFilesRuntimeError> {
-    let mut executor = LocalFileIngestExecutor::from_environment()
-        .with_capacity_admission_provider(capacity_provider);
+    let mut executor =
+        LocalFileIngestExecutor::from_environment_with_custody_catalog(custody_catalog)
+            .with_capacity_admission_provider(capacity_provider);
     executor.resource_gate = resource_gate;
     let mut progress = super::progress::IngestProgressCoalescer::new(progress);
     let response = executor.submit(request, accepted_at_utc, |event| progress.publish(event))?;

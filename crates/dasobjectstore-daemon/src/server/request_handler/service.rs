@@ -644,6 +644,45 @@ where
                         ),
                     )
                 })?;
+                // Profile provision/adoption has filesystem, profile-binding,
+                // and capacity effects before its ordinary registry upsert.
+                // Reject both the manifest store id and any supplied normal
+                // S3 bucket alias under the exact daemon-bound catalog first.
+                handler
+                    .reject_normal_custody_target(
+                        Some(&request.manifest.store_id),
+                        "profile binding/adoption",
+                    )
+                    .map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::ObjectService(error),
+                        )
+                    })?;
+                if let Some(definition) = request.store_definition.as_ref() {
+                    let binding = handler.normal_custody_catalog_binding().map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::ObjectService(error),
+                        )
+                    })?;
+                    if definition.policy.export_policy == ExportPolicy::S3 {
+                        let bucket = bucket_name_for_definition(definition).map_err(|error| {
+                            DaemonRequestHandlerError::ServiceRuntime(
+                                DaemonServiceRuntimeError::ObjectService(error),
+                            )
+                        })?;
+                        reject_bound_catalogued_custody_definition(
+                            &binding,
+                            &definition.store_id,
+                            &bucket,
+                            "profile binding/adoption",
+                        )
+                        .map_err(|error| {
+                            DaemonRequestHandlerError::ServiceRuntime(
+                                DaemonServiceRuntimeError::ObjectService(error),
+                            )
+                        })?;
+                    }
+                }
                 let provision_root_created = prepare_profile_provision_root(&request)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 previous_binding = read_profile_binding_record(
@@ -799,6 +838,28 @@ where
                         },
                     )
                 })?;
+            handler
+                .reject_normal_custody_target(Some(&source_store_id), "profile migration source")
+                .and_then(|_| {
+                    handler.reject_normal_custody_target(
+                        Some(&destination_store_id),
+                        "profile migration destination",
+                    )
+                })
+                .map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        },
+                    )
+                })?;
+            let custody_catalog = handler.normal_custody_catalog_binding().map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: error.to_string(),
+                    },
+                )
+            })?;
             let now = handler.clock.now_utc();
             let report = migrate_registered_folder_store(
                 &request.migration_id,
@@ -806,6 +867,7 @@ where
                 &destination_store_id,
                 &handler.profile_binding_registry_path,
                 &handler.store_registry_path,
+                &custody_catalog,
                 &handler.live_sqlite_path,
                 &handler.profile_migration_state_root,
                 &now,

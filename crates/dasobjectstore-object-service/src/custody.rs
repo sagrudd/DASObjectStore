@@ -765,22 +765,25 @@ fn custody_forbidden_mutation_name(operation: CustodyForbiddenMutation) -> &'sta
     }
 }
 
-pub const CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1: &str =
+#[cfg(test)]
+pub(crate) const CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1: &str =
     "dasobjectstore.local_trusted_administrator_custody_off_nuc_attestation.v1";
 
 /// A signed, expiring observation made by an off-NUC verifier after it has
 /// independently read the object and ledger.  This record binds the custody
 /// result to the DAS binary/image/configuration/endpoint and the full
 /// inventory and marker digests observed by that verifier.
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyOffNucAttestationV1 {
+pub(crate) struct CustodyOffNucAttestationV1 {
     pub body: CustodyOffNucAttestationBodyV1,
     pub authority_id: String,
     pub signature: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyOffNucAttestationBodyV1 {
+pub(crate) struct CustodyOffNucAttestationBodyV1 {
     pub schema: String,
     pub assurance_class: String,
     pub attestation_id: String,
@@ -807,16 +810,18 @@ pub struct CustodyOffNucAttestationBodyV1 {
     pub raw_evidence_sha256: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyFormalGateAttestationExpectationV1 {
+pub(crate) struct CustodyFormalGateAttestationExpectationV1 {
     pub target_id: String,
     pub release_train: String,
     pub release_stage: String,
     pub purpose: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyFormalGateAttestationConsumptionV1 {
+pub(crate) struct CustodyFormalGateAttestationConsumptionV1 {
     pub attestation_id: String,
     pub target_id: String,
     pub release_train: String,
@@ -845,7 +850,8 @@ pub(crate) fn consume_custody_attestation_for_formal_gate(
 /// Durable state held *outside* the NUC, Garage, BaseCamp, and ordinary host
 /// backup paths.  Its implementation must atomically compare and persist the
 /// previous checkpoint; this trait keeps that custody boundary explicit.
-pub trait CustodyOffNucVerifierState {
+#[cfg(test)]
+pub(crate) trait CustodyOffNucVerifierState {
     fn checkpoint(
         &self,
         target_id: &str,
@@ -871,8 +877,9 @@ pub trait CustodyOffNucVerifierState {
     ) -> Result<(), ObjectServiceError>;
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyOffNucVerifierCheckpointV1 {
+pub(crate) struct CustodyOffNucVerifierCheckpointV1 {
     pub target_id: String,
     pub authority_id: String,
     pub verifier_id: String,
@@ -883,17 +890,19 @@ pub struct CustodyOffNucVerifierCheckpointV1 {
     pub expires_at_utc: String,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CustodyVerifierAttemptResult {
+pub(crate) enum CustodyVerifierAttemptResult {
     Accepted,
     Failed,
     TimedOut,
     Incomplete,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct CustodyVerifierAttemptV1 {
+pub(crate) struct CustodyVerifierAttemptV1 {
     pub attestation_id: String,
     pub target_id: String,
     pub custody_marker_sha256: String,
@@ -907,7 +916,8 @@ pub struct CustodyVerifierAttemptV1 {
 /// Record a terminal first verifier observation which could not reach normal
 /// signature verification (for example timeout or incomplete corpus). This
 /// still binds the supplied attestation identifier, marker, and raw corpus.
-pub fn record_custody_incomplete_verifier_attempt(
+#[cfg(test)]
+pub(crate) fn record_custody_incomplete_verifier_attempt(
     attestation: &CustodyOffNucAttestationV1,
     attempted_at_utc: &str,
     result: CustodyVerifierAttemptResult,
@@ -943,7 +953,8 @@ pub fn record_custody_incomplete_verifier_attempt(
 /// The off-NUC authority owns the signing key.  DAS only receives the public
 /// verification capability; it never generates, finds, imports, or stores a
 /// signer credential.
-pub trait CustodyOffNucAttestationAuthority {
+#[cfg(test)]
+pub(crate) trait CustodyOffNucAttestationAuthority {
     fn authority_id(&self) -> &str;
     fn verify(&self, canonical_body: &[u8], signature: &str) -> Result<(), ObjectServiceError>;
 }
@@ -951,7 +962,8 @@ pub trait CustodyOffNucAttestationAuthority {
 /// Verify a signed off-NUC attestation and atomically advance independent
 /// monotonic state.  Replayed, stale, substituted, expired, unsigned, and
 /// rollback observations are all rejected before checkpoint mutation.
-pub fn accept_custody_off_nuc_attestation(
+#[cfg(test)]
+pub(crate) fn accept_custody_off_nuc_attestation(
     attestation: &CustodyOffNucAttestationV1,
     expected_target_id: &str,
     now_utc: &str,
@@ -1039,6 +1051,7 @@ pub fn accept_custody_off_nuc_attestation(
     }
 }
 
+#[cfg(test)]
 fn validate_off_nuc_attestation_body(
     body: &CustodyOffNucAttestationBodyV1,
     expected_target_id: &str,

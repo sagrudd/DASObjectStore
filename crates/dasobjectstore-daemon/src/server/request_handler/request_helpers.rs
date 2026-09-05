@@ -80,6 +80,30 @@ where
             error.to_string(),
         ))
     })?;
+    // Reject the sealed target before creating a saga intent or capacity
+    // ledger. Registry upsert has the same guard, but it is far too late to
+    // be the first effect boundary for a normal creation request.
+    let requested_definition = request.registry_definition().map_err(|error| {
+        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+            error.to_string(),
+        ))
+    })?;
+    if requested_definition.policy.export_policy == dasobjectstore_core::store::ExportPolicy::S3 {
+        let bucket =
+            dasobjectstore_object_service::bucket_name_for_definition(&requested_definition)?;
+        reject_bound_catalogued_custody_definition(
+            custody_catalog,
+            &requested_definition.store_id,
+            &bucket,
+            "ObjectStore creation intent",
+        )?;
+    } else {
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
+            &requested_definition.store_id,
+            "ObjectStore creation intent",
+        )?;
+    }
     if request.dry_run {
         return create_object_store_with_registry(
             request,
@@ -116,11 +140,7 @@ where
             request,
         ));
     }
-    let definition = request.registry_definition().map_err(|error| {
-        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
-            error.to_string(),
-        ))
-    })?;
+    let definition = requested_definition;
     let registry_path = registry_path.as_ref();
     let definition_published = if let Some(existing) =
         read_store_registry_with_custody_catalog(registry_path, custody_catalog)?

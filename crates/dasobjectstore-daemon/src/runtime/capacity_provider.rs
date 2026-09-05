@@ -20,7 +20,8 @@ use dasobjectstore_core::store::CapacityReservationLedger;
 use dasobjectstore_core::SubObjectCapacityLedger;
 use dasobjectstore_object_service::{
     default_store_registry_path, default_subobject_registry_path, read_store_registry,
-    read_subobject_registry,
+    read_store_registry_with_custody_catalog, read_subobject_registry, CustodyCatalogBinding,
+    StoreServiceDefinition,
 };
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -337,6 +338,10 @@ pub struct FileBackedCapacityAdmissionProvider<P = ManagedPoolCapacitySpaceProbe
     ssd_probe_root: PathBuf,
     profile_binding_registry_path: Option<PathBuf>,
     require_profile_binding: bool,
+    /// Exact daemon-composed custody binding. `None` is only used by
+    /// source-level/inactive callers; an active daemon injects this before
+    /// any capacity read, admission, lease maintenance, or status decision.
+    custody_catalog: Option<CustodyCatalogBinding>,
     probe: P,
     state: Mutex<CapacityProviderState>,
 }
@@ -407,6 +412,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
             ssd_probe_root: ssd_probe_root.into(),
             profile_binding_registry_path: None,
             require_profile_binding: false,
+            custody_catalog: None,
             probe,
             state: Mutex::new(CapacityProviderState::default()),
         }
@@ -425,6 +431,23 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
     pub fn require_profile_binding(mut self) -> Self {
         self.require_profile_binding = true;
         self
+    }
+
+    pub fn with_custody_catalog_binding(mut self, binding: CustodyCatalogBinding) -> Self {
+        self.custody_catalog = Some(binding);
+        self
+    }
+
+    fn read_bound_store_registry(
+        &self,
+    ) -> Result<Vec<StoreServiceDefinition>, DaemonServiceRuntimeError> {
+        match &self.custody_catalog {
+            Some(binding) => {
+                read_store_registry_with_custody_catalog(&self.store_registry_path, binding)
+            }
+            None => read_store_registry(&self.store_registry_path),
+        }
+        .map_err(DaemonServiceRuntimeError::ObjectService)
     }
 
     fn probe_roots(
@@ -484,8 +507,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         &self,
         store_id: &StoreId,
     ) -> Result<dasobjectstore_core::store::CapacityPolicy, DaemonServiceRuntimeError> {
-        read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?
+        self.read_bound_store_registry()?
             .into_iter()
             .find(|definition| definition.store_id == store_id.clone())
             .map(|definition| definition.policy.capacity)
@@ -493,8 +515,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
     }
 
     fn copies_for_store(&self, store_id: &StoreId) -> Result<u8, DaemonServiceRuntimeError> {
-        read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?
+        self.read_bound_store_registry()?
             .into_iter()
             .find(|definition| definition.store_id == store_id.clone())
             .map(|definition| definition.policy.copies)
@@ -685,8 +706,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         lease_seconds: u64,
         protections: &[CapacityReservationLeaseProtection],
     ) -> Result<CapacityReservationLeaseReport, DaemonServiceRuntimeError> {
-        let mut definitions = read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let mut definitions = self.read_bound_store_registry()?;
         definitions.sort_by(|left, right| left.store_id.as_str().cmp(right.store_id.as_str()));
         let supplied = protections_by_store(protections);
         let mut state = self
@@ -798,8 +818,7 @@ impl<P> FileBackedCapacityAdmissionProvider<P> {
         now_unix_seconds: u64,
         lease_seconds: u64,
     ) -> Result<CapacityReservationLeaseReport, DaemonServiceRuntimeError> {
-        let definitions = read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let definitions = self.read_bound_store_registry()?;
         let mut protections = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let store_id = definition.store_id;
@@ -890,8 +909,7 @@ where
                 },
             )
         })?;
-        let definitions = read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let definitions = self.read_bound_store_registry()?;
         let definition = definitions
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -954,8 +972,7 @@ where
                 },
             )
         })?;
-        let definitions = read_store_registry(&self.store_registry_path)
-            .map_err(DaemonServiceRuntimeError::ObjectService)?;
+        let definitions = self.read_bound_store_registry()?;
         let definition = definitions
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -1413,7 +1430,10 @@ mod tests {
         CapacityPolicy, CapacityReservationLedger, StoreClass, StorePolicy,
     };
     use dasobjectstore_object_service::{
-        StoreServiceDefinition, SubObjectDefinition, SubObjectParent,
+        create_custody_catalog_entry, CustodyAssuranceClass, CustodyCatalogBinding,
+        CustodyRetentionPolicyV1, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
+        StoreServiceDefinition, SubObjectDefinition, SubObjectParent, CUSTODY_OVERLAY_SCHEMA_V1,
+        CUSTODY_PROFILE_V1,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1506,6 +1526,76 @@ mod tests {
         )
         .expect("registry");
         (registry, root.join("subobjects.json"))
+    }
+
+    fn seal_catalogued_store(root: &Path, store_id: &str) -> CustodyCatalogBinding {
+        let definition = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new(store_id).expect("sealed store id"),
+            bucket_name: format!("dos-{store_id}"),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provisioner".to_string(),
+                provisioner_identity: "custody-provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer".to_string(),
+                writer_identity: "custody-writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader".to_string(),
+                reader_identity: "custody-reader".to_string(),
+            },
+        };
+        let catalog = root.join("sealed/custom-catalog.jsonl");
+        create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            root.join("sealed/ledgers/codex.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog entry");
+        CustodyCatalogBinding::new(catalog).expect("canonical custom catalog")
+    }
+
+    #[test]
+    fn custom_active_catalog_rejects_capacity_status_admission_and_lease_before_ledger_effect() {
+        let root = root("custom-custody-capacity-denial");
+        let (registry_path, _) = registry(&root);
+        let ledger_dir = root.join("ledgers");
+        let provider = FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir.clone(),
+            root.join("backend"),
+            root.join("ssd"),
+            FixedProbe {
+                backend: 2_000,
+                ssd: 500,
+            },
+        )
+        .with_custody_catalog_binding(seal_catalogued_store(&root, "codex"));
+
+        assert!(provider
+            .status(CapacityStatusRequest {
+                store_id: "codex".to_string()
+            })
+            .is_err());
+        assert!(provider
+            .admit(request(DaemonIngressOrigin::RemoteS3, "custody-denied"))
+            .is_err());
+        assert!(provider
+            .maintain_reservation_leases(1_000, 60, &[])
+            .is_err());
+        assert!(provider
+            .maintain_registered_reservation_leases(1_000, 60)
+            .is_err());
+        assert!(
+            !ledger_dir.join("codex.json").exists(),
+            "catalog denial must precede capacity-ledger creation or mutation"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -392,15 +392,16 @@ impl CustodyOffNucJournal {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql("start custody pre-read attempt"))?;
-        let (target_id, nonce, sequence, previous, expires): (
+        let (target_id, nonce, sequence, previous, issued, expires): (
             String,
             String,
             u64,
             Option<String>,
             String,
+            String,
         ) = transaction
             .query_row(
-                "SELECT target_id,nonce,sequence,previous_request_sha256,expires_at_utc \
+                "SELECT target_id,nonce,sequence,previous_request_sha256,issued_at_utc,expires_at_utc \
                      FROM issued_pre_read_requests WHERE request_id=?1 AND status='issued'",
                 params![request_id],
                 |row| {
@@ -410,15 +411,17 @@ impl CustodyOffNucJournal {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )
             .map_err(sql("load issued custody pre-read attempt"))?;
-        if timestamp("custody pre-read attempt start", started_at_utc)?
-            >= timestamp("custody request expiry", &expires)?
-        {
+        let started = timestamp("custody pre-read attempt start", started_at_utc)?;
+        let request_issued = timestamp("custody request issuance", &issued)?;
+        let request_expiry = timestamp("custody request expiry", &expires)?;
+        if started < request_issued || started >= request_expiry {
             return Err(invalid(
-                "custody pre-read attempt cannot begin after request expiry",
+                "custody pre-read attempt must begin at or after issuance and before request expiry",
             ));
         }
         let marker = sha256_hex(format!(
@@ -501,8 +504,19 @@ impl CustodyOffNucJournal {
                 "terminal failure recorder cannot record a passing result",
             ));
         }
-        timestamp("custody terminal attempt time", attempted_at_utc)?;
-        nonblank("custody terminal attempt detail", detail)?;
+        // The terminal marker is more important than a verifier-clock or
+        // diagnostic formatting failure once a read has begun. Preserve that
+        // failure for the caller, but use the durable start as the canonical
+        // terminal time when its supplied clock has moved backwards (or is
+        // malformed) so the nonce cannot become reusable.
+        let supplied_time_error =
+            timestamp("custody terminal attempt time", attempted_at_utc).err();
+        let supplied_detail_error = nonblank("custody terminal attempt detail", detail).err();
+        let terminal_detail = if supplied_detail_error.is_some() {
+            "terminal verifier failure had an invalid diagnostic detail"
+        } else {
+            detail
+        };
         let mut connection = self.open_rw()?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -514,12 +528,16 @@ impl CustodyOffNucJournal {
             None,
             None,
             result_name(result),
-            detail,
+            terminal_detail,
             attempted_at_utc,
         )?;
         transaction
             .commit()
-            .map_err(sql("commit custody terminal attempt"))
+            .map_err(sql("commit custody terminal attempt"))?;
+        if let Some(error) = supplied_time_error.or(supplied_detail_error) {
+            return Err(error);
+        }
+        Ok(())
     }
 
     pub fn accept_signed_attestation(
@@ -540,7 +558,6 @@ impl CustodyOffNucJournal {
                 ));
             }
             verify_signed(record, pinned_authority)?;
-            validate_attestation(&record.body, now_utc)?;
             Ok(record)
         })();
         let mut connection = self.open_rw()?;
@@ -571,7 +588,7 @@ impl CustodyOffNucJournal {
                     }
                     value => value,
                 };
-                let _ = complete_started_request(
+                complete_started_request(
                     &transaction,
                     issued_request_id,
                     Some(raw_jcs),
@@ -580,7 +597,7 @@ impl CustodyOffNucJournal {
                     "failed",
                     &error.to_string(),
                     now_utc,
-                );
+                )?;
                 transaction
                     .commit()
                     .map_err(sql("commit custody failed attestation"))?;
@@ -601,11 +618,11 @@ impl CustodyOffNucJournal {
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql("start custody formal-gate consumption"))?;
-        let (request_raw, request_digest, expires): (Vec<u8>, String, String) = transaction
+        let (request_raw, request_digest, issued, expires): (Vec<u8>, String, String, String) = transaction
             .query_row(
-                "SELECT raw_jcs,raw_sha256,expires_at_utc FROM issued_pre_read_requests WHERE request_id=?1",
+                "SELECT raw_jcs,raw_sha256,issued_at_utc,expires_at_utc FROM issued_pre_read_requests WHERE request_id=?1",
                 params![request_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(sql("load issued custody pre-read request"))?;
         if timestamp("custody formal-gate now", now_utc)?
@@ -620,15 +637,17 @@ impl CustodyOffNucJournal {
                 "custody formal-gate expectation does not exactly match issued measurements",
             ));
         }
-        let (attestation_raw, attestation_digest, attestation_id, result, attempt_marker): (
+        let (attestation_raw, attestation_digest, attestation_id, result, attempt_marker, started, accepted): (
             Vec<u8>,
             String,
             String,
             String,
             String,
+            String,
+            Option<String>,
         ) = transaction
             .query_row(
-                "SELECT raw_jcs,raw_sha256,attestation_id,result,attempt_marker_sha256 \
+                "SELECT raw_jcs,raw_sha256,attestation_id,result,attempt_marker_sha256,started_at_utc,attempted_at_utc \
                  FROM first_attempts WHERE request_id=?1",
                 params![request_id],
                 |row| {
@@ -638,6 +657,8 @@ impl CustodyOffNucJournal {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
                     ))
                 },
             )
@@ -647,9 +668,20 @@ impl CustodyOffNucJournal {
                 "only a passing first off-NUC custody attempt can reach a formal gate",
             ));
         }
+        let accepted = accepted.ok_or_else(|| {
+            invalid(
+                "passing custody verifier attempt is missing its durable terminal acceptance time",
+            )
+        })?;
+        if timestamp("custody passing verifier acceptance time", &accepted)?
+            > timestamp("custody formal-gate consumption now", now_utc)?
+        {
+            return Err(invalid(
+                "custody formal-gate time precedes the durable passing verifier acceptance",
+            ));
+        }
         let signed_attestation: CustodySignedAttestationV2 = strict_jcs(&attestation_raw)?;
         verify_signed(&signed_attestation, pinned_authority)?;
-        validate_attestation(&signed_attestation.body, now_utc)?;
         if sha256_hex(&attestation_raw) != attestation_digest
             || signed_attestation.body.attestation_id != attestation_id
             || signed_attestation.body.pre_read_attempt_marker_sha256 != attempt_marker
@@ -665,6 +697,7 @@ impl CustodyOffNucJournal {
                 "custody formal-gate attestation does not exactly bind the issued request",
             ));
         }
+        validate_attestation(&signed_attestation.body, &issued, &started, now_utc)?;
         let consumption = CustodyFormalGateConsumptionV2 {
             consumption_id: Uuid::new_v4().to_string(),
             request_id: request_id.to_string(),
@@ -749,11 +782,11 @@ fn accept_attestation_transaction(
     now_utc: &str,
 ) -> Result<(), ObjectServiceError> {
     let body = &record.body;
-    let (request_raw, request_digest, status, target): (Vec<u8>, String, String, String) = transaction
+    let (request_raw, request_digest, status, target, issued_at_utc): (Vec<u8>, String, String, String, String) = transaction
         .query_row(
-            "SELECT raw_jcs,raw_sha256,status,target_id FROM issued_pre_read_requests WHERE request_id=?1",
+            "SELECT raw_jcs,raw_sha256,status,target_id,issued_at_utc FROM issued_pre_read_requests WHERE request_id=?1",
             params![body.request.request_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
         .map_err(sql("load issued custody pre-read request for first attempt"))?;
     if status != "started" {
@@ -770,12 +803,12 @@ fn accept_attestation_transaction(
             "custody attestation substitutes or detaches the issued pre-read request",
         ));
     }
-    let marker: String = transaction
+    let (marker, started_at_utc): (String, String) = transaction
         .query_row(
-            "SELECT attempt_marker_sha256 FROM first_attempts \
+            "SELECT attempt_marker_sha256,started_at_utc FROM first_attempts \
              WHERE request_id=?1 AND result='started'",
             params![body.request.request_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(sql("load immutable custody pre-read attempt marker"))?
@@ -785,6 +818,7 @@ fn accept_attestation_transaction(
             "custody attestation does not bind the journal-minted pre-read attempt marker",
         ));
     }
+    validate_attestation(body, &issued_at_utc, &started_at_utc, now_utc)?;
     if attestation_id_exists(transaction, &body.attestation_id)? {
         return Err(invalid(
             "custody attestation id is already retained by another first attempt",
@@ -821,11 +855,27 @@ fn complete_started_request(
     detail: &str,
     attempted_at_utc: &str,
 ) -> Result<(), ObjectServiceError> {
+    let started_at_utc: String = transaction
+        .query_row(
+            "SELECT started_at_utc FROM first_attempts WHERE request_id=?1 AND result='started'",
+            params![request_id],
+            |row| row.get(0),
+        )
+        .map_err(sql("load custody pre-read start before terminal result"))?;
+    let started = timestamp("custody durable pre-read start", &started_at_utc)?;
+    let supplied_terminal_time =
+        timestamp("custody terminal attempt time", attempted_at_utc).unwrap_or(started);
+    // A verifier clock rollback can never leave a begun nonce reusable. The
+    // committed terminal timestamp is canonical and monotonically no earlier
+    // than its already durable pre-read start, while the caller retains the
+    // original validation error where appropriate.
+    let terminal_at_utc =
+        std::cmp::max(supplied_terminal_time, started).to_rfc3339_opts(SecondsFormat::Secs, true);
     let changed = transaction
         .execute(
             "UPDATE first_attempts SET raw_jcs=?2,raw_sha256=?3,attestation_id=?4,result=?5,detail=?6,attempted_at_utc=?7 \
              WHERE request_id=?1 AND result='started'",
-            params![request_id, raw_jcs, raw_sha256, attestation_id, result, detail, attempted_at_utc],
+            params![request_id, raw_jcs, raw_sha256, attestation_id, result, detail, terminal_at_utc],
         )
         .map_err(sql("persist terminal first custody verifier attempt"))?;
     if changed != 1 {
@@ -862,6 +912,8 @@ fn attestation_id_exists(
 
 fn validate_attestation(
     body: &CustodyOffNucAttestationV2,
+    issued_at_utc: &str,
+    started_at_utc: &str,
     now_utc: &str,
 ) -> Result<(), ObjectServiceError> {
     if body.schema != CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V2 {
@@ -874,7 +926,27 @@ fn validate_attestation(
             "only passing custody attestation results are admissible",
         ));
     }
-    timestamp("custody attestation observed_at_utc", &body.observed_at_utc)?;
+    let issued = timestamp("custody durable request issuance", issued_at_utc)?;
+    let started = timestamp("custody durable pre-read start", started_at_utc)?;
+    let observed = timestamp("custody attestation observed_at_utc", &body.observed_at_utc)?;
+    let expiry = timestamp("custody request expiry", &body.request.expires_at_utc)?;
+    let now = timestamp("custody attestation acceptance/consumption now", now_utc)?;
+    if issued
+        != timestamp(
+            "custody attestation request issuance",
+            &body.request.issued_at_utc,
+        )?
+        || issued > started
+        || started >= expiry
+        || observed < started
+        || observed > now
+        || observed >= expiry
+        || now >= expiry
+    {
+        return Err(invalid(
+            "custody attestation observation must be within the durable issued/start/expiry interval and not later than acceptance or formal consumption",
+        ));
+    }
     for (field, value) in [
         ("custody pre-read request", &body.pre_read_request_sha256),
         (
@@ -1093,6 +1165,147 @@ mod tests {
         })
         .unwrap()
         .into_bytes()
+    }
+
+    fn passing_attestation(
+        request: CustodyOffNucPreReadRequestV1,
+        request_digest: String,
+        attempt_marker: String,
+        observed_at_utc: &str,
+    ) -> CustodyOffNucAttestationV2 {
+        CustodyOffNucAttestationV2 {
+            schema: CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V2.to_string(),
+            attestation_id: Uuid::new_v4().to_string(),
+            receipt_jcs_sha256: request.receipt_jcs_sha256.clone(),
+            request,
+            pre_read_request_sha256: request_digest,
+            pre_read_attempt_marker_sha256: attempt_marker,
+            observation_result: CustodyOffNucObservationResult::Passed,
+            observed_at_utc: observed_at_utc.to_string(),
+            custody_marker_sha256: digest("marker"),
+            raw_evidence_sha256: digest("evidence"),
+            direct_readback_sha256: digest("readback"),
+            result_detail: "passed".to_string(),
+        }
+    }
+
+    #[test]
+    fn observation_time_is_bound_to_issued_started_expiry_acceptance_and_formal_consumption() {
+        let (signer, authority) = authority();
+
+        // The physical reader cannot start before the signed request has
+        // durably issued; no marker or target-read permission is created.
+        let root = std::env::temp_dir().join(format!("das-custody-preissued-{}", Uuid::new_v4()));
+        let journal = CustodyOffNucJournal::create(root.join("journal.sqlite")).unwrap();
+        let preissued_request = request(1, None);
+        journal
+            .issue_pre_read_request(
+                &sign(preissued_request.clone(), &signer, &authority),
+                &authority,
+                "2026-09-05T10:00:00Z",
+            )
+            .unwrap();
+        assert!(journal
+            .begin_pre_read_attempt(&preissued_request.request_id, "2026-09-05T09:59:59Z")
+            .is_err());
+        assert!(
+            Connection::open(&journal.path)
+                .unwrap()
+                .query_row::<u64, _, _>("SELECT COUNT(*) FROM first_attempts", [], |row| row.get(0))
+                .unwrap()
+                == 0
+        );
+        let _ = fs::remove_dir_all(root);
+
+        for (label, observed, accepted_at) in [
+            ("prestart", "2026-09-05T10:01:00Z", "2026-09-05T10:03:00Z"),
+            ("future", "2026-09-05T10:04:00Z", "2026-09-05T10:03:00Z"),
+            ("stale", "2026-09-05T09:59:59Z", "2026-09-05T10:03:00Z"),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("das-custody-time-{label}-{}", Uuid::new_v4()));
+            let journal = CustodyOffNucJournal::create(root.join("journal.sqlite")).unwrap();
+            let request = request(1, None);
+            let request_digest = journal
+                .issue_pre_read_request(
+                    &sign(request.clone(), &signer, &authority),
+                    &authority,
+                    "2026-09-05T10:00:00Z",
+                )
+                .unwrap();
+            let attempt = journal
+                .begin_pre_read_attempt(&request.request_id, "2026-09-05T10:01:30Z")
+                .unwrap();
+            let raw = sign(
+                passing_attestation(
+                    request.clone(),
+                    request_digest,
+                    attempt.attempt_marker_sha256,
+                    observed,
+                ),
+                &signer,
+                &authority,
+            );
+            assert!(journal
+                .accept_signed_attestation(&request.request_id, &raw, &authority, accepted_at)
+                .is_err());
+            assert!(journal
+                .consume_for_formal_gate(
+                    &request.request_id,
+                    &CustodyFormalGateExpectationV2 {
+                        request: request.clone()
+                    },
+                    &authority,
+                    "2026-09-05T10:04:00Z",
+                )
+                .is_err());
+            let _ = fs::remove_dir_all(root);
+        }
+
+        // Equality at the durable start/observation boundary is valid and
+        // remains consumable when the formal consumer sees it later.
+        let root =
+            std::env::temp_dir().join(format!("das-custody-time-boundary-{}", Uuid::new_v4()));
+        let journal = CustodyOffNucJournal::create(root.join("journal.sqlite")).unwrap();
+        let request = request(1, None);
+        let request_digest = journal
+            .issue_pre_read_request(
+                &sign(request.clone(), &signer, &authority),
+                &authority,
+                "2026-09-05T10:00:00Z",
+            )
+            .unwrap();
+        let attempt = journal
+            .begin_pre_read_attempt(&request.request_id, "2026-09-05T10:01:30Z")
+            .unwrap();
+        let raw = sign(
+            passing_attestation(
+                request.clone(),
+                request_digest,
+                attempt.attempt_marker_sha256,
+                "2026-09-05T10:01:30Z",
+            ),
+            &signer,
+            &authority,
+        );
+        journal
+            .accept_signed_attestation(
+                &request.request_id,
+                &raw,
+                &authority,
+                "2026-09-05T10:01:30Z",
+            )
+            .unwrap();
+        let request_id = request.request_id.clone();
+        assert!(journal
+            .consume_for_formal_gate(
+                &request_id,
+                &CustodyFormalGateExpectationV2 { request },
+                &authority,
+                "2026-09-05T10:02:00Z",
+            )
+            .is_ok());
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1443,6 +1656,138 @@ mod tests {
                 "2026-09-05T10:03:00Z"
             )
             .is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clock_rollback_terminalises_a_begun_invalid_attempt_before_a_later_valid_response() {
+        let root =
+            std::env::temp_dir().join(format!("das-custody-clock-rollback-{}", Uuid::new_v4()));
+        let journal = CustodyOffNucJournal::create(root.join("journal.sqlite")).unwrap();
+        let (signer, authority) = authority();
+        let request = request(1, None);
+        let request_raw = sign(request.clone(), &signer, &authority);
+        let request_digest = journal
+            .issue_pre_read_request(&request_raw, &authority, "2026-09-05T10:00:00Z")
+            .unwrap();
+        let attempt = journal
+            .begin_pre_read_attempt(&request.request_id, "2026-09-05T10:02:00Z")
+            .unwrap();
+
+        // A malformed response at T1 after the durable T2 read reservation
+        // must terminalise at T2 rather than leave the nonce reusable.
+        assert!(journal
+            .accept_signed_attestation(
+                &request.request_id,
+                b"not-jcs",
+                &authority,
+                "2026-09-05T10:01:00Z",
+            )
+            .is_err());
+        let connection = Connection::open(&journal.path).unwrap();
+        let persisted: (String, String, String) = connection
+            .query_row(
+                "SELECT issued_pre_read_requests.status,first_attempts.result,first_attempts.attempted_at_utc \
+                 FROM issued_pre_read_requests JOIN first_attempts USING(request_id) WHERE request_id=?1",
+                params![request.request_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            persisted,
+            (
+                "terminal".to_string(),
+                "failed".to_string(),
+                "2026-09-05T10:02:00Z".to_string(),
+            )
+        );
+
+        let later_valid = sign(
+            passing_attestation(
+                request.clone(),
+                request_digest,
+                attempt.attempt_marker_sha256,
+                "2026-09-05T10:02:00Z",
+            ),
+            &signer,
+            &authority,
+        );
+        assert!(journal
+            .accept_signed_attestation(
+                &request.request_id,
+                &later_valid,
+                &authority,
+                "2026-09-05T10:03:00Z",
+            )
+            .is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn formal_consumer_cannot_precede_the_durable_passing_acceptance_time() {
+        let root = std::env::temp_dir().join(format!(
+            "das-custody-formal-clock-rollback-{}",
+            Uuid::new_v4()
+        ));
+        let journal = CustodyOffNucJournal::create(root.join("journal.sqlite")).unwrap();
+        let (signer, authority) = authority();
+        let request = request(1, None);
+        let request_digest = journal
+            .issue_pre_read_request(
+                &sign(request.clone(), &signer, &authority),
+                &authority,
+                "2026-09-05T10:00:00Z",
+            )
+            .unwrap();
+        let attempt = journal
+            .begin_pre_read_attempt(&request.request_id, "2026-09-05T10:02:00Z")
+            .unwrap();
+        journal
+            .accept_signed_attestation(
+                &request.request_id,
+                &sign(
+                    passing_attestation(
+                        request.clone(),
+                        request_digest,
+                        attempt.attempt_marker_sha256,
+                        "2026-09-05T10:02:00Z",
+                    ),
+                    &signer,
+                    &authority,
+                ),
+                &authority,
+                "2026-09-05T10:03:00Z",
+            )
+            .expect("passing response accepted at T3");
+        let expectation = CustodyFormalGateExpectationV2 {
+            request: request.clone(),
+        };
+        assert!(journal
+            .consume_for_formal_gate(
+                &request.request_id,
+                &expectation,
+                &authority,
+                "2026-09-05T10:02:00Z",
+            )
+            .is_err());
+        let connection = Connection::open(&journal.path).unwrap();
+        let consumptions: u64 = connection
+            .query_row("SELECT COUNT(*) FROM formal_consumptions", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            consumptions, 0,
+            "rollback denial must not create a partial consumption"
+        );
+        assert!(journal
+            .consume_for_formal_gate(
+                &request.request_id,
+                &expectation,
+                &authority,
+                "2026-09-05T10:04:00Z",
+            )
+            .is_ok());
         let _ = fs::remove_dir_all(root);
     }
 

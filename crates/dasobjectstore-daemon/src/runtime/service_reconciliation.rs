@@ -290,6 +290,7 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
         emit_progress,
         capacity_provider,
         resource_gate,
+        Some(registry.custody_catalog.clone()),
     )
     .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
         operation: format!("S3 reconciliation ingest failed: {error}"),

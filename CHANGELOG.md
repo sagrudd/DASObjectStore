@@ -42,6 +42,21 @@
   one-use opaque provisioner handoff. The attended systemd credential boundary
   resolves the sealed plan in-process before the isolated Garage adapter is
   called; neither a raw Garage plan nor key material crosses the server API.
+- Complete the source-only active-catalog repair: propagate the exact configured
+  catalog into normal capacity, ingest, profile, creation, destructive, and
+  startup-recovery routes; deny sealed StoreId and bucket aliases before any
+  ordinary effect; require exact writer/reader opaque-reference binding; and
+  make an enabled daemon atomically retain a canonical private activation
+  marker before custody composition. Legacy CLI consults only that marker,
+  denies active/malformed state before direct control, and otherwise preserves
+  inactive legacy behaviour; a caller-selected daemon configuration is never
+  authority. The same guard denies inactive or alternate daemon startup before
+  normal-plane composition while an active marker exists. The marker has no
+  CLI/package removal path and survives restart pending a separately authorised
+  attended deactivation transaction.
+  Production formal-gate authority is strict v2 raw-JCS Ed25519 only; the
+  former v1 observation/checkpoint implementation is test-only. No NUC, DGX,
+  Garage, package, or formal-gate activation is qualified by these tests.
 
 ## 0.179.1 - 2026-09-04
 

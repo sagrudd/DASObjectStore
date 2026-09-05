@@ -9,6 +9,10 @@ use dasobjectstore_core::object_catalogue::{
     PORTABLE_OBJECT_CATALOGUE_SCHEMA_VERSION,
 };
 use dasobjectstore_core::protection::ProtectionPolicy;
+use dasobjectstore_object_service::{
+    read_store_registry_with_custody_catalog, reject_bound_catalogued_custody_mutation,
+    CustodyCatalogBinding,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
@@ -37,6 +41,7 @@ pub struct ProfileReactivationRecoveryReport {
 pub fn recover_profile_reactivations(
     binding_registry_path: impl AsRef<Path>,
     store_registry_path: impl AsRef<Path>,
+    custody_catalog: &CustodyCatalogBinding,
     live_sqlite_path: impl AsRef<Path>,
     committed_at_utc: &str,
 ) -> Result<ProfileReactivationRecoveryReport, BackendError> {
@@ -46,8 +51,9 @@ pub fn recover_profile_reactivations(
     if recovering.is_empty() {
         return Ok(ProfileReactivationRecoveryReport::default());
     }
-    let definitions = dasobjectstore_object_service::read_store_registry(store_registry_path)
-        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    let definitions =
+        read_store_registry_with_custody_catalog(store_registry_path, custody_catalog)
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
     let mut report = ProfileReactivationRecoveryReport::default();
     for store_id in recovering {
         let binding = super::read_profile_binding_record(binding_registry_path, &store_id)
@@ -99,6 +105,7 @@ pub fn recover_profile_reactivations(
 /// tombstone is published.
 pub fn recover_profile_retirements(
     binding_registry_path: impl AsRef<Path>,
+    custody_catalog: &CustodyCatalogBinding,
     live_sqlite_path: impl AsRef<Path>,
 ) -> Result<ProfileRetirementRecoveryReport, BackendError> {
     let binding_registry_path = binding_registry_path.as_ref();
@@ -108,6 +115,12 @@ pub fn recover_profile_retirements(
     {
         let store_id = StoreId::new(store_id)
             .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
+            &store_id,
+            "profile retirement recovery",
+        )
+        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
         let namespace = format!("profile-s3:{}", store_id.as_str());
         dasobjectstore_metadata::withdraw_profile_catalogue(
             live_sqlite_path.as_ref(),
@@ -140,6 +153,7 @@ pub fn profile_catalogue_live_sqlite_path() -> std::path::PathBuf {
 pub fn recover_profile_catalogue_publications(
     binding_registry_path: impl AsRef<Path>,
     store_registry_path: impl AsRef<Path>,
+    custody_catalog: &CustodyCatalogBinding,
     live_sqlite_path: impl AsRef<Path>,
     committed_at_utc: &str,
 ) -> Result<ProfileCatalogueRecoveryReport, BackendError> {
@@ -148,8 +162,9 @@ pub fn recover_profile_catalogue_publications(
     if bindings.is_empty() {
         return Ok(ProfileCatalogueRecoveryReport::default());
     }
-    let definitions = dasobjectstore_object_service::read_store_registry(store_registry_path)
-        .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
+    let definitions =
+        read_store_registry_with_custody_catalog(store_registry_path, custody_catalog)
+            .map_err(|error| BackendError::InvalidRequest(error.to_string()))?;
     let mut report = ProfileCatalogueRecoveryReport::default();
     for binding in bindings {
         if binding.manifest.deployment_profile
@@ -645,6 +660,11 @@ mod tests {
         BackendReference, ObjectStoreManifest, OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
     };
     use dasobjectstore_core::protection::ProtectionPolicy;
+    use dasobjectstore_object_service::{
+        create_custody_catalog_entry, CustodyAssuranceClass, CustodyRetentionPolicyV1,
+        CustodyStoreDefinitionV1, CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1,
+        CUSTODY_PROFILE_V1,
+    };
     use rusqlite::Connection;
     use std::io::{Cursor, Read};
 
@@ -656,9 +676,12 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("root");
+        let custody_catalog = CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+            .expect("test catalog binding");
         let report = recover_profile_catalogue_publications(
             root.join("missing-bindings.json"),
             root.join("missing-stores.json"),
+            &custody_catalog,
             root.join("missing-live.sqlite"),
             "2026-07-16T00:00:00Z",
         )
@@ -730,8 +753,10 @@ mod tests {
             .expect("shared transaction");
         drop(connection);
 
-        let report =
-            recover_profile_retirements(&registry, &live_sqlite).expect("startup recovery");
+        let custody_catalog = CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+            .expect("test catalog binding");
+        let report = recover_profile_retirements(&registry, &custody_catalog, &live_sqlite)
+            .expect("startup recovery");
         assert_eq!(report.retirements_completed, 1);
         assert!(super::super::retiring_profile_store_ids(&registry)
             .expect("retiring stores")
@@ -750,6 +775,80 @@ mod tests {
             )
             .expect("remaining transactions");
         assert_eq!(remaining, 0);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn retirement_recovery_custom_catalog_denies_sealed_target_before_withdrawal_or_finalisation() {
+        let root = std::env::temp_dir().join(format!(
+            "dasobjectstore-profile-retirement-custody-denial-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let registry = root.join("bindings.json");
+        let store_id = StoreId::new("retiring-custody").expect("store id");
+        std::fs::create_dir_all(root.join("backend")).expect("backend root");
+        super::super::upsert_profile_binding(
+            &registry,
+            super::super::BackendProfileBinding {
+                manifest: ObjectStoreManifest {
+                    schema_version: OBJECT_STORE_MANIFEST_SCHEMA_VERSION,
+                    store_id: store_id.clone(),
+                    deployment_profile: DeploymentProfile::Folder,
+                    host_mode: HostMode::PerUser,
+                    protection: ProtectionPolicy::LocalOnly,
+                    backend: BackendReference::Folder {
+                        root_identity: "fsid:sealed".to_string(),
+                    },
+                },
+                backend_root: root.join("backend"),
+                ssd_staging_root: None,
+            },
+        )
+        .expect("binding");
+        super::super::begin_profile_binding_retirement(
+            &registry,
+            store_id.as_str(),
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("retirement begins");
+        let catalog_path = root.join("sealed/catalog.jsonl");
+        let definition = CustodyStoreDefinitionV1 {
+            store_id: store_id.clone(),
+            bucket_name: "dos-retiring-custody".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provisioner".to_string(),
+                provisioner_identity: "provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer".to_string(),
+                writer_identity: "writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader".to_string(),
+                reader_identity: "reader".to_string(),
+            },
+        };
+        create_custody_catalog_entry(
+            &catalog_path,
+            &definition,
+            root.join("sealed/ledger.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog");
+        let binding = CustodyCatalogBinding::new(&catalog_path).expect("catalog binding");
+        assert!(
+            recover_profile_retirements(&registry, &binding, root.join("live.sqlite")).is_err()
+        );
+        assert_eq!(
+            super::super::retiring_profile_store_ids(&registry).expect("retiring retained"),
+            vec![store_id.to_string()],
+            "sealed recovery denial must precede metadata withdrawal and final binding state"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

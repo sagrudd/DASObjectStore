@@ -101,10 +101,11 @@ use dasobjectstore_metadata::{
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
     delete_store_definition_with_custody_catalog, delete_subobjects_for_store,
-    portable_store_registry_path, portable_subobject_registry_path,
+    portable_store_registry_path, portable_subobject_registry_path, read_custody_catalog,
     read_managed_credential_registry, read_store_registry_with_custody_catalog,
-    read_subobject_registry, upsert_store_definition_with_custody_catalog, CustodyCatalogBinding,
-    ObjectServiceError, ObjectServiceProviderId, StoreRegistryDeleteReport,
+    read_subobject_registry, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, upsert_store_definition_with_custody_catalog,
+    CustodyCatalogBinding, ObjectServiceError, ObjectServiceProviderId, StoreRegistryDeleteReport,
     StoreRegistryUpdateReport, StoreServiceDefinition,
 };
 use std::collections::BTreeSet;
@@ -329,10 +330,19 @@ where
     /// uses. This is daemon composition data, not API/CLI input; a normal
     /// caller can never redirect the guard to an environment/default alias.
     pub fn try_with_active_custody_catalog_binding(
-        mut self,
+        self,
         path: impl AsRef<Path>,
     ) -> Result<Self, DaemonServiceRuntimeError> {
         let binding = CustodyCatalogBinding::new(path)?;
+        self.try_with_custody_catalog_binding(binding)
+    }
+
+    /// The composed daemon gives every normal request path the same resolved
+    /// catalog identity that protects capacity and isolated custody services.
+    pub fn try_with_custody_catalog_binding(
+        mut self,
+        binding: CustodyCatalogBinding,
+    ) -> Result<Self, DaemonServiceRuntimeError> {
         if let Some(existing) = &self.custody_catalog_binding {
             if existing != &binding {
                 return Err(DaemonServiceRuntimeError::UnsupportedOperation {
@@ -369,6 +379,33 @@ where
     ) -> Result<Vec<StoreServiceDefinition>, ObjectServiceError> {
         let binding = self.normal_custody_catalog_binding()?;
         read_store_registry_with_custody_catalog(&self.store_registry_path, &binding)
+    }
+
+    /// Central pre-effect boundary for normal metadata, reconciliation, and
+    /// lifecycle mutations. A named target is denied when it is sealed by the
+    /// exact daemon-injected catalog. An unbounded normal mutation is denied
+    /// whenever the catalog contains a custody target, because it cannot prove
+    /// that a later metadata scan excludes that target.
+    pub(super) fn reject_normal_custody_target(
+        &self,
+        store_id: Option<&StoreId>,
+        operation: &str,
+    ) -> Result<(), ObjectServiceError> {
+        let binding = self.normal_custody_catalog_binding()?;
+        match store_id {
+            Some(store_id) => {
+                reject_bound_catalogued_custody_mutation(&binding, store_id, operation)
+            }
+            None => {
+                if read_custody_catalog(binding.path())?.is_empty() {
+                    Ok(())
+                } else {
+                    Err(ObjectServiceError::InvalidConfiguration(format!(
+                        "ordinary {operation} has no store target while the exact custody catalog contains sealed store(s); use a targeted normal route or the dedicated custody daemon route"
+                    )))
+                }
+            }
+        }
     }
 
     pub(super) fn upsert_normal_store_definition(
@@ -2433,9 +2470,14 @@ mod tests {
             "2026-07-16T15:00:00Z",
         )
         .expect("interrupted recovery begins");
+        let custody_catalog = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("test catalog binding");
         let startup_recovery = crate::runtime::recover_profile_reactivations(
             &profile_registry,
             &store_registry,
+            &custody_catalog,
             &live_sqlite,
             "2026-07-16T15:01:00Z",
         )
@@ -3423,6 +3465,111 @@ mod tests {
         assert!(
             !root.join("stores.json").exists(),
             "the normal registry is untouched when the injected custody catalog denies the alias"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn active_catalog_rejects_profile_binding_store_and_bucket_before_any_effect() {
+        let root = temp_root("active-custody-profile-binding");
+        cleanup(&root);
+        let catalog_path = root.join("custody/active-catalog.jsonl");
+        let custody_definition = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new("custody-profile-binding").expect("sealed store id"),
+            bucket_name: "dos-custody-profile-binding".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provision-once".to_string(),
+                provisioner_identity: "custody-provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer-once".to_string(),
+                writer_identity: "custody-writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader-once".to_string(),
+                reader_identity: "custody-reader".to_string(),
+            },
+        };
+        create_custody_catalog_entry(
+            &catalog_path,
+            &custody_definition,
+            root.join("custody/ledgers/active.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog entry");
+
+        let profile_registry = root.join("profile-bindings.json");
+        let store_registry = root.join("stores.json");
+        let subobject_registry = root.join("subobjects.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService {
+                active_custody_plane: true,
+                ..FakeService::default()
+            },
+            FixedDaemonClock::new("2026-09-05T12:00:00Z"),
+        )
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_registry_paths(&store_registry, &subobject_registry)
+        .with_live_sqlite_path(root.join("live.sqlite"))
+        .try_with_active_custody_catalog_binding(&catalog_path)
+        .expect("inject active canonical catalog");
+        let actor = preverified_host_service_actor();
+
+        for (label, mut request) in [
+            (
+                "sealed-store",
+                profile_binding_request_for_auth_test(
+                    custody_definition.store_id.as_str(),
+                    root.join("backend-sealed-store"),
+                ),
+            ),
+            (
+                "sealed-bucket-alias",
+                profile_binding_request_for_auth_test(
+                    "normal-profile-bucket-alias",
+                    root.join("backend-sealed-bucket-alias"),
+                ),
+            ),
+        ] {
+            if label == "sealed-bucket-alias" {
+                request
+                    .store_definition
+                    .as_mut()
+                    .expect("normal S3 definition")
+                    .bucket_name = Some(custody_definition.bucket_name.clone());
+            }
+            let backend_root = request.backend_root.clone();
+            let error = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::RegisterProfileBinding(request),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect_err("sealed profile binding must be denied before any effect");
+            assert!(
+                error.to_string().contains("sealed custody"),
+                "{label} must fail at the custody boundary: {error}"
+            );
+            assert!(
+                !backend_root.exists(),
+                "{label} denial must precede profile-root preparation"
+            );
+        }
+        assert!(
+            !profile_registry.exists() && !store_registry.exists() && !subobject_registry.exists(),
+            "custody denial must precede profile/normal-registry writes"
+        );
+        assert!(
+            handler
+                .service_orchestrator
+                .profile_capacity_calls
+                .borrow()
+                .is_empty(),
+            "custody denial must precede capacity initialization"
         );
         cleanup(&root);
     }
