@@ -26,8 +26,8 @@ those same administrative and backup domains.
 
 `CustodyStoreProfileV1` is target-bound and requires all of the following:
 
-- the fixed `local_trusted_administrator_overlay` assurance and retention
-  mode;
+- the separate `local_trusted_administrator_overlay` assurance label and the
+  exact `retention.mode=local_trusted_administrator_non_shortenable` policy;
 - an explicit UTC retention-until timestamp and a permanent legal hold;
 - three distinct provisioner, writer, and reader credential references and
   sealed identities; and
@@ -52,7 +52,11 @@ or folder backend. The dedicated plan instead names three distinct identities:
 2. a runtime writer with a write-only Garage grant; and
 3. an independent runtime reader with a read-only Garage grant.
 
-The concrete `GarageCustodyProvisioner` first requires Garage to report the
+The server-owned `CustodyAdmissionRequest` carries an opaque one-use
+provisioner handoff reference, never a raw Garage plan or a fresh-bucket proof.
+The daemon's attended provisioning authority atomically consumes that
+reference, checks the complete sealed definition and policy, and only then
+calls the concrete `GarageCustodyProvisioner`. That provisioner first requires Garage to report the
 bucket missing, executes the dedicated key/import/create/grant plan without
 accepting any idempotent conflict, and rereads Garage's key-grant table. It
 fails closed unless that table contains exactly the sealed writer with `W` and
@@ -87,8 +91,9 @@ normal DAS API operation in this source release.
 Admission writes a daemon-owned canonical JSONL catalog outside the mutable
 registry. Before it issues the first Garage command it atomically claims both
 the `StoreId` and bucket name. The same daemon retains the resulting
-fresh-bucket proof and claim in a one-way pending-admission slot; only that
-exact proof can then create the ledger and append the catalog entry. A failed,
+fresh-bucket proof and claim in a one-way pending-admission slot; only the
+same daemon-owned provision operation can then create the ledger and append
+the catalog entry. A failed,
 interrupted, restarted, or detached admission leaves a terminal claim: it is
 neither released, adopted, deleted, nor retried. A completed entry binds the
 definition digest, a daemon-derived opaque ledger path, the observed
@@ -116,12 +121,23 @@ handler has independently rediscovered custody semantics. Any future route
 that introduces a new normal store-definition or registry mutation boundary
 must use the same central guard and is a review-required change.
 
+When the packaged daemon configuration declares the custody plane active, the
+direct CLI refuses to run rather than reading or writing a normal registry with
+a fallback catalog. Its only supported normal control plane in that state is
+the daemon server, which has received the same explicit canonical binding at
+composition time. This is a deliberate availability trade-off for a fail-closed
+boundary; it is not a way to activate or administer custody from the CLI.
+
 The only daemon data mutation is `CustodyRetainRequest`. It contains two
-opaque, distinct handoff references but no raw credential, catalog path, or
-ledger path. The daemon consumes the writer and reader references once through
+opaque, distinct writer and reader handoff references but no raw credential,
+catalog path, or ledger path. The daemon consumes those references once through
 an attended host credential-authority boundary, bound to the catalogued store
-and definition digest, before issuing the S3 commands. Its sole production
-resolver reads an opaque file name from systemd's private
+and definition digest, before issuing the S3 commands. A separate
+`CustodyAdmissionRequest` carries only an opaque provisioner-plan handoff
+reference: the daemon, rather than a client, resolves that plan, validates it
+against the sealed profile, and performs the non-idempotent fresh-bucket
+provisioning step. Its sole production resolver reads opaque file names from
+systemd's private
 `CREDENTIALS_DIRECTORY`; it has no filesystem-path, registry, Keychain,
 network, environment-secret, or API fallback. It atomically creates a
 hash-only, empty one-use marker before reading the handoff. Thus a race,
@@ -135,8 +151,18 @@ They use the fixed distinct `dasobjectstore-custody` project,
 `garage-custody` service, custody-only configuration/metadata/data paths, and
 loopback `127.0.0.1:3901`. The packaged daemon configuration keeps custody
 `enabled: false`; if an attended manifest enables it, daemon startup requires
-the systemd credential directory and fails closed when it is absent. The
-normal service lifecycle owns neither the template nor the custody service.
+the systemd credential directory and fails closed when it is absent. That
+private directory is also the only production provisioner-plan source. The
+reviewed inactive template requires a distinct opaque
+`LoadCredentialEncrypted` provisioner-plan credential whose fixed, non-secret
+field names are `version`, `role=provisioner`, `store_id`,
+`configuration_sha256`, `provisioner_identity`, `writer_access_key_id`,
+`writer_secret_access_key`, `reader_access_key_id`, and
+`reader_secret_access_key`; it also requires separate writer and reader
+handoffs for retaining. The opaque provisioner reference is atomically claimed
+before the daemon reads its sealed writer/reader key material, which stays in
+memory only for the one provision operation. The normal service lifecycle owns
+neither the template nor the custody service.
 Rendering, installing, enabling, credential loading, or starting these assets
 is a later attended formal transaction, not a package side effect.
 

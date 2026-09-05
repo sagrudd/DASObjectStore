@@ -38,9 +38,9 @@ pub use custody::{
     CustodyObjectInputV1, CustodyObjectLockPolicyV1, CustodyObjectReader, CustodyObjectState,
     CustodyObjectWriter, CustodyOffNucAttestationAuthority, CustodyOffNucAttestationBodyV1,
     CustodyOffNucAttestationV1, CustodyOffNucVerifierCheckpointV1, CustodyOffNucVerifierState,
-    CustodyReadbackObservationV1, CustodyRetentionMode, CustodyStoreDefinitionV1,
-    CustodyStoreProfileV1, CustodyVerifierAttemptResult, CustodyVerifierAttemptV1,
-    CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
+    CustodyReadbackObservationV1, CustodyRetentionMode, CustodyRetentionPolicyV1,
+    CustodyStoreDefinitionV1, CustodyStoreProfileV1, CustodyVerifierAttemptResult,
+    CustodyVerifierAttemptV1, CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
     CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
     CUSTODY_OBJECT_LOCK_POLICY_ID, CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1,
     CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
@@ -48,8 +48,8 @@ pub use custody::{
 pub use custody_attestation::{
     CustodyEd25519AuthorityV1, CustodyFormalGateConsumptionV2, CustodyFormalGateExpectationV2,
     CustodyOffNucAttestationV2, CustodyOffNucJournal, CustodyOffNucObservationResult,
-    CustodyOffNucPreReadRequestV1, CustodySignedAttestationV2, CustodySignedPreReadRequestV1,
-    CustodySignedRecordV1, CUSTODY_ATTESTATION_ALGORITHM_ED25519,
+    CustodyOffNucPreReadRequestV1, CustodyOffNucReadAttemptV1, CustodySignedAttestationV2,
+    CustodySignedPreReadRequestV1, CustodySignedRecordV1, CUSTODY_ATTESTATION_ALGORITHM_ED25519,
     CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V2, CUSTODY_OFF_NUC_PRE_READ_REQUEST_SCHEMA_V1,
     CUSTODY_SIGNED_RECORD_SCHEMA_V1,
 };

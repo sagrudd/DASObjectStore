@@ -5,6 +5,13 @@ use crate::api::{
 };
 
 pub trait DaemonServiceOrchestrator {
+    /// A custody-capable service must make normal registry paths prove that
+    /// they received the same canonical catalog binding. Test/non-custody
+    /// orchestrators retain the inactive default denial guard.
+    fn requires_explicit_custody_catalog_binding(&self) -> bool {
+        false
+    }
+
     fn application_upload_endpoint(&self) -> Option<String> {
         None
     }

@@ -717,9 +717,7 @@ where
             response.reused = reused;
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {
-                    if let Err(error) =
-                        upsert_store_definition(&handler.store_registry_path, definition)
-                    {
+                    if let Err(error) = handler.upsert_normal_store_definition(definition) {
                         rollback_profile_registration(
                             handler,
                             &rollback_request,
@@ -734,7 +732,8 @@ where
                 response.store_definition_published = !response.accepted.dry_run;
             }
             if !response.accepted.dry_run {
-                let definitions = read_store_registry(&handler.store_registry_path)
+                let definitions = handler
+                    .read_normal_store_registry()
                     .map_err(DaemonServiceRuntimeError::ObjectService)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 let definition = definitions
@@ -1036,7 +1035,8 @@ where
                 && root_state == ProfileInspectionRootState::Available
                 && lifecycle_state == ProfileBindingLifecycleState::Active
             {
-                let policy = read_store_registry(&handler.store_registry_path)
+                let policy = handler
+                    .read_normal_store_registry()
                     .ok()
                     .and_then(|definitions| {
                         definitions

@@ -9,10 +9,11 @@ use super::service::{
     docker_compose_args, garage_exec_args, GarageServiceRuntimeConfig, ServiceCommandRunner,
 };
 use dasobjectstore_object_service::{
-    custody_object_key, custody_provisioning_request_sha256, plan_custody_garage_provisioning,
-    CustodyFreshBucketProofV1, CustodyGarageProvisioningRequest, CustodyObjectLockPolicyV1,
-    CustodyObjectReader, CustodyObjectState, CustodyObjectWriter, ObjectServiceError,
-    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
+    custody_object_key, custody_provisioning_request_sha256, custody_store_definition_sha256,
+    plan_custody_garage_provisioning, CustodyFreshBucketProofV1, CustodyGarageCredential,
+    CustodyGarageProvisionerIdentity, CustodyGarageProvisioningRequest, CustodyObjectLockPolicyV1,
+    CustodyObjectReader, CustodyObjectState, CustodyObjectWriter, CustodyStoreDefinitionV1,
+    ObjectServiceError, CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
     CUSTODY_OBJECT_LOCK_POLICY_ID,
 };
 use serde::Deserialize;
@@ -98,6 +99,19 @@ pub trait CustodyRuntimeCredentialResolver: Send + Sync {
         store_id: &str,
         configuration_sha256: &str,
     ) -> Result<CustodyRuntimeCredential, ObjectServiceError>;
+}
+
+/// Daemon-local, attended authority for the single non-idempotent custody
+/// provision operation.  The public API carries only an opaque handoff name;
+/// this boundary resolves the sealed Garage plan in-process and consumes that
+/// name before the first absence probe.  It is deliberately separate from
+/// normal store credentials and cannot be invoked through a Garage CLI path.
+pub trait CustodyAdmissionProvisioningAuthority: Send + Sync {
+    fn consume_one_use_provisioning_request(
+        &self,
+        handoff_reference: &str,
+        definition: &CustodyStoreDefinitionV1,
+    ) -> Result<CustodyGarageProvisioningRequest, ObjectServiceError>;
 }
 
 /// The only production source for a custody writer or reader credential. A
@@ -228,6 +242,64 @@ impl CustodyRuntimeCredentialResolver for SystemdServiceCredentialHandoffResolve
     }
 }
 
+/// Production custody admission can only obtain a Garage provisioning plan
+/// from the same private systemd credential handoff boundary as retain. The
+/// opaque handoff is atomically claimed before its sealed definition is read;
+/// its two short-lived Garage key secrets remain in memory only while the
+/// daemon's provisioner executes. No normal registry, API field, log, or
+/// persisted custody record can contain this plan or either secret.
+impl CustodyAdmissionProvisioningAuthority for SystemdServiceCredentialHandoffResolver {
+    fn consume_one_use_provisioning_request(
+        &self,
+        handoff_reference: &str,
+        definition: &CustodyStoreDefinitionV1,
+    ) -> Result<CustodyGarageProvisioningRequest, ObjectServiceError> {
+        let configuration_sha256 = custody_store_definition_sha256(definition)?;
+        let credential_path = self.credential_path(handoff_reference)?;
+        let handoff_name = handoff_credential_name(handoff_reference)?;
+        let marker_path = self.consumption_root.join(format!(
+            "{}.consumed",
+            sha256_hex(
+                format!(
+                    "v1\\0provisioner\\0{handoff_name}\\0{}\\0{configuration_sha256}",
+                    definition.store_id
+                )
+                .as_bytes(),
+            )
+        ));
+        claim_systemd_handoff_marker(&marker_path)?;
+        let handoff = read_systemd_provisioning_handoff(&credential_path)?;
+        if handoff.store_id != definition.store_id.to_string()
+            || handoff.configuration_sha256 != configuration_sha256
+            || handoff.provisioner_identity != definition.profile.provisioner_identity
+            || handoff_reference != definition.profile.provisioner_credential_reference
+        {
+            return Err(invalid(
+                "systemd custody provisioning handoff does not match its sealed store, definition, provisioner identity, and reference",
+            ));
+        }
+        Ok(CustodyGarageProvisioningRequest {
+            store_id: definition.store_id.clone(),
+            bucket_name: definition.bucket_name.clone(),
+            profile: definition.profile.clone(),
+            provisioner: CustodyGarageProvisionerIdentity {
+                identity: handoff.provisioner_identity,
+                credential_reference: handoff_reference.to_string(),
+            },
+            writer: CustodyGarageCredential::new(
+                definition.profile.writer_credential_reference.clone(),
+                handoff.writer_access_key_id,
+                handoff.writer_secret_access_key,
+            )?,
+            reader: CustodyGarageCredential::new(
+                definition.profile.reader_credential_reference.clone(),
+                handoff.reader_access_key_id,
+                handoff.reader_secret_access_key,
+            )?,
+        })
+    }
+}
+
 struct SystemdCustodyHandoff {
     role: CustodyRuntimeCredentialRole,
     store_id: String,
@@ -238,6 +310,16 @@ struct SystemdCustodyHandoff {
     aws_session_token: Option<String>,
 }
 
+struct SystemdCustodyProvisioningHandoff {
+    store_id: String,
+    configuration_sha256: String,
+    provisioner_identity: String,
+    writer_access_key_id: String,
+    writer_secret_access_key: String,
+    reader_access_key_id: String,
+    reader_secret_access_key: String,
+}
+
 /// Test-only stand-in for the separately reviewed, attended host credential
 /// handoff boundary. It has no persistence, no environment lookup, and no
 /// way to inspect a stored credential after construction. Each reference is
@@ -246,6 +328,60 @@ struct SystemdCustodyHandoff {
 #[cfg(test)]
 pub(crate) struct TestOnlyCustodyRuntimeCredentialResolver {
     handoffs: Mutex<BTreeMap<String, TestOnlyCustodyRuntimeCredentialHandoff>>,
+}
+
+/// Test-only authority for exercising the server admission boundary without
+/// creating a credential source. Production composition must supply an
+/// attended system credential authority; absence fails closed.
+#[cfg(test)]
+pub(crate) struct TestOnlyCustodyAdmissionProvisioningAuthority {
+    requests: Mutex<BTreeMap<String, CustodyGarageProvisioningRequest>>,
+}
+
+#[cfg(test)]
+impl TestOnlyCustodyAdmissionProvisioningAuthority {
+    pub(crate) fn new(
+        handoffs: impl IntoIterator<Item = (String, CustodyGarageProvisioningRequest)>,
+    ) -> Result<Self, ObjectServiceError> {
+        let mut requests = BTreeMap::new();
+        for (reference, request) in handoffs {
+            if reference.trim().is_empty() || requests.insert(reference, request).is_some() {
+                return Err(invalid(
+                    "test custody provisioner handoff references must be unique and nonblank",
+                ));
+            }
+        }
+        Ok(Self {
+            requests: Mutex::new(requests),
+        })
+    }
+}
+
+#[cfg(test)]
+impl CustodyAdmissionProvisioningAuthority for TestOnlyCustodyAdmissionProvisioningAuthority {
+    fn consume_one_use_provisioning_request(
+        &self,
+        handoff_reference: &str,
+        definition: &CustodyStoreDefinitionV1,
+    ) -> Result<CustodyGarageProvisioningRequest, ObjectServiceError> {
+        let request = self
+            .requests
+            .lock()
+            .map_err(|_| invalid("test custody provisioner authority lock is poisoned"))?
+            .remove(handoff_reference)
+            .ok_or_else(|| {
+                invalid("custody provisioner handoff is absent or has already been consumed")
+            })?;
+        if request.store_id != definition.store_id
+            || request.bucket_name != definition.bucket_name
+            || request.profile != definition.profile
+        {
+            return Err(invalid(
+                "custody provisioner handoff does not match its sealed definition",
+            ));
+        }
+        Ok(request)
+    }
 }
 
 #[cfg(test)]
@@ -749,6 +885,18 @@ fn claim_systemd_handoff_marker(marker_path: &Path) -> Result<(), ObjectServiceE
 }
 
 fn read_systemd_handoff(path: &Path) -> Result<SystemdCustodyHandoff, ObjectServiceError> {
+    let bytes = read_systemd_handoff_bytes(path)?;
+    parse_systemd_handoff(&bytes)
+}
+
+fn read_systemd_provisioning_handoff(
+    path: &Path,
+) -> Result<SystemdCustodyProvisioningHandoff, ObjectServiceError> {
+    let bytes = read_systemd_handoff_bytes(path)?;
+    parse_systemd_provisioning_handoff(&bytes)
+}
+
+fn read_systemd_handoff_bytes(path: &Path) -> Result<Vec<u8>, ObjectServiceError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| command_error("inspect systemd custody credential", path, error))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
@@ -774,7 +922,7 @@ fn read_systemd_handoff(path: &Path) -> Result<SystemdCustodyHandoff, ObjectServ
             "systemd custody credential exceeds the bounded handoff size",
         ));
     }
-    parse_systemd_handoff(&bytes)
+    Ok(bytes)
 }
 
 fn parse_systemd_handoff(bytes: &[u8]) -> Result<SystemdCustodyHandoff, ObjectServiceError> {
@@ -844,6 +992,76 @@ fn parse_systemd_handoff(bytes: &[u8]) -> Result<SystemdCustodyHandoff, ObjectSe
         aws_session_token: fields
             .get("aws_session_token")
             .map(|value| (*value).to_string()),
+    })
+}
+
+fn parse_systemd_provisioning_handoff(
+    bytes: &[u8],
+) -> Result<SystemdCustodyProvisioningHandoff, ObjectServiceError> {
+    let encoded = std::str::from_utf8(bytes)
+        .map_err(|_| invalid("systemd custody provisioning credential is not UTF-8"))?;
+    let mut fields = std::collections::BTreeMap::new();
+    for line in encoded.lines() {
+        let (key, value) = line.split_once('=').ok_or_else(|| {
+            invalid("systemd custody provisioning credential has an invalid field")
+        })?;
+        if key.is_empty()
+            || value.is_empty()
+            || !matches!(
+                key,
+                "version"
+                    | "role"
+                    | "store_id"
+                    | "configuration_sha256"
+                    | "provisioner_identity"
+                    | "writer_access_key_id"
+                    | "writer_secret_access_key"
+                    | "reader_access_key_id"
+                    | "reader_secret_access_key"
+            )
+            || fields.insert(key, value).is_some()
+        {
+            return Err(invalid(
+                "systemd custody provisioning credential has duplicate, blank, or unsupported fields",
+            ));
+        }
+    }
+    let required = |name| {
+        fields
+            .get(name)
+            .filter(|value| !value.trim().is_empty())
+            .copied()
+            .ok_or_else(|| {
+                invalid("systemd custody provisioning credential is missing a required field")
+            })
+    };
+    if required("version")? != "1" || required("role")? != "provisioner" {
+        return Err(invalid(
+            "systemd custody provisioning credential version or role is unsupported",
+        ));
+    }
+    let store_id = required("store_id")?.to_string();
+    if dasobjectstore_core::ids::StoreId::new(store_id.clone()).is_err() {
+        return Err(invalid("systemd custody provisioning store id is invalid"));
+    }
+    let configuration_sha256 = required("configuration_sha256")?.to_string();
+    if configuration_sha256.len() != 64
+        || !configuration_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(invalid(
+            "systemd custody provisioning configuration digest is invalid",
+        ));
+    }
+    Ok(SystemdCustodyProvisioningHandoff {
+        store_id,
+        configuration_sha256,
+        provisioner_identity: required("provisioner_identity")?.to_string(),
+        writer_access_key_id: required("writer_access_key_id")?.to_string(),
+        writer_secret_access_key: required("writer_secret_access_key")?.to_string(),
+        reader_access_key_id: required("reader_access_key_id")?.to_string(),
+        reader_secret_access_key: required("reader_secret_access_key")?.to_string(),
     })
 }
 
@@ -956,7 +1174,8 @@ mod tests {
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_object_service::{
         CustodyAssuranceClass, CustodyGarageCredential, CustodyGarageProvisionerIdentity,
-        CustodyRetentionMode, CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+        CustodyRetentionPolicyV1, CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1,
+        CUSTODY_PROFILE_V1,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -1090,6 +1309,76 @@ mod tests {
                 "definition-digest",
             )
             .is_err());
+    }
+
+    #[test]
+    fn systemd_provisioning_handoff_is_server_only_one_use_and_never_exposes_a_plan() {
+        let root = std::env::temp_dir().join(format!(
+            "das-custody-systemd-provisioning-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let credential_directory = root.join("credentials");
+        let consumption_root = root.join("consumed");
+        fs::create_dir_all(&credential_directory).expect("credential dir");
+        let mut request = provisioning_request();
+        request.profile.provisioner_credential_reference =
+            "systemd-credential://provision-once".to_string();
+        request.provisioner.credential_reference =
+            request.profile.provisioner_credential_reference.clone();
+        let definition = CustodyStoreDefinitionV1 {
+            store_id: request.store_id.clone(),
+            bucket_name: request.bucket_name.clone(),
+            profile: request.profile.clone(),
+        };
+        let digest = custody_store_definition_sha256(&definition).expect("definition digest");
+        let secret = "never-crosses-api-or-persistence";
+        let credential_path = credential_directory.join("provision-once");
+        fs::write(
+            &credential_path,
+            format!(
+                "version=1\nrole=provisioner\nstore_id={}\nconfiguration_sha256={digest}\nprovisioner_identity={}\nwriter_access_key_id={}\nwriter_secret_access_key={secret}\nreader_access_key_id={}\nreader_secret_access_key=another-{secret}\n",
+                definition.store_id,
+                definition.profile.provisioner_identity,
+                request.writer.access_key_id,
+                request.reader.access_key_id,
+            ),
+        )
+        .expect("credential fixture");
+        #[cfg(unix)]
+        fs::set_permissions(&credential_path, fs::Permissions::from_mode(0o600))
+            .expect("credential mode");
+        let resolver = SystemdServiceCredentialHandoffResolver::from_test_credential_directory(
+            credential_directory,
+            consumption_root.clone(),
+        )
+        .expect("systemd resolver");
+        let plan = resolver
+            .consume_one_use_provisioning_request(
+                &definition.profile.provisioner_credential_reference,
+                &definition,
+            )
+            .expect("one sealed provisioning plan");
+        assert_eq!(plan.store_id, definition.store_id);
+        assert!(!format!("{plan:?}").contains(secret));
+        assert!(resolver
+            .consume_one_use_provisioning_request(
+                &definition.profile.provisioner_credential_reference,
+                &definition,
+            )
+            .is_err());
+        let markers = fs::read_dir(&consumption_root)
+            .expect("marker root")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("marker entries");
+        assert_eq!(markers.len(), 1);
+        assert!(fs::read(markers[0].path())
+            .expect("marker bytes")
+            .is_empty());
+        let _ = fs::remove_dir_all(root);
     }
 
     struct Runner {
@@ -1278,7 +1567,7 @@ mod tests {
                 schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
                 profile: CUSTODY_PROFILE_V1.to_string(),
                 assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
                 target_id: "nuc-192.168.0.193".to_string(),
                 retention_until_utc: "2027-09-05T10:00:00Z".to_string(),
                 legal_hold: true,

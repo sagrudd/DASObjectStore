@@ -30,9 +30,10 @@ pub(super) fn delete_store_definition_maybe(
     path: &Path,
     store_id: &StoreId,
     dry_run: bool,
+    custody_catalog: &dasobjectstore_object_service::CustodyCatalogBinding,
 ) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
     if dry_run {
-        let removed = read_store_registry(path)?
+        let removed = read_store_registry_with_custody_catalog(path, custody_catalog)?
             .iter()
             .any(|definition| &definition.store_id == store_id);
         return Ok(StoreRegistryDeleteReport {
@@ -42,7 +43,7 @@ pub(super) fn delete_store_definition_maybe(
         });
     }
 
-    delete_store_definition(path, store_id)
+    delete_store_definition_with_custody_catalog(path, store_id, custody_catalog)
 }
 
 pub(super) fn delete_subobjects_for_store_maybe(

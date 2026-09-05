@@ -16,7 +16,8 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::object_type::ObjectType;
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_garage_credential_registry_path,
-    default_store_registry_path, read_managed_credential_registry, read_store_registry,
+    read_managed_credential_registry, read_store_registry_with_custody_catalog,
+    CustodyCatalogBinding,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -28,9 +29,19 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// The exact normal registry and immutable custody binding used for a
+/// reconciliation. Keeping them together prevents an active custody plane
+/// from accidentally pairing a caller-selected registry with a fallback
+/// catalog guard.
+pub(super) struct ReconciliationRegistryBinding<'a> {
+    pub registry_path: &'a Path,
+    pub custody_catalog: &'a CustodyCatalogBinding,
+}
+
 pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     config: &GarageServiceRuntimeConfig,
     runner: &R,
+    registry: ReconciliationRegistryBinding<'_>,
     store_id: StoreId,
     prefix: Option<String>,
     expectation: Option<&crate::api::StoreRepairS3Expectation>,
@@ -44,7 +55,8 @@ pub(super) fn reconcile_store_s3<R: ServiceCommandRunner>(
     ) -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
 ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
     config.validate()?;
-    let definitions = read_store_registry(default_store_registry_path())?;
+    let definitions =
+        read_store_registry_with_custody_catalog(registry.registry_path, registry.custody_catalog)?;
     let definition = definitions
         .iter()
         .find(|definition| definition.store_id == store_id)

@@ -8,8 +8,8 @@ use super::{
         RemoteEasyconnectAwsCliUploadJobRequest, RemoteUploadAdmissionGate,
         RemoteUploadS3TransferWorkerReport,
     },
-    CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole, GarageCustodyS3Reader,
-    GarageCustodyS3Writer,
+    CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredentialResolver,
+    CustodyRuntimeCredentialRole, GarageCustodyS3Reader, GarageCustodyS3Writer,
 };
 use crate::api::{
     CapacityAdmissionRequest, CapacityAdmissionResponse, CreateObjectStoreRequest,
@@ -85,6 +85,8 @@ pub struct GarageServiceController<R> {
     capacity_admission_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     ingest_resource_gate: Option<Arc<DaemonIngestResourceGate>>,
     custody_runtime_credential_resolver: Option<Arc<dyn CustodyRuntimeCredentialResolver>>,
+    custody_admission_provisioning_authority:
+        Option<Arc<dyn CustodyAdmissionProvisioningAuthority>>,
     custody_catalog: CustodyCatalogBinding,
     /// A custody plane is never allowed to inherit the fallback catalog. The
     /// normal plane has a fixed default solely to reject catalogue aliases,
@@ -120,6 +122,7 @@ where
             capacity_admission_provider: None,
             ingest_resource_gate: None,
             custody_runtime_credential_resolver: None,
+            custody_admission_provisioning_authority: None,
             custody_catalog: CustodyCatalogBinding::new(default_custody_catalog_path())
                 .expect("the fixed default custody catalog path is absolute and canonical"),
             custody_catalog_explicitly_bound: false,
@@ -148,6 +151,17 @@ where
         self
     }
 
+    /// Installs the sole daemon-owned source of a sealed custody provisioning
+    /// plan. The API carries only an opaque one-use reference; it never
+    /// carries a Garage plan, credential, or fresh-bucket proof.
+    pub fn with_custody_admission_provisioning_authority(
+        mut self,
+        authority: Arc<dyn CustodyAdmissionProvisioningAuthority>,
+    ) -> Self {
+        self.custody_admission_provisioning_authority = Some(authority);
+        self
+    }
+
     /// Set only by daemon composition or isolated tests. The API request never
     /// supplies this path, so a client cannot redirect sealed custody state.
     pub fn try_with_custody_catalog_path(
@@ -167,6 +181,25 @@ where
 
     fn custody_catalog_path(&self) -> &Path {
         self.custody_catalog.path()
+    }
+
+    /// Normal-plane operations must use the same explicit binding whenever a
+    /// custody plane is configured. The fixed default is permitted only while
+    /// custody is entirely inactive, where it is a conservative alias-denial
+    /// guard rather than configuration.
+    pub(crate) fn normal_custody_catalog_binding(
+        &self,
+    ) -> Result<&CustodyCatalogBinding, DaemonServiceRuntimeError> {
+        if self.custody_plane_config.is_some() && !self.custody_catalog_explicitly_bound {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "active custody plane requires normal operations to receive its exact explicit catalog binding".to_string(),
+            });
+        }
+        Ok(&self.custody_catalog)
+    }
+
+    pub(crate) fn has_active_custody_plane(&self) -> bool {
+        self.custody_plane_config.is_some()
     }
 
     /// Supply the deliberately separate Garage control/data plane used by
@@ -358,9 +391,10 @@ where
         credentials: &[StoreServiceCredential],
     ) -> Result<GarageProvisioningSummary, DaemonServiceRuntimeError> {
         self.config.validate()?;
+        let catalog = self.normal_custody_catalog_binding()?;
         for credential in credentials {
             reject_bound_catalogued_custody_definition(
-                &self.custody_catalog,
+                catalog,
                 &credential.store_id,
                 &credential.bucket_name,
                 "normal Garage bucket provisioning",
@@ -397,7 +431,7 @@ where
     /// Execute the custody-only, non-idempotent Garage provisioner. The
     /// provisioner key is supplied only for this attended call and is neither
     /// written to the normal credential registry nor returned in the proof.
-    pub fn provision_fresh_custody_bucket(
+    fn provision_fresh_custody_bucket(
         &self,
         request: &dasobjectstore_object_service::CustodyGarageProvisioningRequest,
         created_at_utc: &str,
@@ -469,6 +503,37 @@ where
                 "custody admission preflight",
             )?;
         } else {
+            let authority = self
+                .custody_admission_provisioning_authority
+                .as_ref()
+                .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "custody admission requires a daemon-owned attended sealed provisioning authority"
+                        .to_string(),
+                })?;
+            let provision_request = authority.consume_one_use_provisioning_request(
+                &request.provisioner_handoff_reference,
+                &request.definition,
+            )?;
+            if provision_request.store_id != request.definition.store_id
+                || provision_request.bucket_name != request.definition.bucket_name
+                || provision_request.profile != request.definition.profile
+                || provision_request.provisioner.credential_reference
+                    != request.definition.profile.provisioner_credential_reference
+            {
+                return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "daemon-owned custody provisioning authority returned a plan that is not exactly bound to the sealed definition"
+                        .to_string(),
+                });
+            }
+            let creation_nonce = format!(
+                "daemon-custody-admission:{}:{}",
+                request.definition.store_id, accepted_at_utc
+            );
+            self.provision_fresh_custody_bucket(
+                &provision_request,
+                accepted_at_utc,
+                creation_nonce,
+            )?;
             if read_custody_catalog(&catalog_path)?
                 .iter()
                 .any(|entry| entry.definition.store_id == request.definition.store_id)
@@ -488,14 +553,12 @@ where
                 })?
                 .remove(request.definition.store_id.as_str())
                 .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
-                    operation: "custody admission requires the same daemon's fresh, claimed provisioner result"
+                    operation: "custody admission requires the same daemon-owned fresh, claimed provisioner result"
                         .to_string(),
                 })?;
-            if pending.definition != request.definition
-                || pending.fresh_bucket_proof != request.fresh_bucket_proof
-            {
+            if pending.definition != request.definition {
                 return Err(DaemonServiceRuntimeError::UnsupportedOperation {
-                    operation: "custody admission does not match its pending fresh-bucket proof"
+                    operation: "custody admission does not match its daemon-owned pending fresh-bucket provision"
                         .to_string(),
                 });
             }
@@ -504,7 +567,7 @@ where
             dasobjectstore_object_service::create_custody_ledger_from_definition(
                 &ledger_path,
                 request.definition.clone(),
-                request.fresh_bucket_proof.clone(),
+                pending.fresh_bucket_proof.clone(),
                 accepted_at_utc,
             )?;
             let inspection = inspect_custody_ledger(&ledger_path)?;
@@ -688,14 +751,16 @@ where
         )
             -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
-        reject_bound_catalogued_custody_mutation(
-            &self.custody_catalog,
-            &store_id,
-            "Garage reconciliation",
-        )?;
+        let catalog = self.normal_custody_catalog_binding()?;
+        reject_bound_catalogued_custody_mutation(catalog, &store_id, "Garage reconciliation")?;
+        let registry_path = dasobjectstore_object_service::default_store_registry_path();
         super::service_reconciliation::reconcile_store_s3(
             &self.config,
             &self.runner,
+            super::service_reconciliation::ReconciliationRegistryBinding {
+                registry_path: &registry_path,
+                custody_catalog: catalog,
+            },
             store_id,
             prefix,
             expectation,
@@ -1570,19 +1635,18 @@ mod tests {
     };
     use crate::runtime::{
         CustodyRuntimeCredential, CustodyRuntimeCredentialRole,
-        TestOnlyCustodyRuntimeCredentialHandoff, TestOnlyCustodyRuntimeCredentialResolver,
+        TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
+        TestOnlyCustodyRuntimeCredentialResolver,
     };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
     use dasobjectstore_object_service::{
-        catalog_contains_bucket, custody_store_definition_sha256, generate_per_store_credentials,
-        CredentialEntropy, CustodyAssuranceClass, CustodyFreshBucketProofV1,
-        CustodyGarageCredential, CustodyGarageProvisionerIdentity,
-        CustodyGarageProvisioningRequest, CustodyObjectInputV1, CustodyRetentionMode,
+        custody_store_definition_sha256, generate_per_store_credentials, CredentialEntropy,
+        CustodyAssuranceClass, CustodyGarageCredential, CustodyGarageProvisionerIdentity,
+        CustodyGarageProvisioningRequest, CustodyObjectInputV1, CustodyRetentionPolicyV1,
         CustodyStoreDefinitionV1, CustodyStoreProfileV1, ObjectServiceError,
         ObjectServiceProviderId, ServiceState, StoreCredentialRequest, StoreServiceCredential,
-        StoreServiceDefinition, CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1,
-        CUSTODY_PROFILE_V1,
+        StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -1975,25 +2039,26 @@ mod tests {
             .expect("one-use resolver"),
         );
         let runner = CustodyRetainRunner::default();
+        let provision_request = custody_provisioning_request(&definition);
+        let provisioner = Arc::new(
+            TestOnlyCustodyAdmissionProvisioningAuthority::new(vec![(
+                "attended://provisioner".to_string(),
+                provision_request,
+            )])
+            .expect("one-use provisioner authority"),
+        );
         let controller = GarageServiceController::new(config(), runner)
             .with_custody_plane_config(custody_config())
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical")
+            .with_custody_admission_provisioning_authority(provisioner)
             .with_custody_runtime_credential_resolver(resolver);
 
-        let proof = controller
-            .provision_fresh_custody_bucket(
-                &custody_provisioning_request(&definition),
-                "2026-09-05T12:00:00Z",
-                "fresh-custody-nonce",
-            )
-            .expect("fresh, claimed custody bucket provision");
-        assert!(catalog_contains_bucket(&catalog, &definition.bucket_name).is_err());
         controller
             .admit_custody_store(
                 CustodyAdmissionRequest {
                     definition: definition.clone(),
-                    fresh_bucket_proof: proof,
+                    provisioner_handoff_reference: "attended://provisioner".to_string(),
                     dry_run: false,
                     verified_subject: None,
                     confirmation_marker: CUSTODY_ADMISSION_CONFIRMATION.to_string(),
@@ -2080,16 +2145,16 @@ mod tests {
             .admit_custody_store(
                 CustodyAdmissionRequest {
                     definition: definition.clone(),
-                    fresh_bucket_proof: custody_fresh_proof(&definition),
+                    provisioner_handoff_reference: "attended://detached-proof".to_string(),
                     dry_run: false,
                     verified_subject: None,
                     confirmation_marker: CUSTODY_ADMISSION_CONFIRMATION.to_string(),
                 },
                 "2026-09-05T12:00:00Z",
             )
-            .expect_err("a detached proof cannot bypass the provisioner claim");
+            .expect_err("an opaque request cannot bypass the daemon provisioner authority");
 
-        assert!(error.to_string().contains("same daemon"));
+        assert!(error.to_string().contains("daemon-owned attended"));
         assert!(!catalog.exists());
         let _ = fs::remove_dir_all(root);
     }
@@ -2128,7 +2193,7 @@ mod tests {
                 schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
                 profile: CUSTODY_PROFILE_V1.to_string(),
                 assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
                 target_id: "nuc-192-168-0-193".to_string(),
                 retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
                 legal_hold: true,
@@ -2139,26 +2204,6 @@ mod tests {
                 reader_credential_reference: "attended://reader".to_string(),
                 reader_identity: "custody-reader".to_string(),
             },
-        }
-    }
-
-    fn custody_fresh_proof(definition: &CustodyStoreDefinitionV1) -> CustodyFreshBucketProofV1 {
-        CustodyFreshBucketProofV1 {
-            schema: CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1.to_string(),
-            store_id: definition.store_id.clone(),
-            bucket_name: definition.bucket_name.clone(),
-            target_id: definition.profile.target_id.clone(),
-            provisioner_identity: definition.profile.provisioner_identity.clone(),
-            provisioner_credential_reference: definition
-                .profile
-                .provisioner_credential_reference
-                .clone(),
-            provisioning_request_sha256: custody_store_definition_sha256(definition)
-                .expect("definition digest"),
-            absence_evidence_sha256: "a".repeat(64),
-            creation_evidence_sha256: "b".repeat(64),
-            creation_nonce: "fresh-custody-nonce".to_string(),
-            created_at_utc: "2026-09-05T12:00:00Z".to_string(),
         }
     }
 

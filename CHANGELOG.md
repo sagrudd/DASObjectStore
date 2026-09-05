@@ -38,6 +38,10 @@
   issues a nonce before read, consumes one terminal attempt, and performs
   atomic full-measurement formal-gate consumption. The previous v1 digest-hook
   formal consumer is disabled.
+- Replace the custody-admission fresh-proof transport with a daemon-owned,
+  one-use opaque provisioner handoff. The attended systemd credential boundary
+  resolves the sealed plan in-process before the isolated Garage adapter is
+  called; neither a raw Garage plan nor key material crosses the server API.
 
 ## 0.179.1 - 2026-09-04
 

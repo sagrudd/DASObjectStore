@@ -195,7 +195,7 @@ use dasobjectstore_daemon::{
     StoreVerifyRequest as DaemonStoreVerifyRequest, SubmitIngestFilesRequest,
     SubmitIngestFilesResponse, UnixSocketDaemonTransport,
     UpdateObjectStoreAcknowledgementPolicyRequest, UpdateObjectStoreIngestPolicyRequest,
-    DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
+    DEFAULT_DAEMON_CONFIG_PATH, DEFAULT_DAEMON_STATE_DIR, OBJECT_STORE_CREATE_CONFIRMATION,
 };
 use dasobjectstore_metadata::{
     attach_clean_pool_read_only, export_settled_object, import_dirty_pool_read_only,
@@ -279,6 +279,10 @@ thread_local! {
     static PERFORMANCE_SYNC_ALL_CALLS: RefCell<u32> = const { RefCell::new(0) };
 }
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
+    // Direct CLI registry/layout commands have no injected custody catalog
+    // dependency. When custody is active, deny this legacy surface rather
+    // than allowing a default or caller-selected catalog split.
+    deny_direct_cli_when_custody_plane_is_active(Path::new(DEFAULT_DAEMON_CONFIG_PATH))?;
     match cli.command() {
         Some(Command::Probe(args)) => run_probe(args, writer),
         Some(Command::Health(args)) => run_health(args, writer),
@@ -386,6 +390,37 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+fn deny_direct_cli_when_custody_plane_is_active(config_path: &Path) -> Result<(), CliError> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let file = File::open(config_path).map_err(|error| {
+        CliError::CommandFailed(format!(
+            "cannot inspect daemon configuration {} before direct CLI registry access: {error}",
+            config_path.display()
+        ))
+    })?;
+    let config: DaemonRuntimeConfig = serde_json::from_reader(file).map_err(|error| {
+        CliError::CommandFailed(format!(
+            "cannot parse daemon configuration {} before direct CLI registry access: {error}",
+            config_path.display()
+        ))
+    })?;
+    config.validate().map_err(|error| {
+        CliError::CommandFailed(format!(
+            "daemon configuration {} is invalid; direct CLI registry access is denied: {error}",
+            config_path.display()
+        ))
+    })?;
+    if config.custody.enabled {
+        return Err(CliError::CommandFailed(
+            "direct DASObjectStore CLI access is denied while the isolated custody plane is active; use the daemon server with its exact injected custody catalog binding"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn run_endpoint_test(args: &EndpointTestArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -977,10 +1012,11 @@ mod tests {
     use super::{
         active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
         benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain, collect_ingest_files,
-        current_user_group_names, materialize_generated_performance_workload,
-        measure_copy_with_progress, measure_copy_with_split_progress,
-        measure_ssd_stage_payload_with_progress, parse_binary_size,
-        performance_report_metadata_json, performance_report_metadata_json_from_artifact,
+        current_user_group_names, deny_direct_cli_when_custody_plane_is_active,
+        materialize_generated_performance_workload, measure_copy_with_progress,
+        measure_copy_with_split_progress, measure_ssd_stage_payload_with_progress,
+        parse_binary_size, performance_report_metadata_json,
+        performance_report_metadata_json_from_artifact,
         performance_report_qr_payload_from_artifact, performance_sync_all_calls,
         plan_performance_scenario_matrix, plan_ssd_residency_batches, read_subobject_registry,
         render_performance_json, render_performance_report,
@@ -1011,8 +1047,8 @@ mod tests {
     use dasobjectstore_daemon::{
         DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonClientError,
         DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-        DaemonIngestStage, DaemonIngressOrigin, DaemonSsdPressure, InProcessDaemonTransport,
-        SubmitIngestFilesResponse,
+        DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig, DaemonSsdPressure,
+        InProcessDaemonTransport, SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -1047,6 +1083,23 @@ mod tests {
         assert!(output.contains("Commands:"));
         assert!(output.contains("disk"));
         assert!(output.contains("health"));
+    }
+
+    #[test]
+    fn active_custody_configuration_denies_direct_cli_before_any_registry_route() {
+        let root = temp_root("active-custody-cli-denial");
+        fs::create_dir_all(&root).expect("root");
+        let config_path = root.join("daemon.json");
+        let mut config = DaemonRuntimeConfig::default_packaged();
+        config.custody.enabled = true;
+        serde_json::to_writer(File::create(&config_path).expect("config file"), &config)
+            .expect("config json");
+        let error = deny_direct_cli_when_custody_plane_is_active(&config_path)
+            .expect_err("active custody must deny direct CLI");
+        assert!(error
+            .to_string()
+            .contains("exact injected custody catalog binding"));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

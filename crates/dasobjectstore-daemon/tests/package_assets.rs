@@ -180,6 +180,33 @@ fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
     assert_contains(CUSTODY_COMPOSE_TEMPLATE, "garage-custody");
     assert_contains(CUSTODY_COMPOSE_TEMPLATE, "127.0.0.1:3901:3900");
     assert_contains(CUSTODY_CREDENTIAL_TEMPLATE, "LoadCredentialEncrypted");
+    assert_contains(
+        CUSTODY_CREDENTIAL_TEMPLATE,
+        "LoadCredentialEncrypted=<opaque-provisioner-plan-name>",
+    );
+    for required_provisioner_field in [
+        "version=1",
+        "role=provisioner",
+        "store_id",
+        "configuration_sha256",
+        "provisioner_identity",
+        "writer_access_key_id",
+        "writer_secret_access_key",
+        "reader_access_key_id",
+        "reader_secret_access_key",
+    ] {
+        assert_contains(CUSTODY_CREDENTIAL_TEMPLATE, required_provisioner_field);
+    }
+    assert_contains(
+        CUSTODY_CREDENTIAL_TEMPLATE,
+        "LoadCredentialEncrypted=<opaque-writer-name>",
+    );
+    assert_contains(
+        CUSTODY_CREDENTIAL_TEMPLATE,
+        "LoadCredentialEncrypted=<opaque-reader-name>",
+    );
+    assert_not_contains(CUSTODY_CREDENTIAL_TEMPLATE, "\nEnvironment=");
+    assert_not_contains(CUSTODY_CREDENTIAL_TEMPLATE, "\nEnvironmentFile=");
     for build in [BUILD_DEB, BUILD_RPM] {
         assert_not_contains(build, "dasobjectstore-custody-garage.service.template");
         assert_not_contains(build, "custody-garage.compose.yml.template");

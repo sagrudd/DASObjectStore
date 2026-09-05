@@ -220,6 +220,7 @@ fn run() -> Result<(), String> {
             .with_custody_plane_config(custody_garage_runtime_config(&config)?)
             .try_with_custody_catalog_path(config.custody.catalog_path.clone())
             .map_err(|error| format!("custody activation is denied: {error}"))?
+            .with_custody_admission_provisioning_authority(resolver.clone())
             .with_custody_runtime_credential_resolver(resolver);
     }
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
@@ -344,6 +345,8 @@ fn run() -> Result<(), String> {
         SystemDaemonClock,
         admin_job_registry,
     )
+    .try_with_active_custody_catalog_binding(config.custody.catalog_path.clone())
+    .map_err(|error| format!("normal daemon custody catalog binding is denied: {error}"))?
     .with_profile_binding_registry_path(profile_registry)
     .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))

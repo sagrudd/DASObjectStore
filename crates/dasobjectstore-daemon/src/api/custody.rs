@@ -3,8 +3,7 @@
 use crate::api::{DaemonJobAcceptedResponse, DaemonJobId, DaemonJobKind, PreverifiedHostSubject};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_object_service::{
-    CustodyFreshBucketProofV1, CustodyIntegrityReceiptV1, CustodyObjectInputV1,
-    CustodyStoreDefinitionV1,
+    CustodyIntegrityReceiptV1, CustodyObjectInputV1, CustodyStoreDefinitionV1,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +14,11 @@ pub const CUSTODY_RETAIN_CONFIRMATION: &str = "confirm custody retain";
 #[serde(deny_unknown_fields)]
 pub struct CustodyAdmissionRequest {
     pub definition: CustodyStoreDefinitionV1,
-    pub fresh_bucket_proof: CustodyFreshBucketProofV1,
+    /// Opaque, attended reference for the daemon-local provisioning authority.
+    /// It is never a credential, a Garage command, or a client-supplied
+    /// fresh-bucket proof.  The daemon consumes it once before invoking its
+    /// sealed custody provisioner.
+    pub provisioner_handoff_reference: String,
     #[serde(default)]
     pub dry_run: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -28,11 +31,9 @@ impl CustodyAdmissionRequest {
         self.definition.validate().map_err(|error| {
             CustodyAdmissionValidationError::InvalidDefinition(error.to_string())
         })?;
-        self.fresh_bucket_proof
-            .validate_for_definition(&self.definition, &self.fresh_bucket_proof.created_at_utc)
-            .map_err(|error| {
-                CustodyAdmissionValidationError::InvalidDefinition(error.to_string())
-            })?;
+        if self.provisioner_handoff_reference.trim().is_empty() {
+            return Err(CustodyAdmissionValidationError::InvalidProvisionerHandoff);
+        }
         if self.confirmation_marker != CUSTODY_ADMISSION_CONFIRMATION {
             return Err(CustodyAdmissionValidationError::ConfirmationMismatch);
         }
@@ -69,6 +70,7 @@ impl CustodyAdmissionResponse {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CustodyAdmissionValidationError {
     InvalidDefinition(String),
+    InvalidProvisionerHandoff,
     ConfirmationMismatch,
 }
 
@@ -76,6 +78,9 @@ impl std::fmt::Display for CustodyAdmissionValidationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidDefinition(error) => formatter.write_str(error),
+            Self::InvalidProvisionerHandoff => formatter.write_str(
+                "custody admission requires a nonblank opaque provisioner handoff reference",
+            ),
             Self::ConfirmationMismatch => {
                 formatter.write_str("custody admission confirmation marker does not match")
             }
@@ -145,8 +150,16 @@ impl std::error::Error for CustodyRetainValidationError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{CustodyRetainRequest, CUSTODY_RETAIN_CONFIRMATION};
-    use dasobjectstore_object_service::CustodyObjectInputV1;
+    use super::{
+        CustodyAdmissionRequest, CustodyRetainRequest, CUSTODY_ADMISSION_CONFIRMATION,
+        CUSTODY_RETAIN_CONFIRMATION,
+    };
+    use dasobjectstore_core::ids::StoreId;
+    use dasobjectstore_object_service::{
+        CustodyAssuranceClass, CustodyObjectInputV1, CustodyRetentionPolicyV1,
+        CustodyStoreDefinitionV1, CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1,
+        CUSTODY_PROFILE_V1,
+    };
 
     fn request() -> CustodyRetainRequest {
         CustodyRetainRequest {
@@ -160,6 +173,55 @@ mod tests {
             reader_handoff_reference: "attended://one-use/reader".to_string(),
             verified_subject: None,
             confirmation_marker: CUSTODY_RETAIN_CONFIRMATION.to_string(),
+        }
+    }
+
+    fn admission_request() -> CustodyAdmissionRequest {
+        CustodyAdmissionRequest {
+            definition: CustodyStoreDefinitionV1 {
+                store_id: StoreId::new("custody-sealed").expect("store id"),
+                bucket_name: "dos-custody-sealed".to_string(),
+                profile: CustodyStoreProfileV1 {
+                    schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                    profile: CUSTODY_PROFILE_V1.to_string(),
+                    assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                    retention: CustodyRetentionPolicyV1::required(),
+                    target_id: "nuc-192-168-0-193".to_string(),
+                    retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                    legal_hold: true,
+                    provisioner_credential_reference: "systemd-credential://provision-once"
+                        .to_string(),
+                    provisioner_identity: "custody-provisioner".to_string(),
+                    writer_credential_reference: "systemd-credential://writer-once".to_string(),
+                    writer_identity: "custody-writer".to_string(),
+                    reader_credential_reference: "systemd-credential://reader-once".to_string(),
+                    reader_identity: "custody-reader".to_string(),
+                },
+            },
+            provisioner_handoff_reference: "systemd-credential://provision-once".to_string(),
+            dry_run: false,
+            verified_subject: None,
+            confirmation_marker: CUSTODY_ADMISSION_CONFIRMATION.to_string(),
+        }
+    }
+
+    #[test]
+    fn admission_transport_is_server_owned_and_cannot_carry_a_proof_or_plan() {
+        let encoded = serde_json::to_value(admission_request()).expect("encode request");
+        assert_eq!(
+            encoded["definition"]["profile"]["retention"]["mode"],
+            "local_trusted_administrator_non_shortenable"
+        );
+        for forbidden in [
+            "fresh_bucket_proof",
+            "garage_provisioning_plan",
+            "writer_secret_access_key",
+            "reader_secret_access_key",
+        ] {
+            assert!(encoded.get(forbidden).is_none());
+            let mut attempted = encoded.clone();
+            attempted[forbidden] = serde_json::json!("client-controlled-bypass");
+            assert!(serde_json::from_value::<CustodyAdmissionRequest>(attempted).is_err());
         }
     }
 

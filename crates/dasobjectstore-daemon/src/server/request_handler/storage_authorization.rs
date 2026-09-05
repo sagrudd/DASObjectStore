@@ -67,12 +67,9 @@ where
                 message: "upload differs from the durable Synoptikon intent".to_owned(),
             });
         }
-        let store_id = resolve_authorization_store_id(
-            &request.store_id,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )
-        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let store_id = self
+            .resolve_normal_authorization_store_id(&request.store_id)
+            .map_err(ObjectBrowserAccessFailure::Endpoint)?;
         if store_id != request.store_id {
             return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
                 message: "Synoptikon projection requires an exact ObjectStore".to_owned(),
@@ -162,12 +159,9 @@ where
                 message: "verified Pistis session has expired".to_owned(),
             });
         }
-        let store_id = resolve_authorization_store_id(
-            &request.store_id,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )
-        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let store_id = self
+            .resolve_normal_authorization_store_id(&request.store_id)
+            .map_err(ObjectBrowserAccessFailure::Endpoint)?;
         if store_id != request.store_id {
             return Err(ObjectBrowserAccessFailure::InvalidVerifiedSubject {
                 message: "retained dossier writes require an exact ObjectStore".to_owned(),
@@ -185,12 +179,8 @@ where
         actor: &DaemonLocalActor,
         request: &SubmitIngestFilesRequest,
     ) -> Result<(), IngestAuthorizationFailure> {
-        let store_id = resolve_authorization_store_id(
-            &request.endpoint,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )?;
-        let stores = read_store_registry(&self.store_registry_path)?;
+        let store_id = self.resolve_normal_authorization_store_id(&request.endpoint)?;
+        let stores = self.read_normal_store_registry()?;
         let store = stores
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -270,13 +260,10 @@ where
         endpoint: &StoreId,
     ) -> Result<StoreId, ObjectBrowserAccessFailure> {
         let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
-        let store_id = resolve_authorization_store_id(
-            endpoint,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )
-        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
-        let stores = read_store_registry(&self.store_registry_path)?;
+        let store_id = self
+            .resolve_normal_authorization_store_id(endpoint)
+            .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let stores = self.read_normal_store_registry()?;
         let store = stores
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -323,13 +310,10 @@ where
         endpoint: &StoreId,
     ) -> Result<AuthorizedEndpointWrite, ObjectBrowserAccessFailure> {
         let actor = actor.ok_or(ObjectBrowserAccessFailure::MissingActor)?;
-        let store_id = resolve_authorization_store_id(
-            endpoint,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )
-        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
-        let stores = read_store_registry(&self.store_registry_path)?;
+        let store_id = self
+            .resolve_normal_authorization_store_id(endpoint)
+            .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let stores = self.read_normal_store_registry()?;
         let store = stores
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -427,12 +411,9 @@ where
             .map_err(|error| ObjectBrowserAccessFailure::InvalidVerifiedSubject {
                 message: error.to_string(),
             })?;
-        let store_id = resolve_authorization_store_id(
-            endpoint,
-            &self.store_registry_path,
-            &self.subobject_registry_path,
-        )
-        .map_err(ObjectBrowserAccessFailure::Endpoint)?;
+        let store_id = self
+            .resolve_normal_authorization_store_id(endpoint)
+            .map_err(ObjectBrowserAccessFailure::Endpoint)?;
         Ok(Some(store_id))
     }
 }

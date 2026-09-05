@@ -48,7 +48,7 @@ where
                     )));
                 }
             };
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let capacity = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id)
@@ -120,7 +120,7 @@ where
                     )));
                 }
             };
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let capacity = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id)
@@ -234,7 +234,7 @@ where
                         )))
                     }
                 };
-            let definition = match read_store_registry(&handler.store_registry_path) {
+            let definition = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id),
@@ -538,7 +538,7 @@ where
                         )));
                     }
                 };
-            let definition = match read_store_registry(&handler.store_registry_path) {
+            let definition = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id),
@@ -769,7 +769,7 @@ where
                         )))
                     }
                 };
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let capacity = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id)
@@ -843,7 +843,7 @@ where
                         )))
                     }
                 };
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let capacity = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id)
@@ -920,7 +920,7 @@ where
                         )))
                     }
                 };
-            let capacity = match read_store_registry(&handler.store_registry_path) {
+            let capacity = match handler.read_normal_store_registry() {
                 Ok(definitions) => definitions
                     .into_iter()
                     .find(|definition| definition.store_id == store_id)

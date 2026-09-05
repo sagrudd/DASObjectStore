@@ -161,14 +161,16 @@ pub use config::{
     LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
 };
 pub use custody_garage::{
-    CustodyRuntimeCredential, CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole,
-    GarageCustodyProvisioner, GarageCustodyS3Reader, GarageCustodyS3Writer,
-    SystemdServiceCredentialHandoffResolver, CUSTODY_HANDOFF_CONSUMPTION_DIRECTORY,
-    SYSTEMD_CREDENTIALS_DIRECTORY_ENV, SYSTEMD_CUSTODY_HANDOFF_REFERENCE_PREFIX,
+    CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredential,
+    CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole, GarageCustodyProvisioner,
+    GarageCustodyS3Reader, GarageCustodyS3Writer, SystemdServiceCredentialHandoffResolver,
+    CUSTODY_HANDOFF_CONSUMPTION_DIRECTORY, SYSTEMD_CREDENTIALS_DIRECTORY_ENV,
+    SYSTEMD_CUSTODY_HANDOFF_REFERENCE_PREFIX,
 };
 #[cfg(test)]
 pub(crate) use custody_garage::{
-    TestOnlyCustodyRuntimeCredentialHandoff, TestOnlyCustodyRuntimeCredentialResolver,
+    TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
+    TestOnlyCustodyRuntimeCredentialResolver,
 };
 pub(crate) use destage_admission::build_destage_capacity_claim;
 pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;

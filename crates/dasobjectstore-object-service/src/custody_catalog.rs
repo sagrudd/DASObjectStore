@@ -835,7 +835,7 @@ mod tests {
         CustodyCatalogEntryV1,
     };
     use crate::custody::{
-        CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreDefinitionV1,
+        CustodyAssuranceClass, CustodyRetentionPolicyV1, CustodyStoreDefinitionV1,
         CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
         R237_BOOTSTRAP_BUCKET_NAME, R237_BOOTSTRAP_STORE_ID,
     };
@@ -866,7 +866,7 @@ mod tests {
                 schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
                 profile: CUSTODY_PROFILE_V1.to_string(),
                 assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
                 target_id: "nuc-192-168-0-193".to_string(),
                 retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
                 legal_hold: true,

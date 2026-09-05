@@ -881,7 +881,7 @@ where
                     )))
                 }
             };
-        let definition = match read_store_registry(&self.store_registry_path) {
+        let definition = match self.read_normal_store_registry() {
             Ok(definitions) => definitions
                 .into_iter()
                 .find(|definition| definition.store_id == store_id),
@@ -1321,7 +1321,7 @@ where
                     error.to_string(),
                 ))
             })?;
-        let capacity = match read_store_registry(&self.store_registry_path) {
+        let capacity = match self.read_normal_store_registry() {
             Ok(definitions) => definitions
                 .into_iter()
                 .find(|definition| definition.store_id == store_id)

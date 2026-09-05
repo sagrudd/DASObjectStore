@@ -509,7 +509,7 @@ fn advertise_provider_stream_downloads<S, C>(
     else {
         return;
     };
-    let Ok(definitions) = read_store_registry(&handler.store_registry_path) else {
+    let Ok(definitions) = handler.read_normal_store_registry() else {
         return;
     };
     let Some(capacity) = definitions

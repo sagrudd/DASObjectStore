@@ -334,7 +334,7 @@ mod tests {
         upsert_store_definition_with_custody_catalog, StoreRegistryAction,
     };
     use crate::custody::{
-        CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreDefinitionV1,
+        CustodyAssuranceClass, CustodyRetentionPolicyV1, CustodyStoreDefinitionV1,
         CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use crate::custody_catalog::{create_custody_catalog_entry, CustodyCatalogBinding};
@@ -523,7 +523,7 @@ mod tests {
                 schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
                 profile: CUSTODY_PROFILE_V1.to_string(),
                 assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
                 target_id: "nuc-193".to_string(),
                 retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
                 legal_hold: true,

@@ -68,7 +68,34 @@ impl CustodyAssuranceClass {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CustodyRetentionMode {
-    LocalTrustedAdministratorOverlay,
+    LocalTrustedAdministratorNonShortenable,
+}
+
+/// The sealed retention policy stored in the custody definition and ledger.
+/// Its JSON shape deliberately makes the policy fact explicit as
+/// `retention.mode=local_trusted_administrator_non_shortenable`, distinct
+/// from the broader `assurance_class=local_trusted_administrator_overlay`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustodyRetentionPolicyV1 {
+    pub mode: CustodyRetentionMode,
+}
+
+impl CustodyRetentionPolicyV1 {
+    pub fn required() -> Self {
+        Self {
+            mode: CustodyRetentionMode::LocalTrustedAdministratorNonShortenable,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ObjectServiceError> {
+        if self.mode != CustodyRetentionMode::LocalTrustedAdministratorNonShortenable {
+            return Err(invalid(
+                "custody retention.mode must be local_trusted_administrator_non_shortenable",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// The only Object Lock-shaped policy accepted at the custody S3 boundary.
@@ -127,7 +154,7 @@ pub struct CustodyStoreProfileV1 {
     pub schema: String,
     pub profile: String,
     pub assurance_class: CustodyAssuranceClass,
-    pub retention_mode: CustodyRetentionMode,
+    pub retention: CustodyRetentionPolicyV1,
     pub target_id: String,
     pub retention_until_utc: String,
     pub legal_hold: bool,
@@ -150,11 +177,7 @@ impl CustodyStoreProfileV1 {
         if self.assurance_class != CustodyAssuranceClass::LocalTrustedAdministratorOverlay {
             return Err(invalid("unsupported custody assurance class"));
         }
-        if self.retention_mode != CustodyRetentionMode::LocalTrustedAdministratorOverlay {
-            return Err(invalid(
-                "only append-only legal-hold custody retention is supported",
-            ));
-        }
+        self.retention.validate()?;
         require_nonblank("target_id", &self.target_id)?;
         canonical_timestamp("retention_until_utc", &self.retention_until_utc)?;
         if !self.legal_hold {
@@ -2600,7 +2623,7 @@ mod tests {
             schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
             profile: CUSTODY_PROFILE_V1.to_string(),
             assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-            retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+            retention: CustodyRetentionPolicyV1::required(),
             target_id: "nuc-192.168.0.193".to_string(),
             retention_until_utc: RETENTION.to_string(),
             legal_hold: true,

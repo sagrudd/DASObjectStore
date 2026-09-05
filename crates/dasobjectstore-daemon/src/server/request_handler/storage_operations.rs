@@ -77,9 +77,15 @@ where
                 dry_run: request.dry_run,
             })
             .map_err(|error| ("store_delete_failed", error.to_string()))?;
-        let host_registry =
-            delete_store_definition_maybe(&self.store_registry_path, &store_id, request.dry_run)
-                .map_err(|error| ("store_registry_delete_failed", error.to_string()))?;
+        let host_registry = delete_store_definition_maybe(
+            &self.store_registry_path,
+            &store_id,
+            request.dry_run,
+            &self
+                .normal_custody_catalog_binding()
+                .map_err(|error| ("store_registry_delete_failed", error.to_string()))?,
+        )
+        .map_err(|error| ("store_registry_delete_failed", error.to_string()))?;
         let host_subobjects = delete_subobjects_for_store_maybe(
             &self.subobject_registry_path,
             &store_id,
@@ -97,6 +103,9 @@ where
                         &portable_registry_path,
                         &store_id,
                         request.dry_run,
+                        &self.normal_custody_catalog_binding().map_err(|error| {
+                            ("portable_store_registry_delete_failed", error.to_string())
+                        })?,
                     )
                     .map_err(|error| {
                         ("portable_store_registry_delete_failed", error.to_string())
@@ -398,7 +407,8 @@ where
                     .to_string(),
             ));
         }
-        let definition = read_store_registry(&self.store_registry_path)
+        let definition = self
+            .read_normal_store_registry()
             .map_err(|error| ("profile_repair_unavailable", error.to_string()))?
             .into_iter()
             .find(|definition| definition.store_id == binding.manifest.store_id)
@@ -587,9 +597,9 @@ where
         ),
         (&'static str, String),
     > {
-        let definitions =
-            dasobjectstore_object_service::read_store_registry(&self.store_registry_path)
-                .map_err(|error| (error_code, error.to_string()))?;
+        let definitions = self
+            .read_normal_store_registry()
+            .map_err(|error| (error_code, error.to_string()))?;
         let store_definitions = definitions
             .into_iter()
             .map(|definition| {
@@ -778,7 +788,7 @@ where
                 .store_inventory_for_remote_easyconnect_session(&request, session_id)
                 .map_err(|error| ObjectServiceError::CommandFailed(error.to_string()));
         }
-        let stores = read_store_registry(&self.store_registry_path)?;
+        let stores = self.read_normal_store_registry()?;
         let mut inventory = Vec::new();
         for definition in stores {
             let bucket_name = if definition.policy.export_policy == ExportPolicy::S3 {
@@ -832,7 +842,7 @@ where
             }
         })?;
         let actor = DaemonLocalActor::new(0).with_username(session.approved_actor.clone());
-        let stores = read_store_registry(&self.store_registry_path).map_err(|error| {
+        let stores = self.read_normal_store_registry().map_err(|error| {
             RemoteEasyconnectPairedSessionStoreError::Json {
                 path: self.store_registry_path.clone(),
                 message: error.to_string(),
