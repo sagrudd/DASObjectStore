@@ -3,6 +3,7 @@
 pub mod compose;
 pub mod credentials;
 pub mod custody;
+pub mod custody_attestation;
 pub mod custody_catalog;
 pub mod garage;
 pub mod inspection;
@@ -25,8 +26,7 @@ pub use credentials::{
     SystemCredentialEntropy, GARAGE_CREDENTIAL_REGISTRY_ENV,
 };
 pub use custody::{
-    accept_custody_off_nuc_attestation, append_custody_retention_extension,
-    consume_custody_attestation_for_formal_gate, create_custody_ledger,
+    accept_custody_off_nuc_attestation, append_custody_retention_extension, create_custody_ledger,
     create_custody_ledger_from_definition, custody_bucket_is_reserved, custody_object_key,
     custody_provisioning_request_sha256, custody_store_definition_sha256, inspect_custody_ledger,
     plan_custody_garage_provisioning, record_custody_incomplete_verifier_attempt,
@@ -35,22 +35,31 @@ pub use custody::{
     CustodyFormalGateAttestationExpectationV1, CustodyFreshBucketProofV1, CustodyGarageCredential,
     CustodyGarageProvisionerIdentity, CustodyGarageProvisioningPlan,
     CustodyGarageProvisioningRequest, CustodyIntegrityReceiptV1, CustodyLedgerInspectionV1,
-    CustodyObjectInputV1, CustodyObjectReader, CustodyObjectState, CustodyObjectWriter,
-    CustodyOffNucAttestationAuthority, CustodyOffNucAttestationBodyV1, CustodyOffNucAttestationV1,
-    CustodyOffNucVerifierCheckpointV1, CustodyOffNucVerifierState, CustodyReadbackObservationV1,
-    CustodyRetentionMode, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
-    CustodyVerifierAttemptResult, CustodyVerifierAttemptV1,
+    CustodyObjectInputV1, CustodyObjectLockPolicyV1, CustodyObjectReader, CustodyObjectState,
+    CustodyObjectWriter, CustodyOffNucAttestationAuthority, CustodyOffNucAttestationBodyV1,
+    CustodyOffNucAttestationV1, CustodyOffNucVerifierCheckpointV1, CustodyOffNucVerifierState,
+    CustodyReadbackObservationV1, CustodyRetentionMode, CustodyStoreDefinitionV1,
+    CustodyStoreProfileV1, CustodyVerifierAttemptResult, CustodyVerifierAttemptV1,
     CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
-    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1,
-    CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
+    CUSTODY_OBJECT_LOCK_POLICY_ID, CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1,
+    CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+};
+pub use custody_attestation::{
+    CustodyEd25519AuthorityV1, CustodyFormalGateConsumptionV2, CustodyFormalGateExpectationV2,
+    CustodyOffNucAttestationV2, CustodyOffNucJournal, CustodyOffNucObservationResult,
+    CustodyOffNucPreReadRequestV1, CustodySignedAttestationV2, CustodySignedPreReadRequestV1,
+    CustodySignedRecordV1, CUSTODY_ATTESTATION_ALGORITHM_ED25519,
+    CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V2, CUSTODY_OFF_NUC_PRE_READ_REQUEST_SCHEMA_V1,
+    CUSTODY_SIGNED_RECORD_SCHEMA_V1,
 };
 pub use custody_catalog::{
     append_claimed_custody_catalog_entry, catalog_contains_bucket, catalog_contains_store,
     claim_custody_catalog_admission, create_custody_catalog_entry, custody_ledger_path_for_catalog,
     default_custody_catalog_path, default_custody_ledger_path, read_custody_catalog,
+    reject_bound_catalogued_custody_definition, reject_bound_catalogued_custody_mutation,
     reject_catalogued_custody_definition, reject_catalogued_custody_mutation,
-    reject_default_catalogued_custody_definition, reject_default_catalogued_custody_mutation,
-    CustodyCatalogAdmissionClaim, CustodyCatalogEntryV1, CUSTODY_CATALOG_ENV,
+    CustodyCatalogAdmissionClaim, CustodyCatalogBinding, CustodyCatalogEntryV1,
 };
 pub use garage::{
     render_garage_data_directories, GarageDataDirectory, GarageProvider, GarageProviderConfig,
@@ -62,8 +71,8 @@ pub use inspection::{
     parse_docker_published_bind_address, DEFAULT_OBJECT_SERVICE_PORT,
 };
 pub use layout::{
-    bucket_name_for_definition, plan_store_service_layout, StoreServiceDefinition,
-    StoreServiceLayout,
+    bucket_name_for_definition, plan_store_service_layout,
+    plan_store_service_layout_with_custody_catalog, StoreServiceDefinition, StoreServiceLayout,
 };
 pub use provider::{
     ComposeRenderRequest, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
@@ -74,8 +83,10 @@ pub use provisioning::{
     GarageProvisioningPlan,
 };
 pub use registry::{
-    default_store_registry_path, delete_store_definition, portable_store_registry_path,
-    read_store_registry, upsert_store_definition, StoreRegistryAction, StoreRegistryDeleteReport,
+    default_store_registry_path, delete_store_definition,
+    delete_store_definition_with_custody_catalog, portable_store_registry_path,
+    read_store_registry, read_store_registry_with_custody_catalog, upsert_store_definition,
+    upsert_store_definition_with_custody_catalog, StoreRegistryAction, StoreRegistryDeleteReport,
     StoreRegistryUpdateReport, PORTABLE_STORE_REGISTRY_RELATIVE_PATH, STORE_REGISTRY_ENV,
 };
 pub use remote_upload::{

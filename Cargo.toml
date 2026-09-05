@@ -27,6 +27,7 @@ argon2 = "0.5.3"
 axum = "0.8.9"
 axum-server = { version = "0.7.2", features = ["tls-rustls"] }
 base64 = "0.22.1"
+ed25519-dalek = { version = "2.2", default-features = false }
 bytes = "1.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 clap = { version = "4.5.48", features = ["derive"] }

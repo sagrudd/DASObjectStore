@@ -10,9 +10,10 @@ use super::service::{
 };
 use dasobjectstore_object_service::{
     custody_object_key, custody_provisioning_request_sha256, plan_custody_garage_provisioning,
-    CustodyFreshBucketProofV1, CustodyGarageProvisioningRequest, CustodyObjectReader,
-    CustodyObjectState, CustodyObjectWriter, ObjectServiceError,
-    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1,
+    CustodyFreshBucketProofV1, CustodyGarageProvisioningRequest, CustodyObjectLockPolicyV1,
+    CustodyObjectReader, CustodyObjectState, CustodyObjectWriter, ObjectServiceError,
+    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
+    CUSTODY_OBJECT_LOCK_POLICY_ID,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -400,7 +401,12 @@ impl<'a, R: ServiceCommandRunner> GarageCustodyProvisioner<'a, R> {
     }
 }
 
-/// S3 writer holding only the dedicated write credential in memory.
+/// S3 writer holding only the dedicated write credential in memory. Garage
+/// 2.3 has no native Object Lock/retention/legal-hold API: the exact policy is
+/// enforced by the sealed DAS ledger, conditional content-addressed put,
+/// immutable receipt, and subsequent metadata/readback divergence detection.
+/// We deliberately do not send unsupported AWS Object Lock headers and never
+/// claim provider COMPLIANCE/WORM.
 pub struct GarageCustodyS3Writer<'a, R> {
     runner: &'a R,
     endpoint: String,
@@ -408,6 +414,8 @@ pub struct GarageCustodyS3Writer<'a, R> {
     identity: String,
     environment: Vec<(String, String)>,
     scratch_root: PathBuf,
+    object_lock_policy: CustodyObjectLockPolicyV1,
+    retention_until_utc: String,
 }
 
 /// S3 reader holding only the separate read credential in memory.
@@ -429,14 +437,51 @@ impl<'a, R: ServiceCommandRunner> GarageCustodyS3Writer<'a, R> {
         environment: Vec<(String, String)>,
         scratch_root: impl Into<PathBuf>,
     ) -> Self {
-        Self {
+        Self::new_with_object_lock(
+            runner,
+            endpoint,
+            bucket,
+            identity,
+            environment,
+            scratch_root,
+            CustodyObjectLockPolicyV1::required(),
+            "2099-01-01T00:00:00Z",
+        )
+        .expect("fixed local custody object-lock policy is valid")
+    }
+
+    /// Construct the only writer admitted by the custody daemon. The policy
+    /// and retention are read from the sealed ledger, never from a normal
+    /// profile, request, or S3 client. The timestamp is ledger evidence rather
+    /// than a Garage-native lock because Garage has no supported Object Lock
+    /// operation; a raw S3 divergence therefore fails custody readback.
+    pub fn new_with_object_lock(
+        runner: &'a R,
+        endpoint: impl Into<String>,
+        bucket: impl Into<String>,
+        identity: impl Into<String>,
+        environment: Vec<(String, String)>,
+        scratch_root: impl Into<PathBuf>,
+        object_lock_policy: CustodyObjectLockPolicyV1,
+        retention_until_utc: impl Into<String>,
+    ) -> Result<Self, ObjectServiceError> {
+        object_lock_policy.validate()?;
+        let retention_until_utc = retention_until_utc.into();
+        chrono::DateTime::parse_from_rfc3339(&retention_until_utc).map_err(|error| {
+            invalid(format!(
+                "custody object-lock retention timestamp is invalid: {error}"
+            ))
+        })?;
+        Ok(Self {
             runner,
             endpoint: endpoint.into(),
             bucket: bucket.into(),
             identity: identity.into(),
             environment,
             scratch_root: scratch_root.into(),
-        }
+            object_lock_policy,
+            retention_until_utc,
+        })
     }
 }
 
@@ -478,9 +523,11 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
                 let sha = head
                     .metadata
                     .dasobjectstore_sha256
+                    .as_deref()
                     .ok_or_else(|| invalid("custody Garage object omits SHA-256 metadata"))?;
+                self.validate_object_lock_metadata(&head.metadata)?;
                 Ok(CustodyObjectState::Existing {
-                    content_sha256: sha,
+                    content_sha256: sha.to_string(),
                     content_length: head.content_length,
                 })
             }
@@ -492,6 +539,7 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
     }
 
     fn put_if_absent(&mut self, object_key: &str, bytes: &[u8]) -> Result<(), ObjectServiceError> {
+        self.object_lock_policy.validate()?;
         let expected_key = custody_object_key(&sha256_hex(bytes))?;
         if object_key != expected_key {
             return Err(invalid(
@@ -511,7 +559,13 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
             "--if-none-match".into(),
             "*".into(),
             "--metadata".into(),
-            format!("dasobjectstore-sha256={}", sha256_hex(bytes)),
+            format!(
+                "dasobjectstore-sha256={},dasobjectstore-object-lock-policy={},dasobjectstore-object-lock-shortening-forbidden=true,dasobjectstore-object-lock-delete-forbidden=true,dasobjectstore-object-lock-hold-authority={},dasobjectstore-object-lock-retention-until-utc={}",
+                sha256_hex(bytes),
+                CUSTODY_OBJECT_LOCK_POLICY_ID,
+                CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
+                self.retention_until_utc,
+            ),
             "--endpoint-url".into(),
             self.endpoint.clone(),
         ];
@@ -520,6 +574,25 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
                 .run_with_display_args_and_env("aws", &args, &args, &self.environment);
         let _ = fs::remove_file(&path);
         result.map(|_| ()).map_err(runtime_error)
+    }
+}
+
+impl<R: ServiceCommandRunner> GarageCustodyS3Writer<'_, R> {
+    fn validate_object_lock_metadata(
+        &self,
+        metadata: &GarageMetadata,
+    ) -> Result<(), ObjectServiceError> {
+        if metadata.object_lock_policy.as_deref() != Some(CUSTODY_OBJECT_LOCK_POLICY_ID)
+            || metadata.shortening_forbidden.as_deref() != Some("true")
+            || metadata.delete_forbidden.as_deref() != Some("true")
+            || metadata.hold_authority.as_deref() != Some(CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY)
+            || metadata.retention_until_utc.as_deref() != Some(self.retention_until_utc.as_str())
+        {
+            return Err(invalid(
+                "raw S3 bypass detected: custody object lacks the sealed local trusted-administrator Object Lock policy metadata; Garage remains a trusted-administrator limitation, not provider COMPLIANCE/WORM",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -562,6 +635,16 @@ struct GarageHead {
 struct GarageMetadata {
     #[serde(rename = "dasobjectstore-sha256", alias = "dasobjectstore_sha256")]
     dasobjectstore_sha256: Option<String>,
+    #[serde(rename = "dasobjectstore-object-lock-policy")]
+    object_lock_policy: Option<String>,
+    #[serde(rename = "dasobjectstore-object-lock-shortening-forbidden")]
+    shortening_forbidden: Option<String>,
+    #[serde(rename = "dasobjectstore-object-lock-delete-forbidden")]
+    delete_forbidden: Option<String>,
+    #[serde(rename = "dasobjectstore-object-lock-hold-authority")]
+    hold_authority: Option<String>,
+    #[serde(rename = "dasobjectstore-object-lock-retention-until-utc")]
+    retention_until_utc: Option<String>,
 }
 
 fn head_args(bucket: &str, key: &str, endpoint: &str) -> Vec<String> {
@@ -1072,11 +1155,54 @@ mod tests {
             .find(|args| args.iter().any(|arg| arg == "put-object"))
             .unwrap();
         assert!(put.windows(2).any(|args| args == ["--if-none-match", "*"]));
+        assert!(put
+            .iter()
+            .any(|arg| arg.contains("local_trusted_administrator_non_shortenable")));
+        assert!(put.iter().all(|arg| !arg.starts_with("--object-lock-")));
         assert!(put.iter().all(|arg| arg != "--delete" && arg != "--owner"));
         assert!(calls
             .iter()
             .any(|args| args.iter().any(|arg| arg == "get-object")));
         let _ = fs::remove_dir_all(root);
+    }
+
+    struct RawS3BypassRunner;
+
+    impl ServiceCommandRunner for RawS3BypassRunner {
+        fn run(
+            &self,
+            _program: &str,
+            args: &[String],
+        ) -> Result<ServiceCommandOutput, DaemonServiceRuntimeError> {
+            if args.iter().any(|argument| argument == "head-object") {
+                return Ok(ServiceCommandOutput {
+                    stdout: r#"{"ContentLength":1,"Metadata":{"dasobjectstore-sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#.to_string(),
+                });
+            }
+            Ok(ServiceCommandOutput {
+                stdout: String::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn raw_s3_object_without_the_sealed_overlay_metadata_is_not_custody() {
+        let runner = RawS3BypassRunner;
+        let mut writer = GarageCustodyS3Writer::new(
+            &runner,
+            "http://garage.invalid",
+            "custody",
+            "writer",
+            vec![("AWS_ACCESS_KEY_ID".into(), "writer-key".into())],
+            std::env::temp_dir(),
+        );
+        let error = writer
+            .object_state(
+                "custody/sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            )
+            .expect_err("raw S3 metadata cannot impersonate the local custody overlay");
+        assert!(error.to_string().contains("raw S3 bypass"));
+        assert!(error.to_string().contains("not provider COMPLIANCE/WORM"));
     }
 
     #[test]

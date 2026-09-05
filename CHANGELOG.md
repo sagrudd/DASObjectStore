@@ -29,6 +29,15 @@
   and reader material is read only from systemd's private credential directory
   using opaque references and atomically consumed with a hash-only marker;
   package installation never renders, loads, enables, or starts custody.
+- Complete the source-only custody hardening: active custody composition has
+  one canonical catalog binding injected into normal registry/layout/
+  provisioning/reconciliation guards; path and endpoint aliases fail closed;
+  the sealed local non-shortenable policy and hold authority are bound into
+  ledger/receipt/readback evidence without claiming Garage Object Lock or
+  provider WORM. Add the strict raw-JCS, pinned Ed25519 off-NUC journal that
+  issues a nonce before read, consumes one terminal attempt, and performs
+  atomic full-measurement formal-gate consumption. The previous v1 digest-hook
+  formal consumer is disabled.
 
 ## 0.179.1 - 2026-09-04
 

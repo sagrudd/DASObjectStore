@@ -24,15 +24,18 @@ use dasobjectstore_object_service::{
     append_claimed_custody_catalog_entry, claim_custody_catalog_admission,
     custody_ledger_path_for_catalog, default_custody_catalog_path,
     default_garage_credential_registry_path, generate_per_store_credentials,
-    inspect_custody_ledger, plan_garage_provisioning, plan_store_service_layout,
-    read_custody_catalog, read_store_registry, reject_default_catalogued_custody_mutation,
-    resolve_managed_store_credentials, retain_custody_object_with_readback,
-    GarageProvisioningCommandKind, ObjectServiceError, ObjectServiceProviderId, ServiceState,
-    StoreServiceCredential, SystemCredentialEntropy,
+    inspect_custody_ledger, plan_garage_provisioning,
+    plan_store_service_layout_with_custody_catalog, read_custody_catalog,
+    read_store_registry_with_custody_catalog, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, resolve_managed_store_credentials,
+    retain_custody_object_with_readback, CustodyCatalogBinding, GarageProvisioningCommandKind,
+    ObjectServiceError, ObjectServiceProviderId, ServiceState, StoreServiceCredential,
+    SystemCredentialEntropy,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -82,7 +85,12 @@ pub struct GarageServiceController<R> {
     capacity_admission_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     ingest_resource_gate: Option<Arc<DaemonIngestResourceGate>>,
     custody_runtime_credential_resolver: Option<Arc<dyn CustodyRuntimeCredentialResolver>>,
-    custody_catalog_path: PathBuf,
+    custody_catalog: CustodyCatalogBinding,
+    /// A custody plane is never allowed to inherit the fallback catalog. The
+    /// normal plane has a fixed default solely to reject catalogue aliases,
+    /// while an active custody plane must provide one explicit, canonical
+    /// binding during daemon composition.
+    custody_catalog_explicitly_bound: bool,
     custody_plane_config: Option<GarageServiceRuntimeConfig>,
     custody_pending_admissions: Mutex<BTreeMap<String, PendingCustodyAdmission>>,
 }
@@ -112,7 +120,9 @@ where
             capacity_admission_provider: None,
             ingest_resource_gate: None,
             custody_runtime_credential_resolver: None,
-            custody_catalog_path: default_custody_catalog_path(),
+            custody_catalog: CustodyCatalogBinding::new(default_custody_catalog_path())
+                .expect("the fixed default custody catalog path is absolute and canonical"),
+            custody_catalog_explicitly_bound: false,
             custody_plane_config: None,
             custody_pending_admissions: Mutex::new(BTreeMap::new()),
         }
@@ -140,9 +150,23 @@ where
 
     /// Set only by daemon composition or isolated tests. The API request never
     /// supplies this path, so a client cannot redirect sealed custody state.
-    pub fn with_custody_catalog_path(mut self, path: impl Into<PathBuf>) -> Self {
-        self.custody_catalog_path = path.into();
-        self
+    pub fn try_with_custody_catalog_path(
+        mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, DaemonServiceRuntimeError> {
+        let binding = CustodyCatalogBinding::new(path)?;
+        if self.custody_catalog_explicitly_bound && self.custody_catalog != binding {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "multiple custody catalog bindings are forbidden".to_string(),
+            });
+        }
+        self.custody_catalog = binding;
+        self.custody_catalog_explicitly_bound = true;
+        Ok(self)
+    }
+
+    fn custody_catalog_path(&self) -> &Path {
+        self.custody_catalog.path()
     }
 
     /// Supply the deliberately separate Garage control/data plane used by
@@ -164,6 +188,12 @@ where
                         .to_string(),
             }
         })?;
+        if !self.custody_catalog_explicitly_bound {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "an active custody plane requires one explicit canonical custody catalog binding"
+                    .to_string(),
+            });
+        }
         custody.validate()?;
         validate_distinct_custody_plane(&self.config, custody)?;
         Ok(custody)
@@ -329,8 +359,10 @@ where
     ) -> Result<GarageProvisioningSummary, DaemonServiceRuntimeError> {
         self.config.validate()?;
         for credential in credentials {
-            reject_default_catalogued_custody_mutation(
+            reject_bound_catalogued_custody_definition(
+                &self.custody_catalog,
                 &credential.store_id,
+                &credential.bucket_name,
                 "normal Garage bucket provisioning",
             )?;
         }
@@ -385,7 +417,7 @@ where
         // Reserve both identity coordinates before the first Garage command.
         // If proving or creating the bucket fails, the claim deliberately
         // remains terminal rather than opening a recovery/reuse route.
-        let claim = claim_custody_catalog_admission(&self.custody_catalog_path, &definition)?;
+        let claim = claim_custody_catalog_admission(self.custody_catalog_path(), &definition)?;
         let proof = super::GarageCustodyProvisioner::new(custody_config, &self.runner)
             .provision_fresh(request, created_at_utc, creation_nonce)
             .map_err(DaemonServiceRuntimeError::ObjectService)?;
@@ -426,7 +458,7 @@ where
                 operation: error.to_string(),
             })?;
         let _ = self.custody_plane_config()?;
-        let catalog_path = self.custody_catalog_path.clone();
+        let catalog_path = self.custody_catalog_path().to_path_buf();
         if request.dry_run {
             // Read-only collision preflight only. A dry run must not reserve a
             // store/bucket claim or create any ledger/catalog parent.
@@ -528,7 +560,7 @@ where
                 operation: format!("custody retain store id is invalid: {error}"),
             }
         })?;
-        let entry = read_custody_catalog(&self.custody_catalog_path)?
+        let entry = read_custody_catalog(self.custody_catalog_path())?
             .into_iter()
             .find(|entry| entry.definition.store_id == store_id)
             .ok_or_else(|| DaemonServiceRuntimeError::UnsupportedOperation {
@@ -575,14 +607,16 @@ where
                     .to_string(),
             })?
             .join(".custody-scratch");
-        let mut writer = GarageCustodyS3Writer::new(
+        let mut writer = GarageCustodyS3Writer::new_with_object_lock(
             &self.runner,
             &custody_config.endpoint,
             &entry.definition.bucket_name,
             writer_identity,
             writer_environment,
             &scratch_root,
-        );
+            inspection.object_lock_policy,
+            inspection.retention_until_utc,
+        )?;
         let mut reader = GarageCustodyS3Reader::new(
             &self.runner,
             &custody_config.endpoint,
@@ -654,7 +688,11 @@ where
         )
             -> Result<(), crate::runtime::DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairS3Reconciliation, DaemonServiceRuntimeError> {
-        reject_default_catalogued_custody_mutation(&store_id, "Garage reconciliation")?;
+        reject_bound_catalogued_custody_mutation(
+            &self.custody_catalog,
+            &store_id,
+            "Garage reconciliation",
+        )?;
         super::service_reconciliation::reconcile_store_s3(
             &self.config,
             &self.runner,
@@ -1036,8 +1074,10 @@ where
 {
     let registry_path = registry_path.into();
     let credential_registry_path = credential_registry_path.into();
-    let definitions = read_store_registry(&registry_path)?;
-    let layout = plan_store_service_layout(&definitions)?;
+    let definitions =
+        read_store_registry_with_custody_catalog(&registry_path, &controller.custody_catalog)?;
+    let layout =
+        plan_store_service_layout_with_custody_catalog(&definitions, &controller.custody_catalog)?;
     let mut entropy = SystemCredentialEntropy;
     let (credentials, credentials_issued, credentials_reused, credentials_rotated) = if dry_run {
         let credentials =
@@ -1212,24 +1252,49 @@ fn validate_distinct_custody_plane(
 ) -> Result<(), DaemonServiceRuntimeError> {
     normal.validate()?;
 
+    let normal_compose_file = canonical_service_path("normal compose file", &normal.compose_file)?;
+    let custody_compose_file =
+        canonical_service_path("custody compose file", &custody.compose_file)?;
+    let normal_project_directory = normal
+        .project_directory
+        .as_ref()
+        .map(|path| canonical_service_path("normal project directory", path))
+        .transpose()?;
+    let custody_project_directory = custody
+        .project_directory
+        .as_ref()
+        .map(|path| canonical_service_path("custody project directory", path))
+        .transpose()?;
+    let normal_config_path = canonical_service_path("normal Garage config", &normal.config_path)?;
+    let custody_config_path =
+        canonical_service_path("custody Garage config", &custody.config_path)?;
+    let normal_metadata_path =
+        canonical_service_path("normal Garage metadata", &normal.metadata_path)?;
+    let custody_metadata_path =
+        canonical_service_path("custody Garage metadata", &custody.metadata_path)?;
+    let normal_data_path = canonical_service_path("normal Garage data", &normal.data_path)?;
+    let custody_data_path = canonical_service_path("custody Garage data", &custody.data_path)?;
+    let normal_endpoint = canonical_endpoint_authority(&normal.endpoint)?;
+    let custody_endpoint = canonical_endpoint_authority(&custody.endpoint)?;
+
     let overlaps = [
-        ("compose file", normal.compose_file == custody.compose_file),
+        ("compose file", normal_compose_file == custody_compose_file),
         (
             "project directory",
-            normal.project_directory == custody.project_directory,
+            normal_project_directory == custody_project_directory,
         ),
         (
             "compose project",
             normal.compose_project == custody.compose_project,
         ),
         ("service name", normal.service_name == custody.service_name),
-        ("config path", normal.config_path == custody.config_path),
+        ("config path", normal_config_path == custody_config_path),
         (
             "metadata path",
-            normal.metadata_path == custody.metadata_path,
+            normal_metadata_path == custody_metadata_path,
         ),
-        ("data path", normal.data_path == custody.data_path),
-        ("endpoint", normal.endpoint == custody.endpoint),
+        ("data path", normal_data_path == custody_data_path),
+        ("endpoint", normal_endpoint == custody_endpoint),
     ];
     let shared = overlaps
         .iter()
@@ -1244,6 +1309,161 @@ fn validate_distinct_custody_plane(
         });
     }
     Ok(())
+}
+
+/// Canonicalise an existing path, or resolve a claimed non-existing tail below
+/// its canonical existing parent. `.`/`..` are denied, and a symlink below the
+/// platform-owned top-level aliases is denied rather than compared as a raw
+/// spelling. macOS' `/var` compatibility alias is canonicalised so packaged
+/// Linux-shaped test coordinates remain comparable on the build host.
+fn canonical_service_path(
+    field: &'static str,
+    path: &Path,
+) -> Result<PathBuf, DaemonServiceRuntimeError> {
+    require_absolute_path(field, path)?;
+    #[cfg(target_os = "macos")]
+    let configured = {
+        let mut components = path.components();
+        let _ = components.next();
+        match components.next() {
+            Some(std::path::Component::Normal(component))
+                if matches!(component.to_str(), Some("var" | "etc" | "tmp")) =>
+            {
+                let alias = Path::new("/").join(component);
+                std::fs::canonicalize(&alias)
+                    .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!(
+                            "cannot canonicalise platform alias {}: {error}",
+                            alias.display()
+                        ),
+                    })?
+                    .join(components.as_path())
+            }
+            _ => path.to_path_buf(),
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let configured = path.to_path_buf();
+    let components = configured
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::RootDir => None,
+            std::path::Component::Normal(component) => Some(Ok(component)),
+            std::path::Component::CurDir
+            | std::path::Component::ParentDir
+            | std::path::Component::Prefix(_) => {
+                Some(Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!("{field} has normalisation-ambiguous components"),
+                }))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut existing = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+    let mut missing_at = None;
+    for (index, component) in components.iter().enumerate() {
+        existing.push(component);
+        match std::fs::symlink_metadata(&existing) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!("{field} has a symbolic-link component"),
+                    });
+                }
+                if index + 1 < components.len() && !metadata.is_dir() {
+                    return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: format!("{field} has a non-directory ancestor"),
+                    });
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing_at = Some(index);
+                existing.pop();
+                break;
+            }
+            Err(error) => {
+                return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!("cannot inspect {field}: {error}"),
+                });
+            }
+        }
+    }
+    let canonical_existing = std::fs::canonicalize(&existing).map_err(|error| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: format!("cannot canonicalise {field}: {error}"),
+        }
+    })?;
+    Ok(match missing_at {
+        Some(index) => components[index..]
+            .iter()
+            .fold(canonical_existing, |current, component| {
+                current.join(component)
+            }),
+        None => canonical_existing,
+    })
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct CanonicalEndpointAuthority {
+    scheme: String,
+    host: String,
+    port: u16,
+}
+
+/// Compare endpoint *authorities*, not raw URL spelling. Loopback names and
+/// addresses intentionally collapse to one identity, preventing an ordinary
+/// plane at `localhost` from being presented as distinct from `127.0.0.1`.
+pub(crate) fn canonical_endpoint_authority(
+    endpoint: &str,
+) -> Result<CanonicalEndpointAuthority, DaemonServiceRuntimeError> {
+    let (scheme, authority) = endpoint.split_once("://").ok_or_else(|| {
+        DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "Garage endpoint must contain an explicit scheme and authority".to_string(),
+        }
+    })?;
+    let scheme = scheme.to_ascii_lowercase();
+    if !matches!(scheme.as_str(), "http" | "https")
+        || authority.is_empty()
+        || authority.contains(['/', '?', '#', '@'])
+    {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "Garage endpoint must be a bare http(s) authority".to_string(),
+        });
+    }
+    let (raw_host, port) = if let Some(authority) = authority.strip_prefix('[') {
+        let (host, port) = authority.split_once("]:").ok_or_else(|| {
+            DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "IPv6 Garage endpoint must carry a bracketed explicit port".to_string(),
+            }
+        })?;
+        (host, port.parse::<u16>())
+    } else if let Some((host, port)) = authority.rsplit_once(':') {
+        if host.contains(':') {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "IPv6 Garage endpoint must use brackets".to_string(),
+            });
+        }
+        (host, port.parse::<u16>())
+    } else {
+        (authority, Ok(if scheme == "https" { 443 } else { 80 }))
+    };
+    let port = port.map_err(|_| DaemonServiceRuntimeError::UnsupportedOperation {
+        operation: "Garage endpoint port must be a valid u16".to_string(),
+    })?;
+    if raw_host.is_empty() {
+        return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "Garage endpoint host must not be blank".to_string(),
+        });
+    }
+    let lower_host = raw_host.trim_end_matches('.').to_ascii_lowercase();
+    let host = match lower_host.parse::<IpAddr>() {
+        Ok(address) if address.is_loopback() => "loopback".to_string(),
+        Ok(address) => address.to_string(),
+        Err(_) if matches!(lower_host.as_str(), "localhost" | "localhost.localdomain") => {
+            "loopback".to_string()
+        }
+        Err(_) => lower_host,
+    };
+    Ok(CanonicalEndpointAuthority { scheme, host, port })
 }
 
 #[cfg(test)]
@@ -1644,9 +1864,12 @@ mod tests {
     #[test]
     fn custody_plane_rejects_any_reused_normal_garage_coordinate() {
         let normal = config();
+        let catalog = temp_root().join("sealed/custody-catalog.jsonl");
         let controller =
             GarageServiceController::new(normal.clone(), super::FakeRunner::with_stdout("[]"))
-                .with_custody_plane_config(normal);
+                .with_custody_plane_config(normal)
+                .try_with_custody_catalog_path(&catalog)
+                .expect("explicit test custody catalog");
 
         let error = controller
             .custody_plane_config()
@@ -1656,12 +1879,53 @@ mod tests {
     }
 
     #[test]
+    fn active_custody_plane_requires_one_explicit_non_replaceable_catalog_binding() {
+        let root = temp_root();
+        let first = root.join("one/custody-catalog.jsonl");
+        let second = root.join("two/custody-catalog.jsonl");
+        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
+            .with_custody_plane_config(custody_config());
+        assert!(controller.custody_plane_config().is_err());
+        let controller = controller
+            .try_with_custody_catalog_path(&first)
+            .expect("first explicit custody catalog binding");
+        assert!(controller.custody_plane_config().is_ok());
+        let error = match controller.try_with_custody_catalog_path(&second) {
+            Ok(_) => panic!("a second catalog binding must fail closed"),
+            Err(error) => error,
+        };
+        assert!(error
+            .to_string()
+            .contains("multiple custody catalog bindings"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn custody_endpoint_loopback_alias_is_not_a_distinct_plane() {
+        let root = temp_root();
+        let catalog = root.join("custody-catalog.jsonl");
+        let mut alias = custody_config();
+        alias.endpoint = "http://localhost:3900".to_string();
+        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
+            .with_custody_plane_config(alias)
+            .try_with_custody_catalog_path(&catalog)
+            .expect("explicit catalog");
+        assert!(controller
+            .custody_plane_config()
+            .expect_err("loopback aliases overlap")
+            .to_string()
+            .contains("endpoint"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn default_controller_denies_custody_before_claim_or_garage_effect() {
         let root = temp_root();
         let catalog = root.join("sealed/custody-catalog.jsonl");
         let definition = custody_definition();
         let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
-            .with_custody_catalog_path(&catalog);
+            .try_with_custody_catalog_path(&catalog)
+            .expect("custom test catalog is canonical");
 
         let error = controller
             .provision_fresh_custody_bucket(
@@ -1713,7 +1977,8 @@ mod tests {
         let runner = CustodyRetainRunner::default();
         let controller = GarageServiceController::new(config(), runner)
             .with_custody_plane_config(custody_config())
-            .with_custody_catalog_path(&catalog)
+            .try_with_custody_catalog_path(&catalog)
+            .expect("custom test catalog is canonical")
             .with_custody_runtime_credential_resolver(resolver);
 
         let proof = controller
@@ -1808,7 +2073,8 @@ mod tests {
         let definition = custody_definition();
         let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
             .with_custody_plane_config(custody_config())
-            .with_custody_catalog_path(&catalog);
+            .try_with_custody_catalog_path(&catalog)
+            .expect("custom test catalog is canonical");
 
         let error = controller
             .admit_custody_store(
@@ -1926,6 +2192,7 @@ mod tests {
     struct CustodyRetainRunner {
         calls: Mutex<Vec<CustodyCommandCall>>,
         bucket_info_calls: AtomicUsize,
+        head_object_calls: AtomicUsize,
     }
 
     struct CustodyCommandCall {
@@ -1969,11 +2236,16 @@ mod tests {
                 environment: environment.to_vec(),
             });
             if arguments.iter().any(|argument| argument == "head-object") {
-                return Err(super::DaemonServiceRuntimeError::CommandFailed {
-                    program: "aws".to_string(),
-                    args: arguments.to_vec(),
-                    status: "1".to_string(),
-                    stderr: "NotFound".to_string(),
+                if self.head_object_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Err(super::DaemonServiceRuntimeError::CommandFailed {
+                        program: "aws".to_string(),
+                        args: arguments.to_vec(),
+                        status: "1".to_string(),
+                        stderr: "NotFound".to_string(),
+                    });
+                }
+                return Ok(super::ServiceCommandOutput {
+                    stdout: r#"{"ContentLength":20,"Metadata":{"dasobjectstore-sha256":"f752ba9ffd7e1a725776d4056d051b52cd3d8d0f57b0abc2417f3ddf1842a9d6","dasobjectstore-object-lock-policy":"local_trusted_administrator_non_shortenable","dasobjectstore-object-lock-shortening-forbidden":"true","dasobjectstore-object-lock-delete-forbidden":"true","dasobjectstore-object-lock-hold-authority":"dasobjectstore-custody-ledger-permanent-legal-hold","dasobjectstore-object-lock-retention-until-utc":"2036-09-05T12:00:00Z"}}"#.to_string(),
                 });
             }
             if arguments.iter().any(|argument| argument == "get-object") {

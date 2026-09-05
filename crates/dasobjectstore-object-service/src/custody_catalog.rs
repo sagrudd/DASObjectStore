@@ -22,8 +22,6 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
-pub const CUSTODY_CATALOG_ENV: &str = "DASOBJECTSTORE_CUSTODY_CATALOG_PATH";
-
 #[cfg(target_os = "macos")]
 const DEFAULT_CUSTODY_CATALOG_PATH: &str = "/usr/local/etc/dasobjectstore/custody-catalog.jsonl";
 #[cfg(not(target_os = "macos"))]
@@ -33,6 +31,26 @@ const DEFAULT_CUSTODY_CATALOG_PATH: &str = "/var/lib/dasobjectstore/custody-cata
 const CATALOG_DIR_MODE: u32 = 0o750;
 #[cfg(unix)]
 const CATALOG_FILE_MODE: u32 = 0o640;
+
+/// A resolved catalog identity injected into a normal storage plane.  Normal
+/// paths may not select an environment-dependent or spelling-ambiguous
+/// alternate catalog once this binding exists.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CustodyCatalogBinding {
+    canonical_path: PathBuf,
+}
+
+impl CustodyCatalogBinding {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, ObjectServiceError> {
+        Ok(Self {
+            canonical_path: resolve_custody_path(path.as_ref())?,
+        })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.canonical_path
+    }
+}
 
 /// A sealed custody admission recorded by the daemon.
 ///
@@ -77,6 +95,11 @@ impl CustodyCatalogEntryV1 {
         if !self.ledger_path.is_absolute() {
             return Err(invalid("custody catalog ledger_path must be absolute"));
         }
+        if resolve_custody_path(&self.ledger_path)? != self.ledger_path {
+            return Err(invalid(
+                "custody catalog ledger_path is not its canonical claimed identity",
+            ));
+        }
         let expected_digest = custody_store_definition_sha256(&self.definition)?;
         if self.configuration_sha256 != expected_digest {
             return Err(invalid(
@@ -94,9 +117,7 @@ impl CustodyCatalogEntryV1 {
 
 /// Returns the daemon-owned path for the immutable custody catalog.
 pub fn default_custody_catalog_path() -> PathBuf {
-    std::env::var_os(CUSTODY_CATALOG_ENV)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_CUSTODY_CATALOG_PATH))
+    PathBuf::from(DEFAULT_CUSTODY_CATALOG_PATH)
 }
 
 /// Daemon-derived ledger path for an immutable custody definition.  The
@@ -117,8 +138,8 @@ pub fn custody_ledger_path_for_catalog(
             "the retired r237 bootstrap namespace has no custody ledger path",
         ));
     }
-    let parent = catalog_path
-        .as_ref()
+    let canonical_catalog_path = resolve_custody_path(catalog_path.as_ref())?;
+    let parent = canonical_catalog_path
         .parent()
         .ok_or_else(|| invalid("custody catalog path must name a file below a parent directory"))?;
     let digest = hex::encode(Sha256::digest(store_id.as_str().as_bytes()));
@@ -144,6 +165,7 @@ pub fn create_custody_catalog_entry(
     if !ledger_path.as_ref().is_absolute() {
         return Err(invalid("custody catalog ledger_path must be absolute"));
     }
+    let ledger_path = resolve_custody_path(ledger_path.as_ref())?;
     let claim = claim_custody_catalog_admission(catalog_path, definition)?;
     append_claimed_custody_catalog_entry(
         claim,
@@ -167,12 +189,12 @@ pub fn claim_custody_catalog_admission(
         ));
     }
 
-    let catalog_path = catalog_path.as_ref();
-    prepare_catalog_parent(catalog_path)?;
-    prepare_custody_ledger_parent(catalog_path)?;
-    create_catalog_if_absent(catalog_path)?;
+    let catalog_path = resolve_custody_path(catalog_path.as_ref())?;
+    prepare_catalog_parent(&catalog_path)?;
+    prepare_custody_ledger_parent(&catalog_path)?;
+    create_catalog_if_absent(&catalog_path)?;
 
-    let existing = read_custody_catalog(catalog_path)?;
+    let existing = read_custody_catalog(&catalog_path)?;
     if existing
         .iter()
         .any(|stored| stored.definition.store_id == definition.store_id)
@@ -186,12 +208,12 @@ pub fn claim_custody_catalog_admission(
         return Err(existing_bucket_error(&definition.bucket_name));
     }
 
-    let claim_path = store_claim_path(catalog_path, &definition.store_id)?;
+    let claim_path = store_claim_path(&catalog_path, &definition.store_id)?;
     claim_store_id(&claim_path)?;
-    let bucket_claim = bucket_claim_path(catalog_path, &definition.bucket_name)?;
+    let bucket_claim = bucket_claim_path(&catalog_path, &definition.bucket_name)?;
     claim_bucket_name(&bucket_claim)?;
     Ok(CustodyCatalogAdmissionClaim {
-        catalog_path: catalog_path.to_path_buf(),
+        catalog_path,
         store_id: definition.store_id.clone(),
         bucket_name: definition.bucket_name.clone(),
     })
@@ -212,13 +234,13 @@ pub fn append_claimed_custody_catalog_entry(
             "custody catalog admission claim is not bound to this sealed definition",
         ));
     }
-    let ledger_path = ledger_path.as_ref();
-    if !ledger_path.is_absolute() {
+    if !ledger_path.as_ref().is_absolute() {
         return Err(invalid("custody catalog ledger_path must be absolute"));
     }
+    let ledger_path = resolve_custody_path(ledger_path.as_ref())?;
     let entry = CustodyCatalogEntryV1 {
         definition: definition.clone(),
-        ledger_path: ledger_path.to_path_buf(),
+        ledger_path,
         ledger_configuration_sha256: ledger_configuration_sha256.as_ref().to_string(),
         configuration_sha256: custody_store_definition_sha256(definition)?,
         created_at_utc: canonical_timestamp(
@@ -269,11 +291,11 @@ pub fn append_claimed_custody_catalog_entry(
 pub fn read_custody_catalog(
     catalog_path: impl AsRef<Path>,
 ) -> Result<Vec<CustodyCatalogEntryV1>, ObjectServiceError> {
-    let catalog_path = catalog_path.as_ref();
-    let file = match File::open(catalog_path) {
+    let catalog_path = resolve_custody_path(catalog_path.as_ref())?;
+    let file = match File::open(&catalog_path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(command_error("open custody catalog", catalog_path, error)),
+        Err(error) => return Err(command_error("open custody catalog", &catalog_path, error)),
     };
 
     let mut entries = Vec::new();
@@ -348,15 +370,15 @@ pub fn catalog_contains_store(
             "the retired r237 bootstrap namespace is not a mutable store",
         ));
     }
-    let catalog_path = catalog_path.as_ref();
-    let entries = read_custody_catalog(catalog_path)?;
+    let catalog_path = resolve_custody_path(catalog_path.as_ref())?;
+    let entries = read_custody_catalog(&catalog_path)?;
     if entries
         .iter()
         .any(|entry| entry.definition.store_id == *store_id)
     {
         return Ok(true);
     }
-    let claim_path = store_claim_path(catalog_path, store_id)?;
+    let claim_path = store_claim_path(&catalog_path, store_id)?;
     match fs::metadata(&claim_path) {
         Ok(_) => Err(invalid(&format!(
             "custody catalog has an unresolved create-new claim for store id {store_id}; manual replacement is not supported"
@@ -380,14 +402,14 @@ pub fn catalog_contains_bucket(
     if bucket_name.trim().is_empty() {
         return Err(invalid("custody catalog bucket name must not be blank"));
     }
-    let catalog_path = catalog_path.as_ref();
-    if read_custody_catalog(catalog_path)?
+    let catalog_path = resolve_custody_path(catalog_path.as_ref())?;
+    if read_custody_catalog(&catalog_path)?
         .iter()
         .any(|entry| entry.definition.bucket_name == bucket_name)
     {
         return Ok(true);
     }
-    let claim_path = bucket_claim_path(catalog_path, bucket_name)?;
+    let claim_path = bucket_claim_path(&catalog_path, bucket_name)?;
     match fs::metadata(&claim_path) {
         Ok(_) => Err(invalid(&format!(
             "custody catalog has an unresolved create-new claim for bucket {bucket_name}; normal provisioning is forbidden"
@@ -449,28 +471,103 @@ pub fn reject_catalogued_custody_definition(
     Ok(())
 }
 
-/// The production normal-store guard. Test and attended custody code may use
-/// an explicit catalog path, but ordinary registry and layout paths always
-/// consult the daemon-owned catalog.
-pub fn reject_default_catalogued_custody_mutation(
+/// Refuse a normal mutation using the exact daemon-configured catalog
+/// identity. This closes the old default/environment split: a caller cannot
+/// silently inspect a different catalog from the active custody plane.
+pub fn reject_bound_catalogued_custody_mutation(
+    binding: &CustodyCatalogBinding,
     store_id: &StoreId,
     operation: &str,
 ) -> Result<(), ObjectServiceError> {
-    reject_catalogued_custody_mutation(default_custody_catalog_path(), store_id, operation)
+    reject_catalogued_custody_mutation(binding.path(), store_id, operation)
 }
 
-/// Production normal-definition guard, including bucket-alias denial.
-pub fn reject_default_catalogued_custody_definition(
+/// Refuse a normal definition including a bucket alias using the exact active
+/// catalog identity.
+pub fn reject_bound_catalogued_custody_definition(
+    binding: &CustodyCatalogBinding,
     store_id: &StoreId,
     bucket_name: &str,
     operation: &str,
 ) -> Result<(), ObjectServiceError> {
-    reject_catalogued_custody_definition(
-        default_custody_catalog_path(),
-        store_id,
-        bucket_name,
-        operation,
-    )
+    reject_catalogued_custody_definition(binding.path(), store_id, bucket_name, operation)
+}
+
+/// Resolve an absolute custody path without accepting `.`/`..` spelling or a
+/// symlink in any existing ancestor. A non-existing tail is reconstructed
+/// beneath the canonical existing parent, so a future claim cannot compare a
+/// raw spelling with a different resolved path.
+fn resolve_custody_path(path: &Path) -> Result<PathBuf, ObjectServiceError> {
+    if !path.is_absolute() {
+        return Err(invalid("custody path must be absolute"));
+    }
+    // macOS presents the system-owned `/var` compatibility symlink to
+    // `/private/var`; accepting that one documented kernel namespace alias
+    // means we compare its canonical identity, not that raw spelling. Any
+    // caller-created symlink below it remains a hard refusal.
+    #[cfg(target_os = "macos")]
+    let configured = match path.strip_prefix("/var") {
+        Ok(tail) => fs::canonicalize("/var")
+            .map_err(|error| command_error("canonicalise macOS /var", Path::new("/var"), error))?
+            .join(tail),
+        Err(_) => path.to_path_buf(),
+    };
+    #[cfg(not(target_os = "macos"))]
+    let configured = path.to_path_buf();
+    let components = configured
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::RootDir => None,
+            std::path::Component::Normal(component) => Some(Ok(component)),
+            std::path::Component::CurDir
+            | std::path::Component::ParentDir
+            | std::path::Component::Prefix(_) => Some(Err(invalid(
+                "custody path must not contain normalisation components",
+            ))),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if components.is_empty() {
+        return Err(invalid("custody path must name a file below root"));
+    }
+
+    let mut existing = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+    let mut missing_at = None;
+    for (index, component) in components.iter().enumerate() {
+        existing.push(component);
+        match fs::symlink_metadata(&existing) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(invalid("custody path contains a symbolic-link component"));
+                }
+                if index + 1 < components.len() && !metadata.is_dir() {
+                    return Err(invalid("custody path contains a non-directory ancestor"));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                missing_at = Some(index);
+                existing.pop();
+                break;
+            }
+            Err(error) => return Err(command_error("inspect custody path", &existing, error)),
+        }
+    }
+
+    let canonical_existing = fs::canonicalize(&existing)
+        .map_err(|error| command_error("canonicalise custody path ancestor", &existing, error))?;
+    let resolved = match missing_at {
+        Some(index) => components[index..]
+            .iter()
+            .fold(canonical_existing, |current, component| {
+                current.join(component)
+            }),
+        None => canonical_existing,
+    };
+    if missing_at.is_none() && resolved != configured {
+        return Err(invalid(
+            "custody path canonical identity differs from its configured spelling",
+        ));
+    }
+    Ok(resolved)
 }
 
 fn prepare_catalog_parent(catalog_path: &Path) -> Result<(), ObjectServiceError> {
@@ -799,7 +896,10 @@ mod tests {
         .expect("catalog entry");
 
         assert_eq!(created.definition, definition);
-        assert_eq!(created.ledger_path, ledger);
+        assert_eq!(
+            created.ledger_path,
+            super::resolve_custody_path(&ledger).expect("canonical ledger")
+        );
         assert!(catalog_contains_store(&catalog, &created.definition.store_id).expect("lookup"));
         assert_eq!(read_custody_catalog(&catalog).expect("read"), vec![created]);
         let encoded = fs::read_to_string(&catalog).expect("catalog bytes");

@@ -32,6 +32,11 @@ pub const CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY: &str =
     "local_trusted_administrator_overlay";
 pub const CUSTODY_RECEIPT_SCHEMA_V1: &str =
     "dasobjectstore.local_trusted_administrator_custody_readback_receipt.v1";
+pub const CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1: &str =
+    "dasobjectstore.local_trusted_administrator_object_lock_policy.v1";
+pub const CUSTODY_OBJECT_LOCK_POLICY_ID: &str = "local_trusted_administrator_non_shortenable";
+pub const CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY: &str =
+    "dasobjectstore-custody-ledger-permanent-legal-hold";
 pub const R237_BOOTSTRAP_STORE_ID: &str = "r237_s4_bootstrap_custody";
 pub const R237_BOOTSTRAP_BUCKET_NAME: &str = "dos-r237-s4-bootstrap-custody";
 
@@ -64,6 +69,52 @@ impl CustodyAssuranceClass {
 #[serde(rename_all = "snake_case")]
 pub enum CustodyRetentionMode {
     LocalTrustedAdministratorOverlay,
+}
+
+/// The only Object Lock-shaped policy accepted at the custody S3 boundary.
+/// It deliberately describes the local overlay rather than claiming a
+/// provider COMPLIANCE/WORM control. A NUC administrator can still bypass
+/// Garage or the host; direct/raw S3 divergence is detected and reported as a
+/// trusted-administrator limitation, never silently accepted as custody.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustodyObjectLockPolicyV1 {
+    pub schema: String,
+    pub policy_id: String,
+    pub shortening_forbidden: bool,
+    pub delete_forbidden: bool,
+    pub hold_authority: String,
+}
+
+impl CustodyObjectLockPolicyV1 {
+    pub fn required() -> Self {
+        Self {
+            schema: CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1.to_string(),
+            policy_id: CUSTODY_OBJECT_LOCK_POLICY_ID.to_string(),
+            shortening_forbidden: true,
+            delete_forbidden: true,
+            hold_authority: CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY.to_string(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), ObjectServiceError> {
+        if self.schema != CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1
+            || self.policy_id != CUSTODY_OBJECT_LOCK_POLICY_ID
+            || !self.shortening_forbidden
+            || !self.delete_forbidden
+            || self.hold_authority != CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY
+        {
+            return Err(invalid(
+                "custody object-lock policy must be the exact non-shortenable local overlay policy",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn sha256(&self) -> Result<String, ObjectServiceError> {
+        self.validate()?;
+        Ok(sha256_hex(canonical_json(self)?.as_bytes()))
+    }
 }
 
 /// A target-bound, sealed profile for one fresh custody store.
@@ -595,6 +646,8 @@ pub struct CustodyIntegrityReceiptV1 {
     pub version: u64,
     pub retention_until_utc: String,
     pub legal_hold: bool,
+    pub object_lock_policy_sha256: String,
+    pub hold_authority: String,
     pub reader_identity: String,
     pub observed_at_utc: String,
     pub configuration_sha256: String,
@@ -609,6 +662,8 @@ pub struct CustodyLedgerInspectionV1 {
     pub bucket_name: String,
     pub target_id: String,
     pub assurance_class: String,
+    pub object_lock_policy: CustodyObjectLockPolicyV1,
+    pub retention_until_utc: String,
     pub configuration_sha256: String,
     pub committed_object_versions: u64,
     pub committed_receipts: u64,
@@ -642,6 +697,10 @@ pub enum CustodyForbiddenMutation {
     ClearLegalHold,
     ReplaceConfiguration,
     ReinitialiseLedger,
+    /// Direct S3 is never a supported custody mutation path. A missing
+    /// policy/readback binding is reported as a trusted-administrator
+    /// limitation rather than silently treated as a valid object.
+    RawS3Bypass,
 }
 
 /// Returns the permanent fail-closed result for an unsupported custody
@@ -679,6 +738,7 @@ fn custody_forbidden_mutation_name(operation: CustodyForbiddenMutation) -> &'sta
         CustodyForbiddenMutation::ClearLegalHold => "clear_legal_hold",
         CustodyForbiddenMutation::ReplaceConfiguration => "replace_configuration",
         CustodyForbiddenMutation::ReinitialiseLedger => "reinitialise_ledger",
+        CustodyForbiddenMutation::RawS3Bypass => "raw_s3_bypass",
     }
 }
 
@@ -744,94 +804,19 @@ pub struct CustodyFormalGateAttestationConsumptionV1 {
     pub attestation_sha256: String,
 }
 
-/// Atomically create an external, one-use formal-gate consumption marker.
-/// The caller owns `state_root` outside the NUC, Garage, BaseCamp, and their
-/// backup paths. `create_new` makes a duplicate/replay terminal, including a
-/// crash-partial marker, rather than allowing a retry to replace evidence.
-pub fn consume_custody_attestation_for_formal_gate(
-    state_root: impl AsRef<Path>,
-    attestation: &CustodyOffNucAttestationV1,
-    expectation: &CustodyFormalGateAttestationExpectationV1,
+/// Retired before release: the v1 DTO cannot prove raw JCS, concrete Ed25519
+/// verification, pre-read nonce issuance, or journal-backed first-attempt
+/// consumption. It must never mutate an external formal-gate state. Use the
+/// v2 `CustodyOffNucJournal` API instead.
+#[cfg(test)]
+pub(crate) fn consume_custody_attestation_for_formal_gate(
+    _state_root: impl AsRef<Path>,
+    _attestation: &CustodyOffNucAttestationV1,
+    _expectation: &CustodyFormalGateAttestationExpectationV1,
 ) -> Result<CustodyFormalGateAttestationConsumptionV1, ObjectServiceError> {
-    let body = &attestation.body;
-    require_nonblank("custody attestation id", &body.attestation_id)?;
-    for (field, actual, expected) in [
-        (
-            "custody formal target",
-            &body.target_id,
-            &expectation.target_id,
-        ),
-        (
-            "custody formal release train",
-            &body.release_train,
-            &expectation.release_train,
-        ),
-        (
-            "custody formal release stage",
-            &body.release_stage,
-            &expectation.release_stage,
-        ),
-        (
-            "custody formal purpose",
-            &body.purpose,
-            &expectation.purpose,
-        ),
-    ] {
-        require_nonblank(field, actual)?;
-        require_nonblank(field, expected)?;
-        if actual != expected {
-            return Err(invalid(
-                "custody attestation does not match formal-gate expectation",
-            ));
-        }
-    }
-    validate_sha256("custody one-use marker", &body.custody_marker_sha256)?;
-    validate_sha256("custody raw evidence", &body.raw_evidence_sha256)?;
-    let consumption = CustodyFormalGateAttestationConsumptionV1 {
-        attestation_id: body.attestation_id.clone(),
-        target_id: body.target_id.clone(),
-        release_train: body.release_train.clone(),
-        release_stage: body.release_stage.clone(),
-        purpose: body.purpose.clone(),
-        one_use_marker_sha256: body.custody_marker_sha256.clone(),
-        raw_evidence_sha256: body.raw_evidence_sha256.clone(),
-        attestation_sha256: sha256_hex(canonical_json(attestation)?.as_bytes()),
-    };
-    let root = state_root.as_ref();
-    fs::create_dir_all(root).map_err(|error| {
-        ObjectServiceError::CommandFailed(format!(
-            "create external custody formal-gate state directory {}: {error}",
-            root.display()
-        ))
-    })?;
-    let marker_path = root.join(format!(
-        "{}.json",
-        sha256_hex(consumption.attestation_id.as_bytes())
-    ));
-    let mut marker = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&marker_path)
-        .map_err(|error| {
-            invalid(format!(
-                "custody formal-gate attestation id has already been consumed or cannot be atomically claimed: {error}"
-            ))
-        })?;
-    let bytes = canonical_json(&consumption)?.into_bytes();
-    use std::io::Write as _;
-    marker.write_all(&bytes).map_err(|error| {
-        ObjectServiceError::CommandFailed(format!(
-            "write external custody formal-gate consumption marker {}: {error}",
-            marker_path.display()
-        ))
-    })?;
-    marker.sync_all().map_err(|error| {
-        ObjectServiceError::CommandFailed(format!(
-            "sync external custody formal-gate consumption marker {}: {error}",
-            marker_path.display()
-        ))
-    })?;
-    Ok(consumption)
+    Err(invalid(
+        "legacy v1 custody attestation cannot be consumed for a formal gate; require strict v2 off-NUC journal evidence",
+    ))
 }
 
 /// Durable state held *outside* the NUC, Garage, BaseCamp, and ordinary host
@@ -1086,6 +1071,7 @@ struct CustodySealedConfigurationV1 {
     store_id: StoreId,
     bucket_name: String,
     profile: CustodyStoreProfileV1,
+    object_lock_policy: CustodyObjectLockPolicyV1,
     fresh_bucket_proof: CustodyFreshBucketProofV1,
     created_at_utc: String,
 }
@@ -1168,6 +1154,7 @@ pub fn create_custody_ledger_from_definition(
         store_id: definition.store_id,
         bucket_name: definition.bucket_name,
         profile: definition.profile,
+        object_lock_policy: CustodyObjectLockPolicyV1::required(),
         fresh_bucket_proof,
         created_at_utc: created_at_utc.as_ref().to_string(),
     };
@@ -1260,6 +1247,26 @@ pub fn retain_custody_object_with_readback(
         CustodyObjectState::Existing { .. } => {
             return Err(invalid(
                 "content-addressed custody key collision or overwrite risk detected",
+            ));
+        }
+    }
+
+    // Re-HEAD after the sole create-if-absent operation. The Garage adapter
+    // checks the exact local policy metadata here, so a direct/raw S3 change
+    // between PUT and independent GET cannot become a ledgered receipt.
+    match writer.object_state(&object_key)? {
+        CustodyObjectState::Existing {
+            content_sha256: observed_sha256,
+            content_length: observed_length,
+        } if observed_sha256 == content_sha256 && observed_length == content_length => {}
+        CustodyObjectState::Missing => {
+            return Err(invalid(
+                "custody object disappeared after conditional put before policy/readback verification",
+            ));
+        }
+        CustodyObjectState::Existing { .. } => {
+            return Err(invalid(
+                "custody object changed after conditional put before policy/readback verification",
             ));
         }
     }
@@ -1469,6 +1476,8 @@ pub fn inspect_custody_ledger(
         bucket_name: configuration.bucket_name,
         target_id: configuration.profile.target_id,
         assurance_class: configuration.profile.assurance_class.name().to_string(),
+        object_lock_policy: configuration.object_lock_policy,
+        retention_until_utc: configuration.profile.retention_until_utc,
         configuration_sha256,
         committed_object_versions: object_versions,
         committed_receipts: receipts,
@@ -1648,6 +1657,11 @@ fn receipt_for(
         version: record.version,
         retention_until_utc: record.retention_until_utc.clone(),
         legal_hold: record.legal_hold,
+        object_lock_policy_sha256: configuration
+            .object_lock_policy
+            .sha256()
+            .expect("sealed object-lock policy is exact"),
+        hold_authority: configuration.object_lock_policy.hold_authority.clone(),
         reader_identity: observation.reader_identity,
         observed_at_utc: observation.observed_at_utc,
         configuration_sha256: sealed_configuration_sha256(configuration)
@@ -1665,6 +1679,8 @@ fn verify_receipt_fields(
     if receipt.reader_identity != configuration.profile.reader_identity
         || observation.reader_identity != configuration.profile.reader_identity
         || !receipt.legal_hold
+        || receipt.object_lock_policy_sha256 != configuration.object_lock_policy.sha256()?
+        || receipt.hold_authority != configuration.object_lock_policy.hold_authority
         || receipt.object_id != stored.object_id
         || receipt.object_key != stored.object_key
         || receipt.content_sha256 != stored.content_sha256
@@ -1849,6 +1865,7 @@ fn read_sealed_configuration(
         &configuration.profile,
         &configuration.created_at_utc,
     )?;
+    configuration.object_lock_policy.validate()?;
     if canonical_json(&configuration)? != configuration_jcs {
         return Err(invalid("sealed custody configuration is not canonical JCS"));
     }
@@ -2166,11 +2183,22 @@ mod tests {
             receipt.assurance_class,
             CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY
         );
+        assert_eq!(
+            receipt.object_lock_policy_sha256,
+            CustodyObjectLockPolicyV1::required()
+                .sha256()
+                .expect("policy digest")
+        );
+        assert_eq!(receipt.hold_authority, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY);
         verify_custody_readback_receipt(&path, &receipt, &mut Reader { backend: &backend })
             .expect("receipt independently verifies");
         let inspection = inspect_custody_ledger(&path).expect("inspect");
         assert_eq!(inspection.committed_object_versions, 1);
         assert_eq!(inspection.committed_receipts, 1);
+        assert_eq!(
+            inspection.object_lock_policy,
+            CustodyObjectLockPolicyV1::required()
+        );
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -2405,6 +2433,7 @@ mod tests {
             CustodyForbiddenMutation::ClearLegalHold,
             CustodyForbiddenMutation::ReplaceConfiguration,
             CustodyForbiddenMutation::ReinitialiseLedger,
+            CustodyForbiddenMutation::RawS3Bypass,
         ] {
             assert!(reject_custody_mutation(operation).is_err());
         }
@@ -2504,7 +2533,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_bucket_proof_and_formal_attestation_consumption_are_bound_and_one_use() {
+    fn fresh_bucket_proof_is_bound_and_legacy_formal_consumption_is_refused() {
         let request = request("formal-custody", "dos-formal-custody");
         let proof = fresh_proof(&request).expect("fresh proof");
         let root = temp_root("fresh-proof");
@@ -2529,10 +2558,14 @@ mod tests {
             purpose: "custody_source_provenance".to_string(),
         };
         let state = root.join("external-state");
-        let consumed =
+        assert!(
             consume_custody_attestation_for_formal_gate(&state, &attestation, &expectation)
-                .expect("first formal consumption");
-        assert_eq!(consumed.attestation_id, "r237-s4-consume-once");
+                .is_err()
+        );
+        assert!(
+            !state.exists(),
+            "legacy formal consumer must not create an external marker"
+        );
         assert!(
             consume_custody_attestation_for_formal_gate(&state, &attestation, &expectation)
                 .is_err()
@@ -2619,6 +2652,10 @@ mod tests {
                 version: 1,
                 retention_until_utc: RETENTION.to_string(),
                 legal_hold: true,
+                object_lock_policy_sha256:
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                hold_authority: CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY.to_string(),
                 reader_identity: "custody-reader-v1".to_string(),
                 observed_at_utc: "2026-09-05T10:00:00Z".to_string(),
                 configuration_sha256:

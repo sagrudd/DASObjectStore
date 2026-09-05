@@ -59,8 +59,15 @@ fails closed unless that table contains exactly the sealed writer with `W` and
 the sealed reader with `R`, with no owner grant or extra key. Its proof binds
 the target, definition, three roles, request digest, absence/creation evidence,
 nonce, and timestamp. The provisioner credential is not persisted.
-`GarageCustodyS3Writer` uses conditional content-addressed S3 PUT; the
-distinct `GarageCustodyS3Reader` performs HEAD and GET readback. Neither
+`GarageCustodyS3Writer` uses conditional content-addressed S3 PUT and records
+the exact local policy identity, non-shortening/delete prohibitions, hold
+authority, and sealed retention timestamp as checked metadata; the distinct
+`GarageCustodyS3Reader` performs HEAD and GET readback. Garage 2.3 has no
+native S3 Object Lock, retention, or legal-hold API. Consequently those
+metadata fields are *evidence checked against the sealed DAS ledger*, not a
+claim of provider enforcement: a raw S3 object lacking them is a detected
+trusted-administrator limitation and a custody failure, not a mutable
+fallback or a COMPLIANCE/WORM claim. Neither
 exposes a normal profile, copy, multipart, delete, restore, reconcile,
 lifecycle, migration, or administrative route.
 
@@ -90,6 +97,16 @@ registry read/upsert/delete paths consult this catalog, so an ordinary store
 cannot claim either the custody `StoreId` or the custody bucket under an alias.
 Malformed catalog records, duplicate records, or dangling claims deny those
 normal paths rather than being interpreted as absence.
+
+An enabled custody plane must provide exactly one explicit canonical catalog
+binding during daemon composition. That binding is injected into normal
+registry reads/writes, normal layout, provisioning, and reconciliation guards;
+the normal fallback is never inherited by an active custody plane. The path
+resolver resolves an existing parent before a new claim, rejects caller
+symlinks and normalisation ambiguity, and compares canonical identities. The
+Garage authority comparator likewise canonicalises scheme, host/IP loopback
+aliases, and port, so `localhost`, `127.0.0.1`, and `[::1]` cannot present one
+plane as two endpoints.
 
 This is the enforcement point for ordinary storage: normal definitions cannot
 express the custody plane, ordinary mutable state cannot bind its endpoint or
@@ -164,9 +181,36 @@ identity sealed in the profile; a writer response alone cannot create a
 receipt.  Readback recomputes content hash and size, then binds the result to
 the configuration digest and ledger event hash.
 
-The next delivery boundary is an off-NUC attestation authority.  The source
-defines, but does not configure or host, its public verification interface and
-an external monotonic-state interface.  An accepted attestation must include:
+The supported formal delivery boundary is the strict v2 off-NUC attestation
+journal. It receives the exact raw JCS bytes of a signed pre-read request and
+of the later signed attestation; whitespace, field substitution, unknown
+fields, duplicate/noncanonical wire representations, an arbitrary digest
+hook, and non-RFC4648 Base64 are rejected. One pinned Ed25519 public authority
+is represented with its identifier, public key, and key digest. DAS never
+generates, imports, stores, or discovers the private signing key.
+
+Before any remote read, the off-NUC SQLite journal durably records a signed,
+target-bound pre-read request and nonce. The request includes every expected
+measurement: machine identity; endpoint authority, TLS and routing; reader;
+store/bucket namespace; policy, ledger and ledger head; inventory and lockset;
+verifier executable and provenance; receipt; release train/stage/purpose;
+nonce, sequence/predecessor, issue time and expiry. Each request admits one
+terminal attempt only. A failed, timed-out, incomplete, malformed, or invalidly
+signed response consumes that request before a later response can replace it.
+Only a signed `passed` observation with the exact repeated request, direct
+readback, marker, receipt, and raw-evidence digests advances its monotonic
+checkpoint.
+
+The formal consumer works against that same durable journal, not against an
+arbitrary attestation DTO. In one transaction it re-verifies both strict raw
+JCS signatures and freshness, the complete exact request/measurement contract,
+the passing first attempt, and atomically retains the unique request and
+attestation identifiers, marker, raw-evidence, receipt, policy, ledger, and
+raw-record digests. Reuse and crash-partial state are terminal. The legacy v1
+observation DTO is not formal-gate authority.
+
+The older source observation shape is retained only for compatibility tests;
+it is not a formal approval mechanism. An accepted v2 attestation must include:
 
 - a pinned authority signature, verifier ID, unique nonce, strictly increasing
   sequence, prior-attestation hash, issue time and expiry;
@@ -223,10 +267,12 @@ one-use systemd credential handoffs with hash-only markers, absence/default
 denial, and rejection of a custody configuration that shares any normal Garage
 coordinate. The daemon
 integration contract covers admission, catalog/ledger binding, isolated S3
-endpoint selection, conditional PUT, writer HEAD, independent reader GET, and
-one-use handoff consumption. They also cover off-NUC signature, nonce,
-monotonic sequence, previous hash, expiry, and atomic accepted-attempt/state
-semantics.
+endpoint selection, conditional PUT, policy-metadata/readback divergence,
+writer HEAD, independent reader GET, and one-use handoff consumption. They
+also cover raw-JCS Ed25519 authority binding, nonce issuance, one-terminal
+attempt consumption, timeout/replacement denial, monotonic sequence,
+previous-hash continuity, expiry, full-measurement substitution, and atomic
+formal consumption.
 
 The deployment/integration suite still required before a candidate can be
 considered must exercise a real isolated Garage service, process/credential

@@ -918,14 +918,17 @@ dependencies = [
 name = "dasobjectstore-object-service"
 version = "0.180.0"
 dependencies = [
+ "base64",
  "chrono",
  "dasobjectstore-core",
+ "ed25519-dalek",
  "hex",
  "rusqlite",
  "serde",
  "serde_jcs",
  "serde_json",
  "sha2",
+ "uuid",
 ]
 
 [[package]]

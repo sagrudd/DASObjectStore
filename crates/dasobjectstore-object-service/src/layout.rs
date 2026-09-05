@@ -3,7 +3,8 @@
 use crate::credentials::{credential_reference_for_store, StoreCredentialRequest};
 use crate::custody::{custody_bucket_is_reserved, R237_BOOTSTRAP_STORE_ID};
 use crate::custody_catalog::{
-    reject_default_catalogued_custody_definition, reject_default_catalogued_custody_mutation,
+    default_custody_catalog_path, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, CustodyCatalogBinding,
 };
 use crate::provider::{ObjectServiceError, StoreBucketBinding};
 use dasobjectstore_core::ids::StoreId;
@@ -41,6 +42,18 @@ pub struct StoreServiceLayout {
 pub fn plan_store_service_layout(
     definitions: &[StoreServiceDefinition],
 ) -> Result<StoreServiceLayout, ObjectServiceError> {
+    let binding = CustodyCatalogBinding::new(default_custody_catalog_path())?;
+    plan_store_service_layout_with_custody_catalog(definitions, &binding)
+}
+
+/// Plan normal storage only against the explicitly injected custody catalog
+/// that belongs to this storage plane. Daemon composition must use this form
+/// when a custody plane is configured, so a custom catalog cannot be bypassed
+/// by the process default.
+pub fn plan_store_service_layout_with_custody_catalog(
+    definitions: &[StoreServiceDefinition],
+    custody_catalog: &CustodyCatalogBinding,
+) -> Result<StoreServiceLayout, ObjectServiceError> {
     if definitions.is_empty() {
         return Err(ObjectServiceError::InvalidConfiguration(
             "at least one store definition is required".to_string(),
@@ -54,7 +67,11 @@ pub fn plan_store_service_layout(
 
     for definition in definitions {
         reject_custody_reserved_namespace(definition)?;
-        reject_default_catalogued_custody_mutation(&definition.store_id, "normal store layout")?;
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
+            &definition.store_id,
+            "normal store layout",
+        )?;
         if !store_ids.insert(definition.store_id.as_str()) {
             return Err(ObjectServiceError::InvalidConfiguration(format!(
                 "duplicate store definition: {}",
@@ -67,7 +84,8 @@ pub fn plan_store_service_layout(
         }
 
         let bucket_name = bucket_name_for_definition(definition)?;
-        reject_default_catalogued_custody_definition(
+        reject_bound_catalogued_custody_definition(
+            custody_catalog,
             &definition.store_id,
             &bucket_name,
             "normal store layout",

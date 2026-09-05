@@ -218,7 +218,8 @@ fn run() -> Result<(), String> {
         );
         garage = garage
             .with_custody_plane_config(custody_garage_runtime_config(&config)?)
-            .with_custody_catalog_path(config.custody.catalog_path.clone())
+            .try_with_custody_catalog_path(config.custody.catalog_path.clone())
+            .map_err(|error| format!("custody activation is denied: {error}"))?
             .with_custody_runtime_credential_resolver(resolver);
     }
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(

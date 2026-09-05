@@ -2,7 +2,8 @@
 
 use crate::credentials::credential_reference_for_store;
 use crate::custody_catalog::{
-    reject_default_catalogued_custody_definition, reject_default_catalogued_custody_mutation,
+    default_custody_catalog_path, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, CustodyCatalogBinding,
 };
 use crate::layout::{
     bucket_name_for_definition, reject_custody_reserved_namespace, StoreServiceDefinition,
@@ -79,6 +80,16 @@ pub fn portable_store_registry_path(ssd_root: impl AsRef<Path>) -> PathBuf {
 pub fn read_store_registry(
     path: impl AsRef<Path>,
 ) -> Result<Vec<StoreServiceDefinition>, ObjectServiceError> {
+    let binding = CustodyCatalogBinding::new(default_custody_catalog_path())?;
+    read_store_registry_with_custody_catalog(path, &binding)
+}
+
+/// Read normal registry records under the exact catalog binding for the
+/// current daemon/storage plane.
+pub fn read_store_registry_with_custody_catalog(
+    path: impl AsRef<Path>,
+    custody_catalog: &CustodyCatalogBinding,
+) -> Result<Vec<StoreServiceDefinition>, ObjectServiceError> {
     let path = path.as_ref();
     match File::open(path) {
         Ok(file) => {
@@ -92,7 +103,7 @@ pub fn read_store_registry(
             // Registry files are an untrusted mutable input. Validate every
             // read, not merely the currently requested update, so a manual or
             // legacy bucket alias cannot reach a normal owner-capable path.
-            validate_store_registry(&definitions)?;
+            validate_store_registry(&definitions, custody_catalog)?;
             Ok(definitions)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
@@ -107,15 +118,31 @@ pub fn upsert_store_definition(
     path: impl AsRef<Path>,
     definition: StoreServiceDefinition,
 ) -> Result<StoreRegistryUpdateReport, ObjectServiceError> {
+    let binding = CustodyCatalogBinding::new(default_custody_catalog_path())?;
+    upsert_store_definition_with_custody_catalog(path, definition, &binding)
+}
+
+/// Update normal mutable registry state under the exact catalog binding for
+/// the current daemon/storage plane.
+pub fn upsert_store_definition_with_custody_catalog(
+    path: impl AsRef<Path>,
+    definition: StoreServiceDefinition,
+    custody_catalog: &CustodyCatalogBinding,
+) -> Result<StoreRegistryUpdateReport, ObjectServiceError> {
     definition
         .policy
         .validate()
         .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
     reject_custody_reserved_namespace(&definition)?;
-    reject_default_catalogued_custody_mutation(&definition.store_id, "mutable registry update")?;
+    reject_bound_catalogued_custody_mutation(
+        custody_catalog,
+        &definition.store_id,
+        "mutable registry update",
+    )?;
     if definition.policy.export_policy == ExportPolicy::S3 {
         let bucket_name = bucket_name_for_definition(&definition)?;
-        reject_default_catalogued_custody_definition(
+        reject_bound_catalogued_custody_definition(
+            custody_catalog,
             &definition.store_id,
             &bucket_name,
             "mutable registry update",
@@ -123,7 +150,7 @@ pub fn upsert_store_definition(
     }
 
     let path = path.as_ref();
-    let mut definitions = read_store_registry(path)?;
+    let mut definitions = read_store_registry_with_custody_catalog(path, custody_catalog)?;
     let existing = definitions
         .iter()
         .position(|stored| stored.store_id == definition.store_id);
@@ -135,7 +162,7 @@ pub fn upsert_store_definition(
         StoreRegistryAction::Created
     };
 
-    validate_store_registry(&definitions)?;
+    validate_store_registry(&definitions, custody_catalog)?;
     write_store_registry(path, &definitions)?;
 
     let (bucket_name, credential_reference) = if definition.policy.export_policy == ExportPolicy::S3
@@ -161,9 +188,23 @@ pub fn delete_store_definition(
     path: impl AsRef<Path>,
     store_id: &dasobjectstore_core::ids::StoreId,
 ) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
+    let binding = CustodyCatalogBinding::new(default_custody_catalog_path())?;
+    delete_store_definition_with_custody_catalog(path, store_id, &binding)
+}
+
+/// Delete normal registry state only under the injected catalog binding.
+pub fn delete_store_definition_with_custody_catalog(
+    path: impl AsRef<Path>,
+    store_id: &dasobjectstore_core::ids::StoreId,
+    custody_catalog: &CustodyCatalogBinding,
+) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
     let path = path.as_ref();
-    reject_default_catalogued_custody_mutation(store_id, "mutable registry deletion")?;
-    let mut definitions = read_store_registry(path)?;
+    reject_bound_catalogued_custody_mutation(
+        custody_catalog,
+        store_id,
+        "mutable registry deletion",
+    )?;
+    let mut definitions = read_store_registry_with_custody_catalog(path, custody_catalog)?;
     let original_len = definitions.len();
     if store_id.as_str() == crate::custody::R237_BOOTSTRAP_STORE_ID {
         return Err(ObjectServiceError::InvalidConfiguration(
@@ -174,7 +215,7 @@ pub fn delete_store_definition(
     definitions.retain(|definition| &definition.store_id != store_id);
     let removed = definitions.len() != original_len;
     if removed {
-        validate_store_registry(&definitions)?;
+        validate_store_registry(&definitions, custody_catalog)?;
         write_store_registry(path, &definitions)?;
     }
 
@@ -187,13 +228,15 @@ pub fn delete_store_definition(
 
 fn validate_store_registry(
     definitions: &[StoreServiceDefinition],
+    custody_catalog: &CustodyCatalogBinding,
 ) -> Result<(), ObjectServiceError> {
     let mut store_ids = BTreeSet::new();
     let mut bucket_names = BTreeSet::new();
 
     for definition in definitions {
         reject_custody_reserved_namespace(definition)?;
-        reject_default_catalogued_custody_mutation(
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
             &definition.store_id,
             "mutable registry record",
         )?;
@@ -211,7 +254,8 @@ fn validate_store_registry(
 
         if definition.policy.export_policy == ExportPolicy::S3 {
             let bucket_name = bucket_name_for_definition(definition)?;
-            reject_default_catalogued_custody_definition(
+            reject_bound_catalogued_custody_definition(
+                custody_catalog,
                 &definition.store_id,
                 &bucket_name,
                 "mutable registry record",
@@ -286,8 +330,14 @@ fn restrict_dir(path: &Path) -> Result<(), ObjectServiceError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_store_definition, read_store_registry, upsert_store_definition, StoreRegistryAction,
+        delete_store_definition, read_store_registry, upsert_store_definition,
+        upsert_store_definition_with_custody_catalog, StoreRegistryAction,
     };
+    use crate::custody::{
+        CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreDefinitionV1,
+        CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+    };
+    use crate::custody_catalog::{create_custody_catalog_entry, CustodyCatalogBinding};
     use crate::layout::StoreServiceDefinition;
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
@@ -458,6 +508,54 @@ mod tests {
             ),
         )
         .is_err());
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    #[test]
+    fn explicit_custom_catalog_binding_rejects_a_bucket_alias_before_registry_write() {
+        let root = temp_root("custom-custody-catalog-binding");
+        let catalog = root.join("custody/catalog.jsonl");
+        let registry = root.join("normal/stores.json");
+        let sealed = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new("sealed-custody").expect("sealed id"),
+            bucket_name: "dos-sealed-custody".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                target_id: "nuc-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "attended://provisioner".to_string(),
+                provisioner_identity: "provisioner".to_string(),
+                writer_credential_reference: "attended://writer".to_string(),
+                writer_identity: "writer".to_string(),
+                reader_credential_reference: "attended://reader".to_string(),
+                reader_identity: "reader".to_string(),
+            },
+        };
+        create_custody_catalog_entry(
+            &catalog,
+            &sealed,
+            root.join("custody/ledger.sqlite"),
+            "a".repeat(64),
+            "2026-09-05T10:00:00Z",
+        )
+        .expect("sealed catalog entry");
+        let binding = CustodyCatalogBinding::new(&catalog).expect("canonical custom catalog");
+        let error = upsert_store_definition_with_custody_catalog(
+            &registry,
+            definition(
+                "ordinary-alias",
+                StoreClass::GeneratedData,
+                Some(sealed.bucket_name),
+            ),
+            &binding,
+        )
+        .expect_err("normal registry cannot alias a custom custody catalog bucket");
+        assert!(error.to_string().contains("sealed custody bucket"));
+        assert!(!registry.exists());
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 

@@ -208,8 +208,17 @@ impl DaemonCustodyRuntimeConfig {
         reject_blank("custody.compose_project", &self.compose_project)?;
         reject_blank("custody.service_name", &self.service_name)?;
         reject_blank("custody.endpoint", &self.endpoint)?;
+        let custody_endpoint = super::service::canonical_endpoint_authority(&self.endpoint)
+            .map_err(|error| {
+                DaemonRuntimeConfigError::InvalidCustodyConfiguration(error.to_string())
+            })?;
+        let normal_endpoint = super::service::canonical_endpoint_authority(&normal.endpoint)
+            .map_err(|error| {
+                DaemonRuntimeConfigError::InvalidCustodyConfiguration(error.to_string())
+            })?;
         if self.enabled
-            && (self.compose_project == normal.compose_project || self.endpoint == normal.endpoint)
+            && (self.compose_project == normal.compose_project
+                || custody_endpoint == normal_endpoint)
         {
             return Err(DaemonRuntimeConfigError::InvalidCustodyConfiguration(
                 "enabled custody coordinates overlap the normal object-service plane".to_string(),
