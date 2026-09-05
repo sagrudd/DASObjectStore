@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.180.0 - 2026-09-05
+
+- Add a source-only local trusted-administrator custody-retention overlay for
+  a fresh dedicated Garage bucket. It seals target-bound configuration and
+  append-only content-addressed object/version/event/readback records, requires
+  a distinct reader readback, permanent legal hold, and later-only retention
+  extension. Normal mutable store layout, owner-capable provisioning, and
+  registry rewrite/delete paths fail closed for custody profiles.
+- Define a dedicated no-owner Garage provisioning plan with separate attended
+  provisioner, writer, and reader identities, plus an off-NUC signed,
+  expiring monotonic attestation consumer contract. The assurance label is
+  explicitly `local_trusted_administrator_overlay`; it is not independently
+  administered storage and does not alter r237/r7 Remote 0.177.4.
+
 ## 0.179.1 - 2026-09-04
 
 - Correct the source-only S6 custody substrate so that it never captures,

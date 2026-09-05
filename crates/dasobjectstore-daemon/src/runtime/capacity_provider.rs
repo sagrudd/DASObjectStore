@@ -1498,6 +1498,7 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: true,
+            custody_profile: None,
         };
         std::fs::create_dir_all(root).expect("registry dir");
         std::fs::write(

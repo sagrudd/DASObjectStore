@@ -127,6 +127,7 @@ pub(super) fn run_store_create(
         reader_group: args.reader_group().map(ToOwned::to_owned),
         writer_group: args.writer_group().map(ToOwned::to_owned),
         public: args.public(),
+        custody_profile: None,
     };
     let daemon_config = DaemonRuntimeConfig::default_packaged();
     let use_daemon = args.registry_path().is_none()
@@ -670,6 +671,7 @@ mod tests {
             reader_group: args.reader_group().map(ToOwned::to_owned),
             writer_group: args.writer_group().map(ToOwned::to_owned),
             public: args.public(),
+            custody_profile: None,
         };
         let request = create_object_store_request(args, &definition);
 

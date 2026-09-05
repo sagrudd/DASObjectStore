@@ -56,6 +56,7 @@ fn render_sample_compose(root: &Path) -> String {
         reader_group: None,
         writer_group: None,
         public: false,
+        custody_profile: None,
     }])
     .expect("layout planned");
     let request = ComposeRenderRequest {

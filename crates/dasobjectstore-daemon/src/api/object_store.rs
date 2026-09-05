@@ -110,6 +110,7 @@ impl CreateObjectStoreRequest {
             reader_group: self.reader_group.clone(),
             writer_group: Some(self.writer_group.clone()),
             public: self.public,
+            custody_profile: None,
         })
     }
 }

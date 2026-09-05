@@ -3806,6 +3806,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -3851,6 +3852,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -3887,6 +3889,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -3925,6 +3928,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -4058,6 +4062,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -4101,6 +4106,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -4295,6 +4301,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([
@@ -4632,6 +4639,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
 
@@ -4780,6 +4788,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         run(
@@ -5108,6 +5117,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some(test_writer_group()),
                 public: false,
+                custody_profile: None,
             }],
         );
         let cli = Cli::try_parse_from([

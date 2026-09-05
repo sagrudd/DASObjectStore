@@ -1,7 +1,9 @@
 //! System-managed store service definition registry.
 
 use crate::credentials::credential_reference_for_store;
-use crate::layout::{bucket_name_for_definition, StoreServiceDefinition};
+use crate::layout::{
+    bucket_name_for_definition, validate_custody_definition, StoreServiceDefinition,
+};
 use crate::provider::ObjectServiceError;
 use dasobjectstore_core::store::ExportPolicy;
 use serde::{Deserialize, Serialize};
@@ -98,12 +100,36 @@ pub fn upsert_store_definition(
         .policy
         .validate()
         .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
+    validate_custody_definition(&definition)?;
+    if definition.custody_profile.is_some() {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "custody store {} cannot enter the mutable store registry; use the sealed custody workflow",
+            definition.store_id
+        )));
+    }
 
     let path = path.as_ref();
     let mut definitions = read_store_registry(path)?;
+    if definitions
+        .iter()
+        .any(|stored| stored.custody_profile.is_some())
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "mutable registry contains a custody profile; refusing every rewrite rather than silently replacing sealed state"
+                .to_string(),
+        ));
+    }
     let existing = definitions
         .iter()
         .position(|stored| stored.store_id == definition.store_id);
+    if let Some(index) = existing {
+        if definitions[index].custody_profile.is_some() {
+            return Err(ObjectServiceError::InvalidConfiguration(format!(
+                "custody store {} is sealed and cannot be replaced or migrated through the mutable registry",
+                definition.store_id
+            )));
+        }
+    }
     let action = if let Some(index) = existing {
         definitions[index] = definition.clone();
         StoreRegistryAction::Updated
@@ -140,7 +166,24 @@ pub fn delete_store_definition(
 ) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
     let path = path.as_ref();
     let mut definitions = read_store_registry(path)?;
+    if definitions
+        .iter()
+        .any(|stored| stored.custody_profile.is_some())
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "mutable registry contains a custody profile; refusing every rewrite rather than silently replacing sealed state"
+                .to_string(),
+        ));
+    }
     let original_len = definitions.len();
+    if definitions
+        .iter()
+        .any(|definition| &definition.store_id == store_id && definition.custody_profile.is_some())
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(format!(
+            "custody store {store_id} is sealed and cannot be deleted through the mutable registry"
+        )));
+    }
     definitions.retain(|definition| &definition.store_id != store_id);
     let removed = definitions.len() != original_len;
     if removed {
@@ -162,6 +205,7 @@ fn validate_store_registry(
     let mut bucket_names = BTreeSet::new();
 
     for definition in definitions {
+        validate_custody_definition(definition)?;
         definition
             .policy
             .validate()
@@ -247,6 +291,10 @@ fn restrict_dir(path: &Path) -> Result<(), ObjectServiceError> {
 mod tests {
     use super::{
         delete_store_definition, read_store_registry, upsert_store_definition, StoreRegistryAction,
+    };
+    use crate::custody::{
+        CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreProfileV1,
+        CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use crate::layout::StoreServiceDefinition;
     use dasobjectstore_core::ids::StoreId;
@@ -395,6 +443,26 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
 
+    #[test]
+    fn custody_profiles_cannot_be_created_replaced_or_deleted_by_mutable_registry() {
+        let root = temp_root("custody-registry-denial");
+        let registry_path = root.join("stores.json");
+        let custody = custody_definition();
+        assert!(upsert_store_definition(&registry_path, custody.clone()).is_err());
+        assert!(!registry_path.exists());
+
+        let initial = serde_json::to_vec_pretty(&vec![custody]).expect("serialize custody");
+        fs::create_dir_all(&root).expect("create fixture root");
+        fs::write(&registry_path, &initial).expect("write legacy custody registry fixture");
+        assert!(delete_store_definition(
+            &registry_path,
+            &StoreId::new("formal-custody").expect("store id"),
+        )
+        .is_err());
+        assert_eq!(fs::read(&registry_path).expect("read fixture"), initial);
+        fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
     fn definition(
         store_id: &str,
         class: StoreClass,
@@ -407,6 +475,30 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: false,
+            custody_profile: None,
+        }
+    }
+
+    fn custody_definition() -> StoreServiceDefinition {
+        StoreServiceDefinition {
+            store_id: StoreId::new("formal-custody").expect("store id"),
+            policy: StorePolicy::defaults_for(StoreClass::CriticalMetadata),
+            bucket_name: Some("dos-formal-custody".to_string()),
+            reader_group: None,
+            writer_group: None,
+            public: false,
+            custody_profile: Some(CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
+                target_id: "nuc-192.168.0.193".to_string(),
+                retention_until_utc: "2027-09-05T10:00:00Z".to_string(),
+                legal_hold: true,
+                writer_credential_reference: "secret://custody/writer".to_string(),
+                reader_credential_reference: "secret://custody/reader".to_string(),
+                reader_identity: "custody-reader-v1".to_string(),
+            }),
         }
     }
 

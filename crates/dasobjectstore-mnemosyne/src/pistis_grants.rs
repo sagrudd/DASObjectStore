@@ -277,6 +277,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some("mnemosyne".to_owned()),
                 public: false,
+                custody_profile: None,
             }])
             .expect("serialize stores"),
         )

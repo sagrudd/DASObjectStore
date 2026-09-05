@@ -2412,6 +2412,7 @@ mod tests {
                 reader_group: None,
                 writer_group: None,
                 public: false,
+                custody_profile: None,
             }),
             backend_root,
             ssd_staging_root: None,
@@ -2487,6 +2488,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some("mnemosyne".to_string()),
                 public: false,
+                custody_profile: None,
             }),
             backend_root: backend_root.clone(),
             ssd_staging_root: None,
@@ -5719,6 +5721,7 @@ mod tests {
                 reader_group: None,
                 writer_group: Some("writers".to_string()),
                 public: false,
+                custody_profile: None,
             }),
             backend_root,
             ssd_staging_root: None,
@@ -6988,6 +6991,7 @@ mod tests {
             reader_group: None,
             writer_group: writer_group.map(ToString::to_string),
             public: false,
+            custody_profile: None,
         }];
         fs::write(
             &store_registry,
@@ -7015,6 +7019,7 @@ mod tests {
             reader_group: reader_group.map(ToString::to_string),
             writer_group: writer_group.map(ToString::to_string),
             public,
+            custody_profile: None,
         }];
         fs::write(
             &store_registry,

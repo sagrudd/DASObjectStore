@@ -2,6 +2,7 @@
 
 pub mod compose;
 pub mod credentials;
+pub mod custody;
 pub mod garage;
 pub mod inspection;
 pub mod layout;
@@ -21,6 +22,20 @@ pub use credentials::{
     ManagedCredentialResolution, ManagedStoreCredentialRecord, SecretAccessKey,
     StoreCredentialReference, StoreCredentialRequest, StoreServiceCredential,
     SystemCredentialEntropy, GARAGE_CREDENTIAL_REGISTRY_ENV,
+};
+pub use custody::{
+    accept_custody_off_nuc_attestation, append_custody_retention_extension, create_custody_ledger,
+    custody_bucket_is_reserved, custody_object_key, inspect_custody_ledger,
+    plan_custody_garage_provisioning, reject_custody_mutation, retain_custody_object_with_readback,
+    verify_custody_readback_receipt, CustodyAssuranceClass, CustodyForbiddenMutation,
+    CustodyGarageCredential, CustodyGarageProvisionerIdentity, CustodyGarageProvisioningPlan,
+    CustodyGarageProvisioningRequest, CustodyIntegrityReceiptV1, CustodyLedgerInspectionV1,
+    CustodyObjectInputV1, CustodyObjectReader, CustodyObjectState, CustodyObjectWriter,
+    CustodyOffNucAttestationAuthority, CustodyOffNucAttestationBodyV1, CustodyOffNucAttestationV1,
+    CustodyOffNucVerifierCheckpointV1, CustodyOffNucVerifierState, CustodyReadbackObservationV1,
+    CustodyRetentionMode, CustodyStoreProfileV1,
+    CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
+    CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
 };
 pub use garage::{
     render_garage_data_directories, GarageDataDirectory, GarageProvider, GarageProviderConfig,

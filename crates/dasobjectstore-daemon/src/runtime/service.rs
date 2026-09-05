@@ -1304,6 +1304,7 @@ mod tests {
             reader_group: None,
             writer_group: Some("mnemosyne".to_string()),
             public: false,
+            custody_profile: None,
         }];
         let parent = path.parent().expect("registry parent");
         fs::create_dir_all(parent).expect("registry dir");

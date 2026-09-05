@@ -957,6 +957,7 @@ mod tests {
             reader_group: None,
             writer_group: Some("bioinformatics".to_string()),
             public: false,
+            custody_profile: None,
         };
         fs::write(
             &registry_path,
