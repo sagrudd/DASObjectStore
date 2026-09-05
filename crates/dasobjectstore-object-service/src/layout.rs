@@ -1,6 +1,11 @@
 //! Store-to-bucket service layout planning.
 
 use crate::credentials::{credential_reference_for_store, StoreCredentialRequest};
+use crate::custody::{custody_bucket_is_reserved, R237_BOOTSTRAP_STORE_ID};
+use crate::custody_catalog::{
+    default_custody_catalog_path, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, CustodyCatalogBinding,
+};
 use crate::provider::{ObjectServiceError, StoreBucketBinding};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::{ExportPolicy, StorePolicy};
@@ -10,7 +15,12 @@ use std::collections::BTreeSet;
 const BUCKET_PREFIX: &str = "dos";
 const MAX_BUCKET_NAME_LEN: usize = 63;
 
+/// Normal mutable storage definitions deliberately have no custody field.
+/// Custody admission is a separate daemon-only contract; unknown fields are
+/// denied rather than ignored and accidentally sent to the owner-capable
+/// normal Garage provisioner.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StoreServiceDefinition {
     pub store_id: StoreId,
     pub policy: StorePolicy,
@@ -32,6 +42,18 @@ pub struct StoreServiceLayout {
 pub fn plan_store_service_layout(
     definitions: &[StoreServiceDefinition],
 ) -> Result<StoreServiceLayout, ObjectServiceError> {
+    let binding = CustodyCatalogBinding::new(default_custody_catalog_path())?;
+    plan_store_service_layout_with_custody_catalog(definitions, &binding)
+}
+
+/// Plan normal storage only against the explicitly injected custody catalog
+/// that belongs to this storage plane. Daemon composition must use this form
+/// when a custody plane is configured, so a custom catalog cannot be bypassed
+/// by the process default.
+pub fn plan_store_service_layout_with_custody_catalog(
+    definitions: &[StoreServiceDefinition],
+    custody_catalog: &CustodyCatalogBinding,
+) -> Result<StoreServiceLayout, ObjectServiceError> {
     if definitions.is_empty() {
         return Err(ObjectServiceError::InvalidConfiguration(
             "at least one store definition is required".to_string(),
@@ -44,6 +66,12 @@ pub fn plan_store_service_layout(
     let mut bucket_bindings = Vec::new();
 
     for definition in definitions {
+        reject_custody_reserved_namespace(definition)?;
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
+            &definition.store_id,
+            "normal store layout",
+        )?;
         if !store_ids.insert(definition.store_id.as_str()) {
             return Err(ObjectServiceError::InvalidConfiguration(format!(
                 "duplicate store definition: {}",
@@ -56,6 +84,12 @@ pub fn plan_store_service_layout(
         }
 
         let bucket_name = bucket_name_for_definition(definition)?;
+        reject_bound_catalogued_custody_definition(
+            custody_catalog,
+            &definition.store_id,
+            &bucket_name,
+            "normal store layout",
+        )?;
         if !bucket_names.insert(bucket_name.as_str().to_string()) {
             return Err(ObjectServiceError::InvalidConfiguration(format!(
                 "duplicate bucket name: {bucket_name}"
@@ -84,6 +118,26 @@ pub fn plan_store_service_layout(
         credential_requests,
         bucket_bindings,
     })
+}
+
+/// The retired r237 bootstrap coordinates can never pass through ordinary
+/// layout or registry code.  A custody store is admitted only by the
+/// dedicated daemon adapter and must use a newly proved bucket.
+pub fn reject_custody_reserved_namespace(
+    definition: &StoreServiceDefinition,
+) -> Result<(), ObjectServiceError> {
+    if definition.store_id.as_str() == R237_BOOTSTRAP_STORE_ID
+        || definition
+            .bucket_name
+            .as_deref()
+            .is_some_and(custody_bucket_is_reserved)
+    {
+        return Err(ObjectServiceError::InvalidConfiguration(
+            "retired r237 bootstrap custody namespace is excluded from normal storage workflows"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn bucket_name_for_definition(

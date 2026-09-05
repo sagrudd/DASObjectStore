@@ -66,6 +66,11 @@ pub(crate) use performance::{
 #[derive(Debug, Parser)]
 #[command(name = "dasobjectstore", version = dasobjectstore_core::VERSION)]
 pub(crate) struct Cli {
+    /// Deprecated compatibility option. It is never accepted as authority for
+    /// production direct control: only the daemon server receives the active
+    /// custody catalog binding.
+    #[arg(long, global = true, value_name = "PATH")]
+    _daemon_config: Option<PathBuf>,
     #[command(subcommand)]
     command: Option<Command>,
 }

@@ -26,6 +26,8 @@ where
         }
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        self.reject_normal_custody_target(Some(&store_id), "store drain")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         self.reject_profile_lifecycle_fallback(&store_id, "drain")?;
         let disk_roots = discover_managed_hdd_roots(&self.hdd_root_path)
             .map_err(|error| ("managed_hdd_discovery_failed", error.to_string()))?;
@@ -61,6 +63,11 @@ where
 
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        // This guard precedes profile/metadata lookup and deletion.  A sealed
+        // custody identifier must not be able to trigger a normal destructive
+        // probe merely because it has no mutable registry definition.
+        self.reject_normal_custody_target(Some(&store_id), "store delete")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         if read_profile_binding_record(&self.profile_binding_registry_path, store_id.as_str())
             .map_err(|error| ("profile_lifecycle_unavailable", error.to_string()))?
             .is_some()
@@ -77,9 +84,15 @@ where
                 dry_run: request.dry_run,
             })
             .map_err(|error| ("store_delete_failed", error.to_string()))?;
-        let host_registry =
-            delete_store_definition_maybe(&self.store_registry_path, &store_id, request.dry_run)
-                .map_err(|error| ("store_registry_delete_failed", error.to_string()))?;
+        let host_registry = delete_store_definition_maybe(
+            &self.store_registry_path,
+            &store_id,
+            request.dry_run,
+            &self
+                .normal_custody_catalog_binding()
+                .map_err(|error| ("store_registry_delete_failed", error.to_string()))?,
+        )
+        .map_err(|error| ("store_registry_delete_failed", error.to_string()))?;
         let host_subobjects = delete_subobjects_for_store_maybe(
             &self.subobject_registry_path,
             &store_id,
@@ -97,6 +110,9 @@ where
                         &portable_registry_path,
                         &store_id,
                         request.dry_run,
+                        &self.normal_custody_catalog_binding().map_err(|error| {
+                            ("portable_store_registry_delete_failed", error.to_string())
+                        })?,
                     )
                     .map_err(|error| {
                         ("portable_store_registry_delete_failed", error.to_string())
@@ -211,6 +227,8 @@ where
             DaemonIngestProgressEvent,
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<StoreRepairResponse, (&'static str, String)> {
+        self.reject_normal_custody_target(request.store_id.as_ref(), "store repair/reconciliation")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         if !request.dry_run {
             require_preverified_host_maintenance_peer(
                 actor,
@@ -398,7 +416,8 @@ where
                     .to_string(),
             ));
         }
-        let definition = read_store_registry(&self.store_registry_path)
+        let definition = self
+            .read_normal_store_registry()
             .map_err(|error| ("profile_repair_unavailable", error.to_string()))?
             .into_iter()
             .find(|definition| definition.store_id == binding.manifest.store_id)
@@ -543,6 +562,8 @@ where
         request: StoreDeduplicateRequest,
         actor: Option<&DaemonLocalActor>,
     ) -> Result<StoreDeduplicateResponse, (&'static str, String)> {
+        self.reject_normal_custody_target(request.store_id.as_ref(), "store deduplicate")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         if !request.dry_run {
             require_preverified_host_maintenance_peer(
                 actor,
@@ -587,9 +608,9 @@ where
         ),
         (&'static str, String),
     > {
-        let definitions =
-            dasobjectstore_object_service::read_store_registry(&self.store_registry_path)
-                .map_err(|error| (error_code, error.to_string()))?;
+        let definitions = self
+            .read_normal_store_registry()
+            .map_err(|error| (error_code, error.to_string()))?;
         let store_definitions = definitions
             .into_iter()
             .map(|definition| {
@@ -724,6 +745,8 @@ where
         }
         let store_id = StoreId::new(request.store_id.clone())
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        self.reject_normal_custody_target(Some(&store_id), "ingest queue drain")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         let report = dasobjectstore_metadata::drain_ingest_queue(
             &dasobjectstore_metadata::IngestQueueDrainRequest {
                 live_sqlite_path: self.live_sqlite_path.clone(),
@@ -757,6 +780,8 @@ where
         }
         let store_id = StoreId::new(request.store_id)
             .map_err(|error| ("invalid_store_id", error.to_string()))?;
+        self.reject_normal_custody_target(Some(&store_id), "destage retry")
+            .map_err(|error| ("custody_normal_route_denied", error.to_string()))?;
         let now_utc = self.clock.now_utc();
         let report = dasobjectstore_metadata::retry_needs_review_destage_for_store(
             &self.live_sqlite_path,
@@ -778,7 +803,7 @@ where
                 .store_inventory_for_remote_easyconnect_session(&request, session_id)
                 .map_err(|error| ObjectServiceError::CommandFailed(error.to_string()));
         }
-        let stores = read_store_registry(&self.store_registry_path)?;
+        let stores = self.read_normal_store_registry()?;
         let mut inventory = Vec::new();
         for definition in stores {
             let bucket_name = if definition.policy.export_policy == ExportPolicy::S3 {
@@ -832,7 +857,7 @@ where
             }
         })?;
         let actor = DaemonLocalActor::new(0).with_username(session.approved_actor.clone());
-        let stores = read_store_registry(&self.store_registry_path).map_err(|error| {
+        let stores = self.read_normal_store_registry().map_err(|error| {
             RemoteEasyconnectPairedSessionStoreError::Json {
                 path: self.store_registry_path.clone(),
                 message: error.to_string(),

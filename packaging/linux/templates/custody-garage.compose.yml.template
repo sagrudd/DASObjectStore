@@ -1,0 +1,17 @@
+# REVIEWED TEMPLATE ONLY — do not install or start through normal packaging.
+# This is a separate Compose project, service, configuration, metadata/data
+# volume set, and loopback endpoint. It contains no credential material.
+name: dasobjectstore-custody
+services:
+  garage-custody:
+    image: dxflrs/garage:v2.3.0
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+    ports:
+      - "127.0.0.1:3901:3900"
+    volumes:
+      - "/etc/dasobjectstore/custody-garage.toml:/etc/garage.toml:ro"
+      - "/var/lib/dasobjectstore/custody-garage/meta:/var/lib/garage/meta"
+      - "/srv/dasobjectstore/custody/garage:/var/lib/garage/data"
+    command: ["/garage", "server", "-c", "/etc/garage.toml"]

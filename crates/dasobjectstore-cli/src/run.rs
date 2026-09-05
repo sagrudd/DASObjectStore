@@ -177,7 +177,8 @@ use dasobjectstore_core::risk::{
 };
 use dasobjectstore_core::store::{StorePolicy, StorePolicyValidationErrors};
 use dasobjectstore_daemon::{
-    authoritative_performance_recommendation_path, CapacityStatusRequest, CreateObjectStoreRequest,
+    authoritative_performance_recommendation_path, canonical_custody_activation_marker_path,
+    custody_activation_blocks_legacy_cli_at, CapacityStatusRequest, CreateObjectStoreRequest,
     DaemonClient, DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
     DaemonIngestControlAction, DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin,
     DaemonRuntimeConfig, DestageRetryRequest as DaemonDestageRetryRequest,
@@ -279,6 +280,11 @@ thread_local! {
     static PERFORMANCE_SYNC_ALL_CALLS: RefCell<u32> = const { RefCell::new(0) };
 }
 pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
+    // Legacy CLI must not infer the active custody plane from an omitted or
+    // caller-selected daemon configuration. It independently reads only the
+    // canonical daemon-owned activation marker, which is written before an
+    // enabled daemon can compose custody and persists across restart/stop.
+    deny_direct_production_cli_control(cli.command().is_some(), cfg!(test))?;
     match cli.command() {
         Some(Command::Probe(args)) => run_probe(args, writer),
         Some(Command::Health(args)) => run_health(args, writer),
@@ -386,6 +392,41 @@ pub(crate) fn run(cli: &Cli, writer: &mut impl Write) -> Result<(), CliError> {
         Some(Command::PerformanceReport(args)) => run_performance_report(args, writer),
         None => Cli::write_help(writer).map_err(CliError::Io),
     }
+}
+
+/// Fails closed when the daemon-owned custody activation marker is present,
+/// malformed, or unreadable. No caller-selected config is consulted.
+fn deny_direct_production_cli_control(
+    command_requested: bool,
+    allow_offline_test: bool,
+) -> Result<(), CliError> {
+    deny_direct_production_cli_control_at(
+        &canonical_custody_activation_marker_path(),
+        command_requested,
+        allow_offline_test,
+    )
+}
+
+fn deny_direct_production_cli_control_at(
+    activation_marker_path: &Path,
+    command_requested: bool,
+    allow_offline_test: bool,
+) -> Result<(), CliError> {
+    if !command_requested || allow_offline_test {
+        return Ok(());
+    }
+    let active = custody_activation_blocks_legacy_cli_at(activation_marker_path).map_err(|error| {
+        CliError::CommandFailed(format!(
+            "cannot verify daemon-owned custody activation state before direct CLI control; direct access is denied: {error}"
+        ))
+    })?;
+    if active {
+        return Err(CliError::CommandFailed(
+            "direct DASObjectStore CLI control is denied while the daemon-owned isolated custody plane is active; use the daemon server with its exact injected custody catalog binding"
+                .to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn run_endpoint_test(args: &EndpointTestArgs, writer: &mut impl Write) -> Result<(), CliError> {
@@ -977,7 +1018,8 @@ mod tests {
     use super::{
         active_hdd_landing_lines, benchmark_direct_hdd, benchmark_ssd_only,
         benchmark_ssd_pipeline_with_options, benchmark_ssd_stage_then_drain, collect_ingest_files,
-        current_user_group_names, materialize_generated_performance_workload,
+        current_user_group_names, deny_direct_production_cli_control,
+        deny_direct_production_cli_control_at, materialize_generated_performance_workload,
         measure_copy_with_progress, measure_copy_with_split_progress,
         measure_ssd_stage_payload_with_progress, parse_binary_size,
         performance_report_metadata_json, performance_report_metadata_json_from_artifact,
@@ -1009,10 +1051,10 @@ mod tests {
         CapacityBehavior, StoreClass, StorePolicy, StorePolicyValidationError,
     };
     use dasobjectstore_daemon::{
-        DaemonApiRequest, DaemonApiResponse, DaemonClient, DaemonClientError,
-        DaemonClientTransport, DaemonIngestConflictPolicy, DaemonIngestProgressEvent,
-        DaemonIngestStage, DaemonIngressOrigin, DaemonSsdPressure, InProcessDaemonTransport,
-        SubmitIngestFilesResponse,
+        ensure_custody_activation_marker_at, DaemonApiRequest, DaemonApiResponse, DaemonClient,
+        DaemonClientError, DaemonClientTransport, DaemonIngestConflictPolicy,
+        DaemonIngestProgressEvent, DaemonIngestStage, DaemonIngressOrigin, DaemonRuntimeConfig,
+        DaemonSsdPressure, InProcessDaemonTransport, SubmitIngestFilesResponse,
     };
     use dasobjectstore_metadata::{
         export_metadata_snapshot, initialize_pool, manifest::DiskRole, ArtifactReference,
@@ -1028,7 +1070,7 @@ mod tests {
     use rusqlite::Connection;
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::fs::{self, File};
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::{mpsc, Arc, Mutex};
@@ -1047,6 +1089,64 @@ mod tests {
         assert!(output.contains("Commands:"));
         assert!(output.contains("disk"));
         assert!(output.contains("health"));
+    }
+
+    #[test]
+    fn active_daemon_marker_denies_cli_even_with_a_disabled_caller_config() {
+        let root = temp_root("active-custody-marker-cli-denial");
+        let marker_path = root.join("canonical/custody-activation.json");
+        let mut active = DaemonRuntimeConfig::linux_packaged();
+        active.custody.enabled = true;
+        ensure_custody_activation_marker_at(&marker_path, &active.custody, "2026-09-05T12:00:00Z")
+            .expect("active daemon writes durable marker before composing custody");
+        let disabled_config_b = root.join("caller-disabled-daemon.json");
+        Cli::try_parse_from([
+            "dasobjectstore",
+            "--daemon-config",
+            disabled_config_b.to_str().expect("UTF-8 path"),
+            "store",
+            "list",
+        ])
+        .expect("legacy config option remains parse-compatible but is not authority");
+        let error = deny_direct_production_cli_control_at(&marker_path, true, false)
+            .expect_err("the active daemon marker must deny before any direct route");
+        assert!(error
+            .to_string()
+            .contains("isolated custody plane is active"));
+        assert!(
+            marker_path.is_file(),
+            "daemon stop/restart cannot clear marker"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_daemon_owned_custody_marker_denies_direct_cli_before_control() {
+        let root = temp_root("malformed-custody-marker-cli-denial");
+        let marker_path = root.join("canonical/custody-activation.json");
+        fs::create_dir_all(marker_path.parent().expect("marker parent")).expect("marker parent");
+        fs::write(&marker_path, b"not-json").expect("malformed marker");
+        #[cfg(unix)]
+        fs::set_permissions(&marker_path, fs::Permissions::from_mode(0o600)).expect("marker mode");
+        let error = deny_direct_production_cli_control_at(&marker_path, true, false)
+            .expect_err("malformed marker must fail closed");
+        assert!(error
+            .to_string()
+            .contains("cannot verify daemon-owned custody activation state"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn absent_marker_preserves_legacy_cli_control_and_test_fixture_is_explicit() {
+        let root = temp_root("inactive-custody-marker-cli-allow");
+        let marker_path = root.join("canonical/custody-activation.json");
+        deny_direct_production_cli_control_at(&marker_path, true, false)
+            .expect("no daemon-owned marker means legacy inactive behaviour remains available");
+        deny_direct_production_cli_control(true, true)
+            .expect("offline unit fixture is intentionally isolated from production marker state");
+        deny_direct_production_cli_control(false, false)
+            .expect("top-level help has no direct registry route");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -1075,7 +1175,7 @@ mod tests {
 
         let output = String::from_utf8(output).expect("utf8 help");
         assert!(output.contains("Manage object stores and policy"));
-        assert!(output.contains("Usage: dasobjectstore store [COMMAND]"));
+        assert!(output.contains("Usage: dasobjectstore store [OPTIONS] [COMMAND]"));
         assert!(output.contains("adopt"));
         assert!(output.contains("create"));
         assert!(output.contains("list"));
@@ -1090,7 +1190,7 @@ mod tests {
 
         let output = String::from_utf8(output).expect("utf8 help");
         assert!(output.contains("Inspect SSD ingest and destage work"));
-        assert!(output.contains("Usage: dasobjectstore ingest [COMMAND]"));
+        assert!(output.contains("Usage: dasobjectstore ingest [OPTIONS] [COMMAND]"));
         assert!(output.contains("status"));
         assert!(output.contains("queue"));
         assert!(output.contains("direct-import"));

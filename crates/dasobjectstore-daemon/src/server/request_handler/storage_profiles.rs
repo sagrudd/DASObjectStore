@@ -216,7 +216,7 @@ where
             "profile S3 is available for bounded folder profiles only",
         ));
     }
-    let capacity = match read_store_registry(&handler.store_registry_path) {
+    let capacity = match handler.read_normal_store_registry() {
         Ok(definitions) => definitions
             .into_iter()
             .find(|definition| definition.store_id == store_id)
@@ -307,7 +307,7 @@ where
             "profile diagnostics is available for bounded folder profiles only",
         ));
     }
-    let capacity = match read_store_registry(&handler.store_registry_path) {
+    let capacity = match handler.read_normal_store_registry() {
         Ok(definitions) => definitions
             .into_iter()
             .find(|definition| definition.store_id == store_id)

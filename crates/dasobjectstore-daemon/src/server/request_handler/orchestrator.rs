@@ -5,6 +5,13 @@ use crate::api::{
 };
 
 pub trait DaemonServiceOrchestrator {
+    /// A custody-capable service must make normal registry paths prove that
+    /// they received the same canonical catalog binding. Test/non-custody
+    /// orchestrators retain the inactive default denial guard.
+    fn requires_explicit_custody_catalog_binding(&self) -> bool {
+        false
+    }
+
     fn application_upload_endpoint(&self) -> Option<String> {
         None
     }
@@ -216,6 +223,25 @@ pub trait DaemonServiceOrchestrator {
         Err(DaemonServiceRuntimeError::UnsupportedOperation {
             operation: "create_object_store requires an ObjectStore administration orchestrator"
                 .to_string(),
+        })
+    }
+
+    fn admit_custody_store(
+        &self,
+        _request: crate::api::CustodyAdmissionRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<crate::api::CustodyAdmissionResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "custody admission requires the Garage custody controller".to_string(),
+        })
+    }
+
+    fn retain_custody_object(
+        &self,
+        _request: crate::api::CustodyRetainRequest,
+    ) -> Result<crate::api::CustodyRetainResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "custody retain requires the Garage custody controller and attended credential authority".to_string(),
         })
     }
 

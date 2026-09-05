@@ -486,7 +486,7 @@ where
         else {
             return report;
         };
-        let Ok(definitions) = read_store_registry(&self.store_registry_path) else {
+        let Ok(definitions) = self.read_normal_store_registry() else {
             return report;
         };
         for binding in bindings {

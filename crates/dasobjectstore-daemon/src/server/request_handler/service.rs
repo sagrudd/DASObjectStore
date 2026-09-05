@@ -500,6 +500,49 @@ where
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
         }
+        DaemonApiRequest::CustodyAdmission(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "custody admission",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
+            let verified_subject_id = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone());
+            let now = handler.clock.now_utc();
+            let response = handler
+                .service_orchestrator
+                .admit_custody_store(request, &now)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            handler.record_admin_job(DaemonJobSummary {
+                job_id: response.accepted.job_id.clone(),
+                kind: response.accepted.kind.clone(),
+                state: DaemonJobState::Complete,
+                progress: DaemonJobProgress::default(),
+                submitted_at_utc: response.accepted.accepted_at_utc.clone(),
+                updated_at_utc: response.accepted.accepted_at_utc.clone(),
+                actor: verified_subject_id,
+                failure_message: None,
+            })?;
+            Ok(DaemonApiResponse::CustodyAdmission(response))
+        }
+        DaemonApiRequest::CustodyRetain(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "custody retain",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
+            let response = handler
+                .service_orchestrator
+                .retain_custody_object(request)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            Ok(DaemonApiResponse::CustodyRetain(response))
+        }
         DaemonApiRequest::CreateObjectStore(request) => {
             // Creation mutates daemon-owned capacity and registry authority.
             // Human authority is established by the verified Pistis host
@@ -601,6 +644,45 @@ where
                         ),
                     )
                 })?;
+                // Profile provision/adoption has filesystem, profile-binding,
+                // and capacity effects before its ordinary registry upsert.
+                // Reject both the manifest store id and any supplied normal
+                // S3 bucket alias under the exact daemon-bound catalog first.
+                handler
+                    .reject_normal_custody_target(
+                        Some(&request.manifest.store_id),
+                        "profile binding/adoption",
+                    )
+                    .map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::ObjectService(error),
+                        )
+                    })?;
+                if let Some(definition) = request.store_definition.as_ref() {
+                    let binding = handler.normal_custody_catalog_binding().map_err(|error| {
+                        DaemonRequestHandlerError::ServiceRuntime(
+                            DaemonServiceRuntimeError::ObjectService(error),
+                        )
+                    })?;
+                    if definition.policy.export_policy == ExportPolicy::S3 {
+                        let bucket = bucket_name_for_definition(definition).map_err(|error| {
+                            DaemonRequestHandlerError::ServiceRuntime(
+                                DaemonServiceRuntimeError::ObjectService(error),
+                            )
+                        })?;
+                        reject_bound_catalogued_custody_definition(
+                            &binding,
+                            &definition.store_id,
+                            &bucket,
+                            "profile binding/adoption",
+                        )
+                        .map_err(|error| {
+                            DaemonRequestHandlerError::ServiceRuntime(
+                                DaemonServiceRuntimeError::ObjectService(error),
+                            )
+                        })?;
+                    }
+                }
                 let provision_root_created = prepare_profile_provision_root(&request)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 previous_binding = read_profile_binding_record(
@@ -674,9 +756,7 @@ where
             response.reused = reused;
             if let Some(definition) = store_definition {
                 if !response.accepted.dry_run {
-                    if let Err(error) =
-                        upsert_store_definition(&handler.store_registry_path, definition)
-                    {
+                    if let Err(error) = handler.upsert_normal_store_definition(definition) {
                         rollback_profile_registration(
                             handler,
                             &rollback_request,
@@ -691,7 +771,8 @@ where
                 response.store_definition_published = !response.accepted.dry_run;
             }
             if !response.accepted.dry_run {
-                let definitions = read_store_registry(&handler.store_registry_path)
+                let definitions = handler
+                    .read_normal_store_registry()
                     .map_err(DaemonServiceRuntimeError::ObjectService)
                     .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
                 let definition = definitions
@@ -757,6 +838,28 @@ where
                         },
                     )
                 })?;
+            handler
+                .reject_normal_custody_target(Some(&source_store_id), "profile migration source")
+                .and_then(|_| {
+                    handler.reject_normal_custody_target(
+                        Some(&destination_store_id),
+                        "profile migration destination",
+                    )
+                })
+                .map_err(|error| {
+                    DaemonRequestHandlerError::ServiceRuntime(
+                        DaemonServiceRuntimeError::UnsupportedOperation {
+                            operation: error.to_string(),
+                        },
+                    )
+                })?;
+            let custody_catalog = handler.normal_custody_catalog_binding().map_err(|error| {
+                DaemonRequestHandlerError::ServiceRuntime(
+                    DaemonServiceRuntimeError::UnsupportedOperation {
+                        operation: error.to_string(),
+                    },
+                )
+            })?;
             let now = handler.clock.now_utc();
             let report = migrate_registered_folder_store(
                 &request.migration_id,
@@ -764,6 +867,7 @@ where
                 &destination_store_id,
                 &handler.profile_binding_registry_path,
                 &handler.store_registry_path,
+                &custody_catalog,
                 &handler.live_sqlite_path,
                 &handler.profile_migration_state_root,
                 &now,
@@ -993,7 +1097,8 @@ where
                 && root_state == ProfileInspectionRootState::Available
                 && lifecycle_state == ProfileBindingLifecycleState::Active
             {
-                let policy = read_store_registry(&handler.store_registry_path)
+                let policy = handler
+                    .read_normal_store_registry()
                     .ok()
                     .and_then(|definitions| {
                         definitions

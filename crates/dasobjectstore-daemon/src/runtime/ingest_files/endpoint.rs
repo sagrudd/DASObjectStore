@@ -3,7 +3,8 @@
 use super::DaemonIngestFilesRuntimeError;
 use dasobjectstore_core::ids::{ObjectId, StoreId};
 use dasobjectstore_object_service::{
-    read_store_registry, read_subobject_registry, StoreServiceDefinition,
+    read_store_registry, read_store_registry_with_custody_catalog, read_subobject_registry,
+    CustodyCatalogBinding, StoreServiceDefinition,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,8 +31,15 @@ pub(super) fn resolve_ingest_endpoint(
     endpoint: &StoreId,
     store_registry_path: &Path,
     subobject_registry_path: &Path,
+    custody_catalog: Option<&CustodyCatalogBinding>,
 ) -> Result<ResolvedIngestEndpoint, DaemonIngestFilesRuntimeError> {
-    let stores = read_store_registry(store_registry_path)?;
+    // This resolution happens before source discovery, capacity admission, or
+    // metadata work. An active daemon must use its injected catalog binding,
+    // never the process/default catalog fallback.
+    let stores = match custody_catalog {
+        Some(binding) => read_store_registry_with_custody_catalog(store_registry_path, binding)?,
+        None => read_store_registry(store_registry_path)?,
+    };
     let store_match = stores
         .iter()
         .find(|definition| definition.store_id == *endpoint);

@@ -7,8 +7,9 @@ use dasobjectstore_daemon::runtime::{
     reconcile_workspace_materializations, reconcile_workspace_nfs_attachments,
     reconcile_workspace_promotions, reconcile_workspace_provision_operations,
     run_garbage_collection, run_one_durable_destage, spawn_disk_housekeeping_loop,
-    DurableDestageOutcome, DurableDestageWorkerConfig, GarbageCollectDecision, GarbageCollectMode,
-    GarbageCollectTrigger, GarbageCollectorConfig, LiveStatusRegistry, StorageAssuranceConfig,
+    validate_daemon_custody_activation, DurableDestageOutcome, DurableDestageWorkerConfig,
+    GarbageCollectDecision, GarbageCollectMode, GarbageCollectTrigger, GarbageCollectorConfig,
+    LiveStatusRegistry, StorageAssuranceConfig, SystemdServiceCredentialHandoffResolver,
     WorkspaceCleanupWorkerConfig, WorkspacePromotionWorkerConfig, WorkspaceProvisionWorkerConfig,
     DEFAULT_WORKSPACE_HOST_SOCKET,
 };
@@ -25,7 +26,7 @@ use dasobjectstore_daemon::{
     UnixSocketDaemonServer, DEFAULT_CAPACITY_RESERVATION_LEASE_SECONDS,
     DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS, DEFAULT_DAEMON_CONFIG_PATH,
 };
-use dasobjectstore_object_service::DEFAULT_GARAGE_CONFIG_PATH;
+use dasobjectstore_object_service::{CustodyCatalogBinding, DEFAULT_GARAGE_CONFIG_PATH};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
@@ -198,13 +199,46 @@ fn run() -> Result<(), String> {
 
     verify_managed_storage_resources()?;
 
-    let capacity_provider = Arc::new(FileBackedCapacityAdmissionProvider::for_daemon(
-        &config.state_dir,
-    ));
-    let garage =
+    // Before composing any normal or custody component, validate the canonical
+    // daemon-owned lifecycle marker. An enabled config writes/validates it;
+    // an inactive or alternate config is denied if the durable active marker
+    // exists. This prevents a `--config` split from reaching normal registry,
+    // capacity, or service composition beside custody.
+    validate_daemon_custody_activation(&config.custody, &current_utc_timestamp())
+        .map_err(|error| format!("custody activation is denied: {error}"))?;
+
+    // Resolve once at daemon composition.  All normal registry, capacity,
+    // ingress, recovery, and custody paths receive this exact identity; no
+    // later component is allowed to re-select an environment/default alias.
+    let custody_catalog_binding = CustodyCatalogBinding::new(&config.custody.catalog_path)
+        .map_err(|error| format!("daemon custody catalog configuration is denied: {error}"))?;
+
+    let capacity_provider = Arc::new(
+        FileBackedCapacityAdmissionProvider::for_daemon(&config.state_dir)
+            .with_custody_catalog_binding(custody_catalog_binding.clone()),
+    );
+    let mut garage =
         GarageServiceController::new(garage_runtime_config(&config)?, SystemServiceCommandRunner)
             .with_capacity_admission_provider(capacity_provider.clone())
             .with_ingest_resource_policy(config.ingest_resource_policy);
+    if config.custody.enabled {
+        // Custody is dormant unless a systemd-managed service credential
+        // directory and the separately reviewed isolated-plane configuration
+        // have both been supplied. There is deliberately no file, registry,
+        // Keychain, environment-secret, or API fallback.
+        let resolver = Arc::new(
+            SystemdServiceCredentialHandoffResolver::from_service_environment(
+                config.custody.handoff_consumption_root.clone(),
+            )
+            .map_err(|error| format!("custody activation is denied: {error}"))?,
+        );
+        garage = garage
+            .with_custody_plane_config(custody_garage_runtime_config(&config)?)
+            .try_with_custody_catalog_binding(custody_catalog_binding.clone())
+            .map_err(|error| format!("custody activation is denied: {error}"))?
+            .with_custody_admission_provisioning_authority(resolver.clone())
+            .with_custody_runtime_credential_resolver(resolver);
+    }
     let admin_job_registry = Arc::new(FileBackedAdminJobRegistry::new(admin_job_registry_path(
         &config.state_dir,
     )));
@@ -286,9 +320,12 @@ fn run() -> Result<(), String> {
             ingest_capacity_recovery.unrecognized_owners_retained,
         );
     }
-    let retirement_recovery =
-        recover_profile_retirements(&profile_registry, profile_catalogue_live_sqlite_path())
-            .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
+    let retirement_recovery = recover_profile_retirements(
+        &profile_registry,
+        &custody_catalog_binding,
+        profile_catalogue_live_sqlite_path(),
+    )
+    .map_err(|error| format!("profile retirement startup recovery failed: {error}"))?;
     if retirement_recovery.retirements_completed > 0 {
         eprintln!(
             "completed {} interrupted profile retirement(s)",
@@ -298,6 +335,7 @@ fn run() -> Result<(), String> {
     let reactivation_recovery = recover_profile_reactivations(
         &profile_registry,
         dasobjectstore_object_service::default_store_registry_path(),
+        &custody_catalog_binding,
         profile_catalogue_live_sqlite_path(),
         &current_utc_timestamp(),
     )
@@ -311,6 +349,7 @@ fn run() -> Result<(), String> {
     let recovery = recover_profile_catalogue_publications(
         &profile_registry,
         dasobjectstore_object_service::default_store_registry_path(),
+        &custody_catalog_binding,
         profile_catalogue_live_sqlite_path(),
         &current_utc_timestamp(),
     )
@@ -327,6 +366,8 @@ fn run() -> Result<(), String> {
         SystemDaemonClock,
         admin_job_registry,
     )
+    .try_with_custody_catalog_binding(custody_catalog_binding.clone())
+    .map_err(|error| format!("normal daemon custody catalog binding is denied: {error}"))?
     .with_profile_binding_registry_path(profile_registry)
     .with_profile_migration_state_root(config.state_dir.join("profile-migrations"))
     .with_application_identity_registry_path(application_identity_registry_path(&config.state_dir))
@@ -996,6 +1037,25 @@ fn garage_runtime_config(
     })
 }
 
+fn custody_garage_runtime_config(
+    config: &DaemonRuntimeConfig,
+) -> Result<GarageServiceRuntimeConfig, String> {
+    let custody = &config.custody;
+    if !custody.enabled {
+        return Err("custody Garage plane is inactive by default".to_string());
+    }
+    Ok(GarageServiceRuntimeConfig {
+        compose_file: custody.compose_file.clone(),
+        project_directory: Some(custody.project_directory.clone()),
+        compose_project: custody.compose_project.clone(),
+        service_name: custody.service_name.clone(),
+        config_path: custody.garage_config_path.clone(),
+        metadata_path: custody.metadata_path.clone(),
+        data_path: custody.data_path.clone(),
+        endpoint: custody.endpoint.clone(),
+    })
+}
+
 fn read_config(path: &PathBuf) -> Result<DaemonRuntimeConfig, String> {
     let file = File::open(path)
         .map_err(|err| format!("failed to open daemon config {}: {err}", path.display()))?;
@@ -1046,7 +1106,7 @@ impl DaemonArgs {
 #[cfg(test)]
 mod tests {
     use super::{
-        current_utc_timestamp, garage_runtime_config, host_id,
+        current_utc_timestamp, custody_garage_runtime_config, garage_runtime_config, host_id,
         preserve_pre_logical_identity_metadata, DaemonArgs,
     };
     use dasobjectstore_daemon::DaemonRuntimeConfig;
@@ -1106,6 +1166,22 @@ mod tests {
         let garage = garage_runtime_config(&config).expect("garage config");
 
         assert_eq!(garage.compose_project, "dasobjectstore-validation-42");
+    }
+
+    #[test]
+    fn custody_garage_runtime_is_inactive_until_explicitly_enabled() {
+        let mut config = DaemonRuntimeConfig::linux_packaged();
+        assert!(custody_garage_runtime_config(&config).is_err());
+
+        config.custody.enabled = true;
+        let custody = custody_garage_runtime_config(&config).expect("enabled custody config");
+        assert_eq!(custody.compose_project, "dasobjectstore-custody");
+        assert_eq!(custody.service_name, "garage-custody");
+        assert_eq!(custody.endpoint, "http://127.0.0.1:3901");
+        assert_ne!(
+            custody.compose_file,
+            garage_runtime_config(&config).unwrap().compose_file
+        );
     }
 
     #[test]

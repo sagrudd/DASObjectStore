@@ -7,6 +7,7 @@ static OBJECT_STORE_CREATION_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
 pub(super) fn create_object_store_with_registry(
     request: CreateObjectStoreRequest,
     registry_path: impl AsRef<Path>,
+    custody_catalog: &dasobjectstore_object_service::CustodyCatalogBinding,
     accepted_at_utc: &str,
 ) -> Result<CreateObjectStoreResponse, DaemonServiceRuntimeError> {
     request.validate().map_err(|error| {
@@ -20,7 +21,7 @@ pub(super) fn create_object_store_with_registry(
         ))
     })?;
     if !request.dry_run {
-        upsert_store_definition(registry_path, definition)?;
+        upsert_store_definition_with_custody_catalog(registry_path, definition, custody_catalog)?;
     }
     let job_id_value = format!(
         "objectstore-create-{}",
@@ -73,15 +74,41 @@ fn create_object_store_with_capacity_and_intent_path<R>(
 where
     R: ServiceCommandRunner,
 {
+    let custody_catalog = controller.normal_custody_catalog_binding()?;
     request.validate().map_err(|error| {
         DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
             error.to_string(),
         ))
     })?;
+    // Reject the sealed target before creating a saga intent or capacity
+    // ledger. Registry upsert has the same guard, but it is far too late to
+    // be the first effect boundary for a normal creation request.
+    let requested_definition = request.registry_definition().map_err(|error| {
+        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
+            error.to_string(),
+        ))
+    })?;
+    if requested_definition.policy.export_policy == dasobjectstore_core::store::ExportPolicy::S3 {
+        let bucket =
+            dasobjectstore_object_service::bucket_name_for_definition(&requested_definition)?;
+        reject_bound_catalogued_custody_definition(
+            custody_catalog,
+            &requested_definition.store_id,
+            &bucket,
+            "ObjectStore creation intent",
+        )?;
+    } else {
+        reject_bound_catalogued_custody_mutation(
+            custody_catalog,
+            &requested_definition.store_id,
+            "ObjectStore creation intent",
+        )?;
+    }
     if request.dry_run {
         return create_object_store_with_registry(
             request,
-            default_store_registry_path(),
+            registry_path,
+            custody_catalog,
             accepted_at_utc,
         );
     }
@@ -113,15 +140,12 @@ where
             request,
         ));
     }
-    let definition = request.registry_definition().map_err(|error| {
-        DaemonServiceRuntimeError::ObjectService(ObjectServiceError::InvalidConfiguration(
-            error.to_string(),
-        ))
-    })?;
+    let definition = requested_definition;
     let registry_path = registry_path.as_ref();
-    let definition_published = if let Some(existing) = read_store_registry(registry_path)?
-        .into_iter()
-        .find(|existing| existing.store_id == definition.store_id)
+    let definition_published = if let Some(existing) =
+        read_store_registry_with_custody_catalog(registry_path, custody_catalog)?
+            .into_iter()
+            .find(|existing| existing.store_id == definition.store_id)
     {
         if existing != definition {
             return Err(DaemonServiceRuntimeError::UnsupportedOperation {
@@ -173,7 +197,11 @@ where
         .map_err(creation_intent_error)?;
     }
     if intent.phase == crate::runtime::ObjectStoreCreationPhase::CapacityInitialized {
-        if let Err(error) = upsert_store_definition(registry_path, definition.clone()) {
+        if let Err(error) = upsert_store_definition_with_custody_catalog(
+            registry_path,
+            definition.clone(),
+            custody_catalog,
+        ) {
             if intent.capacity_created {
                 controller.rollback_initialized_store_capacity(&definition.store_id)?;
                 crate::runtime::advance_object_store_creation_intent(
@@ -413,35 +441,6 @@ pub(super) struct ProfileBackendPreparation {
     pub inspection: FolderInspectionReport,
     pub adopted_object_count: usize,
     pub adopted_bytes: u64,
-}
-
-pub(super) fn resolve_authorization_store_id(
-    endpoint: &StoreId,
-    store_registry_path: &Path,
-    subobject_registry_path: &Path,
-) -> Result<StoreId, IngestAuthorizationFailure> {
-    let stores = read_store_registry(store_registry_path)?;
-    let store_match = stores
-        .iter()
-        .find(|definition| definition.store_id == *endpoint)
-        .map(|definition| definition.store_id.clone());
-    let subobjects = read_subobject_registry(subobject_registry_path)?;
-    let subobject_match = subobjects
-        .iter()
-        .find(|definition| definition.name == endpoint.as_str());
-
-    match (store_match, subobject_match) {
-        (Some(_), Some(_)) => Err(IngestAuthorizationFailure::AmbiguousEndpoint {
-            endpoint: endpoint.clone(),
-        }),
-        (Some(store_id), None) => Ok(store_id),
-        (None, Some(subobject)) => Ok(subobject.store_id.clone()),
-        (None, None) => Err(IngestAuthorizationFailure::UnknownEndpoint {
-            endpoint: endpoint.clone(),
-            store_registry_path: store_registry_path.to_path_buf(),
-            subobject_registry_path: subobject_registry_path.to_path_buf(),
-        }),
-    }
 }
 
 pub(super) fn stable_easyconnect_id(prefix: &str, subject: &str, timestamp: &str) -> String {

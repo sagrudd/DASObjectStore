@@ -7,6 +7,7 @@ mod application_mtls;
 mod application_token;
 mod application_upload;
 mod capacity;
+mod custody;
 mod destage_retry;
 mod disk_lockdown;
 mod disk_mutation;
@@ -90,6 +91,11 @@ pub use capacity::{
     CapacityAdmissionDecision, CapacityAdmissionRejectionReason, CapacityAdmissionRequest,
     CapacityAdmissionReservationError, CapacityAdmissionResponse, CapacityAdmissionValidationError,
     CapacityStatusRequest, CapacityStatusResponse,
+};
+pub use custody::{
+    CustodyAdmissionRequest, CustodyAdmissionResponse, CustodyAdmissionValidationError,
+    CustodyRetainRequest, CustodyRetainResponse, CustodyRetainValidationError,
+    CUSTODY_ADMISSION_CONFIRMATION, CUSTODY_RETAIN_CONFIRMATION,
 };
 pub use destage_retry::{
     DestageRetryRequest, DestageRetryResponse, DestageRetryValidationError,
@@ -408,6 +414,8 @@ pub enum DaemonApiRequest {
     DeleteApplicationObject(ApplicationObjectDeleteRequest),
     PrepareEnclosure(PrepareEnclosureRequest),
     CreateObjectStore(CreateObjectStoreRequest),
+    CustodyAdmission(CustodyAdmissionRequest),
+    CustodyRetain(CustodyRetainRequest),
     RegisterProfileBinding(ProfileBindingRequest),
     ProfileMigration(ProfileMigrationRequest),
     ProfileBrowser(ProfileBrowserRequest),
@@ -501,6 +509,8 @@ impl DaemonApiRequest {
             Self::DeleteApplicationObject(_) => "delete_application_object",
             Self::PrepareEnclosure(_) => "prepare_enclosure",
             Self::CreateObjectStore(_) => "create_object_store",
+            Self::CustodyAdmission(_) => "custody_admission",
+            Self::CustodyRetain(_) => "custody_retain",
             Self::RegisterProfileBinding(_) => "register_profile_binding",
             Self::ProfileMigration(_) => "profile_migration",
             Self::ProfileBrowser(_) => "profile_browser",
@@ -624,6 +634,20 @@ impl DaemonApiRequest {
             Self::CreateObjectStore(request) => request
                 .validate()
                 .map_err(create_object_store_validation_error),
+            Self::CustodyAdmission(request) => {
+                request
+                    .validate()
+                    .map_err(|error| DaemonRequestValidationError::InvalidPolicy {
+                        message: error.to_string(),
+                    })
+            }
+            Self::CustodyRetain(request) => {
+                request
+                    .validate()
+                    .map_err(|error| DaemonRequestValidationError::InvalidPolicy {
+                        message: error.to_string(),
+                    })
+            }
             Self::RegisterProfileBinding(request) => {
                 request.validate().map_err(profile_binding_validation_error)
             }
@@ -808,6 +832,8 @@ pub enum DaemonApiResponse {
     ErgasterionObjectGroupStatus(ErgasterionObjectGroupStatusResponse),
     PrepareEnclosure(PrepareEnclosureResponse),
     CreateObjectStore(CreateObjectStoreResponse),
+    CustodyAdmission(CustodyAdmissionResponse),
+    CustodyRetain(CustodyRetainResponse),
     RegisterProfileBinding(ProfileBindingResponse),
     ProfileMigration(ProfileMigrationResponse),
     ProfileBrowser(ProfileBrowserResponse),

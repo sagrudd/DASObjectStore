@@ -23,6 +23,9 @@ The repository also contains Markdown design notes covering architecture,
 requirements, service orchestration, Mnemosyne integration, metadata recovery,
 platform probing, and application authentication and authoritative tokens.
 They remain source-controlled design documents rather than operator runbooks.
+The local trusted-administrator custody-retention overlay is documented in
+``local-trusted-administrator-custody-overlay.md``; it is explicitly a source
+contract, not a deployment authorisation.
 
 .. toctree::
    :maxdepth: 2

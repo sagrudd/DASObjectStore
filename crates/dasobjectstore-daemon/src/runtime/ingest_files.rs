@@ -23,7 +23,8 @@ use dasobjectstore_metadata::{
     ObjectPutRequest, SsdCapacityPolicy, SsdPressure, StagedObjectPut, VerifiedSsdCommitRequest,
 };
 use dasobjectstore_object_service::{
-    default_store_registry_path, default_subobject_registry_path, ObjectServiceError,
+    default_store_registry_path, default_subobject_registry_path, CustodyCatalogBinding,
+    ObjectServiceError,
 };
 use std::collections::BTreeMap;
 use std::fmt::{self, Display};
@@ -128,6 +129,7 @@ pub fn submit_ingest_files_to_local_store_with_capacity_provider(
         progress,
         capacity_provider,
         None,
+        None,
     )
 }
 
@@ -142,10 +144,13 @@ struct LocalFileIngestExecutor {
     capacity_policy: SsdCapacityPolicy,
     capacity_provider: Option<Arc<dyn CapacityAdmissionProvider>>,
     resource_gate: Option<Arc<crate::api::DaemonIngestResourceGate>>,
+    custody_catalog: Option<CustodyCatalogBinding>,
 }
 
 impl LocalFileIngestExecutor {
-    fn from_environment() -> Self {
+    fn from_environment_with_custody_catalog(
+        custody_catalog: Option<CustodyCatalogBinding>,
+    ) -> Self {
         Self {
             ssd_root: default_ssd_root(),
             hdd_root: default_hdd_root(),
@@ -156,6 +161,7 @@ impl LocalFileIngestExecutor {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog,
         }
     }
 
@@ -195,6 +201,7 @@ impl LocalFileIngestExecutor {
             &request.endpoint,
             &self.store_registry_path,
             &self.subobject_registry_path,
+            self.custody_catalog.as_ref(),
         )?;
         let managed_disk_roots = discover_managed_hdd_roots(&self.hdd_root)?;
         let copies = request.copies.unwrap_or(endpoint.store.policy.copies);
@@ -1404,7 +1411,11 @@ mod tests {
         DiskCopyRoot, IngestStagingLayout, ObjectPutProgress, ObjectPutProgressStage,
         ObjectPutRequest, SsdCapacityPolicy,
     };
-    use dasobjectstore_object_service::StoreServiceDefinition;
+    use dasobjectstore_object_service::{
+        create_custody_catalog_entry, CustodyAssuranceClass, CustodyCatalogBinding,
+        CustodyRetentionPolicyV1, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
+        StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+    };
     use rusqlite::Connection;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1413,6 +1424,91 @@ mod tests {
 
     struct RecordingIngestCapacityProvider {
         events: Mutex<Vec<String>>,
+    }
+
+    #[test]
+    fn custom_active_catalog_denies_ingest_endpoint_before_capacity_or_metadata_effect() {
+        let root = temp_root("ingest-custom-custody-catalog");
+        let ssd_root = root.join("ssd");
+        let hdd_root = root.join("hdd");
+        let source_root = root.join("source");
+        let registry_path = root.join("stores.json");
+        let subobject_registry_path = root.join("subobjects.json");
+        write_device_marker(&ssd_root, "role=ssd");
+        write_device_marker(&hdd_root.join("disk-a"), "role=hdd:disk-a");
+        fs::create_dir_all(&source_root).expect("source root");
+        fs::write(source_root.join("payload.txt"), b"unreachable").expect("source payload");
+        write_store_registry(&registry_path);
+        fs::write(&subobject_registry_path, "[]\n").expect("subobject registry");
+
+        let custody_definition = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new("zymo_fecal_2025.05").expect("sealed store id"),
+            bucket_name: "dos-zymo-fecal-2025-05".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provisioner".to_string(),
+                provisioner_identity: "custody-provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer".to_string(),
+                writer_identity: "custody-writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader".to_string(),
+                reader_identity: "custody-reader".to_string(),
+            },
+        };
+        let catalog_path = root.join("sealed/custom-catalog.jsonl");
+        create_custody_catalog_entry(
+            &catalog_path,
+            &custody_definition,
+            root.join("sealed/ledgers/custody.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog");
+        let capacity = std::sync::Arc::new(RecordingIngestCapacityProvider {
+            events: Mutex::new(Vec::new()),
+        });
+        let live_sqlite = ssd_root.join(".dasobjectstore/live.sqlite");
+        let executor = LocalFileIngestExecutor {
+            ssd_root,
+            hdd_root,
+            live_sqlite_path: live_sqlite.clone(),
+            store_registry_path: registry_path,
+            subobject_registry_path,
+            source_is_server_local: |_| true,
+            capacity_policy: SsdCapacityPolicy::default(),
+            capacity_provider: Some(capacity.clone()),
+            resource_gate: None,
+            custody_catalog: Some(CustodyCatalogBinding::new(catalog_path).expect("binding")),
+        };
+        let error = executor
+            .submit(
+                SubmitIngestFilesRequest {
+                    endpoint: custody_definition.store_id,
+                    source_path: source_root,
+                    object_type: ObjectType::Naive,
+                    copies: None,
+                    hdd_workers: None,
+                    ingress_origin: DaemonIngressOrigin::LocalServer,
+                    conflict_policy: DaemonIngestConflictPolicy::Strict,
+                    dry_run: false,
+                    client_request_id: Some("custom-catalog-denial".to_string()),
+                },
+                "2026-09-05T12:01:00Z",
+                |_| Ok(()),
+            )
+            .expect_err("sealed custom catalog must deny normal ingest endpoint");
+        assert!(error.to_string().contains("sealed custody store"));
+        assert!(capacity.events.lock().expect("events").is_empty());
+        assert!(
+            !live_sqlite.exists(),
+            "metadata must not be opened before endpoint denial"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     impl CapacityAdmissionProvider for RecordingIngestCapacityProvider {
@@ -1503,6 +1599,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1576,6 +1673,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: Some(capacity_provider.clone()),
             resource_gate: None,
+            custody_catalog: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1679,6 +1777,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog: None,
         };
 
         executor
@@ -1745,6 +1844,7 @@ mod tests {
                 capacity_policy: SsdCapacityPolicy::new(99, 100, 0).expect("capacity policy"),
                 capacity_provider: None,
                 resource_gate: None,
+                custody_catalog: None,
             };
             let mut events = Vec::new();
             let response = executor
@@ -1866,6 +1966,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog: None,
         };
         let mut progress_events = Vec::new();
         executor
@@ -1918,6 +2019,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog: None,
         };
 
         let mut progress_events = Vec::new();
@@ -1995,6 +2097,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
+            custody_catalog: None,
         };
 
         let mut progress_events = Vec::new();

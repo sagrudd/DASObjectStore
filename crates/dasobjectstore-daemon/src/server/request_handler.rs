@@ -100,9 +100,13 @@ use dasobjectstore_metadata::{
 };
 use dasobjectstore_object_service::{
     bucket_name_for_definition, default_store_registry_path, default_subobject_registry_path,
-    delete_store_definition, delete_subobjects_for_store, portable_store_registry_path,
-    portable_subobject_registry_path, read_managed_credential_registry, read_store_registry,
-    read_subobject_registry, upsert_store_definition, ObjectServiceError, ObjectServiceProviderId,
+    delete_store_definition_with_custody_catalog, delete_subobjects_for_store,
+    portable_store_registry_path, portable_subobject_registry_path, read_custody_catalog,
+    read_managed_credential_registry, read_store_registry_with_custody_catalog,
+    read_subobject_registry, reject_bound_catalogued_custody_definition,
+    reject_bound_catalogued_custody_mutation, upsert_store_definition_with_custody_catalog,
+    CustodyCatalogBinding, ObjectServiceError, ObjectServiceProviderId, StoreRegistryDeleteReport,
+    StoreRegistryUpdateReport, StoreServiceDefinition,
 };
 use std::collections::BTreeSet;
 use std::fmt::{self, Display};
@@ -145,14 +149,19 @@ pub use self::multipart_completion_worker::MultipartCompletionRecoveryReport;
 pub use self::orchestrator::DaemonServiceOrchestrator;
 use self::request_helpers::{
     create_object_store_with_capacity, ensure_profile_backend, prepare_profile_provision_root,
-    register_profile_binding, resolve_authorization_store_id,
-    rollback_empty_profile_provision_root, stable_easyconnect_id, validate_profile_provision_claim,
+    register_profile_binding, rollback_empty_profile_provision_root, stable_easyconnect_id,
+    validate_profile_provision_claim,
 };
 pub struct DaemonRequestHandler<S, C> {
     service_orchestrator: S,
     clock: C,
     admin_job_registry: Option<Arc<dyn AdminJobRegistry>>,
     store_registry_path: PathBuf,
+    /// The exact active custody binding is injected at daemon composition.
+    /// `None` is allowed only when the service orchestrator declares custody
+    /// inactive; requests then use the fixed default solely as a normal-plane
+    /// denial guard, never an environment-selected active binding.
+    custody_catalog_binding: Option<CustodyCatalogBinding>,
     subobject_registry_path: PathBuf,
     live_sqlite_path: PathBuf,
     hdd_root_path: PathBuf,
@@ -199,6 +208,7 @@ where
             clock,
             admin_job_registry: None,
             store_registry_path: default_store_registry_path(),
+            custody_catalog_binding: None,
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
@@ -257,6 +267,7 @@ where
             clock,
             admin_job_registry: Some(admin_job_registry),
             store_registry_path: default_store_registry_path(),
+            custody_catalog_binding: None,
             subobject_registry_path: default_subobject_registry_path(),
             live_sqlite_path: default_live_sqlite_path(),
             hdd_root_path: default_hdd_root(),
@@ -314,6 +325,136 @@ where
         self.subobject_registry_path = subobject_registry_path.into();
         self
     }
+
+    /// Inject the one canonical custody catalog that an active custody plane
+    /// uses. This is daemon composition data, not API/CLI input; a normal
+    /// caller can never redirect the guard to an environment/default alias.
+    pub fn try_with_active_custody_catalog_binding(
+        self,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, DaemonServiceRuntimeError> {
+        let binding = CustodyCatalogBinding::new(path)?;
+        self.try_with_custody_catalog_binding(binding)
+    }
+
+    /// The composed daemon gives every normal request path the same resolved
+    /// catalog identity that protects capacity and isolated custody services.
+    pub fn try_with_custody_catalog_binding(
+        mut self,
+        binding: CustodyCatalogBinding,
+    ) -> Result<Self, DaemonServiceRuntimeError> {
+        if let Some(existing) = &self.custody_catalog_binding {
+            if existing != &binding {
+                return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "multiple custody catalog bindings are forbidden".to_string(),
+                });
+            }
+        }
+        self.custody_catalog_binding = Some(binding);
+        Ok(self)
+    }
+
+    fn normal_custody_catalog_binding(&self) -> Result<CustodyCatalogBinding, ObjectServiceError> {
+        if self
+            .service_orchestrator
+            .requires_explicit_custody_catalog_binding()
+        {
+            return self.custody_catalog_binding.clone().ok_or_else(|| {
+                ObjectServiceError::InvalidConfiguration(
+                    "active custody plane requires the exact explicitly injected custody catalog binding"
+                        .to_string(),
+                )
+            });
+        }
+        match &self.custody_catalog_binding {
+            Some(binding) => Ok(binding.clone()),
+            None => CustodyCatalogBinding::new(
+                dasobjectstore_object_service::default_custody_catalog_path(),
+            ),
+        }
+    }
+
+    pub(super) fn read_normal_store_registry(
+        &self,
+    ) -> Result<Vec<StoreServiceDefinition>, ObjectServiceError> {
+        let binding = self.normal_custody_catalog_binding()?;
+        read_store_registry_with_custody_catalog(&self.store_registry_path, &binding)
+    }
+
+    /// Central pre-effect boundary for normal metadata, reconciliation, and
+    /// lifecycle mutations. A named target is denied when it is sealed by the
+    /// exact daemon-injected catalog. An unbounded normal mutation is denied
+    /// whenever the catalog contains a custody target, because it cannot prove
+    /// that a later metadata scan excludes that target.
+    pub(super) fn reject_normal_custody_target(
+        &self,
+        store_id: Option<&StoreId>,
+        operation: &str,
+    ) -> Result<(), ObjectServiceError> {
+        let binding = self.normal_custody_catalog_binding()?;
+        match store_id {
+            Some(store_id) => {
+                reject_bound_catalogued_custody_mutation(&binding, store_id, operation)
+            }
+            None => {
+                if read_custody_catalog(binding.path())?.is_empty() {
+                    Ok(())
+                } else {
+                    Err(ObjectServiceError::InvalidConfiguration(format!(
+                        "ordinary {operation} has no store target while the exact custody catalog contains sealed store(s); use a targeted normal route or the dedicated custody daemon route"
+                    )))
+                }
+            }
+        }
+    }
+
+    pub(super) fn upsert_normal_store_definition(
+        &self,
+        definition: StoreServiceDefinition,
+    ) -> Result<StoreRegistryUpdateReport, ObjectServiceError> {
+        let binding = self.normal_custody_catalog_binding()?;
+        upsert_store_definition_with_custody_catalog(
+            &self.store_registry_path,
+            definition,
+            &binding,
+        )
+    }
+
+    #[allow(dead_code)] // central guarded delete boundary retained for future normal delete routes
+    pub(super) fn delete_normal_store_definition(
+        &self,
+        store_id: &StoreId,
+    ) -> Result<StoreRegistryDeleteReport, ObjectServiceError> {
+        let binding = self.normal_custody_catalog_binding()?;
+        delete_store_definition_with_custody_catalog(&self.store_registry_path, store_id, &binding)
+    }
+
+    pub(in crate::server::request_handler) fn resolve_normal_authorization_store_id(
+        &self,
+        endpoint: &StoreId,
+    ) -> Result<StoreId, IngestAuthorizationFailure> {
+        let stores = self.read_normal_store_registry()?;
+        let store_match = stores
+            .iter()
+            .find(|definition| definition.store_id == *endpoint)
+            .map(|definition| definition.store_id.clone());
+        let subobjects = read_subobject_registry(&self.subobject_registry_path)?;
+        let subobject_match = subobjects
+            .iter()
+            .find(|definition| definition.name == endpoint.as_str());
+        match (store_match, subobject_match) {
+            (Some(_), Some(_)) => Err(IngestAuthorizationFailure::AmbiguousEndpoint {
+                endpoint: endpoint.clone(),
+            }),
+            (Some(store_id), None) => Ok(store_id),
+            (None, Some(subobject)) => Ok(subobject.store_id.clone()),
+            (None, None) => Err(IngestAuthorizationFailure::UnknownEndpoint {
+                endpoint: endpoint.clone(),
+                store_registry_path: self.store_registry_path.clone(),
+                subobject_registry_path: self.subobject_registry_path.clone(),
+            }),
+        }
+    }
     pub fn with_synoptikon_projection_ledger_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.synoptikon_projection_ledger_path = path.into();
         self
@@ -343,6 +484,17 @@ where
         ) -> Result<(), DaemonIngestFilesRuntimeError>,
     ) -> Result<DaemonApiResponse, DaemonRequestHandlerError> {
         request.validate()?;
+        if self
+            .service_orchestrator
+            .requires_explicit_custody_catalog_binding()
+            && self.custody_catalog_binding.is_none()
+        {
+            return Err(DaemonRequestHandlerError::ServiceRuntime(
+                DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: "active custody plane is denied because normal request handling lacks its exact custody catalog binding".to_string(),
+                },
+            ));
+        }
 
         let registry = Arc::clone(&self.live_status_registry);
         let observed_actor = actor.cloned();
@@ -508,7 +660,7 @@ where
                 request.store_id
             ))
         })?;
-        let mut definitions = read_store_registry(&self.store_registry_path)?;
+        let mut definitions = self.read_normal_store_registry()?;
         let definition = definitions
             .iter_mut()
             .find(|definition| definition.store_id == store_id)
@@ -525,7 +677,7 @@ where
             .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
         let updated_definition = definition.clone();
         if !request.dry_run {
-            upsert_store_definition(&self.store_registry_path, updated_definition)?;
+            self.upsert_normal_store_definition(updated_definition)?;
         }
         let job_id_value = format!(
             "objectstore-policy-{}",
@@ -567,7 +719,7 @@ where
                 request.store_id
             ))
         })?;
-        let mut definitions = read_store_registry(&self.store_registry_path)?;
+        let mut definitions = self.read_normal_store_registry()?;
         let definition = definitions
             .iter_mut()
             .find(|definition| definition.store_id == store_id)
@@ -583,7 +735,7 @@ where
             .validate()
             .map_err(|error| ObjectServiceError::InvalidConfiguration(error.to_string()))?;
         if !request.dry_run {
-            upsert_store_definition(&self.store_registry_path, definition.clone())?;
+            self.upsert_normal_store_definition(definition.clone())?;
         }
         let job_id_value = format!(
             "objectstore-acknowledgement-policy-{}",
@@ -659,6 +811,10 @@ impl<R> DaemonServiceOrchestrator for GarageServiceController<R>
 where
     R: ServiceCommandRunner,
 {
+    fn requires_explicit_custody_catalog_binding(&self) -> bool {
+        self.has_active_custody_plane()
+    }
+
     fn application_upload_endpoint(&self) -> Option<String> {
         Some(self.endpoint().to_string())
     }
@@ -683,6 +839,21 @@ where
         request: DaemonServiceStatusRequest,
     ) -> Result<DaemonServiceStatusResponse, DaemonServiceRuntimeError> {
         GarageServiceController::status(self, request)
+    }
+
+    fn admit_custody_store(
+        &self,
+        request: crate::api::CustodyAdmissionRequest,
+        accepted_at_utc: &str,
+    ) -> Result<crate::api::CustodyAdmissionResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::admit_custody_store(self, request, accepted_at_utc)
+    }
+
+    fn retain_custody_object(
+        &self,
+        request: crate::api::CustodyRetainRequest,
+    ) -> Result<crate::api::CustodyRetainResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::retain_custody_object(self, request)
     }
 
     fn lifecycle(
@@ -1174,9 +1345,11 @@ mod tests {
     use dasobjectstore_core::store::{ExportPolicy, IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
-        read_store_registry, write_managed_credential_registry, ManagedCredentialRegistry,
-        ManagedStoreCredentialRecord, ObjectServiceProviderId, ServiceState,
-        StoreServiceDefinition,
+        create_custody_catalog_entry, read_store_registry, write_managed_credential_registry,
+        CustodyAssuranceClass, CustodyRetentionPolicyV1, CustodyStoreDefinitionV1,
+        CustodyStoreProfileV1, ManagedCredentialRegistry, ManagedStoreCredentialRecord,
+        ObjectServiceProviderId, ServiceState, StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1,
+        CUSTODY_PROFILE_V1,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use rusqlite::{params, Connection};
@@ -2297,9 +2470,14 @@ mod tests {
             "2026-07-16T15:00:00Z",
         )
         .expect("interrupted recovery begins");
+        let custody_catalog = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("test catalog binding");
         let startup_recovery = crate::runtime::recover_profile_reactivations(
             &profile_registry,
             &store_registry,
+            &custody_catalog,
             &live_sqlite,
             "2026-07-16T15:01:00Z",
         )
@@ -3201,6 +3379,10 @@ mod tests {
     fn persists_non_dry_run_object_store_definition_before_accepting_job() {
         let root = temp_root("persist-create-objectstore");
         let registry_path = root.join("stores.json");
+        let custody_catalog = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody/catalog.jsonl"),
+        )
+        .expect("canonical test custody catalog");
         let mut request = create_object_store_request();
         request.store_id = "porkchop".to_string();
         request.dry_run = false;
@@ -3208,16 +3390,187 @@ mod tests {
         let response = super::request_helpers::create_object_store_with_registry(
             request,
             &registry_path,
+            &custody_catalog,
             "2026-07-10T14:23:45Z",
         )
         .expect("object store creation persists");
 
         assert_eq!(response.store_id, "porkchop");
         assert!(!response.accepted.dry_run);
-        let definitions = read_store_registry(&registry_path).expect("registry reads");
+        let definitions = dasobjectstore_object_service::read_store_registry_with_custody_catalog(
+            &registry_path,
+            &custody_catalog,
+        )
+        .expect("registry reads");
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].store_id.as_str(), "porkchop");
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn active_daemon_handler_rejects_normal_bucket_alias_using_its_injected_catalog() {
+        let root = temp_root("active-custody-handler-alias");
+        let catalog_path = root.join("custody/active-catalog.jsonl");
+        let custody_definition = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new("custody-active-handler").expect("sealed store id"),
+            bucket_name: "dos-custody-active-handler".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provision-once".to_string(),
+                provisioner_identity: "custody-provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer-once".to_string(),
+                writer_identity: "custody-writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader-once".to_string(),
+                reader_identity: "custody-reader".to_string(),
+            },
+        };
+        create_custody_catalog_entry(
+            &catalog_path,
+            &custody_definition,
+            root.join("custody/ledgers/active.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog entry");
+
+        let mut ordinary_request = create_object_store_request();
+        ordinary_request.store_id = "normal-handler-bucket-alias".to_string();
+        ordinary_request.bucket = Some(custody_definition.bucket_name.clone());
+        ordinary_request.dry_run = false;
+        let ordinary_definition = ordinary_request
+            .registry_definition()
+            .expect("ordinary definition");
+        let handler = DaemonRequestHandler::new(
+            FakeService {
+                active_custody_plane: true,
+                ..FakeService::default()
+            },
+            FixedDaemonClock::new("2026-09-05T12:00:00Z"),
+        )
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .try_with_active_custody_catalog_binding(&catalog_path)
+        .expect("inject active canonical catalog");
+
+        let error = handler
+            .upsert_normal_store_definition(ordinary_definition)
+            .expect_err("normal handler must reject a bucket claimed by the active catalog");
+        assert!(error.to_string().contains("cannot alias"));
+        assert!(
+            !root.join("stores.json").exists(),
+            "the normal registry is untouched when the injected custody catalog denies the alias"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn active_catalog_rejects_profile_binding_store_and_bucket_before_any_effect() {
+        let root = temp_root("active-custody-profile-binding");
+        cleanup(&root);
+        let catalog_path = root.join("custody/active-catalog.jsonl");
+        let custody_definition = CustodyStoreDefinitionV1 {
+            store_id: StoreId::new("custody-profile-binding").expect("sealed store id"),
+            bucket_name: "dos-custody-profile-binding".to_string(),
+            profile: CustodyStoreProfileV1 {
+                schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+                profile: CUSTODY_PROFILE_V1.to_string(),
+                assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+                retention: CustodyRetentionPolicyV1::required(),
+                target_id: "nuc-192-168-0-193".to_string(),
+                retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+                legal_hold: true,
+                provisioner_credential_reference: "systemd-credential://provision-once".to_string(),
+                provisioner_identity: "custody-provisioner".to_string(),
+                writer_credential_reference: "systemd-credential://writer-once".to_string(),
+                writer_identity: "custody-writer".to_string(),
+                reader_credential_reference: "systemd-credential://reader-once".to_string(),
+                reader_identity: "custody-reader".to_string(),
+            },
+        };
+        create_custody_catalog_entry(
+            &catalog_path,
+            &custody_definition,
+            root.join("custody/ledgers/active.sqlite"),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "2026-09-05T12:00:00Z",
+        )
+        .expect("sealed catalog entry");
+
+        let profile_registry = root.join("profile-bindings.json");
+        let store_registry = root.join("stores.json");
+        let subobject_registry = root.join("subobjects.json");
+        let handler = DaemonRequestHandler::new(
+            FakeService {
+                active_custody_plane: true,
+                ..FakeService::default()
+            },
+            FixedDaemonClock::new("2026-09-05T12:00:00Z"),
+        )
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_registry_paths(&store_registry, &subobject_registry)
+        .with_live_sqlite_path(root.join("live.sqlite"))
+        .try_with_active_custody_catalog_binding(&catalog_path)
+        .expect("inject active canonical catalog");
+        let actor = preverified_host_service_actor();
+
+        for (label, mut request) in [
+            (
+                "sealed-store",
+                profile_binding_request_for_auth_test(
+                    custody_definition.store_id.as_str(),
+                    root.join("backend-sealed-store"),
+                ),
+            ),
+            (
+                "sealed-bucket-alias",
+                profile_binding_request_for_auth_test(
+                    "normal-profile-bucket-alias",
+                    root.join("backend-sealed-bucket-alias"),
+                ),
+            ),
+        ] {
+            if label == "sealed-bucket-alias" {
+                request
+                    .store_definition
+                    .as_mut()
+                    .expect("normal S3 definition")
+                    .bucket_name = Some(custody_definition.bucket_name.clone());
+            }
+            let backend_root = request.backend_root.clone();
+            let error = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::RegisterProfileBinding(request),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect_err("sealed profile binding must be denied before any effect");
+            assert!(
+                error.to_string().contains("sealed custody"),
+                "{label} must fail at the custody boundary: {error}"
+            );
+            assert!(
+                !backend_root.exists(),
+                "{label} denial must precede profile-root preparation"
+            );
+        }
+        assert!(
+            !profile_registry.exists() && !store_registry.exists() && !subobject_registry.exists(),
+            "custody denial must precede profile/normal-registry writes"
+        );
+        assert!(
+            handler
+                .service_orchestrator
+                .profile_capacity_calls
+                .borrow()
+                .is_empty(),
+            "custody denial must precede capacity initialization"
+        );
         cleanup(&root);
     }
 
@@ -7127,6 +7480,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeService {
+        active_custody_plane: bool,
         status_calls: RefCell<Vec<bool>>,
         lifecycle_calls: RefCell<Vec<String>>,
         provision_calls: RefCell<Vec<String>>,
@@ -7154,6 +7508,10 @@ mod tests {
     }
 
     impl DaemonServiceOrchestrator for FakeService {
+        fn requires_explicit_custody_catalog_binding(&self) -> bool {
+            self.active_custody_plane
+        }
+
         fn initialize_profile_capacity(
             &self,
             store_id: &StoreId,

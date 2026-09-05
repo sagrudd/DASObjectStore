@@ -24,18 +24,20 @@ use crate::api::{
     AssignLocalUserToLocalGroupResponse, CancelIngestJobRequest, CancelIngestJobResponse,
     CapacityAdmissionRequest, CapacityAdmissionResponse, CapacityStatusRequest,
     CapacityStatusResponse, CreateLocalGroupRequest, CreateLocalGroupResponse,
-    CreateObjectStoreRequest, CreateObjectStoreResponse, DaemonApiRequest, DaemonApiResponse,
-    DaemonHealthSummaryRequest, DaemonHealthSummaryResponse, DaemonIngestProgressEvent,
-    DaemonJobCancelRequest, DaemonJobCancelResponse, DaemonJobListRequest, DaemonJobListResponse,
-    DaemonJobStatusRequest, DaemonJobStatusResponse, DaemonServiceLifecycleRequest,
-    DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest, DaemonServiceProvisionResponse,
-    DaemonServiceStatusRequest, DaemonServiceStatusResponse, DestageRetryRequest,
-    DestageRetryResponse, DiskForceRetireRequest, DiskLockdownRequest, DiskLockdownResponse,
-    DiskRetireRequest, DiskRetireResponse, ErgasterionCapabilityDiscoveryResponse,
-    ErgasterionCapabilityExchangeRequest, ErgasterionCapabilityExchangeResponse,
-    ErgasterionCapabilityRenewalRequest, ErgasterionObjectGroupStatusRequest,
-    ErgasterionObjectGroupStatusResponse, ErgasterionObjectSnapshotRequest,
-    ErgasterionObjectSnapshotResponse, GeneratedOutputBindingAuthorityAdmissionRequest,
+    CreateObjectStoreRequest, CreateObjectStoreResponse, CustodyAdmissionRequest,
+    CustodyAdmissionResponse, CustodyRetainRequest, CustodyRetainResponse, DaemonApiRequest,
+    DaemonApiResponse, DaemonHealthSummaryRequest, DaemonHealthSummaryResponse,
+    DaemonIngestProgressEvent, DaemonJobCancelRequest, DaemonJobCancelResponse,
+    DaemonJobListRequest, DaemonJobListResponse, DaemonJobStatusRequest, DaemonJobStatusResponse,
+    DaemonServiceLifecycleRequest, DaemonServiceLifecycleResponse, DaemonServiceProvisionRequest,
+    DaemonServiceProvisionResponse, DaemonServiceStatusRequest, DaemonServiceStatusResponse,
+    DestageRetryRequest, DestageRetryResponse, DiskForceRetireRequest, DiskLockdownRequest,
+    DiskLockdownResponse, DiskRetireRequest, DiskRetireResponse,
+    ErgasterionCapabilityDiscoveryResponse, ErgasterionCapabilityExchangeRequest,
+    ErgasterionCapabilityExchangeResponse, ErgasterionCapabilityRenewalRequest,
+    ErgasterionObjectGroupStatusRequest, ErgasterionObjectGroupStatusResponse,
+    ErgasterionObjectSnapshotRequest, ErgasterionObjectSnapshotResponse,
+    GeneratedOutputBindingAuthorityAdmissionRequest,
     GeneratedOutputBindingAuthorityAdmissionResponse, GovernedBindingAuthorityAdmissionRequest,
     GovernedBindingAuthorityAdmissionResponse, IngestControlRequest, IngestControlResponse,
     IngestJobStatusRequest, IngestJobStatusResponse, IngestQueueDrainRequest,
@@ -664,6 +666,32 @@ where
         }
     }
 
+    /// Submit the sole daemon entry point for a sealed custody definition.
+    /// This is deliberately separate from normal store creation and cannot
+    /// carry a raw or optional custody profile.
+    pub fn admit_custody_store(
+        &self,
+        request: CustodyAdmissionRequest,
+    ) -> Result<CustodyAdmissionResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CustodyAdmission(request))? {
+            DaemonApiResponse::CustodyAdmission(response) => Ok(response),
+            response => Err(unexpected("custody_admission", response)),
+        }
+    }
+
+    /// Retain through the only daemon custody mutation route. Credential
+    /// material is resolved from one-use daemon-local handoffs, never from
+    /// this transport request.
+    pub fn retain_custody_object(
+        &self,
+        request: CustodyRetainRequest,
+    ) -> Result<CustodyRetainResponse, DaemonClientError> {
+        match self.send(DaemonApiRequest::CustodyRetain(request))? {
+            DaemonApiResponse::CustodyRetain(response) => Ok(response),
+            response => Err(unexpected("custody_retain", response)),
+        }
+    }
+
     pub fn register_profile_binding(
         &self,
         request: ProfileBindingRequest,
@@ -994,6 +1022,8 @@ fn response_name(response: &DaemonApiResponse) -> &'static str {
         DaemonApiResponse::ErgasterionObjectGroupStatus(_) => "ergasterion_object_group_status",
         DaemonApiResponse::PrepareEnclosure(_) => "prepare_enclosure",
         DaemonApiResponse::CreateObjectStore(_) => "create_object_store",
+        DaemonApiResponse::CustodyAdmission(_) => "custody_admission",
+        DaemonApiResponse::CustodyRetain(_) => "custody_retain",
         DaemonApiResponse::RegisterProfileBinding(_) => "register_profile_binding",
         DaemonApiResponse::ProfileMigration(_) => "profile_migration",
         DaemonApiResponse::ProfileBrowser(_) => "profile_browser",

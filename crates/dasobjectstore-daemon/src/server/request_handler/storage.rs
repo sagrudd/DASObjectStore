@@ -89,6 +89,14 @@ where
                     )));
                 }
             };
+            if let Err(error) =
+                handler.reject_normal_custody_target(Some(&store_id), "capacity admission")
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "custody_normal_route_denied",
+                    error.to_string(),
+                )));
+            }
             if let Err(error) = handler.authorize_endpoint_read(actor, &store_id) {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     error.code(),
@@ -113,6 +121,14 @@ where
                     )));
                 }
             };
+            if let Err(error) =
+                handler.reject_normal_custody_target(Some(&store_id), "capacity status")
+            {
+                return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
+                    "custody_normal_route_denied",
+                    error.to_string(),
+                )));
+            }
             if let Err(error) = handler.authorize_endpoint_read(actor, &store_id) {
                 return Ok(DaemonApiResponse::Error(DaemonApiErrorResponse::new(
                     error.code(),
@@ -509,7 +525,7 @@ fn advertise_provider_stream_downloads<S, C>(
     else {
         return;
     };
-    let Ok(definitions) = read_store_registry(&handler.store_registry_path) else {
+    let Ok(definitions) = handler.read_normal_store_registry() else {
         return;
     };
     let Some(capacity) = definitions

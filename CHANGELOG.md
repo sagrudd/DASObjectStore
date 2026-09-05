@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.180.0 - 2026-09-05
+
+- Add a source-only local trusted-administrator custody-retention overlay for
+  a fresh dedicated Garage bucket. It seals target-bound configuration and
+  append-only content-addressed object/version/event/readback records, requires
+  a distinct reader readback, permanent legal hold, and later-only retention
+  extension. Normal mutable store layout, owner-capable provisioning, CLI
+  fallback, profile binding, and registry paths cannot represent a custody
+  profile and reject raw fields/retired bootstrap coordinates.
+- Define a dedicated no-owner Garage provisioning plan with separate attended
+  provisioner, writer, and reader identities, plus an off-NUC signed,
+  expiring monotonic attestation consumer contract. The assurance label is
+  explicitly `local_trusted_administrator_overlay`; it is not independently
+  administered storage and does not alter r237/r7 Remote 0.177.4.
+- Add the concrete daemon Garage custody boundary: a non-idempotent fresh
+  bucket provisioner with no owner grant, conditional content-addressed S3
+  PUT, distinct HEAD/GET readback, sealed fresh-bucket evidence, dedicated
+  daemon admission, and one-use external formal-attestation consumption.
+- Harden that source-only boundary with a separate custody Garage
+  control/data-plane configuration, immutable store-and-bucket admission
+  claims, canonical catalog-to-ledger binding, and a secret-free daemon retain
+  request. Normal registry/layout routes fail closed on a sealed store or
+  bucket alias; the only production one-use credential handoff is an attended
+  systemd service credential, never persisted by DASObjectStore.
+- Add the inactive-by-default systemd custody credential handoff and the
+  reviewed-but-unpackaged isolated Garage Compose/service templates. Writer
+  and reader material is read only from systemd's private credential directory
+  using opaque references and atomically consumed with a hash-only marker;
+  package installation never renders, loads, enables, or starts custody.
+- Complete the source-only custody hardening: active custody composition has
+  one canonical catalog binding injected into normal registry/layout/
+  provisioning/reconciliation guards; path and endpoint aliases fail closed;
+  the sealed local non-shortenable policy and hold authority are bound into
+  ledger/receipt/readback evidence without claiming Garage Object Lock or
+  provider WORM. Add the strict raw-JCS, pinned Ed25519 off-NUC journal that
+  issues a nonce before read, consumes one terminal attempt, and performs
+  atomic full-measurement formal-gate consumption. The previous v1 digest-hook
+  formal consumer is disabled.
+- Replace the custody-admission fresh-proof transport with a daemon-owned,
+  one-use opaque provisioner handoff. The attended systemd credential boundary
+  resolves the sealed plan in-process before the isolated Garage adapter is
+  called; neither a raw Garage plan nor key material crosses the server API.
+- Complete the source-only active-catalog repair: propagate the exact configured
+  catalog into normal capacity, ingest, profile, creation, destructive, and
+  startup-recovery routes; deny sealed StoreId and bucket aliases before any
+  ordinary effect; require exact writer/reader opaque-reference binding; and
+  make an enabled daemon atomically retain a canonical private activation
+  marker before custody composition. Legacy CLI consults only that marker,
+  denies active/malformed state before direct control, and otherwise preserves
+  inactive legacy behaviour; a caller-selected daemon configuration is never
+  authority. The same guard denies inactive or alternate daemon startup before
+  normal-plane composition while an active marker exists. The marker has no
+  CLI/package removal path and survives restart pending a separately authorised
+  attended deactivation transaction.
+  Production formal-gate authority is strict v2 raw-JCS Ed25519 only; the
+  former v1 observation/checkpoint implementation is test-only. No NUC, DGX,
+  Garage, package, or formal-gate activation is qualified by these tests.
+
 ## 0.179.1 - 2026-09-04
 
 - Correct the source-only S6 custody substrate so that it never captures,

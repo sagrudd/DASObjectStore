@@ -2,6 +2,10 @@ use super::*;
 use crate::api::{CapacityAdmissionRequest, CapacityAdmissionResponse};
 use crate::runtime::{CapacityAdmissionProvider, ServiceCommandOutput, ServiceCommandRunner};
 use dasobjectstore_core::ids::StoreId;
+use dasobjectstore_object_service::{
+    create_custody_catalog_entry, CustodyAssuranceClass, CustodyRetentionPolicyV1,
+    CustodyStoreDefinitionV1, CustodyStoreProfileV1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -124,6 +128,82 @@ fn root(name: &str) -> PathBuf {
         "dasobjectstore-creation-saga-{name}-{}",
         std::process::id()
     ))
+}
+
+fn sealed_definition(store_id: &str, bucket_name: &str) -> CustodyStoreDefinitionV1 {
+    CustodyStoreDefinitionV1 {
+        store_id: StoreId::new(store_id).expect("sealed store id"),
+        bucket_name: bucket_name.to_string(),
+        profile: CustodyStoreProfileV1 {
+            schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
+            profile: CUSTODY_PROFILE_V1.to_string(),
+            assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
+            retention: CustodyRetentionPolicyV1::required(),
+            target_id: "nuc-192-168-0-193".to_string(),
+            retention_until_utc: "2036-09-05T12:00:00Z".to_string(),
+            legal_hold: true,
+            provisioner_credential_reference: "systemd-credential://provisioner".to_string(),
+            provisioner_identity: "provisioner".to_string(),
+            writer_credential_reference: "systemd-credential://writer".to_string(),
+            writer_identity: "writer".to_string(),
+            reader_credential_reference: "systemd-credential://reader".to_string(),
+            reader_identity: "reader".to_string(),
+        },
+    }
+}
+
+#[test]
+fn sealed_store_or_bucket_is_denied_before_creation_intent_or_capacity_effect() {
+    let root = root("custody-pre-intent-denial");
+    fs::create_dir_all(&root).expect("root");
+    let catalog = root.join("sealed/catalog.jsonl");
+    let sealed = sealed_definition("sealed-store", "dos-sealed-store");
+    create_custody_catalog_entry(
+        &catalog,
+        &sealed,
+        root.join("sealed/ledger.sqlite"),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "2026-09-05T12:00:00Z",
+    )
+    .expect("sealed catalog");
+    for (label, request) in [
+        ("store", {
+            let mut request = request("sealed-store");
+            request.store_id = "sealed-store".to_string();
+            request.bucket = Some("different-normal-bucket".to_string());
+            request
+        }),
+        ("bucket", {
+            let mut request = request("sealed-bucket-alias");
+            request.store_id = "normal-alias".to_string();
+            request.bucket = Some(sealed.bucket_name.clone());
+            request
+        }),
+    ] {
+        let provider = Arc::new(RecordingCreationCapacity::default());
+        let guarded = controller(provider.clone())
+            .try_with_custody_catalog_path(&catalog)
+            .expect("catalog binding");
+        let intent = root.join(format!("{label}-intents.json"));
+        let registry = root.join(format!("{label}-stores.json"));
+        fs::write(&registry, "[]").expect("registry");
+        assert!(create_object_store_with_capacity_and_intent_path(
+            &guarded,
+            request,
+            "2026-09-05T12:01:00Z",
+            &intent,
+            &registry,
+        )
+        .is_err());
+        assert!(
+            !intent.exists(),
+            "{label} denial must precede durable creation intent"
+        );
+        assert_eq!(*provider.initialize_calls.lock().expect("calls"), 0);
+        assert_eq!(*provider.rollback_calls.lock().expect("calls"), 0);
+        assert_eq!(fs::read_to_string(&registry).expect("registry"), "[]");
+    }
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

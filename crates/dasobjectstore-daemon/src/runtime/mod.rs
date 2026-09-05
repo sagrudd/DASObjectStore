@@ -15,6 +15,8 @@ mod capacity_lease_audit;
 mod capacity_persistence;
 mod capacity_provider;
 mod config;
+mod custody_activation;
+mod custody_garage;
 mod destage_admission;
 mod destage_worker;
 mod direct_s3_ingress;
@@ -153,11 +155,31 @@ pub use capacity_provider::{
     StatvfsCapacitySpaceProbe,
 };
 pub use config::{
-    DaemonRuntimeConfig, DaemonRuntimeConfigError, DaemonTelemetryRuntimeConfig,
-    DEFAULT_DAEMON_CONFIG_PATH, DEFAULT_DAEMON_GROUP, DEFAULT_DAEMON_LOG_DIR,
-    DEFAULT_DAEMON_RUNTIME_DIR, DEFAULT_DAEMON_SERVICE_USER, DEFAULT_DAEMON_SOCKET_FILE_NAME,
-    DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH, LINUX_DAEMON_LOG_DIR,
-    LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
+    DaemonCustodyRuntimeConfig, DaemonRuntimeConfig, DaemonRuntimeConfigError,
+    DaemonTelemetryRuntimeConfig, DEFAULT_DAEMON_CONFIG_PATH, DEFAULT_DAEMON_GROUP,
+    DEFAULT_DAEMON_LOG_DIR, DEFAULT_DAEMON_RUNTIME_DIR, DEFAULT_DAEMON_SERVICE_USER,
+    DEFAULT_DAEMON_SOCKET_FILE_NAME, DEFAULT_DAEMON_STATE_DIR, LINUX_DAEMON_CONFIG_PATH,
+    LINUX_DAEMON_LOG_DIR, LINUX_DAEMON_RUNTIME_DIR, LINUX_DAEMON_STATE_DIR,
+};
+pub use custody_activation::{
+    canonical_custody_activation_marker_path, custody_activation_blocks_legacy_cli,
+    custody_activation_blocks_legacy_cli_at, custody_activation_marker_path_for_state_dir,
+    ensure_custody_activation_marker, ensure_custody_activation_marker_at,
+    read_custody_activation_marker_at, validate_daemon_custody_activation,
+    validate_daemon_custody_activation_at, CustodyActivationMarkerV1,
+    CUSTODY_ACTIVATION_MARKER_FILE_NAME, CUSTODY_ACTIVATION_MARKER_SCHEMA,
+};
+pub use custody_garage::{
+    CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredential,
+    CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole, GarageCustodyProvisioner,
+    GarageCustodyS3Reader, GarageCustodyS3Writer, SystemdServiceCredentialHandoffResolver,
+    CUSTODY_HANDOFF_CONSUMPTION_DIRECTORY, SYSTEMD_CREDENTIALS_DIRECTORY_ENV,
+    SYSTEMD_CUSTODY_HANDOFF_REFERENCE_PREFIX,
+};
+#[cfg(test)]
+pub(crate) use custody_garage::{
+    TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
+    TestOnlyCustodyRuntimeCredentialResolver,
 };
 pub(crate) use destage_admission::build_destage_capacity_claim;
 pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;
