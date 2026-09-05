@@ -2463,7 +2463,6 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: false,
-            custody_profile: None,
         };
         let json = serde_json::to_string_pretty(&vec![definition]).expect("store registry json");
         fs::write(path, json).expect("store registry");

@@ -44,8 +44,26 @@ const CATALOG_FILE_MODE: u32 = 0o640;
 pub struct CustodyCatalogEntryV1 {
     pub definition: CustodyStoreDefinitionV1,
     pub ledger_path: PathBuf,
+    /// Digest of the sealed ledger configuration observed immediately after
+    /// create-new admission. It prevents an alternate same-id/same-bucket
+    /// ledger from being substituted during a later retain operation.
+    pub ledger_configuration_sha256: String,
+    /// Canonical digest of the catalogued admission definition used to bind
+    /// the credential authority. This is intentionally distinct from the
+    /// ledger configuration digest above.
     pub configuration_sha256: String,
     pub created_at_utc: String,
+}
+
+/// A durable, create-new reservation made before a fresh ledger is created.
+/// It is intentionally neither serializable nor releasable. A crash after the
+/// claim is a terminal incomplete admission, never permission to re-use the
+/// store id or bucket through an ordinary path.
+#[derive(Debug)]
+pub struct CustodyCatalogAdmissionClaim {
+    catalog_path: PathBuf,
+    store_id: StoreId,
+    bucket_name: String,
 }
 
 impl CustodyCatalogEntryV1 {
@@ -65,6 +83,10 @@ impl CustodyCatalogEntryV1 {
                 "custody catalog configuration_sha256 does not bind its sealed definition",
             ));
         }
+        validate_sha256(
+            "custody catalog ledger_configuration_sha256",
+            &self.ledger_configuration_sha256,
+        )?;
         canonical_timestamp("custody catalog created_at_utc", &self.created_at_utc)?;
         Ok(())
     }
@@ -75,6 +97,34 @@ pub fn default_custody_catalog_path() -> PathBuf {
     std::env::var_os(CUSTODY_CATALOG_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_CUSTODY_CATALOG_PATH))
+}
+
+/// Daemon-derived ledger path for an immutable custody definition.  The
+/// public daemon API never accepts a caller-selected ledger path: doing so
+/// would let an ordinary client redirect sealed state into a mutable location.
+pub fn default_custody_ledger_path(store_id: &StoreId) -> Result<PathBuf, ObjectServiceError> {
+    custody_ledger_path_for_catalog(default_custody_catalog_path(), store_id)
+}
+
+/// Derive a sealed ledger path below one daemon-selected catalog. This exists
+/// for daemon composition and tests; it is never a client transport field.
+pub fn custody_ledger_path_for_catalog(
+    catalog_path: impl AsRef<Path>,
+    store_id: &StoreId,
+) -> Result<PathBuf, ObjectServiceError> {
+    if store_id.as_str() == R237_BOOTSTRAP_STORE_ID {
+        return Err(invalid(
+            "the retired r237 bootstrap namespace has no custody ledger path",
+        ));
+    }
+    let parent = catalog_path
+        .as_ref()
+        .parent()
+        .ok_or_else(|| invalid("custody catalog path must name a file below a parent directory"))?;
+    let digest = hex::encode(Sha256::digest(store_id.as_str().as_bytes()));
+    Ok(parent
+        .join("custody-ledgers")
+        .join(format!("{digest}.sqlite")))
 }
 
 /// Append exactly one sealed custody definition to the immutable catalog.
@@ -88,8 +138,28 @@ pub fn create_custody_catalog_entry(
     catalog_path: impl AsRef<Path>,
     definition: &CustodyStoreDefinitionV1,
     ledger_path: impl AsRef<Path>,
+    ledger_configuration_sha256: impl AsRef<str>,
     created_at_utc: impl AsRef<str>,
 ) -> Result<CustodyCatalogEntryV1, ObjectServiceError> {
+    if !ledger_path.as_ref().is_absolute() {
+        return Err(invalid("custody catalog ledger_path must be absolute"));
+    }
+    let claim = claim_custody_catalog_admission(catalog_path, definition)?;
+    append_claimed_custody_catalog_entry(
+        claim,
+        definition,
+        ledger_path,
+        ledger_configuration_sha256,
+        created_at_utc,
+    )
+}
+
+/// Atomically reserve a custody store id and bucket name before any backend
+/// provision or ledger creation. The reservation is deliberately one-way.
+pub fn claim_custody_catalog_admission(
+    catalog_path: impl AsRef<Path>,
+    definition: &CustodyStoreDefinitionV1,
+) -> Result<CustodyCatalogAdmissionClaim, ObjectServiceError> {
     definition.validate()?;
     if definition.store_id.as_str() == R237_BOOTSTRAP_STORE_ID {
         return Err(invalid(
@@ -97,14 +167,59 @@ pub fn create_custody_catalog_entry(
         ));
     }
 
+    let catalog_path = catalog_path.as_ref();
+    prepare_catalog_parent(catalog_path)?;
+    prepare_custody_ledger_parent(catalog_path)?;
+    create_catalog_if_absent(catalog_path)?;
+
+    let existing = read_custody_catalog(catalog_path)?;
+    if existing
+        .iter()
+        .any(|stored| stored.definition.store_id == definition.store_id)
+    {
+        return Err(existing_entry_error(&definition.store_id));
+    }
+    if existing
+        .iter()
+        .any(|stored| stored.definition.bucket_name == definition.bucket_name)
+    {
+        return Err(existing_bucket_error(&definition.bucket_name));
+    }
+
+    let claim_path = store_claim_path(catalog_path, &definition.store_id)?;
+    claim_store_id(&claim_path)?;
+    let bucket_claim = bucket_claim_path(catalog_path, &definition.bucket_name)?;
+    claim_bucket_name(&bucket_claim)?;
+    Ok(CustodyCatalogAdmissionClaim {
+        catalog_path: catalog_path.to_path_buf(),
+        store_id: definition.store_id.clone(),
+        bucket_name: definition.bucket_name.clone(),
+    })
+}
+
+/// Append an immutable entry only for a matching, already durable admission
+/// claim. It has no recovery or claim-release operation.
+pub fn append_claimed_custody_catalog_entry(
+    claim: CustodyCatalogAdmissionClaim,
+    definition: &CustodyStoreDefinitionV1,
+    ledger_path: impl AsRef<Path>,
+    ledger_configuration_sha256: impl AsRef<str>,
+    created_at_utc: impl AsRef<str>,
+) -> Result<CustodyCatalogEntryV1, ObjectServiceError> {
+    definition.validate()?;
+    if claim.store_id != definition.store_id || claim.bucket_name != definition.bucket_name {
+        return Err(invalid(
+            "custody catalog admission claim is not bound to this sealed definition",
+        ));
+    }
     let ledger_path = ledger_path.as_ref();
     if !ledger_path.is_absolute() {
         return Err(invalid("custody catalog ledger_path must be absolute"));
     }
-
     let entry = CustodyCatalogEntryV1 {
         definition: definition.clone(),
         ledger_path: ledger_path.to_path_buf(),
+        ledger_configuration_sha256: ledger_configuration_sha256.as_ref().to_string(),
         configuration_sha256: custody_store_definition_sha256(definition)?,
         created_at_utc: canonical_timestamp(
             "custody catalog created_at_utc",
@@ -112,34 +227,33 @@ pub fn create_custody_catalog_entry(
         )?,
     };
     entry.validate()?;
-
-    let catalog_path = catalog_path.as_ref();
-    prepare_catalog_parent(catalog_path)?;
-    create_catalog_if_absent(catalog_path)?;
-
-    let existing = read_custody_catalog(catalog_path)?;
-    if existing
-        .iter()
-        .any(|stored| stored.definition.store_id == entry.definition.store_id)
+    let catalog_path = claim.catalog_path;
+    if !store_claim_path(&catalog_path, &entry.definition.store_id)?.exists()
+        || !bucket_claim_path(&catalog_path, &entry.definition.bucket_name)?.exists()
     {
-        return Err(existing_entry_error(&entry.definition.store_id));
+        return Err(invalid(
+            "custody catalog admission claim is missing; replacement is not supported",
+        ));
     }
 
-    let claim_path = store_claim_path(catalog_path, &entry.definition.store_id)?;
-    claim_store_id(&claim_path)?;
-
-    let append_lock = append_lock_path(catalog_path)?;
+    let append_lock = append_lock_path(&catalog_path)?;
     acquire_append_lock(&append_lock)?;
 
     let append_result = (|| {
-        let current = read_custody_catalog(catalog_path)?;
+        let current = read_custody_catalog(&catalog_path)?;
         if current
             .iter()
             .any(|stored| stored.definition.store_id == entry.definition.store_id)
         {
             return Err(existing_entry_error(&entry.definition.store_id));
         }
-        append_entry(catalog_path, &entry)?;
+        if current
+            .iter()
+            .any(|stored| stored.definition.bucket_name == entry.definition.bucket_name)
+        {
+            return Err(existing_bucket_error(&entry.definition.bucket_name));
+        }
+        append_entry(&catalog_path, &entry)?;
         Ok(())
     })();
 
@@ -164,6 +278,7 @@ pub fn read_custody_catalog(
 
     let mut entries = Vec::new();
     let mut store_ids = BTreeSet::new();
+    let mut bucket_names = BTreeSet::new();
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line.map_err(|error| {
             ObjectServiceError::CommandFailed(format!(
@@ -208,6 +323,13 @@ pub fn read_custody_catalog(
                 entry.definition.store_id
             )));
         }
+        if !bucket_names.insert(entry.definition.bucket_name.clone()) {
+            return Err(invalid(&format!(
+                "custody catalog {} has a duplicate bucket {}",
+                catalog_path.display(),
+                entry.definition.bucket_name
+            )));
+        }
         entries.push(entry);
     }
     Ok(entries)
@@ -248,6 +370,109 @@ pub fn catalog_contains_store(
     }
 }
 
+/// Returns whether an immutable custody admission or incomplete create-new
+/// claim owns `bucket_name`. It is separate from the StoreId lookup so a
+/// normal owner-capable route cannot alias the bucket under another id.
+pub fn catalog_contains_bucket(
+    catalog_path: impl AsRef<Path>,
+    bucket_name: &str,
+) -> Result<bool, ObjectServiceError> {
+    if bucket_name.trim().is_empty() {
+        return Err(invalid("custody catalog bucket name must not be blank"));
+    }
+    let catalog_path = catalog_path.as_ref();
+    if read_custody_catalog(catalog_path)?
+        .iter()
+        .any(|entry| entry.definition.bucket_name == bucket_name)
+    {
+        return Ok(true);
+    }
+    let claim_path = bucket_claim_path(catalog_path, bucket_name)?;
+    match fs::metadata(&claim_path) {
+        Ok(_) => Err(invalid(&format!(
+            "custody catalog has an unresolved create-new claim for bucket {bucket_name}; normal provisioning is forbidden"
+        ))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(command_error(
+            "inspect custody catalog bucket claim",
+            &claim_path,
+            error,
+        )),
+    }
+}
+
+/// Refuse an ordinary mutable route when its target is owned by the sealed
+/// custody catalog. This lookup is read-only: a malformed catalog or dangling
+/// create-new claim is also a terminal error, rather than permission to race a
+/// normal owner-capable route.
+pub fn reject_catalogued_custody_mutation(
+    catalog_path: impl AsRef<Path>,
+    store_id: &StoreId,
+    operation: &str,
+) -> Result<(), ObjectServiceError> {
+    if operation.trim().is_empty() {
+        return Err(invalid("custody mutation operation must not be blank"));
+    }
+    if catalog_contains_store(catalog_path, store_id)? {
+        return Err(invalid(&format!(
+            "sealed custody store {store_id} rejects ordinary {operation}; use the dedicated daemon custody-retain route"
+        )));
+    }
+    Ok(())
+}
+
+/// Refuse a normal definition which aliases either a sealed custody store id
+/// *or its fresh bucket*. Checking only the id would let an owner-capable
+/// normal provisioning request take over the custody bucket under a new id.
+pub fn reject_catalogued_custody_definition(
+    catalog_path: impl AsRef<Path>,
+    store_id: &StoreId,
+    bucket_name: &str,
+    operation: &str,
+) -> Result<(), ObjectServiceError> {
+    if operation.trim().is_empty() || bucket_name.trim().is_empty() {
+        return Err(invalid(
+            "custody definition operation and bucket name must not be blank",
+        ));
+    }
+    let catalog_path = catalog_path.as_ref();
+    if catalog_contains_store(catalog_path, store_id)? {
+        return Err(invalid(&format!(
+            "sealed custody store {store_id} rejects ordinary {operation}; use the dedicated daemon custody-retain route"
+        )));
+    }
+    if catalog_contains_bucket(catalog_path, bucket_name)? {
+        return Err(invalid(&format!(
+            "sealed custody bucket {bucket_name} rejects ordinary {operation}; another store id cannot alias it"
+        )));
+    }
+    Ok(())
+}
+
+/// The production normal-store guard. Test and attended custody code may use
+/// an explicit catalog path, but ordinary registry and layout paths always
+/// consult the daemon-owned catalog.
+pub fn reject_default_catalogued_custody_mutation(
+    store_id: &StoreId,
+    operation: &str,
+) -> Result<(), ObjectServiceError> {
+    reject_catalogued_custody_mutation(default_custody_catalog_path(), store_id, operation)
+}
+
+/// Production normal-definition guard, including bucket-alias denial.
+pub fn reject_default_catalogued_custody_definition(
+    store_id: &StoreId,
+    bucket_name: &str,
+    operation: &str,
+) -> Result<(), ObjectServiceError> {
+    reject_catalogued_custody_definition(
+        default_custody_catalog_path(),
+        store_id,
+        bucket_name,
+        operation,
+    )
+}
+
 fn prepare_catalog_parent(catalog_path: &Path) -> Result<(), ObjectServiceError> {
     let parent = catalog_path
         .parent()
@@ -279,6 +504,26 @@ fn create_catalog_if_absent(catalog_path: &Path) -> Result<(), ObjectServiceErro
     }
 }
 
+/// Establish the daemon-selected ledger directory before recording a
+/// one-way admission claim. Ledger creation itself remains `create_new` only;
+/// this merely avoids letting a later admission path choose or implicitly
+/// create its parent directory.
+fn prepare_custody_ledger_parent(catalog_path: &Path) -> Result<(), ObjectServiceError> {
+    let parent = catalog_path
+        .parent()
+        .ok_or_else(|| invalid("custody catalog path must name a file below a parent directory"))?;
+    let ledger_parent = parent.join("custody-ledgers");
+    fs::create_dir_all(&ledger_parent).map_err(|error| {
+        command_error(
+            "create daemon custody ledger directory",
+            &ledger_parent,
+            error,
+        )
+    })?;
+    restrict_dir(&ledger_parent)?;
+    sync_parent(&ledger_parent)
+}
+
 fn claim_store_id(claim_path: &Path) -> Result<(), ObjectServiceError> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -296,6 +541,33 @@ fn claim_store_id(claim_path: &Path) -> Result<(), ObjectServiceError> {
         ))),
         Err(error) => Err(command_error(
             "create custody catalog claim",
+            claim_path,
+            error,
+        )),
+    }
+}
+
+fn claim_bucket_name(claim_path: &Path) -> Result<(), ObjectServiceError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    configure_private_file(&mut options);
+    match options.open(claim_path) {
+        Ok(file) => {
+            file.sync_all().map_err(|error| {
+                command_error(
+                    "synchronize custody catalog bucket claim",
+                    claim_path,
+                    error,
+                )
+            })?;
+            sync_parent(claim_path)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(invalid(&format!(
+            "custody catalog bucket is already claimed: {}",
+            claim_path.display()
+        ))),
+        Err(error) => Err(command_error(
+            "create custody catalog bucket claim",
             claim_path,
             error,
         )),
@@ -368,6 +640,14 @@ fn store_claim_path(
     Ok(catalog_claim_dir(catalog_path)?.join(format!("{digest}.claim")))
 }
 
+fn bucket_claim_path(
+    catalog_path: &Path,
+    bucket_name: &str,
+) -> Result<PathBuf, ObjectServiceError> {
+    let digest = hex::encode(Sha256::digest(bucket_name.as_bytes()));
+    Ok(catalog_claim_dir(catalog_path)?.join(format!("bucket-{digest}.claim")))
+}
+
 fn append_lock_path(catalog_path: &Path) -> Result<PathBuf, ObjectServiceError> {
     let parent = catalog_path
         .parent()
@@ -389,6 +669,15 @@ fn canonical_timestamp(field: &str, value: &str) -> Result<String, ObjectService
         )));
     }
     Ok(canonical)
+}
+
+fn validate_sha256(field: &str, value: &str) -> Result<(), ObjectServiceError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(invalid(&format!(
+            "{field} must be a lower-level SHA-256 hex digest"
+        )));
+    }
+    Ok(())
 }
 
 fn configure_private_file(options: &mut OpenOptions) {
@@ -424,6 +713,12 @@ fn existing_entry_error(store_id: &StoreId) -> ObjectServiceError {
     ))
 }
 
+fn existing_bucket_error(bucket_name: &str) -> ObjectServiceError {
+    invalid(&format!(
+        "custody catalog entry already exists for bucket {bucket_name}; immutable entries cannot be aliased or replaced"
+    ))
+}
+
 fn command_error(action: &str, path: &Path, error: io::Error) -> ObjectServiceError {
     ObjectServiceError::CommandFailed(format!("{action} {}: {error}", path.display()))
 }
@@ -437,8 +732,10 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     use super::default_custody_catalog_path;
     use super::{
-        catalog_contains_store, create_custody_catalog_entry, read_custody_catalog,
-        store_claim_path, CustodyCatalogEntryV1,
+        catalog_contains_bucket, catalog_contains_store, claim_custody_catalog_admission,
+        create_custody_catalog_entry, default_custody_ledger_path, read_custody_catalog,
+        reject_catalogued_custody_definition, reject_catalogued_custody_mutation, store_claim_path,
+        CustodyCatalogEntryV1,
     };
     use crate::custody::{
         CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreDefinitionV1,
@@ -451,6 +748,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const CREATED_AT: &str = "2026-09-05T12:00:00Z";
+    const LEDGER_CONFIGURATION_SHA256: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     fn temporary_catalog_path(test_name: &str) -> PathBuf {
         let nonce = SystemTime::now()
@@ -490,8 +789,14 @@ mod tests {
         let definition = definition("custody-a");
         let ledger = PathBuf::from("/var/lib/dasobjectstore/custody/custody-a.sqlite");
 
-        let created = create_custody_catalog_entry(&catalog, &definition, &ledger, CREATED_AT)
-            .expect("catalog entry");
+        let created = create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            &ledger,
+            LEDGER_CONFIGURATION_SHA256,
+            CREATED_AT,
+        )
+        .expect("catalog entry");
 
         assert_eq!(created.definition, definition);
         assert_eq!(created.ledger_path, ledger);
@@ -508,12 +813,24 @@ mod tests {
         let catalog = temporary_catalog_path("duplicate").join("catalog.jsonl");
         let definition = definition("custody-duplicate");
         let ledger = PathBuf::from("/var/lib/dasobjectstore/custody/duplicate.sqlite");
-        create_custody_catalog_entry(&catalog, &definition, &ledger, CREATED_AT)
-            .expect("first entry");
+        create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            &ledger,
+            LEDGER_CONFIGURATION_SHA256,
+            CREATED_AT,
+        )
+        .expect("first entry");
         let before = fs::read(&catalog).expect("original catalog");
 
-        let error = create_custody_catalog_entry(&catalog, &definition, &ledger, CREATED_AT)
-            .expect_err("second entry must fail");
+        let error = create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            &ledger,
+            LEDGER_CONFIGURATION_SHA256,
+            CREATED_AT,
+        )
+        .expect_err("second entry must fail");
 
         assert!(error.to_string().contains("cannot be updated or replaced"));
         assert_eq!(fs::read(&catalog).expect("unchanged catalog"), before);
@@ -530,6 +847,7 @@ mod tests {
             &catalog,
             &retired,
             "/var/lib/dasobjectstore/custody/retired.sqlite",
+            LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
         .expect_err("retired bootstrap namespace must fail");
@@ -546,6 +864,7 @@ mod tests {
             &catalog,
             &definition("custody-relative-ledger"),
             "custody/relative.sqlite",
+            LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
         .expect_err("relative ledger path must fail");
@@ -587,6 +906,7 @@ mod tests {
         let entry = CustodyCatalogEntryV1 {
             definition: definition("custody-strict"),
             ledger_path: PathBuf::from("/var/lib/dasobjectstore/custody/strict.sqlite"),
+            ledger_configuration_sha256: LEDGER_CONFIGURATION_SHA256.to_string(),
             configuration_sha256: "not-used".to_string(),
             created_at_utc: CREATED_AT.to_string(),
         };
@@ -608,6 +928,88 @@ mod tests {
     }
 
     #[test]
+    fn sealed_entry_blocks_ordinary_mutation_before_that_route_can_act() {
+        let catalog = temporary_catalog_path("ordinary-route").join("catalog.jsonl");
+        let definition = definition("custody-ordinary-route");
+        create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            "/var/lib/dasobjectstore/custody/ordinary-route.sqlite",
+            LEDGER_CONFIGURATION_SHA256,
+            CREATED_AT,
+        )
+        .expect("catalog entry");
+
+        let error =
+            reject_catalogued_custody_mutation(&catalog, &definition.store_id, "multipart upload")
+                .expect_err("normal mutation must be denied");
+
+        assert!(error
+            .to_string()
+            .contains("dedicated daemon custody-retain"));
+        fs::remove_dir_all(catalog.parent().expect("parent")).expect("cleanup");
+    }
+
+    #[test]
+    fn sealed_bucket_cannot_be_aliased_by_an_ordinary_store_id() {
+        let catalog = temporary_catalog_path("bucket-alias").join("catalog.jsonl");
+        let definition = definition("custody-bucket-owner");
+        create_custody_catalog_entry(
+            &catalog,
+            &definition,
+            "/var/lib/dasobjectstore/custody/bucket-owner.sqlite",
+            LEDGER_CONFIGURATION_SHA256,
+            CREATED_AT,
+        )
+        .expect("catalog entry");
+        let alias = StoreId::new("ordinary-alias").expect("alias store id");
+
+        let error = reject_catalogued_custody_definition(
+            &catalog,
+            &alias,
+            &definition.bucket_name,
+            "normal Garage provisioning",
+        )
+        .expect_err("bucket alias must fail");
+
+        assert!(error.to_string().contains("cannot alias"));
+        fs::remove_dir_all(catalog.parent().expect("parent")).expect("cleanup");
+    }
+
+    #[test]
+    fn incomplete_admission_claim_blocks_bucket_alias_before_ledger_creation() {
+        let catalog = temporary_catalog_path("bucket-claim").join("catalog.jsonl");
+        let definition = definition("custody-claimed-bucket");
+        claim_custody_catalog_admission(&catalog, &definition).expect("fresh claim");
+        let alias = StoreId::new("ordinary-claimed-alias").expect("alias store id");
+
+        assert!(catalog_contains_bucket(&catalog, &definition.bucket_name).is_err());
+        assert!(reject_catalogued_custody_definition(
+            &catalog,
+            &alias,
+            &definition.bucket_name,
+            "normal Garage provisioning",
+        )
+        .is_err());
+        assert!(read_custody_catalog(&catalog)
+            .expect("no entry before append")
+            .is_empty());
+        fs::remove_dir_all(catalog.parent().expect("parent")).expect("cleanup");
+    }
+
+    #[test]
+    fn default_ledger_path_is_daemon_derived_and_does_not_embed_store_text() {
+        let path = default_custody_ledger_path(&StoreId::new("custody-ledger-path").unwrap())
+            .expect("derived path");
+        assert!(path.is_absolute());
+        assert_eq!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("sqlite")
+        );
+        assert!(!path.to_string_lossy().contains("custody-ledger-path"));
+    }
+
+    #[test]
     fn rejects_a_nested_unknown_profile_field_instead_of_silently_dropping_it() {
         let catalog = temporary_catalog_path("nested-strict").join("catalog.jsonl");
         fs::create_dir_all(catalog.parent().expect("parent")).expect("catalog parent");
@@ -615,6 +1017,7 @@ mod tests {
             &catalog,
             &definition("custody-nested-strict"),
             "/var/lib/dasobjectstore/custody/nested-strict.sqlite",
+            LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
         .expect("entry");

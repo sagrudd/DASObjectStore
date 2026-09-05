@@ -6,13 +6,29 @@
   a fresh dedicated Garage bucket. It seals target-bound configuration and
   append-only content-addressed object/version/event/readback records, requires
   a distinct reader readback, permanent legal hold, and later-only retention
-  extension. Normal mutable store layout, owner-capable provisioning, and
-  registry rewrite/delete paths fail closed for custody profiles.
+  extension. Normal mutable store layout, owner-capable provisioning, CLI
+  fallback, profile binding, and registry paths cannot represent a custody
+  profile and reject raw fields/retired bootstrap coordinates.
 - Define a dedicated no-owner Garage provisioning plan with separate attended
   provisioner, writer, and reader identities, plus an off-NUC signed,
   expiring monotonic attestation consumer contract. The assurance label is
   explicitly `local_trusted_administrator_overlay`; it is not independently
   administered storage and does not alter r237/r7 Remote 0.177.4.
+- Add the concrete daemon Garage custody boundary: a non-idempotent fresh
+  bucket provisioner with no owner grant, conditional content-addressed S3
+  PUT, distinct HEAD/GET readback, sealed fresh-bucket evidence, dedicated
+  daemon admission, and one-use external formal-attestation consumption.
+- Harden that source-only boundary with a separate custody Garage
+  control/data-plane configuration, immutable store-and-bucket admission
+  claims, canonical catalog-to-ledger binding, and a secret-free daemon retain
+  request. Normal registry/layout routes fail closed on a sealed store or
+  bucket alias; the only production one-use credential handoff is an attended
+  systemd service credential, never persisted by DASObjectStore.
+- Add the inactive-by-default systemd custody credential handoff and the
+  reviewed-but-unpackaged isolated Garage Compose/service templates. Writer
+  and reader material is read only from systemd's private credential directory
+  using opaque references and atomically consumed with a hash-only marker;
+  package installation never renders, loads, enables, or starts custody.
 
 ## 0.179.1 - 2026-09-04
 

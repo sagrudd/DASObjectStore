@@ -49,6 +49,8 @@ where
         | DaemonApiRequest::RevokeApplicationCredential(_)
         | DaemonApiRequest::AuthorizeApplicationMtls(_)
         | DaemonApiRequest::PrepareEnclosure(_)
+        | DaemonApiRequest::CustodyAdmission(_)
+        | DaemonApiRequest::CustodyRetain(_)
         | DaemonApiRequest::CreateObjectStore(_)
         | DaemonApiRequest::RegisterProfileBinding(_)
         | DaemonApiRequest::ProfileMigration(_)

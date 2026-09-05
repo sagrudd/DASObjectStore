@@ -80,7 +80,10 @@ pub struct CustodyStoreProfileV1 {
     pub target_id: String,
     pub retention_until_utc: String,
     pub legal_hold: bool,
+    pub provisioner_credential_reference: String,
+    pub provisioner_identity: String,
     pub writer_credential_reference: String,
+    pub writer_identity: String,
     pub reader_credential_reference: String,
     pub reader_identity: String,
 }
@@ -109,9 +112,15 @@ impl CustodyStoreProfileV1 {
             ));
         }
         require_nonblank(
+            "provisioner_credential_reference",
+            &self.provisioner_credential_reference,
+        )?;
+        require_nonblank("provisioner_identity", &self.provisioner_identity)?;
+        require_nonblank(
             "writer_credential_reference",
             &self.writer_credential_reference,
         )?;
+        require_nonblank("writer_identity", &self.writer_identity)?;
         require_nonblank(
             "reader_credential_reference",
             &self.reader_credential_reference,
@@ -122,8 +131,75 @@ impl CustodyStoreProfileV1 {
             ));
         }
         require_nonblank("reader_identity", &self.reader_identity)?;
+        let credential_references = [
+            &self.provisioner_credential_reference,
+            &self.writer_credential_reference,
+            &self.reader_credential_reference,
+        ];
+        let identities = [
+            &self.provisioner_identity,
+            &self.writer_identity,
+            &self.reader_identity,
+        ];
+        if credential_references
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != 3
+            || identities
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != 3
+        {
+            return Err(invalid(
+                "custody provisioner, writer, and reader identities and credential references must each be distinct",
+            ));
+        }
         Ok(())
     }
+}
+
+/// The only serializable custody admission shape.  It is deliberately not a
+/// `StoreServiceDefinition`: normal registry, compose, and owner-capable
+/// provisioning paths have no field with which to represent it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustodyStoreDefinitionV1 {
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub profile: CustodyStoreProfileV1,
+}
+
+impl CustodyStoreDefinitionV1 {
+    pub fn validate(&self) -> Result<(), ObjectServiceError> {
+        self.profile.validate()?;
+        if self.store_id.as_str() == R237_BOOTSTRAP_STORE_ID
+            || custody_bucket_is_reserved(&self.bucket_name)
+        {
+            return Err(invalid(
+                "the retired r237 bootstrap namespace cannot be adopted as custody",
+            ));
+        }
+        require_nonblank("custody bucket_name", &self.bucket_name)?;
+        if !self
+            .bucket_name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        {
+            return Err(invalid(
+                "custody bucket_name is not a conservative S3 bucket name",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub fn custody_store_definition_sha256(
+    definition: &CustodyStoreDefinitionV1,
+) -> Result<String, ObjectServiceError> {
+    definition.validate()?;
+    Ok(sha256_hex(canonical_json(definition)?.as_bytes()))
 }
 
 /// Returns true for a historical bootstrap namespace which must never be
@@ -349,6 +425,119 @@ pub fn plan_custody_garage_provisioning(
     })
 }
 
+pub const CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1: &str =
+    "dasobjectstore.local_trusted_administrator_custody_fresh_bucket_proof.v1";
+
+/// Immutable evidence emitted by the dedicated provisioner after it has
+/// observed absence, created one bucket, and re-read its creation result. It
+/// binds that one operation to all three sealed identities. A ledger cannot be
+/// created from an arbitrary pre-existing bucket.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CustodyFreshBucketProofV1 {
+    pub schema: String,
+    pub store_id: StoreId,
+    pub bucket_name: String,
+    pub target_id: String,
+    pub provisioner_identity: String,
+    pub provisioner_credential_reference: String,
+    pub provisioning_request_sha256: String,
+    pub absence_evidence_sha256: String,
+    pub creation_evidence_sha256: String,
+    pub creation_nonce: String,
+    pub created_at_utc: String,
+}
+
+/// Produces the redacted, immutable binding which a fresh-bucket proof must
+/// carry. It includes no credential secret.
+pub fn custody_provisioning_request_sha256(
+    request: &CustodyGarageProvisioningRequest,
+) -> Result<String, ObjectServiceError> {
+    validate_custody_provisioning_request(request)?;
+    custody_store_definition_sha256(&CustodyStoreDefinitionV1 {
+        store_id: request.store_id.clone(),
+        bucket_name: request.bucket_name.clone(),
+        profile: request.profile.clone(),
+    })
+}
+
+impl CustodyFreshBucketProofV1 {
+    pub fn validate_for(
+        &self,
+        request: &CustodyGarageProvisioningRequest,
+        created_at_utc: &str,
+    ) -> Result<(), ObjectServiceError> {
+        validate_custody_provisioning_request(request)?;
+        if self.schema != CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1
+            || self.store_id != request.store_id
+            || self.bucket_name != request.bucket_name
+            || self.target_id != request.profile.target_id
+            || self.provisioner_identity != request.profile.provisioner_identity
+            || self.provisioner_credential_reference
+                != request.profile.provisioner_credential_reference
+            || self.provisioning_request_sha256 != custody_provisioning_request_sha256(request)?
+        {
+            return Err(invalid(
+                "fresh custody bucket proof is not bound to this exact provisioning request",
+            ));
+        }
+        validate_sha256(
+            "fresh bucket absence evidence",
+            &self.absence_evidence_sha256,
+        )?;
+        validate_sha256(
+            "fresh bucket creation evidence",
+            &self.creation_evidence_sha256,
+        )?;
+        require_nonblank("fresh bucket creation nonce", &self.creation_nonce)?;
+        let created = canonical_timestamp("fresh bucket created_at_utc", &self.created_at_utc)?;
+        let ledger_created = canonical_timestamp("custody ledger created_at_utc", created_at_utc)?;
+        if created > ledger_created {
+            return Err(invalid(
+                "fresh custody bucket proof is from after ledger admission",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_definition(
+        &self,
+        definition: &CustodyStoreDefinitionV1,
+        created_at_utc: &str,
+    ) -> Result<(), ObjectServiceError> {
+        definition.validate()?;
+        if self.schema != CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1
+            || self.store_id != definition.store_id
+            || self.bucket_name != definition.bucket_name
+            || self.target_id != definition.profile.target_id
+            || self.provisioner_identity != definition.profile.provisioner_identity
+            || self.provisioner_credential_reference
+                != definition.profile.provisioner_credential_reference
+            || self.provisioning_request_sha256 != custody_store_definition_sha256(definition)?
+        {
+            return Err(invalid(
+                "fresh custody bucket proof is not bound to this exact custody definition",
+            ));
+        }
+        validate_sha256(
+            "fresh bucket absence evidence",
+            &self.absence_evidence_sha256,
+        )?;
+        validate_sha256(
+            "fresh bucket creation evidence",
+            &self.creation_evidence_sha256,
+        )?;
+        require_nonblank("fresh bucket creation nonce", &self.creation_nonce)?;
+        let created = canonical_timestamp("fresh bucket created_at_utc", &self.created_at_utc)?;
+        let ledger_created = canonical_timestamp("custody ledger created_at_utc", created_at_utc)?;
+        if created > ledger_created {
+            return Err(invalid(
+                "fresh custody bucket proof is from after ledger admission",
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// State returned by a writer before an immutable content-addressed put.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CustodyObjectState {
@@ -375,7 +564,8 @@ pub trait CustodyObjectReader {
     fn read_exact(&mut self, object_key: &str) -> Result<Vec<u8>, ObjectServiceError>;
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CustodyObjectInputV1 {
     pub object_type: String,
     pub bytes: Vec<u8>,
@@ -437,6 +627,17 @@ pub enum CustodyForbiddenMutation {
     Restore,
     Reconcile,
     Lifecycle,
+    Provision,
+    MutableRegistry,
+    ProfileBinding,
+    ProfileAdoption,
+    Migration,
+    CapacityOrPolicy,
+    Ingest,
+    RepairOrDeduplicate,
+    CredentialOrGrant,
+    RemoteSession,
+    GlobalServiceLifecycle,
     ShortenRetention,
     ClearLegalHold,
     ReplaceConfiguration,
@@ -463,6 +664,17 @@ fn custody_forbidden_mutation_name(operation: CustodyForbiddenMutation) -> &'sta
         CustodyForbiddenMutation::Restore => "restore",
         CustodyForbiddenMutation::Reconcile => "reconcile",
         CustodyForbiddenMutation::Lifecycle => "lifecycle",
+        CustodyForbiddenMutation::Provision => "provision",
+        CustodyForbiddenMutation::MutableRegistry => "mutable_registry",
+        CustodyForbiddenMutation::ProfileBinding => "profile_binding",
+        CustodyForbiddenMutation::ProfileAdoption => "profile_adoption",
+        CustodyForbiddenMutation::Migration => "migration",
+        CustodyForbiddenMutation::CapacityOrPolicy => "capacity_or_policy",
+        CustodyForbiddenMutation::Ingest => "ingest",
+        CustodyForbiddenMutation::RepairOrDeduplicate => "repair_or_deduplicate",
+        CustodyForbiddenMutation::CredentialOrGrant => "credential_or_grant",
+        CustodyForbiddenMutation::RemoteSession => "remote_session",
+        CustodyForbiddenMutation::GlobalServiceLifecycle => "global_service_lifecycle",
         CustodyForbiddenMutation::ShortenRetention => "shorten_retention",
         CustodyForbiddenMutation::ClearLegalHold => "clear_legal_hold",
         CustodyForbiddenMutation::ReplaceConfiguration => "replace_configuration",
@@ -488,6 +700,10 @@ pub struct CustodyOffNucAttestationV1 {
 pub struct CustodyOffNucAttestationBodyV1 {
     pub schema: String,
     pub assurance_class: String,
+    pub attestation_id: String,
+    pub release_train: String,
+    pub release_stage: String,
+    pub purpose: String,
     pub verifier_id: String,
     pub target_id: String,
     pub nonce: String,
@@ -503,6 +719,119 @@ pub struct CustodyOffNucAttestationBodyV1 {
     pub s3_endpoint: String,
     pub full_inventory_sha256: String,
     pub custody_marker_sha256: String,
+    /// Digest of the retained raw verifier corpus.  A formal gate consumes
+    /// this exact value with the one-use marker and attestation identifier.
+    pub raw_evidence_sha256: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CustodyFormalGateAttestationExpectationV1 {
+    pub target_id: String,
+    pub release_train: String,
+    pub release_stage: String,
+    pub purpose: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CustodyFormalGateAttestationConsumptionV1 {
+    pub attestation_id: String,
+    pub target_id: String,
+    pub release_train: String,
+    pub release_stage: String,
+    pub purpose: String,
+    pub one_use_marker_sha256: String,
+    pub raw_evidence_sha256: String,
+    pub attestation_sha256: String,
+}
+
+/// Atomically create an external, one-use formal-gate consumption marker.
+/// The caller owns `state_root` outside the NUC, Garage, BaseCamp, and their
+/// backup paths. `create_new` makes a duplicate/replay terminal, including a
+/// crash-partial marker, rather than allowing a retry to replace evidence.
+pub fn consume_custody_attestation_for_formal_gate(
+    state_root: impl AsRef<Path>,
+    attestation: &CustodyOffNucAttestationV1,
+    expectation: &CustodyFormalGateAttestationExpectationV1,
+) -> Result<CustodyFormalGateAttestationConsumptionV1, ObjectServiceError> {
+    let body = &attestation.body;
+    require_nonblank("custody attestation id", &body.attestation_id)?;
+    for (field, actual, expected) in [
+        (
+            "custody formal target",
+            &body.target_id,
+            &expectation.target_id,
+        ),
+        (
+            "custody formal release train",
+            &body.release_train,
+            &expectation.release_train,
+        ),
+        (
+            "custody formal release stage",
+            &body.release_stage,
+            &expectation.release_stage,
+        ),
+        (
+            "custody formal purpose",
+            &body.purpose,
+            &expectation.purpose,
+        ),
+    ] {
+        require_nonblank(field, actual)?;
+        require_nonblank(field, expected)?;
+        if actual != expected {
+            return Err(invalid(
+                "custody attestation does not match formal-gate expectation",
+            ));
+        }
+    }
+    validate_sha256("custody one-use marker", &body.custody_marker_sha256)?;
+    validate_sha256("custody raw evidence", &body.raw_evidence_sha256)?;
+    let consumption = CustodyFormalGateAttestationConsumptionV1 {
+        attestation_id: body.attestation_id.clone(),
+        target_id: body.target_id.clone(),
+        release_train: body.release_train.clone(),
+        release_stage: body.release_stage.clone(),
+        purpose: body.purpose.clone(),
+        one_use_marker_sha256: body.custody_marker_sha256.clone(),
+        raw_evidence_sha256: body.raw_evidence_sha256.clone(),
+        attestation_sha256: sha256_hex(canonical_json(attestation)?.as_bytes()),
+    };
+    let root = state_root.as_ref();
+    fs::create_dir_all(root).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!(
+            "create external custody formal-gate state directory {}: {error}",
+            root.display()
+        ))
+    })?;
+    let marker_path = root.join(format!(
+        "{}.json",
+        sha256_hex(consumption.attestation_id.as_bytes())
+    ));
+    let mut marker = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&marker_path)
+        .map_err(|error| {
+            invalid(format!(
+                "custody formal-gate attestation id has already been consumed or cannot be atomically claimed: {error}"
+            ))
+        })?;
+    let bytes = canonical_json(&consumption)?.into_bytes();
+    use std::io::Write as _;
+    marker.write_all(&bytes).map_err(|error| {
+        ObjectServiceError::CommandFailed(format!(
+            "write external custody formal-gate consumption marker {}: {error}",
+            marker_path.display()
+        ))
+    })?;
+    marker.sync_all().map_err(|error| {
+        ObjectServiceError::CommandFailed(format!(
+            "sync external custody formal-gate consumption marker {}: {error}",
+            marker_path.display()
+        ))
+    })?;
+    Ok(consumption)
 }
 
 /// Durable state held *outside* the NUC, Garage, BaseCamp, and ordinary host
@@ -514,10 +843,23 @@ pub trait CustodyOffNucVerifierState {
         target_id: &str,
     ) -> Result<Option<CustodyOffNucVerifierCheckpointV1>, ObjectServiceError>;
     fn nonce_seen(&self, target_id: &str, nonce: &str) -> Result<bool, ObjectServiceError>;
-    fn compare_and_store(
+    /// Atomically advance the checkpoint, consume the nonce, and retain the
+    /// accepted first-attempt record. Implementations must not make an
+    /// accepted checkpoint durable without the matching accepted attempt, or
+    /// vice versa.
+    fn accept_first_attempt(
         &mut self,
         expected_previous: Option<&CustodyOffNucVerifierCheckpointV1>,
         next: CustodyOffNucVerifierCheckpointV1,
+        accepted_attempt: CustodyVerifierAttemptV1,
+    ) -> Result<(), ObjectServiceError>;
+
+    /// Atomically retain one attempt by attestation identifier.  Timeouts,
+    /// incomplete records, signature failures, and accepted observations are
+    /// all terminal first-attempt evidence.
+    fn record_first_attempt(
+        &mut self,
+        attempt: CustodyVerifierAttemptV1,
     ) -> Result<(), ObjectServiceError>;
 }
 
@@ -531,6 +873,63 @@ pub struct CustodyOffNucVerifierCheckpointV1 {
     pub attestation_sha256: String,
     pub ledger_head_sha256: String,
     pub expires_at_utc: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CustodyVerifierAttemptResult {
+    Accepted,
+    Failed,
+    TimedOut,
+    Incomplete,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CustodyVerifierAttemptV1 {
+    pub attestation_id: String,
+    pub target_id: String,
+    pub custody_marker_sha256: String,
+    pub raw_evidence_sha256: String,
+    pub attestation_sha256: String,
+    pub attempted_at_utc: String,
+    pub result: CustodyVerifierAttemptResult,
+    pub result_detail: String,
+}
+
+/// Record a terminal first verifier observation which could not reach normal
+/// signature verification (for example timeout or incomplete corpus). This
+/// still binds the supplied attestation identifier, marker, and raw corpus.
+pub fn record_custody_incomplete_verifier_attempt(
+    attestation: &CustodyOffNucAttestationV1,
+    attempted_at_utc: &str,
+    result: CustodyVerifierAttemptResult,
+    result_detail: impl Into<String>,
+    state: &mut impl CustodyOffNucVerifierState,
+) -> Result<(), ObjectServiceError> {
+    if !matches!(
+        result,
+        CustodyVerifierAttemptResult::TimedOut | CustodyVerifierAttemptResult::Incomplete
+    ) {
+        return Err(invalid(
+            "incomplete verifier recorder accepts only timeout or incomplete results",
+        ));
+    }
+    canonical_timestamp(
+        "custody incomplete verifier attempted_at_utc",
+        attempted_at_utc,
+    )?;
+    let body = &attestation.body;
+    require_nonblank("custody attestation id", &body.attestation_id)?;
+    state.record_first_attempt(CustodyVerifierAttemptV1 {
+        attestation_id: body.attestation_id.clone(),
+        target_id: body.target_id.clone(),
+        custody_marker_sha256: body.custody_marker_sha256.clone(),
+        raw_evidence_sha256: body.raw_evidence_sha256.clone(),
+        attestation_sha256: sha256_hex(canonical_json(attestation)?.as_bytes()),
+        attempted_at_utc: attempted_at_utc.to_string(),
+        result,
+        result_detail: result_detail.into(),
+    })
 }
 
 /// The off-NUC authority owns the signing key.  DAS only receives the public
@@ -552,50 +951,84 @@ pub fn accept_custody_off_nuc_attestation(
     state: &mut impl CustodyOffNucVerifierState,
 ) -> Result<CustodyOffNucVerifierCheckpointV1, ObjectServiceError> {
     let body = &attestation.body;
-    validate_off_nuc_attestation_body(body, expected_target_id, now_utc)?;
-    if attestation.authority_id != authority.authority_id() {
-        return Err(invalid(
-            "custody attestation authority does not match pinned verifier authority",
-        ));
-    }
-    require_nonblank("custody attestation signature", &attestation.signature)?;
-    let canonical_body = canonical_json(body)?;
-    authority.verify(canonical_body.as_bytes(), &attestation.signature)?;
-    if state.nonce_seen(&body.target_id, &body.nonce)? {
-        return Err(invalid(
-            "custody attestation nonce has already been accepted",
-        ));
-    }
-    let previous = state.checkpoint(&body.target_id)?;
-    match &previous {
-        None if body.sequence == 1 && body.previous_attestation_sha256.is_none() => {}
-        Some(checkpoint)
-            if body.sequence
-                == checkpoint
-                    .sequence
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("custody verifier checkpoint sequence overflow"))?
-                && body.previous_attestation_sha256.as_deref()
-                    == Some(checkpoint.attestation_sha256.as_str()) => {}
-        _ => {
+    let attestation_sha256 = sha256_hex(canonical_json(attestation)?.as_bytes());
+    let evaluated = (|| {
+        validate_off_nuc_attestation_body(body, expected_target_id, now_utc)?;
+        if attestation.authority_id != authority.authority_id() {
             return Err(invalid(
-                "custody attestation sequence or previous hash does not continue off-NUC state",
+                "custody attestation authority does not match pinned verifier authority",
             ));
         }
+        require_nonblank("custody attestation signature", &attestation.signature)?;
+        let canonical_body = canonical_json(body)?;
+        authority.verify(canonical_body.as_bytes(), &attestation.signature)?;
+        if state.nonce_seen(&body.target_id, &body.nonce)? {
+            return Err(invalid(
+                "custody attestation nonce has already been accepted",
+            ));
+        }
+        let previous = state.checkpoint(&body.target_id)?;
+        match &previous {
+            None if body.sequence == 1 && body.previous_attestation_sha256.is_none() => {}
+            Some(checkpoint)
+                if body.sequence
+                    == checkpoint.sequence.checked_add(1).ok_or_else(|| {
+                        invalid("custody verifier checkpoint sequence overflow")
+                    })?
+                    && body.previous_attestation_sha256.as_deref()
+                        == Some(checkpoint.attestation_sha256.as_str()) => {}
+            _ => {
+                return Err(invalid(
+                    "custody attestation sequence or previous hash does not continue off-NUC state",
+                ));
+            }
+        }
+        Ok((
+            previous,
+            CustodyOffNucVerifierCheckpointV1 {
+                target_id: body.target_id.clone(),
+                authority_id: attestation.authority_id.clone(),
+                verifier_id: body.verifier_id.clone(),
+                sequence: body.sequence,
+                nonce: body.nonce.clone(),
+                attestation_sha256: attestation_sha256.clone(),
+                ledger_head_sha256: body.ledger_head_sha256.clone(),
+                expires_at_utc: body.expires_at_utc.clone(),
+            },
+        ))
+    })();
+    match evaluated {
+        Ok((previous, checkpoint)) => {
+            state.accept_first_attempt(
+                previous.as_ref(),
+                checkpoint.clone(),
+                CustodyVerifierAttemptV1 {
+                    attestation_id: body.attestation_id.clone(),
+                    target_id: body.target_id.clone(),
+                    custody_marker_sha256: body.custody_marker_sha256.clone(),
+                    raw_evidence_sha256: body.raw_evidence_sha256.clone(),
+                    attestation_sha256,
+                    attempted_at_utc: now_utc.to_string(),
+                    result: CustodyVerifierAttemptResult::Accepted,
+                    result_detail: "accepted".to_string(),
+                },
+            )?;
+            Ok(checkpoint)
+        }
+        Err(error) => {
+            state.record_first_attempt(CustodyVerifierAttemptV1 {
+                attestation_id: body.attestation_id.clone(),
+                target_id: body.target_id.clone(),
+                custody_marker_sha256: body.custody_marker_sha256.clone(),
+                raw_evidence_sha256: body.raw_evidence_sha256.clone(),
+                attestation_sha256,
+                attempted_at_utc: now_utc.to_string(),
+                result: CustodyVerifierAttemptResult::Failed,
+                result_detail: error.to_string(),
+            })?;
+            Err(error)
+        }
     }
-    let attestation_sha256 = sha256_hex(canonical_json(attestation)?.as_bytes());
-    let checkpoint = CustodyOffNucVerifierCheckpointV1 {
-        target_id: body.target_id.clone(),
-        authority_id: attestation.authority_id.clone(),
-        verifier_id: body.verifier_id.clone(),
-        sequence: body.sequence,
-        nonce: body.nonce.clone(),
-        attestation_sha256,
-        ledger_head_sha256: body.ledger_head_sha256.clone(),
-        expires_at_utc: body.expires_at_utc.clone(),
-    };
-    state.compare_and_store(previous.as_ref(), checkpoint.clone())?;
-    Ok(checkpoint)
 }
 
 fn validate_off_nuc_attestation_body(
@@ -615,6 +1048,10 @@ fn validate_off_nuc_attestation_body(
         ));
     }
     require_nonblank("custody verifier id", &body.verifier_id)?;
+    require_nonblank("custody attestation id", &body.attestation_id)?;
+    require_nonblank("custody release train", &body.release_train)?;
+    require_nonblank("custody release stage", &body.release_stage)?;
+    require_nonblank("custody attestation purpose", &body.purpose)?;
     require_nonblank("custody attestation nonce", &body.nonce)?;
     if body.sequence == 0 {
         return Err(invalid(
@@ -632,6 +1069,7 @@ fn validate_off_nuc_attestation_body(
     validate_sha256("Garage configuration", &body.garage_config_sha256)?;
     validate_sha256("full inventory", &body.full_inventory_sha256)?;
     validate_sha256("custody marker", &body.custody_marker_sha256)?;
+    validate_sha256("custody raw evidence", &body.raw_evidence_sha256)?;
     require_nonblank("Garage image digest", &body.garage_image_digest)?;
     require_nonblank("S3 endpoint", &body.s3_endpoint)?;
     if body.receipt.ledger_event_sha256.is_empty() || body.receipt.configuration_sha256.is_empty() {
@@ -648,6 +1086,7 @@ struct CustodySealedConfigurationV1 {
     store_id: StoreId,
     bucket_name: String,
     profile: CustodyStoreProfileV1,
+    fresh_bucket_proof: CustodyFreshBucketProofV1,
     created_at_utc: String,
 }
 
@@ -686,24 +1125,50 @@ struct StoredObjectVersion {
 /// silently adopted or repaired by this API.
 pub fn create_custody_ledger(
     path: impl AsRef<Path>,
-    store_id: StoreId,
-    bucket_name: impl Into<String>,
-    profile: CustodyStoreProfileV1,
+    request: &CustodyGarageProvisioningRequest,
+    fresh_bucket_proof: CustodyFreshBucketProofV1,
     created_at_utc: impl AsRef<str>,
 ) -> Result<CustodyLedgerInspectionV1, ObjectServiceError> {
-    profile.validate()?;
+    validate_custody_provisioning_request(request)?;
+    fresh_bucket_proof.validate_for(request, created_at_utc.as_ref())?;
+    create_custody_ledger_from_definition(
+        path,
+        CustodyStoreDefinitionV1 {
+            store_id: request.store_id.clone(),
+            bucket_name: request.bucket_name.clone(),
+            profile: request.profile.clone(),
+        },
+        fresh_bucket_proof,
+        created_at_utc,
+    )
+}
+
+/// Daemon-only custody admission. It accepts the separate custody definition
+/// and an already-bound fresh-bucket proof, never a normal registry entry.
+pub fn create_custody_ledger_from_definition(
+    path: impl AsRef<Path>,
+    definition: CustodyStoreDefinitionV1,
+    fresh_bucket_proof: CustodyFreshBucketProofV1,
+    created_at_utc: impl AsRef<str>,
+) -> Result<CustodyLedgerInspectionV1, ObjectServiceError> {
     let path = path.as_ref();
-    let bucket_name = bucket_name.into();
-    validate_new_custody_store(&store_id, &bucket_name, &profile, created_at_utc.as_ref())?;
+    validate_new_custody_store(
+        &definition.store_id,
+        &definition.bucket_name,
+        &definition.profile,
+        created_at_utc.as_ref(),
+    )?;
+    fresh_bucket_proof.validate_for_definition(&definition, created_at_utc.as_ref())?;
     create_private_new_file(path)?;
 
     let mut connection = open_ledger(path)?;
     initialise_schema(&mut connection)?;
     let configuration = CustodySealedConfigurationV1 {
         schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
-        store_id,
-        bucket_name,
-        profile,
+        store_id: definition.store_id,
+        bucket_name: definition.bucket_name,
+        profile: definition.profile,
+        fresh_bucket_proof,
         created_at_utc: created_at_utc.as_ref().to_string(),
     };
     let configuration_jcs = canonical_json(&configuration)?;
@@ -743,7 +1208,7 @@ pub fn retain_custody_object_with_readback(
     let path = path.as_ref();
     validate_custody_input(&input)?;
     let configuration = read_sealed_configuration(path)?;
-    validate_reader_writer(&configuration.profile, writer.identity(), reader.identity())?;
+    validate_retainer_identities(&configuration.profile, writer.identity(), reader.identity())?;
     if configuration.profile.retention_until_utc <= input.retained_at_utc {
         return Err(invalid(
             "custody retention_until_utc must be after the retained object timestamp",
@@ -933,20 +1398,7 @@ pub fn verify_custody_readback_receipt(
             "custody receipt is not bound to this sealed store configuration",
         ));
     }
-    validate_reader_writer(
-        &configuration.profile,
-        "verification-writer-placeholder",
-        reader.identity(),
-    )
-    .or_else(|error| {
-        // Verification has no writer.  Preserve the actual reader identity
-        // check without treating the placeholder as a retained writer.
-        if reader.identity() == configuration.profile.reader_identity {
-            Ok(())
-        } else {
-            Err(error)
-        }
-    })?;
+    validate_reader_identity(&configuration.profile, reader.identity())?;
     let connection = open_ledger(path)?;
     verify_event_chain(&connection)?;
     let stored = latest_object_version(&connection, &receipt.object_id)?
@@ -1035,6 +1487,9 @@ fn validate_custody_provisioning_request(
     )?;
     if request.writer.credential_reference != request.profile.writer_credential_reference
         || request.reader.credential_reference != request.profile.reader_credential_reference
+        || request.provisioner.credential_reference
+            != request.profile.provisioner_credential_reference
+        || request.provisioner.identity != request.profile.provisioner_identity
     {
         return Err(invalid(
             "custody provisioner credentials must exactly match the sealed profile references",
@@ -1055,6 +1510,7 @@ fn validate_custody_provisioning_request(
     )?;
     if request.provisioner.credential_reference == request.writer.credential_reference
         || request.provisioner.credential_reference == request.reader.credential_reference
+        || request.provisioner.identity == request.profile.writer_identity
         || request.provisioner.identity == request.profile.reader_identity
     {
         return Err(invalid(
@@ -1095,20 +1551,34 @@ fn validate_custody_input(input: &CustodyObjectInputV1) -> Result<(), ObjectServ
     Ok(())
 }
 
-fn validate_reader_writer(
+fn validate_retainer_identities(
     profile: &CustodyStoreProfileV1,
     writer_identity: &str,
     reader_identity: &str,
 ) -> Result<(), ObjectServiceError> {
     require_nonblank("custody writer identity", writer_identity)?;
-    if reader_identity != profile.reader_identity {
+    if writer_identity != profile.writer_identity {
         return Err(invalid(
-            "custody reader identity does not match sealed profile",
+            "custody writer identity does not match sealed profile",
         ));
     }
+    validate_reader_identity(profile, reader_identity)?;
     if writer_identity == reader_identity {
         return Err(invalid(
             "custody writer and reader identities must be independently distinct",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reader_identity(
+    profile: &CustodyStoreProfileV1,
+    reader_identity: &str,
+) -> Result<(), ObjectServiceError> {
+    require_nonblank("custody reader identity", reader_identity)?;
+    if reader_identity != profile.reader_identity {
+        return Err(invalid(
+            "custody reader identity does not match sealed profile",
         ));
     }
     Ok(())
@@ -1425,7 +1895,7 @@ fn verify_event_chain(connection: &Connection) -> Result<(), ObjectServiceError>
             .map_err(|error| invalid(format!("decode custody event: {error}")))?;
         if event.sequence != sequence
             || event.previous_event_sha256 != stored_previous
-            || event.legal_hold != true
+            || !event.legal_hold
             || canonical_json(&event)? != event_jcs
         {
             return Err(invalid(
@@ -1681,14 +2151,7 @@ mod tests {
     fn creates_sealed_append_only_ledger_and_independently_reads_back() {
         let root = temp_root("retain");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let receipt = retain_custody_object_with_readback(
             &path,
@@ -1715,14 +2178,7 @@ mod tests {
     fn exact_duplicate_is_idempotent_but_partial_write_is_never_adopted() {
         let root = temp_root("duplicate-and-partial");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let first = retain_custody_object_with_readback(
             &path,
@@ -1774,28 +2230,12 @@ mod tests {
     fn existing_ledger_and_bootstrap_namespace_are_never_adopted() {
         let root = temp_root("no-adopt");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
-        assert!(create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .is_err());
-        assert!(create_custody_ledger(
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
+        assert!(create_test_ledger(&path, "formal-custody", "dos-formal-custody").is_err());
+        assert!(create_test_ledger(
             root.join("bootstrap.sqlite"),
-            store_id(R237_BOOTSTRAP_STORE_ID),
-            R237_BOOTSTRAP_BUCKET_NAME,
-            profile(),
-            CREATED,
+            R237_BOOTSTRAP_STORE_ID,
+            R237_BOOTSTRAP_BUCKET_NAME
         )
         .is_err());
         fs::remove_dir_all(root).expect("cleanup");
@@ -1805,14 +2245,7 @@ mod tests {
     fn extension_can_only_be_append_only_and_later_with_readback() {
         let root = temp_root("extension");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let receipt = retain_custody_object_with_readback(
             &path,
@@ -1852,14 +2285,7 @@ mod tests {
     fn rejects_writer_reader_conflation_or_unledgered_backend_object() {
         let root = temp_root("conflation");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let error = retain_custody_object_with_readback(
             &path,
@@ -1868,7 +2294,7 @@ mod tests {
             &mut Reader { backend: &backend },
         )
         .expect_err("writer reader identities must differ");
-        assert!(error.to_string().contains("identities"));
+        assert!(error.to_string().contains("writer identity"));
 
         let bytes = b"unledgered".to_vec();
         let key = custody_object_key(&sha256_hex(&bytes)).unwrap();
@@ -1897,14 +2323,7 @@ mod tests {
     fn sqlite_triggers_reject_mutation_and_deletion() {
         let root = temp_root("triggers");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let receipt = retain_custody_object_with_readback(
             &path,
@@ -1933,14 +2352,7 @@ mod tests {
     fn independent_verification_detects_ordinary_ledger_tampering() {
         let root = temp_root("event-tamper");
         let path = root.join("custody.sqlite");
-        create_custody_ledger(
-            &path,
-            store_id("formal-custody"),
-            "dos-formal-custody",
-            profile(),
-            CREATED,
-        )
-        .expect("ledger created");
+        create_test_ledger(&path, "formal-custody", "dos-formal-custody").expect("ledger created");
         let backend = MemoryObjectStore::default();
         let receipt = retain_custody_object_with_readback(
             &path,
@@ -1978,6 +2390,17 @@ mod tests {
             CustodyForbiddenMutation::Restore,
             CustodyForbiddenMutation::Reconcile,
             CustodyForbiddenMutation::Lifecycle,
+            CustodyForbiddenMutation::Provision,
+            CustodyForbiddenMutation::MutableRegistry,
+            CustodyForbiddenMutation::ProfileBinding,
+            CustodyForbiddenMutation::ProfileAdoption,
+            CustodyForbiddenMutation::Migration,
+            CustodyForbiddenMutation::CapacityOrPolicy,
+            CustodyForbiddenMutation::Ingest,
+            CustodyForbiddenMutation::RepairOrDeduplicate,
+            CustodyForbiddenMutation::CredentialOrGrant,
+            CustodyForbiddenMutation::RemoteSession,
+            CustodyForbiddenMutation::GlobalServiceLifecycle,
             CustodyForbiddenMutation::ShortenRetention,
             CustodyForbiddenMutation::ClearLegalHold,
             CustodyForbiddenMutation::ReplaceConfiguration,
@@ -2073,6 +2496,70 @@ mod tests {
             &mut state,
         )
         .is_err());
+        assert_eq!(
+            state.attempts.len(),
+            4,
+            "first success and failures are retained"
+        );
+    }
+
+    #[test]
+    fn fresh_bucket_proof_and_formal_attestation_consumption_are_bound_and_one_use() {
+        let request = request("formal-custody", "dos-formal-custody");
+        let proof = fresh_proof(&request).expect("fresh proof");
+        let root = temp_root("fresh-proof");
+        let ledger = root.join("custody.sqlite");
+        create_custody_ledger(&ledger, &request, proof.clone(), CREATED)
+            .expect("proved fresh bucket creates a ledger");
+        let mut substituted = proof;
+        substituted.bucket_name = "different-bucket".to_string();
+        assert!(create_custody_ledger(
+            root.join("substituted.sqlite"),
+            &request,
+            substituted,
+            CREATED,
+        )
+        .is_err());
+
+        let attestation = signed_attestation(1, None, "consume-once", "2026-09-05T11:00:00Z");
+        let expectation = CustodyFormalGateAttestationExpectationV1 {
+            target_id: "nuc-192.168.0.193".to_string(),
+            release_train: "r237".to_string(),
+            release_stage: "s4".to_string(),
+            purpose: "custody_source_provenance".to_string(),
+        };
+        let state = root.join("external-state");
+        let consumed =
+            consume_custody_attestation_for_formal_gate(&state, &attestation, &expectation)
+                .expect("first formal consumption");
+        assert_eq!(consumed.attestation_id, "r237-s4-consume-once");
+        assert!(
+            consume_custody_attestation_for_formal_gate(&state, &attestation, &expectation)
+                .is_err()
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn timeout_and_incomplete_first_attempts_are_terminal() {
+        let mut state = TestOffNucState::default();
+        let timeout = signed_attestation(1, None, "timeout", "2026-09-05T11:00:00Z");
+        record_custody_incomplete_verifier_attempt(
+            &timeout,
+            "2026-09-05T10:30:00Z",
+            CustodyVerifierAttemptResult::TimedOut,
+            "off-nuc read deadline elapsed",
+            &mut state,
+        )
+        .expect("timeout is retained");
+        assert!(record_custody_incomplete_verifier_attempt(
+            &timeout,
+            "2026-09-05T10:31:00Z",
+            CustodyVerifierAttemptResult::Incomplete,
+            "retry must not replace timeout",
+            &mut state,
+        )
+        .is_err());
     }
 
     fn profile() -> CustodyStoreProfileV1 {
@@ -2084,7 +2571,10 @@ mod tests {
             target_id: "nuc-192.168.0.193".to_string(),
             retention_until_utc: RETENTION.to_string(),
             legal_hold: true,
+            provisioner_credential_reference: "secret://custody/provisioner".to_string(),
+            provisioner_identity: "custody-provisioner-v1".to_string(),
             writer_credential_reference: "secret://custody/writer".to_string(),
+            writer_identity: "custody-writer-v1".to_string(),
             reader_credential_reference: "secret://custody/reader".to_string(),
             reader_identity: "custody-reader-v1".to_string(),
         }
@@ -2100,6 +2590,10 @@ mod tests {
             schema: CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1.to_string(),
             assurance_class: CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY
                 .to_string(),
+            attestation_id: format!("r237-s4-{nonce}"),
+            release_train: "r237".to_string(),
+            release_stage: "s4".to_string(),
+            purpose: "custody_source_provenance".to_string(),
             verifier_id: "off-nuc-verifier-v1".to_string(),
             target_id: "nuc-192.168.0.193".to_string(),
             nonce: nonce.to_string(),
@@ -2146,6 +2640,8 @@ mod tests {
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
             custody_marker_sha256:
                 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            raw_evidence_sha256:
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
         };
         CustodyOffNucAttestationV1 {
             signature: sha256_hex(canonical_json(&body).unwrap().as_bytes()),
@@ -2176,6 +2672,35 @@ mod tests {
             )
             .unwrap(),
         }
+    }
+
+    fn fresh_proof(
+        request: &CustodyGarageProvisioningRequest,
+    ) -> Result<CustodyFreshBucketProofV1, ObjectServiceError> {
+        Ok(CustodyFreshBucketProofV1 {
+            schema: CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1.to_string(),
+            store_id: request.store_id.clone(),
+            bucket_name: request.bucket_name.clone(),
+            target_id: request.profile.target_id.clone(),
+            provisioner_identity: request.provisioner.identity.clone(),
+            provisioner_credential_reference: request.provisioner.credential_reference.clone(),
+            provisioning_request_sha256: custody_provisioning_request_sha256(request)?,
+            absence_evidence_sha256:
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            creation_evidence_sha256:
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+            creation_nonce: "fresh-bucket-creation-nonce".to_string(),
+            created_at_utc: CREATED.to_string(),
+        })
+    }
+
+    fn create_test_ledger(
+        path: impl AsRef<Path>,
+        store: &str,
+        bucket: &str,
+    ) -> Result<CustodyLedgerInspectionV1, ObjectServiceError> {
+        let request = request(store, bucket);
+        create_custody_ledger(path, &request, fresh_proof(&request)?, CREATED)
     }
 
     fn input(bytes: &[u8]) -> CustodyObjectInputV1 {
@@ -2290,6 +2815,7 @@ mod tests {
     struct TestOffNucState {
         checkpoint: Option<CustodyOffNucVerifierCheckpointV1>,
         seen_nonces: BTreeSet<String>,
+        attempts: BTreeMap<String, CustodyVerifierAttemptV1>,
     }
 
     impl CustodyOffNucVerifierState for TestOffNucState {
@@ -2308,16 +2834,40 @@ mod tests {
             Ok(self.seen_nonces.contains(nonce))
         }
 
-        fn compare_and_store(
+        fn accept_first_attempt(
             &mut self,
             expected_previous: Option<&CustodyOffNucVerifierCheckpointV1>,
             next: CustodyOffNucVerifierCheckpointV1,
+            accepted_attempt: CustodyVerifierAttemptV1,
         ) -> Result<(), ObjectServiceError> {
             if self.checkpoint.as_ref() != expected_previous {
-                return Err(invalid("test off-NUC compare-and-store conflict"));
+                return Err(invalid("test off-NUC atomic acceptance conflict"));
+            }
+            if accepted_attempt.result != CustodyVerifierAttemptResult::Accepted
+                || accepted_attempt.target_id != next.target_id
+                || accepted_attempt.attestation_sha256 != next.attestation_sha256
+                || self.attempts.contains_key(&accepted_attempt.attestation_id)
+            {
+                return Err(invalid(
+                    "test off-NUC atomic acceptance is not a fresh accepted record",
+                ));
             }
             self.seen_nonces.insert(next.nonce.clone());
             self.checkpoint = Some(next);
+            self.attempts
+                .insert(accepted_attempt.attestation_id.clone(), accepted_attempt);
+            Ok(())
+        }
+
+        fn record_first_attempt(
+            &mut self,
+            attempt: CustodyVerifierAttemptV1,
+        ) -> Result<(), ObjectServiceError> {
+            if self.attempts.contains_key(&attempt.attestation_id) {
+                return Err(invalid("test verifier attempt has already been recorded"));
+            }
+            self.attempts
+                .insert(attempt.attestation_id.clone(), attempt);
             Ok(())
         }
     }

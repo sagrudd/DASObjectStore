@@ -685,6 +685,21 @@ where
         GarageServiceController::status(self, request)
     }
 
+    fn admit_custody_store(
+        &self,
+        request: crate::api::CustodyAdmissionRequest,
+        accepted_at_utc: &str,
+    ) -> Result<crate::api::CustodyAdmissionResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::admit_custody_store(self, request, accepted_at_utc)
+    }
+
+    fn retain_custody_object(
+        &self,
+        request: crate::api::CustodyRetainRequest,
+    ) -> Result<crate::api::CustodyRetainResponse, DaemonServiceRuntimeError> {
+        GarageServiceController::retain_custody_object(self, request)
+    }
+
     fn lifecycle(
         &self,
         request: DaemonServiceLifecycleRequest,
@@ -2412,7 +2427,6 @@ mod tests {
                 reader_group: None,
                 writer_group: None,
                 public: false,
-                custody_profile: None,
             }),
             backend_root,
             ssd_staging_root: None,
@@ -2488,7 +2502,6 @@ mod tests {
                 reader_group: None,
                 writer_group: Some("mnemosyne".to_string()),
                 public: false,
-                custody_profile: None,
             }),
             backend_root: backend_root.clone(),
             ssd_staging_root: None,
@@ -5721,7 +5734,6 @@ mod tests {
                 reader_group: None,
                 writer_group: Some("writers".to_string()),
                 public: false,
-                custody_profile: None,
             }),
             backend_root,
             ssd_staging_root: None,
@@ -6991,7 +7003,6 @@ mod tests {
             reader_group: None,
             writer_group: writer_group.map(ToString::to_string),
             public: false,
-            custody_profile: None,
         }];
         fs::write(
             &store_registry,
@@ -7019,7 +7030,6 @@ mod tests {
             reader_group: reader_group.map(ToString::to_string),
             writer_group: writer_group.map(ToString::to_string),
             public,
-            custody_profile: None,
         }];
         fs::write(
             &store_registry,

@@ -1,7 +1,10 @@
 //! Store-to-bucket service layout planning.
 
 use crate::credentials::{credential_reference_for_store, StoreCredentialRequest};
-use crate::custody::{custody_bucket_is_reserved, CustodyStoreProfileV1};
+use crate::custody::{custody_bucket_is_reserved, R237_BOOTSTRAP_STORE_ID};
+use crate::custody_catalog::{
+    reject_default_catalogued_custody_definition, reject_default_catalogued_custody_mutation,
+};
 use crate::provider::{ObjectServiceError, StoreBucketBinding};
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::{ExportPolicy, StorePolicy};
@@ -11,7 +14,12 @@ use std::collections::BTreeSet;
 const BUCKET_PREFIX: &str = "dos";
 const MAX_BUCKET_NAME_LEN: usize = 63;
 
+/// Normal mutable storage definitions deliberately have no custody field.
+/// Custody admission is a separate daemon-only contract; unknown fields are
+/// denied rather than ignored and accidentally sent to the owner-capable
+/// normal Garage provisioner.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct StoreServiceDefinition {
     pub store_id: StoreId,
     pub policy: StorePolicy,
@@ -22,11 +30,6 @@ pub struct StoreServiceDefinition {
     pub writer_group: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub public: bool,
-    /// A separate, sealed custody profile.  It is deliberately excluded from
-    /// the ordinary store layout: that path creates one owner-capable Garage
-    /// key and is therefore not permitted for a custody store.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custody_profile: Option<CustodyStoreProfileV1>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -50,13 +53,8 @@ pub fn plan_store_service_layout(
     let mut bucket_bindings = Vec::new();
 
     for definition in definitions {
-        validate_custody_definition(definition)?;
-        if definition.custody_profile.is_some() {
-            return Err(ObjectServiceError::InvalidConfiguration(format!(
-                "custody store {} is excluded from the normal layout and owner-capable Garage provisioner",
-                definition.store_id
-            )));
-        }
+        reject_custody_reserved_namespace(definition)?;
+        reject_default_catalogued_custody_mutation(&definition.store_id, "normal store layout")?;
         if !store_ids.insert(definition.store_id.as_str()) {
             return Err(ObjectServiceError::InvalidConfiguration(format!(
                 "duplicate store definition: {}",
@@ -69,6 +67,11 @@ pub fn plan_store_service_layout(
         }
 
         let bucket_name = bucket_name_for_definition(definition)?;
+        reject_default_catalogued_custody_definition(
+            &definition.store_id,
+            &bucket_name,
+            "normal store layout",
+        )?;
         if !bucket_names.insert(bucket_name.as_str().to_string()) {
             return Err(ObjectServiceError::InvalidConfiguration(format!(
                 "duplicate bucket name: {bucket_name}"
@@ -99,51 +102,21 @@ pub fn plan_store_service_layout(
     })
 }
 
-/// Reject configurations which could make the normal mutable store path look
-/// like a custody path.  A custody bucket is provisioned only by the dedicated
-/// custody workflow, with distinct reader and writer identities and without
-/// an owner grant.
-pub fn validate_custody_definition(
+/// The retired r237 bootstrap coordinates can never pass through ordinary
+/// layout or registry code.  A custody store is admitted only by the
+/// dedicated daemon adapter and must use a newly proved bucket.
+pub fn reject_custody_reserved_namespace(
     definition: &StoreServiceDefinition,
 ) -> Result<(), ObjectServiceError> {
-    let Some(profile) = &definition.custody_profile else {
-        return Ok(());
-    };
-
-    profile.validate()?;
-    if definition.policy.export_policy != ExportPolicy::S3 {
-        return Err(ObjectServiceError::InvalidConfiguration(format!(
-            "custody store {} must use S3 export policy",
-            definition.store_id
-        )));
-    }
-    if definition.public {
-        return Err(ObjectServiceError::InvalidConfiguration(format!(
-            "custody store {} must not be public",
-            definition.store_id
-        )));
-    }
-    if definition.reader_group.is_some() || definition.writer_group.is_some() {
-        return Err(ObjectServiceError::InvalidConfiguration(format!(
-            "custody store {} must use dedicated custody reader and writer identities",
-            definition.store_id
-        )));
-    }
-    let bucket_name = definition.bucket_name.as_deref().ok_or_else(|| {
-        ObjectServiceError::InvalidConfiguration(format!(
-            "custody store {} must specify a fresh explicit bucket name",
-            definition.store_id
-        ))
-    })?;
-    if custody_bucket_is_reserved(bucket_name) {
-        return Err(ObjectServiceError::InvalidConfiguration(format!(
-            "custody store {} cannot use the retired r237 bootstrap bucket {bucket_name}",
-            definition.store_id
-        )));
-    }
-    if definition.store_id.as_str() == "r237_s4_bootstrap_custody" {
+    if definition.store_id.as_str() == R237_BOOTSTRAP_STORE_ID
+        || definition
+            .bucket_name
+            .as_deref()
+            .is_some_and(custody_bucket_is_reserved)
+    {
         return Err(ObjectServiceError::InvalidConfiguration(
-            "the retired r237 bootstrap store can never be adopted as custody".to_string(),
+            "retired r237 bootstrap custody namespace is excluded from normal storage workflows"
+                .to_string(),
         ));
     }
     Ok(())
@@ -230,10 +203,6 @@ pub(crate) fn validate_bucket_name(bucket_name: &str) -> Result<(), ObjectServic
 #[cfg(test)]
 mod tests {
     use super::{plan_store_service_layout, StoreServiceDefinition};
-    use crate::custody::{
-        CustodyAssuranceClass, CustodyRetentionMode, CustodyStoreProfileV1,
-        CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
-    };
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
 
@@ -349,32 +318,6 @@ mod tests {
             .contains("at least one S3-exported store definition"));
     }
 
-    #[test]
-    fn custody_profile_is_hard_denied_before_normal_owner_credential_layout() {
-        let mut store = definition(
-            "formal-custody",
-            StorePolicy::defaults_for(StoreClass::CriticalMetadata),
-        );
-        store.bucket_name = Some("dos-formal-custody".to_string());
-        store.custody_profile = Some(custody_profile());
-
-        let error = plan_store_service_layout(&[store])
-            .expect_err("normal store layout must not issue a custody credential");
-        assert!(error.to_string().contains("owner-capable"));
-    }
-
-    #[test]
-    fn custody_profile_rejects_retired_bootstrap_namespace() {
-        let mut store = definition(
-            "r237_s4_bootstrap_custody",
-            StorePolicy::defaults_for(StoreClass::CriticalMetadata),
-        );
-        store.bucket_name = Some("dos-r237-s4-bootstrap-custody".to_string());
-        store.custody_profile = Some(custody_profile());
-
-        assert!(plan_store_service_layout(&[store]).is_err());
-    }
-
     fn definition(store_id: &str, policy: StorePolicy) -> StoreServiceDefinition {
         StoreServiceDefinition {
             store_id: StoreId::new(store_id).expect("store id"),
@@ -383,22 +326,6 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: false,
-            custody_profile: None,
-        }
-    }
-
-    fn custody_profile() -> CustodyStoreProfileV1 {
-        CustodyStoreProfileV1 {
-            schema: CUSTODY_OVERLAY_SCHEMA_V1.to_string(),
-            profile: CUSTODY_PROFILE_V1.to_string(),
-            assurance_class: CustodyAssuranceClass::LocalTrustedAdministratorOverlay,
-            retention_mode: CustodyRetentionMode::LocalTrustedAdministratorOverlay,
-            target_id: "nuc-192.168.0.193".to_string(),
-            retention_until_utc: "2027-09-05T10:00:00Z".to_string(),
-            legal_hold: true,
-            writer_credential_reference: "secret://custody/writer".to_string(),
-            reader_credential_reference: "secret://custody/reader".to_string(),
-            reader_identity: "custody-reader-v1".to_string(),
         }
     }
 }

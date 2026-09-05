@@ -11,6 +11,13 @@ const AUTHORITY_RETIREMENT_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-authority-retirement.service");
 const S3_GATEWAY_SERVICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-s3-gateway.service");
+const CUSTODY_SERVICE_TEMPLATE: &str =
+    include_str!("../../../packaging/linux/systemd/dasobjectstore-custody-garage.service.template");
+const CUSTODY_COMPOSE_TEMPLATE: &str =
+    include_str!("../../../packaging/linux/templates/custody-garage.compose.yml.template");
+const CUSTODY_CREDENTIAL_TEMPLATE: &str = include_str!(
+    "../../../packaging/linux/systemd/dasobjectstored-custody-credentials.conf.template"
+);
 const CONTROL_SLICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-control.slice");
 const STORAGE_SLICE: &str =
@@ -161,6 +168,23 @@ fn package_daemon_config_matches_runtime_defaults() {
     assert!(config.telemetry.enabled);
     assert_eq!(config.telemetry.cadence_seconds, 30);
     config.validate().expect("packaged config is valid");
+}
+
+#[test]
+fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
+    assert!(!DaemonRuntimeConfig::linux_packaged().custody.enabled);
+    assert_contains(CUSTODY_SERVICE_TEMPLATE, "dasobjectstore-custody");
+    assert_contains(CUSTODY_SERVICE_TEMPLATE, "garage-custody");
+    assert_not_contains(CUSTODY_SERVICE_TEMPLATE, "[Install]");
+    assert_contains(CUSTODY_COMPOSE_TEMPLATE, "name: dasobjectstore-custody");
+    assert_contains(CUSTODY_COMPOSE_TEMPLATE, "garage-custody");
+    assert_contains(CUSTODY_COMPOSE_TEMPLATE, "127.0.0.1:3901:3900");
+    assert_contains(CUSTODY_CREDENTIAL_TEMPLATE, "LoadCredentialEncrypted");
+    for build in [BUILD_DEB, BUILD_RPM] {
+        assert_not_contains(build, "dasobjectstore-custody-garage.service.template");
+        assert_not_contains(build, "custody-garage.compose.yml.template");
+        assert_not_contains(build, "dasobjectstored-custody-credentials.conf.template");
+    }
 }
 
 #[test]

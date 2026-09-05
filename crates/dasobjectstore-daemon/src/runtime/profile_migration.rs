@@ -290,7 +290,6 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: false,
-            custody_profile: None,
         });
         std::fs::write(
             &store_registry,

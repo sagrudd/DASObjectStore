@@ -1,0 +1,29 @@
+# REVIEWED TEMPLATE ONLY — intentionally not installed, enabled, or started by
+# DEB/RPM packaging. An attended release transaction must render this only
+# after separate custody configuration, S8 approval, and systemd credentials
+# have been reviewed.
+[Unit]
+Description=DASObjectStore isolated local-trusted-administrator custody Garage
+Documentation=https://github.com/sagrudd/DASObjectStore
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/etc/dasobjectstore/custody-garage.compose.yml
+ConditionPathExists=/etc/dasobjectstore/custody-garage.toml
+
+[Service]
+Type=simple
+Slice=dasobjectstore-storage.slice
+ExecStart=/usr/bin/docker compose --file /etc/dasobjectstore/custody-garage.compose.yml --project-directory /var/lib/dasobjectstore/custody-garage --project-name dasobjectstore-custody up garage-custody
+ExecStop=/usr/bin/docker compose --file /etc/dasobjectstore/custody-garage.compose.yml --project-directory /var/lib/dasobjectstore/custody-garage --project-name dasobjectstore-custody down
+TimeoutStopSec=60s
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dasobjectstore/custody-garage /srv/dasobjectstore/custody
+
+# No installation stanza: the normal DASObjectStore lifecycle owns no custody
+# service. This template is activated only by a separately reviewed attended
+# unit/drop-in transaction.

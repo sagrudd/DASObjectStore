@@ -114,7 +114,6 @@ mod tests {
             reader_group: None,
             writer_group: None,
             public: true,
-            custody_profile: None,
         };
         std::fs::write(
             &registry,

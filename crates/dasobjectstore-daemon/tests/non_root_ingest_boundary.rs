@@ -121,7 +121,6 @@ fn write_test_store_registry(
         reader_group: None,
         writer_group: writer_group.map(ToString::to_string),
         public: false,
-        custody_profile: None,
     }];
     fs::write(
         &store_registry,

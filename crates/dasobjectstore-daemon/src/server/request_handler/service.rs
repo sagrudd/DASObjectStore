@@ -500,6 +500,49 @@ where
             })?;
             Ok(DaemonApiResponse::DiskLockdown(response))
         }
+        DaemonApiRequest::CustodyAdmission(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "custody admission",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
+            let verified_subject_id = request
+                .verified_subject
+                .as_ref()
+                .map(|subject| subject.subject_id.clone());
+            let now = handler.clock.now_utc();
+            let response = handler
+                .service_orchestrator
+                .admit_custody_store(request, &now)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            handler.record_admin_job(DaemonJobSummary {
+                job_id: response.accepted.job_id.clone(),
+                kind: response.accepted.kind.clone(),
+                state: DaemonJobState::Complete,
+                progress: DaemonJobProgress::default(),
+                submitted_at_utc: response.accepted.accepted_at_utc.clone(),
+                updated_at_utc: response.accepted.accepted_at_utc.clone(),
+                actor: verified_subject_id,
+                failure_message: None,
+            })?;
+            Ok(DaemonApiResponse::CustodyAdmission(response))
+        }
+        DaemonApiRequest::CustodyRetain(request) => {
+            if let Err(error) = require_verified_pistis_host_authority(
+                actor,
+                request.verified_subject.as_ref(),
+                "custody retain",
+            ) {
+                return Ok(DaemonApiResponse::Error(error));
+            }
+            let response = handler
+                .service_orchestrator
+                .retain_custody_object(request)
+                .map_err(DaemonRequestHandlerError::ServiceRuntime)?;
+            Ok(DaemonApiResponse::CustodyRetain(response))
+        }
         DaemonApiRequest::CreateObjectStore(request) => {
             // Creation mutates daemon-owned capacity and registry authority.
             // Human authority is established by the verified Pistis host

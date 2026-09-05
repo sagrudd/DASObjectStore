@@ -77,7 +77,6 @@ impl ProductProfileProvisioningPlan {
                 reader_group: self.reader_group.clone(),
                 writer_group: self.writer_group.clone(),
                 public: self.public,
-                custody_profile: None,
             }),
             backend_root: self.backend_root.clone(),
             ssd_staging_root: self.ssd_staging_root.clone(),

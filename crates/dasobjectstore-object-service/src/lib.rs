@@ -3,6 +3,7 @@
 pub mod compose;
 pub mod credentials;
 pub mod custody;
+pub mod custody_catalog;
 pub mod garage;
 pub mod inspection;
 pub mod layout;
@@ -24,18 +25,32 @@ pub use credentials::{
     SystemCredentialEntropy, GARAGE_CREDENTIAL_REGISTRY_ENV,
 };
 pub use custody::{
-    accept_custody_off_nuc_attestation, append_custody_retention_extension, create_custody_ledger,
-    custody_bucket_is_reserved, custody_object_key, inspect_custody_ledger,
-    plan_custody_garage_provisioning, reject_custody_mutation, retain_custody_object_with_readback,
-    verify_custody_readback_receipt, CustodyAssuranceClass, CustodyForbiddenMutation,
-    CustodyGarageCredential, CustodyGarageProvisionerIdentity, CustodyGarageProvisioningPlan,
+    accept_custody_off_nuc_attestation, append_custody_retention_extension,
+    consume_custody_attestation_for_formal_gate, create_custody_ledger,
+    create_custody_ledger_from_definition, custody_bucket_is_reserved, custody_object_key,
+    custody_provisioning_request_sha256, custody_store_definition_sha256, inspect_custody_ledger,
+    plan_custody_garage_provisioning, record_custody_incomplete_verifier_attempt,
+    reject_custody_mutation, retain_custody_object_with_readback, verify_custody_readback_receipt,
+    CustodyAssuranceClass, CustodyForbiddenMutation, CustodyFormalGateAttestationConsumptionV1,
+    CustodyFormalGateAttestationExpectationV1, CustodyFreshBucketProofV1, CustodyGarageCredential,
+    CustodyGarageProvisionerIdentity, CustodyGarageProvisioningPlan,
     CustodyGarageProvisioningRequest, CustodyIntegrityReceiptV1, CustodyLedgerInspectionV1,
     CustodyObjectInputV1, CustodyObjectReader, CustodyObjectState, CustodyObjectWriter,
     CustodyOffNucAttestationAuthority, CustodyOffNucAttestationBodyV1, CustodyOffNucAttestationV1,
     CustodyOffNucVerifierCheckpointV1, CustodyOffNucVerifierState, CustodyReadbackObservationV1,
-    CustodyRetentionMode, CustodyStoreProfileV1,
+    CustodyRetentionMode, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
+    CustodyVerifierAttemptResult, CustodyVerifierAttemptV1,
     CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
-    CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+    CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OFF_NUC_ATTESTATION_SCHEMA_V1,
+    CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+};
+pub use custody_catalog::{
+    append_claimed_custody_catalog_entry, catalog_contains_bucket, catalog_contains_store,
+    claim_custody_catalog_admission, create_custody_catalog_entry, custody_ledger_path_for_catalog,
+    default_custody_catalog_path, default_custody_ledger_path, read_custody_catalog,
+    reject_catalogued_custody_definition, reject_catalogued_custody_mutation,
+    reject_default_catalogued_custody_definition, reject_default_catalogued_custody_mutation,
+    CustodyCatalogAdmissionClaim, CustodyCatalogEntryV1, CUSTODY_CATALOG_ENV,
 };
 pub use garage::{
     render_garage_data_directories, GarageDataDirectory, GarageProvider, GarageProviderConfig,

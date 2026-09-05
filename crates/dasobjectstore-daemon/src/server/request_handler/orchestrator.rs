@@ -219,6 +219,25 @@ pub trait DaemonServiceOrchestrator {
         })
     }
 
+    fn admit_custody_store(
+        &self,
+        _request: crate::api::CustodyAdmissionRequest,
+        _accepted_at_utc: &str,
+    ) -> Result<crate::api::CustodyAdmissionResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "custody admission requires the Garage custody controller".to_string(),
+        })
+    }
+
+    fn retain_custody_object(
+        &self,
+        _request: crate::api::CustodyRetainRequest,
+    ) -> Result<crate::api::CustodyRetainResponse, DaemonServiceRuntimeError> {
+        Err(DaemonServiceRuntimeError::UnsupportedOperation {
+            operation: "custody retain requires the Garage custody controller and attended credential authority".to_string(),
+        })
+    }
+
     fn upsert_endpoint_inventory(
         &self,
         _request: UpsertEndpointInventoryRequest,

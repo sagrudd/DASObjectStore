@@ -29,8 +29,8 @@ those same administrative and backup domains.
 - the fixed `local_trusted_administrator_overlay` assurance and retention
   mode;
 - an explicit UTC retention-until timestamp and a permanent legal hold;
-- different writer and reader credential references, plus a sealed reader
-  identity; and
+- three distinct provisioner, writer, and reader credential references and
+  sealed identities; and
 - a fresh explicit bucket name.
 
 The historical r237 bootstrap store
@@ -39,19 +39,89 @@ The historical r237 bootstrap store
 existing bucket, existing ledger, ordinary registry record, or pre-existing
 object is never adopted, upgraded in place, repaired, or replaced.
 
-The mutable normal store registry and ordinary layout/provisioning path reject
-a custody profile before issuing their usual per-store owner-capable Garage
-credential.  The dedicated plan instead names three distinct identities:
+Normal `StoreServiceDefinition`, mutable registry, CLI fallback, compose
+layout, and folder-profile binding have no custody-profile field at all; their
+strict decoders reject a raw custody field rather than ignoring it. The only
+admission shape is `CustodyStoreDefinitionV1`, handled by the preverified
+daemon custody-admission route. It writes only the custody ledger and never a
+normal registry, normal credential registry, capacity state, profile binding,
+or folder backend. The dedicated plan instead names three distinct identities:
 
 1. an attended provisioner used only to create a fresh bucket and issue
    grants;
 2. a runtime writer with a write-only Garage grant; and
 3. an independent runtime reader with a read-only Garage grant.
 
-The plan neither emits nor persists the provisioner credential, and contains
-no owner, list, delete, copy, lifecycle, or runtime administrative grant.
-The implementation of the attended plan must additionally prove that no DGX
-or user S3 credential grants access to the custody bucket.
+The concrete `GarageCustodyProvisioner` first requires Garage to report the
+bucket missing, executes the dedicated key/import/create/grant plan without
+accepting any idempotent conflict, and rereads Garage's key-grant table. It
+fails closed unless that table contains exactly the sealed writer with `W` and
+the sealed reader with `R`, with no owner grant or extra key. Its proof binds
+the target, definition, three roles, request digest, absence/creation evidence,
+nonce, and timestamp. The provisioner credential is not persisted.
+`GarageCustodyS3Writer` uses conditional content-addressed S3 PUT; the
+distinct `GarageCustodyS3Reader` performs HEAD and GET readback. Neither
+exposes a normal profile, copy, multipart, delete, restore, reconcile,
+lifecycle, migration, or administrative route.
+
+## Isolated custody plane and sealed admission catalog
+
+Custody is not a protected flag on the normal Garage service. The daemon
+requires a separately supplied custody Garage configuration before it will
+admit a ledger, provision a fresh bucket, or retain an object. Its Compose
+file, project directory and name, service name, configuration path, metadata
+path, data path, and S3 endpoint must all differ from the normal Garage
+plane. The normal service lifecycle and normal provisioner only use the
+normal configuration; they have no custody-plane configuration or lifecycle
+operation. Starting, stopping, or otherwise handing off the isolated custody
+service remains an attended host-integration responsibility and is not a
+normal DAS API operation in this source release.
+
+Admission writes a daemon-owned canonical JSONL catalog outside the mutable
+registry. Before it issues the first Garage command it atomically claims both
+the `StoreId` and bucket name. The same daemon retains the resulting
+fresh-bucket proof and claim in a one-way pending-admission slot; only that
+exact proof can then create the ledger and append the catalog entry. A failed,
+interrupted, restarted, or detached admission leaves a terminal claim: it is
+neither released, adopted, deleted, nor retried. A completed entry binds the
+definition digest, a daemon-derived opaque ledger path, the observed
+sealed-ledger digest, and creation time. Normal store layout and normal
+registry read/upsert/delete paths consult this catalog, so an ordinary store
+cannot claim either the custody `StoreId` or the custody bucket under an alias.
+Malformed catalog records, duplicate records, or dangling claims deny those
+normal paths rather than being interpreted as absence.
+
+This is the enforcement point for ordinary storage: normal definitions cannot
+express the custody plane, ordinary mutable state cannot bind its endpoint or
+bucket, and the central definition/registry guard denies catalogue aliases.
+It is intentionally not a brittle assertion that every historical request
+handler has independently rediscovered custody semantics. Any future route
+that introduces a new normal store-definition or registry mutation boundary
+must use the same central guard and is a review-required change.
+
+The only daemon data mutation is `CustodyRetainRequest`. It contains two
+opaque, distinct handoff references but no raw credential, catalog path, or
+ledger path. The daemon consumes the writer and reader references once through
+an attended host credential-authority boundary, bound to the catalogued store
+and definition digest, before issuing the S3 commands. Its sole production
+resolver reads an opaque file name from systemd's private
+`CREDENTIALS_DIRECTORY`; it has no filesystem-path, registry, Keychain,
+network, environment-secret, or API fallback. It atomically creates a
+hash-only, empty one-use marker before reading the handoff. Thus a race,
+restart, malformed handoff, or binding mismatch is terminal without
+persisting raw credential material. The in-memory resolver remains solely for
+regression tests.
+
+The source includes, but packages do not install, a custody Garage Compose
+template, custody service template, and systemd credential drop-in template.
+They use the fixed distinct `dasobjectstore-custody` project,
+`garage-custody` service, custody-only configuration/metadata/data paths, and
+loopback `127.0.0.1:3901`. The packaged daemon configuration keeps custody
+`enabled: false`; if an attended manifest enables it, daemon startup requires
+the systemd credential directory and fails closed when it is absent. The
+normal service lifecycle owns neither the template nor the custody service.
+Rendering, installing, enabling, credential loading, or starting these assets
+is a later attended formal transaction, not a package side effect.
 
 ## Durable record and allowed operations
 
@@ -105,6 +175,15 @@ an external monotonic-state interface.  An accepted attestation must include:
   and S3 endpoint observed by the verifier; and
 - a full inventory digest and dedicated custody-marker digest.
 
+It also includes a required attestation identifier, release train, stage,
+purpose, and raw-evidence digest. The off-NUC state records each first attempt
+as accepted, failed, timed out, or incomplete evidence; accepted state advance,
+nonce consumption, and its accepted first-attempt record must occur in one
+atomic transaction. A retry cannot erase the first observation. The formal
+gate consumes the identifier, one-use marker digest, and raw-evidence digest
+together through an atomic external marker. Reuse, mismatch, and a
+crash-partial marker are terminal failures.
+
 The verifier state must be held outside the NUC, Garage, BaseCamp, and their
 ordinary backup/restore paths, and must atomically compare-and-store the prior
 checkpoint.  Replayed nonce, expired observation, wrong target or authority,
@@ -137,8 +216,17 @@ provisioner/writer/reader identities, absence of owner grants, canonical
 timestamps, legal-hold requirement, no-side-effect inspection, bootstrap
 namespace denial, immutable SQLite rows, hash-chain/readback verification,
 unledgered-object denial, later-only retention extension, and all named
-mutation bypasses.  They also cover off-NUC signature, nonce, monotonic
-sequence, previous hash, expiry, and compare-and-store semantics.
+mutation bypasses. They cover immutable store and bucket claims, incomplete
+admission denial, malformed/duplicate catalogue fail-closed behaviour,
+claim-before-provision race denial, strict secret-free daemon transport,
+one-use systemd credential handoffs with hash-only markers, absence/default
+denial, and rejection of a custody configuration that shares any normal Garage
+coordinate. The daemon
+integration contract covers admission, catalog/ledger binding, isolated S3
+endpoint selection, conditional PUT, writer HEAD, independent reader GET, and
+one-use handoff consumption. They also cover off-NUC signature, nonce,
+monotonic sequence, previous hash, expiry, and atomic accepted-attempt/state
+semantics.
 
 The deployment/integration suite still required before a candidate can be
 considered must exercise a real isolated Garage service, process/credential

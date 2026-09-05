@@ -51,6 +51,10 @@ pub struct DaemonRuntimeConfig {
     pub ingest_resource_policy: DaemonIngestResourcePolicy,
     #[serde(default)]
     pub object_service: DaemonObjectServiceRuntimeConfig,
+    /// Disabled unless a separately reviewed, attended custody configuration
+    /// is installed. The default daemon continues to own only normal Garage.
+    #[serde(default)]
+    pub custody: DaemonCustodyRuntimeConfig,
 }
 
 impl DaemonRuntimeConfig {
@@ -68,6 +72,7 @@ impl DaemonRuntimeConfig {
             telemetry: DaemonTelemetryRuntimeConfig::default(),
             ingest_resource_policy: DaemonIngestResourcePolicy::default(),
             object_service: DaemonObjectServiceRuntimeConfig::default(),
+            custody: DaemonCustodyRuntimeConfig::default(),
         }
     }
 
@@ -85,6 +90,7 @@ impl DaemonRuntimeConfig {
             telemetry: DaemonTelemetryRuntimeConfig::default(),
             ingest_resource_policy: DaemonIngestResourcePolicy::default(),
             object_service: DaemonObjectServiceRuntimeConfig::default(),
+            custody: DaemonCustodyRuntimeConfig::default(),
         }
     }
 
@@ -99,6 +105,7 @@ impl DaemonRuntimeConfig {
         validate_absolute_path("product_root", &self.product_root)?;
         self.telemetry.validate()?;
         self.object_service.validate()?;
+        self.custody.validate(&self.object_service)?;
         if let Some(limit) = self.ingest_resource_policy.max_concurrent_transactions {
             if !(crate::api::DaemonIngestResourceBudget::MIN_CONCURRENT_TRANSACTIONS
                 ..=crate::api::DaemonIngestResourceBudget::MAX_CONCURRENT_TRANSACTIONS)
@@ -150,6 +157,117 @@ impl Default for DaemonObjectServiceRuntimeConfig {
     }
 }
 
+/// Inactive-by-default coordinates for the separately managed custody Garage
+/// plane. These values deliberately do not reuse the normal object-service
+/// project, endpoint, compose file, or any Garage state path.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DaemonCustodyRuntimeConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_custody_compose_file")]
+    pub compose_file: PathBuf,
+    #[serde(default = "default_custody_project_directory")]
+    pub project_directory: PathBuf,
+    #[serde(default = "default_custody_compose_project")]
+    pub compose_project: String,
+    #[serde(default = "default_custody_service_name")]
+    pub service_name: String,
+    #[serde(default = "default_custody_garage_config_path")]
+    pub garage_config_path: PathBuf,
+    #[serde(default = "default_custody_metadata_path")]
+    pub metadata_path: PathBuf,
+    #[serde(default = "default_custody_data_path")]
+    pub data_path: PathBuf,
+    #[serde(default = "default_custody_endpoint")]
+    pub endpoint: String,
+    #[serde(default = "default_custody_catalog_path")]
+    pub catalog_path: PathBuf,
+    #[serde(default = "default_custody_handoff_consumption_root")]
+    pub handoff_consumption_root: PathBuf,
+}
+
+impl DaemonCustodyRuntimeConfig {
+    fn validate(
+        &self,
+        normal: &DaemonObjectServiceRuntimeConfig,
+    ) -> Result<(), DaemonRuntimeConfigError> {
+        for (field, path) in [
+            ("custody.compose_file", &self.compose_file),
+            ("custody.project_directory", &self.project_directory),
+            ("custody.garage_config_path", &self.garage_config_path),
+            ("custody.metadata_path", &self.metadata_path),
+            ("custody.data_path", &self.data_path),
+            ("custody.catalog_path", &self.catalog_path),
+            (
+                "custody.handoff_consumption_root",
+                &self.handoff_consumption_root,
+            ),
+        ] {
+            validate_absolute_path(field, path)?;
+        }
+        reject_blank("custody.compose_project", &self.compose_project)?;
+        reject_blank("custody.service_name", &self.service_name)?;
+        reject_blank("custody.endpoint", &self.endpoint)?;
+        if self.enabled
+            && (self.compose_project == normal.compose_project || self.endpoint == normal.endpoint)
+        {
+            return Err(DaemonRuntimeConfigError::InvalidCustodyConfiguration(
+                "enabled custody coordinates overlap the normal object-service plane".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for DaemonCustodyRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            compose_file: default_custody_compose_file(),
+            project_directory: default_custody_project_directory(),
+            compose_project: default_custody_compose_project(),
+            service_name: default_custody_service_name(),
+            garage_config_path: default_custody_garage_config_path(),
+            metadata_path: default_custody_metadata_path(),
+            data_path: default_custody_data_path(),
+            endpoint: default_custody_endpoint(),
+            catalog_path: default_custody_catalog_path(),
+            handoff_consumption_root: default_custody_handoff_consumption_root(),
+        }
+    }
+}
+
+fn default_custody_compose_file() -> PathBuf {
+    PathBuf::from("/etc/dasobjectstore/custody-garage.compose.yml")
+}
+fn default_custody_project_directory() -> PathBuf {
+    PathBuf::from("/var/lib/dasobjectstore/custody-garage")
+}
+fn default_custody_compose_project() -> String {
+    "dasobjectstore-custody".to_string()
+}
+fn default_custody_service_name() -> String {
+    "garage-custody".to_string()
+}
+fn default_custody_garage_config_path() -> PathBuf {
+    PathBuf::from("/etc/dasobjectstore/custody-garage.toml")
+}
+fn default_custody_metadata_path() -> PathBuf {
+    PathBuf::from("/var/lib/dasobjectstore/custody-garage/meta")
+}
+fn default_custody_data_path() -> PathBuf {
+    PathBuf::from("/srv/dasobjectstore/custody/garage")
+}
+fn default_custody_endpoint() -> String {
+    "http://127.0.0.1:3901".to_string()
+}
+fn default_custody_catalog_path() -> PathBuf {
+    PathBuf::from("/var/lib/dasobjectstore/custody-catalog.jsonl")
+}
+fn default_custody_handoff_consumption_root() -> PathBuf {
+    PathBuf::from("/var/lib/dasobjectstore/custody-handoff-consumptions")
+}
+
 impl Default for DaemonRuntimeConfig {
     fn default() -> Self {
         Self::default_packaged()
@@ -194,6 +312,7 @@ pub enum DaemonRuntimeConfigError {
     },
     InvalidTelemetryCadenceSeconds(u64),
     InvalidMaxConcurrentIngestTransactions(u16),
+    InvalidCustodyConfiguration(String),
 }
 
 impl Display for DaemonRuntimeConfigError {
@@ -222,6 +341,9 @@ impl Display for DaemonRuntimeConfigError {
                 crate::api::DaemonIngestResourceBudget::MIN_CONCURRENT_TRANSACTIONS,
                 crate::api::DaemonIngestResourceBudget::MAX_CONCURRENT_TRANSACTIONS,
             ),
+            Self::InvalidCustodyConfiguration(message) => {
+                write!(formatter, "invalid inactive-by-default custody configuration: {message}")
+            }
         }
     }
 }
@@ -287,6 +409,9 @@ mod tests {
         );
         assert_eq!(config.object_service.compose_project, "dasobjectstore");
         assert_eq!(config.object_service.endpoint, "http://127.0.0.1:3900");
+        assert!(!config.custody.enabled);
+        assert_eq!(config.custody.compose_project, "dasobjectstore-custody");
+        assert_eq!(config.custody.endpoint, "http://127.0.0.1:3901");
         config.validate().expect("default config is valid");
     }
 
@@ -399,5 +524,18 @@ mod tests {
             err,
             DaemonRuntimeConfigError::InvalidTelemetryCadenceSeconds(5)
         );
+    }
+
+    #[test]
+    fn enabled_custody_configuration_rejects_normal_plane_overlap() {
+        let mut config = DaemonRuntimeConfig::default_packaged();
+        config.custody.enabled = true;
+        config.custody.endpoint = config.object_service.endpoint.clone();
+
+        assert!(matches!(
+            config.validate(),
+            Err(DaemonRuntimeConfigError::InvalidCustodyConfiguration(message))
+                if message.contains("overlap")
+        ));
     }
 }
