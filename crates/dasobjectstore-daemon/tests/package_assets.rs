@@ -19,6 +19,8 @@ const CUSTODY_COMPOSE_TEMPLATE: &str =
 const CUSTODY_CREDENTIAL_TEMPLATE: &str = include_str!(
     "../../../packaging/linux/systemd/dasobjectstored-custody-credentials.conf.template"
 );
+const CUSTODY_REVIEW_ASSET_STAGER: &str =
+    include_str!("../../../packaging/custody-review-assets.sh");
 const CONTROL_SLICE: &str =
     include_str!("../../../packaging/linux/systemd/dasobjectstore-control.slice");
 const STORAGE_SLICE: &str =
@@ -172,7 +174,7 @@ fn package_daemon_config_matches_runtime_defaults() {
 }
 
 #[test]
-fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
+fn custody_review_assets_are_packaged_only_as_inert_documentation() {
     assert!(!DaemonRuntimeConfig::linux_packaged().custody.enabled);
     assert_eq!(
         custody_activation_marker_path_for_state_dir(LINUX_DAEMON_STATE_DIR),
@@ -213,12 +215,218 @@ fn custody_activation_assets_are_review_templates_not_packaged_lifecycle() {
     );
     assert_not_contains(CUSTODY_CREDENTIAL_TEMPLATE, "\nEnvironment=");
     assert_not_contains(CUSTODY_CREDENTIAL_TEMPLATE, "\nEnvironmentFile=");
+
+    assert_contains(
+        CUSTODY_REVIEW_ASSET_STAGER,
+        "CUSTODY_REVIEW_DOC_RELATIVE_DIR=\"usr/share/doc/dasobjectstore/custody-review\"",
+    );
+    assert_contains(
+        CUSTODY_REVIEW_ASSET_STAGER,
+        "refusing to stage custody review assets",
+    );
+    assert_contains(
+        CUSTODY_REVIEW_ASSET_STAGER,
+        "refusing to stage custody review assets through a symlinked payload root",
+    );
+    assert_contains(
+        CUSTODY_REVIEW_ASSET_STAGER,
+        "refusing to stage custody review assets through a symlinked destination asset",
+    );
     for build in [BUILD_DEB, BUILD_RPM] {
-        assert_not_contains(build, "dasobjectstore-custody-garage.service.template");
-        assert_not_contains(build, "custody-garage.compose.yml.template");
-        assert_not_contains(build, "dasobjectstored-custody-credentials.conf.template");
+        assert_contains(build, "packaging/custody-review-assets.sh");
+        assert_not_contains(
+            build,
+            "lib/systemd/system/dasobjectstore-custody-garage.service",
+        );
+        assert_not_contains(build, "etc/systemd/system/dasobjectstored.service.d");
         assert_not_contains(build, CUSTODY_ACTIVATION_MARKER_FILE_NAME);
     }
+    assert_contains(BUILD_DEB, "das_stage_custody_review_assets \"$build_root\"");
+    assert_contains(
+        BUILD_RPM,
+        "das_stage_custody_review_assets \"$payload_root\"",
+    );
+    assert_contains(
+        BUILD_RPM,
+        "%doc /usr/share/doc/dasobjectstore/custody-review",
+    );
+
+    let root = std::env::temp_dir().join(format!(
+        "dasobjectstore-custody-review-assets-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    std::fs::create_dir_all(&root).expect("create package payload fixture");
+    let stager = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/custody-review-assets.sh");
+    let output = std::process::Command::new("bash")
+        .arg(&stager)
+        .arg(&root)
+        .output()
+        .expect("stage inert custody review assets");
+    assert!(
+        output.status.success(),
+        "custody review staging failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let review = root.join("usr/share/doc/dasobjectstore/custody-review");
+    let mut entries = std::fs::read_dir(&review)
+        .expect("review-only documentation directory")
+        .map(|entry| {
+            entry
+                .expect("review documentation entry")
+                .file_name()
+                .into_string()
+                .expect("UTF-8 documentation name")
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    assert_eq!(
+        entries,
+        vec![
+            "README.rst",
+            "custody-garage.compose.yml.template",
+            "dasobjectstore-custody-garage.service.template",
+            "dasobjectstored-custody-credentials.conf.template",
+        ]
+    );
+    for asset in &entries {
+        let metadata = std::fs::metadata(review.join(asset)).expect("review asset metadata");
+        assert!(
+            metadata.is_file(),
+            "review asset must be a regular file: {asset}"
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(&metadata.permissions()) & 0o777,
+            0o644,
+            "review asset must be world-readable documentation: {asset}"
+        );
+    }
+    for forbidden in [
+        "etc/dasobjectstore/custody-garage.compose.yml",
+        "etc/dasobjectstore/custody-garage.toml",
+        "etc/systemd/system/dasobjectstored.service.d",
+        "lib/systemd/system/dasobjectstore-custody-garage.service",
+        "usr/lib/systemd/system/dasobjectstore-custody-garage.service",
+        "var/lib/dasobjectstore/custody-activation.json",
+        "var/lib/dasobjectstore/custody-garage",
+        "srv/dasobjectstore/custody",
+    ] {
+        assert!(
+            !root.join(forbidden).exists(),
+            "inert package staging must not create `{forbidden}`"
+        );
+    }
+    let credential_template =
+        std::fs::read_to_string(review.join("dasobjectstored-custody-credentials.conf.template"))
+            .expect("read staged credential template");
+    assert!(
+        credential_template.lines().all(|line| {
+            let trimmed = line.trim();
+            trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "[Service]"
+        }),
+        "the packaged credential template must contain no active credential directive"
+    );
+    for script in [POSTINST, PRERM, POSTRM, BUILD_RPM] {
+        assert_no_automatic_unit_activation(script, "dasobjectstore-custody-garage.service");
+        assert_not_contains(script, "dasobjectstored-custody-credentials.conf.template");
+        assert_not_contains(script, "custody-activation.json");
+    }
+    #[cfg(unix)]
+    {
+        let assert_symlink_rejected =
+            |label: &str, relative_path: &str, destination_is_file: bool| {
+                let payload = root.join(format!("rejection-{label}"));
+                let escape = root.join(format!("escape-{label}"));
+                std::fs::create_dir_all(&payload).expect("create guarded payload fixture");
+                std::fs::create_dir_all(&escape).expect("create symlink escape fixture");
+                let sentinel = escape.join("sentinel");
+                std::fs::write(&sentinel, b"must-remain-unmodified")
+                    .expect("write symlink escape sentinel");
+
+                let destination = payload.join(relative_path);
+                std::fs::create_dir_all(
+                    destination
+                        .parent()
+                        .expect("guarded destination has a parent"),
+                )
+                .expect("create guarded destination parent");
+                if destination_is_file {
+                    std::os::unix::fs::symlink(&sentinel, &destination)
+                        .expect("create destination-asset symlink");
+                } else {
+                    std::os::unix::fs::symlink(&escape, &destination)
+                        .expect("create destination-component symlink");
+                }
+
+                let rejected = std::process::Command::new("bash")
+                    .arg(&stager)
+                    .arg(&payload)
+                    .output()
+                    .expect("reject symlinked custody review destination");
+                assert!(
+                    !rejected.status.success(),
+                    "stager must refuse symlinked custody review destination `{relative_path}`"
+                );
+                assert_eq!(
+                    std::fs::read(&sentinel).expect("read symlink escape sentinel"),
+                    b"must-remain-unmodified",
+                    "stager must not write through `{relative_path}`"
+                );
+                let mut escaped_entries = std::fs::read_dir(&escape)
+                    .expect("read symlink escape fixture")
+                    .map(|entry| {
+                        entry
+                            .expect("symlink escape entry")
+                            .file_name()
+                            .into_string()
+                            .expect("UTF-8 symlink escape entry")
+                    })
+                    .collect::<Vec<_>>();
+                escaped_entries.sort();
+                assert_eq!(
+                    escaped_entries,
+                    vec!["sentinel"],
+                    "stager must refuse before affecting escape path `{relative_path}`"
+                );
+            };
+
+        for component in [
+            "usr",
+            "usr/share",
+            "usr/share/doc",
+            "usr/share/doc/dasobjectstore",
+            "usr/share/doc/dasobjectstore/custody-review",
+        ] {
+            let label = component.replace('/', "-");
+            assert_symlink_rejected(&label, component, false);
+        }
+        for asset in [
+            "README.rst",
+            "custody-garage.compose.yml.template",
+            "dasobjectstore-custody-garage.service.template",
+            "dasobjectstored-custody-credentials.conf.template",
+        ] {
+            let relative_path = format!("usr/share/doc/dasobjectstore/custody-review/{asset}");
+            assert_symlink_rejected(asset, &relative_path, true);
+        }
+
+        let link = root.with_extension("symlink");
+        std::os::unix::fs::symlink(&root, &link).expect("create payload-root symlink");
+        let rejected = std::process::Command::new("bash")
+            .arg(&stager)
+            .arg(&link)
+            .output()
+            .expect("reject symlinked package payload root");
+        assert!(
+            !rejected.status.success(),
+            "stager must refuse a symlinked payload root"
+        );
+        std::fs::remove_file(link).expect("remove payload-root symlink");
+    }
+    std::fs::remove_dir_all(root).expect("remove package payload fixture");
 }
 
 #[test]

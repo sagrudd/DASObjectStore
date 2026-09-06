@@ -2,10 +2,10 @@
 
 ## Status and scope
 
-This is the source contract for DASObjectStore 0.180.0.  It introduces a
+This is the source and inert-package contract for DASObjectStore 0.181.0.  It introduces a
 small custody-retention overlay for a **fresh, dedicated Garage bucket** on a
-locally administered NUC.  It is not a deployment guide, package, host
-transaction, S4–S8 result, or authorisation to contact a NUC, DGX, Docker,
+locally administered NUC.  It is not a deployment guide, package-install
+authorisation, host transaction, S4–S8 result, or authorisation to contact a NUC, DGX, Docker,
 Garage, or any S3 endpoint.
 
 The only supported assurance label is
@@ -178,9 +178,14 @@ material is persisted. Syntactically invalid non-opaque references are rejected
 before a marker can be named. The in-memory resolver remains solely for
 regression tests.
 
-The source includes, but packages do not install, a custody Garage Compose
-template, custody service template, and systemd credential drop-in template.
-They use the fixed distinct `dasobjectstore-custody` project,
+The package includes review-only copies of the custody Garage Compose template,
+custody service template, and systemd credential drop-in template under
+`/usr/share/doc/dasobjectstore/custody-review/`. They are ordinary `0644`
+documentation assets, not rendered configuration: package installation never
+copies them to `/etc`, a systemd unit/drop-in directory, a Garage directory, or
+any DAS state location; it creates no credential, custody activation marker,
+catalogue, bucket, ledger, Docker object, or service lifecycle action. Their
+attended use remains separately target-bound and approved. They use the fixed distinct `dasobjectstore-custody` project,
 `garage-custody` service, custody-only configuration/metadata/data paths, and
 loopback `127.0.0.1:3901`. The packaged daemon configuration keeps custody
 `enabled: false`; if an attended manifest enables it, daemon startup requires
@@ -310,7 +315,7 @@ they appear in the ordinary mutable registry or a backup.
 
 This source release does not reinterpret existing r237 records.  The r237/r7
 `dasobjectstore-remote` 0.177.4 selection is immutable and untouched.  Any
-future candidate using this overlay needs a new DASObjectStore 0.180.0 Kanon
+future candidate using this overlay needs a new DASObjectStore 0.181.0 Kanon
 profile and lock, explicit Terraform projection, package provenance, and a
 programme-SOP amendment that records the local trusted-administrator assurance
 model and its exclusions.  It needs a separately target-bound S8 approval

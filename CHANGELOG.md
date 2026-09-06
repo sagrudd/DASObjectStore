@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.181.0 - 2026-09-06
+
+- Package the reviewed local trusted-administrator custody Garage service,
+  Compose, and systemd credential drop-in templates as non-secret, mode-0644
+  documentation assets only under
+  `/usr/share/doc/dasobjectstore/custody-review/`. DEB and RPM payloads do not
+  install units or drop-ins, render configuration, create credentials, custody
+  state, markers, catalogues, buckets, or ledgers, or enable, start, restart,
+  or invoke a custody service or Docker Compose. The supported assurance label
+  remains `local_trusted_administrator_overlay`; this release does not claim
+  Garage Object Lock, WORM, provider-enforced retention, deployment, or a
+  formal S4--S8 result.
+
 ## 0.180.0 - 2026-09-05
 
 - Add a source-only local trusted-administrator custody-retention overlay for

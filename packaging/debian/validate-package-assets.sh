@@ -42,6 +42,11 @@ pinned_sources_test="$repo_root/packaging/tests/pinned-mnemosyne-package-sources
 monas_access_test="$repo_root/packaging/tests/monas-access-boundary.sh"
 storage_startup_test="$repo_root/packaging/tests/resource-bound-storage-startup.sh"
 garage_renderer="$repo_root/crates/dasobjectstore-object-service/src/garage.rs"
+custody_review_asset_stager="$repo_root/packaging/custody-review-assets.sh"
+custody_service_template="$repo_root/packaging/linux/systemd/dasobjectstore-custody-garage.service.template"
+custody_compose_template="$repo_root/packaging/linux/templates/custody-garage.compose.yml.template"
+custody_credential_template="$repo_root/packaging/linux/systemd/dasobjectstored-custody-credentials.conf.template"
+custody_review_readme="$repo_root/docs/user/local-custody-review-assets.rst"
 
 require_file() {
   local path="$1"
@@ -127,6 +132,11 @@ require_executable "$pinned_sources_test"
 require_file "$monas_access_test"
 require_file "$storage_startup_test"
 require_file "$garage_renderer"
+require_file "$custody_review_asset_stager"
+require_file "$custody_service_template"
+require_file "$custody_compose_template"
+require_file "$custody_credential_template"
+require_file "$custody_review_readme"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -163,6 +173,131 @@ require_text "$storage_mount_helper" "findmnt"
 require_text "$storage_mount_helper" "mount"
 require_text "$garage_renderer" 'restart: \"no\"'
 require_absent "$garage_renderer" 'push_str("    restart: unless-stopped'
+
+require_text "$custody_review_asset_stager" 'CUSTODY_REVIEW_DOC_RELATIVE_DIR="usr/share/doc/dasobjectstore/custody-review"'
+require_text "$custody_service_template" 'REVIEWED INERT PACKAGE ASSET'
+require_absent "$custody_service_template" '[Install]'
+require_text "$custody_compose_template" 'REVIEWED INERT PACKAGE ASSET'
+require_text "$custody_credential_template" 'REVIEWED INERT PACKAGE ASSET'
+if grep -Eq '^[[:space:]]*(Environment|EnvironmentFile|LoadCredentialEncrypted)=' "$custody_credential_template"; then
+  printf 'custody credential template must not contain an active environment or credential directive\n' >&2
+  exit 1
+fi
+if awk '/^[[:space:]]*($|#|\[Service\])/{next} {exit 1}' "$custody_credential_template"; then
+  :
+else
+  printf 'custody credential template must contain comments and [Service] only\n' >&2
+  exit 1
+fi
+
+custody_payload_root="$(mktemp -d)"
+custody_symlink_fixture_root="$(mktemp -d)"
+trap 'rm -rf "$custody_payload_root" "$custody_symlink_fixture_root"' EXIT
+"$custody_review_asset_stager" "$custody_payload_root"
+custody_review_dir="$custody_payload_root/usr/share/doc/dasobjectstore/custody-review"
+for asset in \
+  README.rst \
+  custody-garage.compose.yml.template \
+  dasobjectstore-custody-garage.service.template \
+  dasobjectstored-custody-credentials.conf.template; do
+  require_file "$custody_review_dir/$asset"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    custody_asset_mode="$(stat -f '%Lp' "$custody_review_dir/$asset")"
+  else
+    custody_asset_mode="$(stat -c '%a' "$custody_review_dir/$asset")"
+  fi
+  if [[ "$custody_asset_mode" != "644" ]]; then
+    printf 'custody review asset must be mode 0644: %s\n' "$asset" >&2
+    exit 1
+  fi
+done
+expected_custody_payload_files=$'./usr/share/doc/dasobjectstore/custody-review/README.rst\n./usr/share/doc/dasobjectstore/custody-review/custody-garage.compose.yml.template\n./usr/share/doc/dasobjectstore/custody-review/dasobjectstore-custody-garage.service.template\n./usr/share/doc/dasobjectstore/custody-review/dasobjectstored-custody-credentials.conf.template'
+actual_custody_payload_files="$(cd "$custody_payload_root" && find . -type f -print | LC_ALL=C sort)"
+if [[ "$actual_custody_payload_files" != "$expected_custody_payload_files" ]]; then
+  printf 'custody review staging produced an unexpected payload:\n%s\n' "$actual_custody_payload_files" >&2
+  exit 1
+fi
+for forbidden in \
+  etc/dasobjectstore/custody-garage.compose.yml \
+  etc/dasobjectstore/custody-garage.toml \
+  etc/systemd/system/dasobjectstored.service.d \
+  lib/systemd/system/dasobjectstore-custody-garage.service \
+  usr/lib/systemd/system/dasobjectstore-custody-garage.service \
+  var/lib/dasobjectstore/custody-activation.json \
+  var/lib/dasobjectstore/custody-garage \
+  srv/dasobjectstore/custody; do
+  if [[ -e "$custody_payload_root/$forbidden" ]]; then
+    printf 'custody review staging must not create: %s\n' "$forbidden" >&2
+    exit 1
+  fi
+done
+if "$custody_review_asset_stager" / >/dev/null 2>&1; then
+  printf 'custody review stager must refuse the live root filesystem\n' >&2
+  exit 1
+fi
+custody_payload_link="$custody_payload_root-link"
+ln -s "$custody_payload_root" "$custody_payload_link"
+if "$custody_review_asset_stager" "$custody_payload_link" >/dev/null 2>&1; then
+  printf 'custody review stager must refuse a symlinked payload root\n' >&2
+  exit 1
+fi
+rm -f "$custody_payload_link"
+
+assert_custody_review_symlink_refusal() {
+  local label="$1"
+  local relative_path="$2"
+  local destination_kind="$3"
+  local fixture="$custody_symlink_fixture_root/$label-payload"
+  local escape="$custody_symlink_fixture_root/$label-escape"
+  local sentinel="$escape/sentinel"
+  local destination
+  local escaped_entries
+
+  install -d "$fixture" "$escape"
+  printf 'must-remain-unmodified\n' >"$sentinel"
+  destination="$fixture/$relative_path"
+  install -d "$(dirname "$destination")"
+  if [[ "$destination_kind" == "file" ]]; then
+    ln -s "$sentinel" "$destination"
+  else
+    ln -s "$escape" "$destination"
+  fi
+  if "$custody_review_asset_stager" "$fixture" >/dev/null 2>&1; then
+    printf 'custody review stager must refuse symlinked destination: %s\n' "$relative_path" >&2
+    exit 1
+  fi
+  if [[ "$(cat "$sentinel")" != "must-remain-unmodified" ]]; then
+    printf 'custody review stager wrote through symlinked destination: %s\n' "$relative_path" >&2
+    exit 1
+  fi
+  escaped_entries="$(find "$escape" -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort)"
+  if [[ "$escaped_entries" != "$sentinel" ]]; then
+    printf 'custody review stager affected symlink escape path: %s\n' "$relative_path" >&2
+    exit 1
+  fi
+}
+
+for custody_component in \
+  usr \
+  usr/share \
+  usr/share/doc \
+  usr/share/doc/dasobjectstore \
+  usr/share/doc/dasobjectstore/custody-review; do
+  assert_custody_review_symlink_refusal \
+    "component-${custody_component//\//-}" \
+    "$custody_component" \
+    directory
+done
+for custody_asset in \
+  README.rst \
+  custody-garage.compose.yml.template \
+  dasobjectstore-custody-garage.service.template \
+  dasobjectstored-custody-credentials.conf.template; do
+  assert_custody_review_symlink_refusal \
+    "asset-${custody_asset}" \
+    "usr/share/doc/dasobjectstore/custody-review/$custody_asset" \
+    file
+done
 
 require_text "$web_service" "User=dasobjectstore"
 require_text "$web_service" "Group=dasobjectstore"
@@ -316,6 +451,8 @@ require_text "$build_deb" 'usr/libexec/dasobjectstore/manage-monas-access-bounda
 require_text "$build_deb" 'usr/libexec/dasobjectstore/verify-managed-storage-mounts'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-storage-ready.service'
 require_text "$build_deb" 'lib/systemd/system/dasobjectstore-garage.service'
+require_text "$build_deb" 'packaging/custody-review-assets.sh'
+require_text "$build_deb" 'das_stage_custody_review_assets "$build_root"'
 require_text "$build_deb" 'etc/dasobjectstore/managed-storage.v1.json'
 require_text "$build_deb" 'DEBIAN/postinst'
 require_text "$build_deb" "'/opt/dasobjectstore/config.json' >\"\$build_root/DEBIAN/conffiles\""
@@ -339,6 +476,9 @@ done
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/verify-managed-storage-mounts'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-storage-ready.service'
 require_text "$build_rpm" '/usr/lib/systemd/system/dasobjectstore-garage.service'
+require_text "$build_rpm" 'packaging/custody-review-assets.sh'
+require_text "$build_rpm" 'das_stage_custody_review_assets "$payload_root"'
+require_text "$build_rpm" '%doc /usr/share/doc/dasobjectstore/custody-review'
 require_text "$build_rpm" '/etc/dasobjectstore/managed-storage.v1.json'
 require_text "$build_deb" 'Provides: dasobjectstore-remote'
 require_text "$build_deb" 'Conflicts: dasobjectstore-remote'

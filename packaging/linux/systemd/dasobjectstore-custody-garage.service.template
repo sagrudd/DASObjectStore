@@ -1,7 +1,8 @@
-# REVIEWED TEMPLATE ONLY — intentionally not installed, enabled, or started by
-# DEB/RPM packaging. An attended release transaction must render this only
-# after separate custody configuration, S8 approval, and systemd credentials
-# have been reviewed.
+# REVIEWED INERT PACKAGE ASSET — packaged only beneath
+# /usr/share/doc/dasobjectstore/custody-review. It is never installed as a
+# systemd unit, enabled, started, rendered, or supplied with credentials by a
+# DEB/RPM. An attended release transaction must review and copy this template
+# only after separate custody configuration and S8 approval.
 [Unit]
 Description=DASObjectStore isolated local-trusted-administrator custody Garage
 Documentation=https://github.com/sagrudd/DASObjectStore
