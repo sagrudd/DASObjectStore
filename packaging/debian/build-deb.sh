@@ -6,6 +6,7 @@ bash "$repo_root/packaging/validate-release-version.sh" "$repo_root"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
 source "$repo_root/packaging/cargo-target-dir.sh"
+source "$repo_root/packaging/custody-review-assets.sh"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
@@ -143,6 +144,7 @@ install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$build_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$build_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
+das_stage_custody_review_assets "$build_root"
 cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"

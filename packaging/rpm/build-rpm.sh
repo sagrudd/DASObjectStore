@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/package-provenance.sh"; das_package_provenance_init "$repo_root"
 source "$repo_root/packaging/pinned-mnemosyne-package-sources.sh"; das_package_configure_pinned_mnemosyne_sources "$repo_root"
 source "$repo_root/packaging/cargo-target-dir.sh"
+source "$repo_root/packaging/custody-review-assets.sh"
 package_name="dasobjectstore"
 version="$(cargo metadata --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" \
   | sed -n 's/.*"name":"dasobjectstore-cli","version":"\([^"]*\)".*/\1/p')"
@@ -141,6 +142,7 @@ install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/sysusers.d/dasobjectstore.conf"
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
+das_stage_custody_review_assets "$payload_root"
 cp -a "$web_dist/." "$payload_root/opt/dasobjectstore/web/"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
@@ -474,6 +476,7 @@ fi
 %doc /usr/share/doc/dasobjectstore/README.md
 %doc /usr/share/doc/dasobjectstore/remote-site-trust-provisioning-v1.md
 %doc /usr/share/doc/dasobjectstore/remote-site-trust-source-v1.schema.json
+%doc /usr/share/doc/dasobjectstore/custody-review
 %license /usr/share/licenses/dasobjectstore/LICENSE
 
 %changelog

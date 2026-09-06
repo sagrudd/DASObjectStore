@@ -1,6 +1,8 @@
-# REVIEWED TEMPLATE ONLY — do not install or start through normal packaging.
-# This is a separate Compose project, service, configuration, metadata/data
-# volume set, and loopback endpoint. It contains no credential material.
+# REVIEWED INERT PACKAGE ASSET — packaged only beneath
+# /usr/share/doc/dasobjectstore/custody-review. Do not install, render, or
+# start it through normal packaging. This is a separate Compose project,
+# service, configuration, metadata/data volume set, and loopback endpoint. It
+# contains no credential material.
 name: dasobjectstore-custody
 services:
   garage-custody:

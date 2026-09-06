@@ -24,6 +24,7 @@ stabilized in the current MVP.
    nas-endpoints
    disk-preparation
    object-stores
+   local-custody-review-assets
    monas-package-access-boundary
    inspecting-store-contents
    subobjects
