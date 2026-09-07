@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.182.1 - 2026-09-07
+
+- Correct the legacy Phoreus producer-declaration regression test to assert
+  that the current custody source line remains outside its historical range,
+  rather than hard-code an older workspace version. The declaration and all
+  runtime behavior remain unchanged. Align the root source product manifest
+  with the workspace version. Source-only Kanon companion: #335;
+  no package selection, compatibility qualification or host change is made.
+
 ## 0.182.0 - 2026-09-07
 
 - Add a source-only, pure custody bootstrap input planner and purpose-fixed

@@ -1,5 +1,9 @@
 # DASObjectStore TODO
 
+0.182.1 source follow-up: remove the stale current-version assertion from the
+legacy Phoreus declaration test and align the root product manifest. Historical
+compatibility remains unchanged; Kanon #335 coordinates this regression repair.
+
 Issue #199: non-mutating custody bootstrap source-plan slice implemented for
 review in 0.182.0 (programme #251, Kanon #331). Runtime execution, independent
 qualification and accepted live companion remain unimplemented and unclaimed.

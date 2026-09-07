@@ -205,9 +205,14 @@ mod tests {
             ">=0.177.1,<0.179.0"
         );
         // The retained readiness declaration is intentionally not widened for
-        // the inert-package 0.181.0 custody-retention overlay. It must not be
-        // read as a Phoreus compatibility claim for this release.
-        assert_eq!(env!("CARGO_PKG_VERSION"), "0.181.0");
+        // the custody-retention line or its subsequent source fixes. Assert
+        // exclusion, not an exact current version that breaks the next bump.
+        let current = (
+            env!("CARGO_PKG_VERSION_MAJOR").parse::<u64>().unwrap(),
+            env!("CARGO_PKG_VERSION_MINOR").parse::<u64>().unwrap(),
+            env!("CARGO_PKG_VERSION_PATCH").parse::<u64>().unwrap(),
+        );
+        assert!(!((0, 177, 1)..(0, 179, 0)).contains(&current));
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
             PROFILE_READINESS_SCHEMA_VERSION
