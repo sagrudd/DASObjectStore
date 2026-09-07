@@ -16,6 +16,17 @@ pub const MANIFEST_SCHEMA: &str = "dasobjectstore.custody-bootstrap-manifest.v1"
 pub const OBSERVATION_SCHEMA: &str = "dasobjectstore.custody-bootstrap-observation.v1";
 /// Redacted, non-authoritative planning result wire coordinate.
 pub const PLAN_SCHEMA: &str = "dasobjectstore.custody-bootstrap-plan.v1";
+/// Planning-only coordinate for a future executor-generated terminal receipt.
+pub const TERMINAL_RECEIPT_SCHEMA: &str = "dasobjectstore.custody-bootstrap-terminal-receipt.v1";
+const TERMINAL_BINDINGS: [&str; 7] = [
+    "target_identity",
+    "raw_companion_digest",
+    "attempt_identity",
+    "attempt_marker_digest",
+    "terminal_outcome",
+    "observed_completion_time",
+    "retained_inventory_digest",
+];
 
 /// A fixed public denial code. Never includes caller-controlled input or paths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -145,7 +156,22 @@ struct Store {
     namespace: String,
     definition: CustodyStoreDefinitionV1,
     hold_authority_identity: String,
-    inventory: Vec<Object>,
+    content_policy: ContentPolicy,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+enum ContentPolicy {
+    #[serde(rename = "preknown_inventory")]
+    PreknownInventory { objects: Vec<Object> },
+    #[serde(rename = "generated_terminal_receipt")]
+    GeneratedTerminalReceipt {
+        schema: String,
+        maximum_count: u8,
+        maximum_size_bytes: u64,
+        payload_source: String,
+        required_bindings: Vec<String>,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -210,8 +236,10 @@ pub struct BootstrapPlan {
     pub observation_sha256: String,
     /// Number of distinct store-purpose definitions checked.
     pub store_count: usize,
-    /// Number of finite inventory entries checked.
+    /// Number of preknown inventory entries checked, excluding future receipts.
     pub object_count: usize,
+    /// Maximum generated receipt count; no receipt is generated or accepted.
+    pub generated_receipt_limit: u8,
     /// False even when all supplied booleans are affirmative.
     pub live_target_verified: bool,
     /// Always false: no custody or release authority is issued.
@@ -264,6 +292,7 @@ pub fn plan_bootstrap(manifest: &[u8], observation: &[u8]) -> Result<BootstrapPl
         observation_sha256: digest(observation),
         store_count: m.stores.len(),
         object_count,
+        generated_receipt_limit: 1,
         live_target_verified: false,
         execution_authorized: false,
     })
@@ -425,8 +454,6 @@ fn validate_stores(
             || o.existing_buckets.contains(&s.definition.bucket_name)
             || o.existing_store_ids.iter().any(|v| v == id)
             || o.existing_namespaces.contains(&s.namespace)
-            || s.inventory.is_empty()
-            || s.inventory.len() > 4096
         {
             return Err(PlanDenial::Custody);
         }
@@ -449,21 +476,55 @@ fn validate_stores(
                 return Err(PlanDenial::Custody);
             }
         }
-        let mut objects = BTreeSet::new();
-        for object in &s.inventory {
-            if !sha(&object.content_sha256)
-                || object.size_bytes == 0
-                || !objects.insert(&object.content_sha256)
-            {
-                return Err(PlanDenial::Custody);
-            }
-        }
-        count += s.inventory.len();
+        count += validate_content_policy(&s.purpose, &s.content_policy)?;
     }
     if purposes != BTreeSet::from(["builder-corpus", "nuc-delivery", "terminal-receipt"]) {
         return Err(PlanDenial::Custody);
     }
     Ok(count)
+}
+
+fn validate_content_policy(purpose: &str, policy: &ContentPolicy) -> Result<usize, PlanDenial> {
+    match policy {
+        ContentPolicy::PreknownInventory { objects } if purpose != "terminal-receipt" => {
+            if objects.is_empty() || objects.len() > 4096 {
+                return Err(PlanDenial::Custody);
+            }
+            let mut digests = BTreeSet::new();
+            for object in objects {
+                if !sha(&object.content_sha256)
+                    || object.size_bytes == 0
+                    || !digests.insert(&object.content_sha256)
+                {
+                    return Err(PlanDenial::Custody);
+                }
+            }
+            Ok(objects.len())
+        }
+        ContentPolicy::GeneratedTerminalReceipt {
+            schema,
+            maximum_count,
+            maximum_size_bytes,
+            payload_source,
+            required_bindings,
+        } if purpose == "terminal-receipt" => {
+            if schema != TERMINAL_RECEIPT_SCHEMA
+                || *maximum_count != 1
+                || *maximum_size_bytes != 65536
+                || payload_source != "executor_only"
+                || required_bindings.len() != TERMINAL_BINDINGS.len()
+                || required_bindings
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>()
+                    != BTreeSet::from(TERMINAL_BINDINGS)
+            {
+                return Err(PlanDenial::Custody);
+            }
+            Ok(0)
+        }
+        _ => Err(PlanDenial::Custody),
+    }
 }
 
 fn validate_evidence(m: &Manifest, o: &Observation) -> Result<(), PlanDenial> {

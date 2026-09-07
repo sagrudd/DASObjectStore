@@ -45,6 +45,16 @@ this tool neither reads nor verifies the named evidence or actual isolation.
 Its output always says ``live_target_verified: false`` and
 ``execution_authorized: false``. No apply mode or runtime capability exists.
 
+Programme PR #253 corrects terminal-receipt planning: corpus/delivery stores
+use ``content_policy.kind=preknown_inventory`` with exact current-batch objects.
+The terminal store instead uses ``generated_terminal_receipt``: one future
+executor-only receipt, fixed schema, 65536-byte bound and exact target/companion/
+attempt/marker/outcome/time/inventory bindings. It has no precomputed digest,
+payload or signature. Unknown future package bytes are not preknown inventory;
+later batches need separate bounded review and an as-yet-unimplemented consumer.
+The planner's ``object_count`` excludes that future receipt and reports
+``generated_receipt_limit: 1`` separately. No receipt is generated or accepted.
+
 Formal runtime composition, independently measured old-client exclusion,
 credentials, one-use markers and the exact execution companion remain outside
 this slice. A real package still requires complete Kanon/Terraform provenance

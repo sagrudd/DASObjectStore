@@ -19,8 +19,13 @@ pub(super) fn fixture() -> (Value, Value) {
                 reader_credential_reference: format!("reader-ref-{n}"), reader_identity: format!("reader-{n}"),
             },
         };
+        let content_policy = if *purpose == "terminal-receipt" {
+            json!({"kind":"generated_terminal_receipt","schema":"dasobjectstore.custody-bootstrap-terminal-receipt.v1",
+                "maximum_count":1,"maximum_size_bytes":65536,"payload_source":"executor_only",
+                "required_bindings":["target_identity","raw_companion_digest","attempt_identity","attempt_marker_digest","terminal_outcome","observed_completion_time","retained_inventory_digest"]})
+        } else { json!({"kind":"preknown_inventory","objects":[{"content_sha256":hash('b'),"size_bytes":12}]}) };
         json!({"purpose":purpose,"namespace":format!("namespace-{n}"),"definition":definition,
-            "hold_authority_identity":format!("hold-{n}"),"inventory":[{"content_sha256":hash('b'),"size_bytes":12}]})
+            "hold_authority_identity":format!("hold-{n}"),"content_policy":content_policy})
     }).collect();
     let m = json!({
         "schema":MANIFEST_SCHEMA,"transaction_id":"r239-synthetic","purpose":"r239-custody-bootstrap-plan",

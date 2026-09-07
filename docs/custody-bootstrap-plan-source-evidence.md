@@ -6,10 +6,12 @@ its source coordinates. No immutable 0.181 package selection is modified.
 
 Local checks on macOS:
 
-- Object-service suite: 96 unit tests and one compose integration test pass.
-  Eight new planner tests include recursive required-field deletion, every
+- Object-service suite: 97 unit tests and one compose integration test pass.
+  Nine new planner tests include recursive required-field deletion, every
   truncated raw manifest prefix, duplicate and inherited unknown fields,
   target/time/role/retention/hold/isolation/independent-evidence matrices.
+  The ninth test covers the independently reviewed programme #253 correction:
+  terminal receipts are bounded executor-only policies, never guessed hashes.
 - Dedicated CLI: three tests pass, including actual descriptor/file-to-plan
   roundtrip, unchanged input bytes/directory inventory, malformed-input
   redaction, no-follow parent/final aliases and oversized/device/directory

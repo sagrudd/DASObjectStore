@@ -22,7 +22,8 @@ fn result_is_deterministic_redacted_and_never_authority() {
     assert_eq!(result, plan_bootstrap(&raw, &observed).unwrap());
     assert!(!result.execution_authorized);
     assert!(!result.live_target_verified);
-    assert_eq!((result.store_count, result.object_count), (3, 3));
+    assert_eq!((result.store_count, result.object_count), (3, 2));
+    assert_eq!(result.generated_receipt_limit, 1);
     let output = serde_json::to_string(&result).unwrap();
     for hidden in [
         "192.168",
@@ -70,7 +71,7 @@ fn malformed_closed_nested_duplicate_and_oversized_inputs_deny() {
         "/reader_continuation",
         "/stores/0/definition/profile",
         "/stores/0/definition/profile/retention",
-        "/stores/0/inventory/0",
+        "/stores/0/content_policy/objects/0",
     ] {
         let mut bad = m.clone();
         bad.pointer_mut(pointer)
@@ -149,9 +150,12 @@ fn binding_custody_time_and_evidence_mutation_matrix_denies() {
             "/stores/0/definition/bucket_name",
             json!("dos-r237-s4-bootstrap-custody"),
         ),
-        ("/stores/0/inventory", json!([])),
-        ("/stores/0/inventory/0/size_bytes", json!(0)),
-        ("/stores/0/inventory/0/content_sha256", json!("bad")),
+        ("/stores/0/content_policy/objects", json!([])),
+        ("/stores/0/content_policy/objects/0/size_bytes", json!(0)),
+        (
+            "/stores/0/content_policy/objects/0/content_sha256",
+            json!("bad"),
+        ),
         ("/verifier/machine_identity_sha256", json!(hash('a'))),
         ("/reader_continuation/read_only", json!(false)),
         (
@@ -302,4 +306,44 @@ fn locked_command_verifier_and_role_path_binding_denials() {
         *bad.pointer_mut(pointer).unwrap() = value;
         assert!(check(&bad, &o).is_err(), "{pointer}");
     }
+}
+
+#[test]
+fn generated_receipt_is_bounded_executor_policy_never_prehash_or_payload() {
+    let (m, o) = fixture();
+    for (field, value) in [
+        ("kind", json!("other")),
+        ("schema", json!("other")),
+        ("maximum_count", json!(2)),
+        ("maximum_size_bytes", json!(65537)),
+        ("payload_source", json!("caller")),
+        ("required_bindings", json!([])),
+    ] {
+        let mut bad = m.clone();
+        bad["stores"][2]["content_policy"][field] = value;
+        assert!(check(&bad, &o).is_err(), "{field}");
+    }
+    for field in [
+        "content_sha256",
+        "payload",
+        "signature",
+        "objects",
+        "size_bytes",
+    ] {
+        let mut bad = m.clone();
+        bad["stores"][2]["content_policy"][field] = json!("guessed");
+        assert_eq!(check(&bad, &o), Err(PlanDenial::Encoding), "{field}");
+    }
+    let mut bad = m.clone();
+    bad["stores"][2]["content_policy"] = m["stores"][0]["content_policy"].clone();
+    assert_eq!(check(&bad, &o), Err(PlanDenial::Custody));
+    let mut bad = m.clone();
+    bad["stores"][0]["content_policy"] = m["stores"][2]["content_policy"].clone();
+    assert_eq!(check(&bad, &o), Err(PlanDenial::Custody));
+    let mut bad = m.clone();
+    bad["stores"][2]["content_policy"]["required_bindings"][1] = json!("target_identity");
+    assert_eq!(check(&bad, &o), Err(PlanDenial::Custody));
+    let good = check(&m, &o).unwrap();
+    assert_eq!(good.object_count, 2);
+    assert!(!good.execution_authorized);
 }
