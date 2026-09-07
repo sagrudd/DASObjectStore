@@ -8,6 +8,7 @@ stabilized in the current MVP.
    :maxdepth: 2
 
    expedition-retained-dossiers
+   custody-bootstrap-plan
 
    getting-started
    local-docker
