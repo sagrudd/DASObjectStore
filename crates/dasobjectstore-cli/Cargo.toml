@@ -21,6 +21,10 @@ path = "src/s3_gateway_main.rs"
 name = "dasobjectstore-r237-bootstrap-observer"
 path = "src/r237_bootstrap_observer_main.rs"
 
+[[bin]]
+name = "dasobjectstore-custody-bootstrap-plan"
+path = "src/custody_bootstrap_plan_main.rs"
+
 [dependencies]
 axum.workspace = true
 axum-server.workspace = true

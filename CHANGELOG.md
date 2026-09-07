@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.182.0 - 2026-09-07
+
+- Add a source-only, pure custody bootstrap input planner and purpose-fixed
+  read-only CLI, with strict closed/duplicate-key decoding, raw input binding,
+  role/path/target/retention conflict checks and redacted non-authoritative
+  results. Programme #251 and Kanon #331 coordinate the source slice; no
+  runtime, credential, package selection or immutable r239 change is made.
+
 ## 0.181.0 - 2026-09-06
 
 - Package the reviewed local trusted-administrator custody Garage service,

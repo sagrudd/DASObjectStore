@@ -1,6 +1,7 @@
 //! Object service orchestration boundary.
 
 pub mod compose;
+pub mod bootstrap_plan;
 pub mod credentials;
 pub mod custody;
 pub mod custody_attestation;

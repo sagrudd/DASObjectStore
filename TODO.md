@@ -1,5 +1,9 @@
 # DASObjectStore TODO
 
+Issue #199: non-mutating custody bootstrap source-plan slice implemented for
+review in 0.182.0 (programme #251, Kanon #331). Runtime execution, independent
+qualification and accepted live companion remain unimplemented and unclaimed.
+
 Status: Draft  
 Source roadmap: [ROADMAP.md](ROADMAP.md)  
 Purpose: discrete implementation tasks suitable for CODEX agents or senior
