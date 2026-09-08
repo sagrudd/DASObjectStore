@@ -2,6 +2,10 @@
 
 ## 0.186.0 - Unreleased
 
+- Add an exact-envelope journal read entry point sharing the existing durable
+  started transition, with same-transaction raw/column binding and whole-call
+  deadline enforcement. Preserve legacy callers and journal schema.
+
 - Bind signed exact-object reads to server-owned receipt/measurement selection,
   process-lifetime attempt claims and the full raw ledger digest inside the
   verified read snapshot. Preserve the historical unbound read API; no TLS

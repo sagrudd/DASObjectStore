@@ -213,3 +213,24 @@ deadline is checked around each bounded memory-file read. Kanon #339
 no dependency version, credential schema or production identity changes.
 The separate VM evidence binds the actual probe it ran, not this full loader
 or a future authenticated endpoint.
+
+Exact outgoing journal binding
+----------------------------------------
+
+The additive ``perform_pre_read_exact`` client entry point validates the existing
+signed envelope and compares its original bytes and digest to the retained issued
+row inside the same transaction that writes ``started``. Denormalized target,
+nonce, sequence, predecessor and time columns must also match those exact bytes.
+A differently signed envelope with the same ID cannot borrow an older permit.
+The callback receives the checked original bytes only after commit. The prior
+request-ID-only entry point and persisted journal schema are unchanged.
+
+This new path uses the existing whole-call deadline, opens an existing journal
+only, denies lock contention without a busy wait, and installs the SQLite progress
+hook. Callback failure is retained as incomplete while the budget permits; if
+the deadline is exhausted, the durable started marker remains and still denies
+retry. No deadline or journal is created afresh for failure settlement. Tests use
+real SQLite and synthetic Ed25519 records, including resigned substitutions,
+corrupt columns/digests, legacy-start reuse, missing/busy journal and deadline
+expiry after the callback. This establishes the real client attempt boundary;
+it does not itself make a network connection or produce an attestation.
