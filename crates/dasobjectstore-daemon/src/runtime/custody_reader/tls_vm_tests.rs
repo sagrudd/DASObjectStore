@@ -79,9 +79,61 @@ fn wall_clock() -> DateTime<Utc> {
     DateTime::<Utc>::from(std::time::SystemTime::now())
 }
 
+fn install_prepare_diagnostics() {
+    std::panic::set_hook(Box::new(|info| {
+        if let Some(location) = info.location() {
+            let source = match location.file() {
+                "crates/dasobjectstore-daemon/src/runtime/custody_reader/tls_vm_tests.rs" => "tls_vm_tests.rs",
+                "crates/dasobjectstore-daemon/src/runtime/custody_reader/garage_tls_vm_tests.rs" => "garage_tls_vm_tests.rs",
+                "crates/dasobjectstore-daemon/src/runtime/custody_reader/loader_vm_tests.rs" => "loader_vm_tests.rs",
+                "crates/dasobjectstore-daemon/src/runtime/custody_reader/manager_tests.rs" => "manager_tests.rs",
+                _ => "unknown",
+            };
+            eprintln!(
+                "VM_TLS_PREP_LOCATION source={source} line={}",
+                location.line()
+            );
+        }
+        // Never inspect or format panic payloads, credentials or private paths.
+    }));
+}
+
+#[test]
+fn prepare_diagnostic_child() {
+    if std::env::var("DAS_TEST_PREP_DIAGNOSTIC").as_deref() != Ok("1") {
+        return;
+    }
+    install_prepare_diagnostics();
+    panic!("synthetic-private-payload-must-not-appear");
+}
+
+#[test]
+fn prepare_diagnostics_never_emit_panic_payload() {
+    let output = std::process::Command::new("/usr/bin/timeout")
+        .args(["--kill-after=2s", "10s"])
+        .arg(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "runtime::custody_reader::manager_tests::tls_vm_tests::prepare_diagnostic_child",
+            "--nocapture",
+        ])
+        .env("DAS_TEST_PREP_DIAGNOSTIC", "1")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    for bytes in [&output.stdout, &output.stderr] {
+        assert!(
+            !String::from_utf8_lossy(bytes).contains("synthetic-private-payload-must-not-appear")
+        );
+    }
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("VM_TLS_PREP_LOCATION source=tls_vm_tests.rs line="));
+}
+
 #[test]
 #[ignore = "root-only joined fixture preparation in separately approved disposable VM"]
 fn prepare_joined_tls_vm() {
+    install_prepare_diagnostics();
     loader_vm_tests::guest_guard(0);
     let _ = mode();
     let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();

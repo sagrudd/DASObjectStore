@@ -10,7 +10,18 @@ else
     test "$#" = 0
 fi
 phase=start
-trap 'status=$?; printf "VM_JOINED_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then poweroff -f; fi' EXIT
+finish() {
+    local status=$?
+    printf 'VM_JOINED_EXIT phase=%s status=%s\n' "$phase" "$status"
+    if test "$status" != 0; then
+        if [[ "$phase" = prepare_* ]] && test -f /run/das-systemd-vm-fixture/tls-prepare.log; then
+            grep -E '^VM_TLS_PREP_LOCATION source=(tls_vm_tests.rs|garage_tls_vm_tests.rs|loader_vm_tests.rs|manager_tests.rs|unknown) line=[0-9]+$' \
+                /run/das-systemd-vm-fixture/tls-prepare.log | head -1 || true
+        fi
+        poweroff -f
+    fi
+}
+trap finish EXIT
 test "$(cat /proc/1/comm)" = systemd
 test "$(id -u)" = 0
 if test "$garage_existing" = no; then
