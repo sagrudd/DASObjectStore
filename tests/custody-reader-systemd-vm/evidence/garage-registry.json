@@ -1,0 +1,57 @@
+{
+  "index_digest": "sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690",
+  "selected": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "size": 428,
+    "digest": "sha256:2d3f94a89a8a02dc49fa75594d6df67ed9c6ffe08fe55ed023d0c9776f71a9bd",
+    "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+    }
+  },
+  "manifest": {
+    "schemaVersion": 2,
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "config": {
+      "mediaType": "application/vnd.docker.container.image.v1+json",
+      "size": 455,
+      "digest": "sha256:4a53620ee2088de01a185899412889ade13c420df74ac9ca12699c27a8ab18b2"
+    },
+    "layers": [
+      {
+        "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+        "size": 27085033,
+        "digest": "sha256:6151230acbde3c6cd384cfc5f75cfa076c2eaa1ccf16bafa2a3468620ea035fb"
+      }
+    ]
+  },
+  "config": {
+    "architecture": "arm64",
+    "created": "2026-04-16T20:15:49.757190519Z",
+    "history": [
+      {
+        "author": "kaniko",
+        "created": "0001-01-01T00:00:00Z",
+        "created_by": "COPY result/bin/garage /"
+      }
+    ],
+    "os": "linux",
+    "rootfs": {
+      "type": "layers",
+      "diff_ids": [
+        "sha256:2ece7b597203ea0db441b4f1f9b33b64e7997143fc56b5396943ff569b660b67"
+      ]
+    },
+    "config": {
+      "Cmd": [
+        "/garage",
+        "server"
+      ],
+      "Env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "RUST_BACKTRACE=1",
+        "RUST_LOG=garage=info"
+      ]
+    }
+  }
+}

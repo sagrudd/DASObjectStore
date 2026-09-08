@@ -1397,6 +1397,9 @@ impl ServiceCommandRunner for FakeRunner {
 
 #[cfg(test)]
 mod tests {
+    mod custody_garage_vm_tests {
+        include!("custody_garage_vm_tests.rs");
+    }
     include!("custody_service_tests.rs");
     include!("custody_batch_tests.rs");
     #[cfg(unix)]
