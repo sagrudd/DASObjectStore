@@ -19,16 +19,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.connection.settimeout(5)
-        expected = (PUBLIC / 'object-path').read_text()
-        if self.path != expected or self.headers.get('Host') != '127.0.0.1:19000':
-            self.send_error(404)
-            return
         counter = CONTROL / 'get-count'
         count = int(counter.read_text()) + 1
         counter.write_text(str(count))
         # Real CLI retries must be absent, not hidden by an idempotent responder.
         if count != 1:
             self.send_error(409)
+            return
+        expected = (PUBLIC / 'object-path').read_text()
+        if self.path != expected or self.headers.get('Host') != '127.0.0.1:19000':
+            self.send_error(404)
             return
         mode = (CONTROL / 'mode').read_text().strip()
         if mode == 'disconnect':
