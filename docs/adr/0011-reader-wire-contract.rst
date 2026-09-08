@@ -75,6 +75,28 @@ the admitted continuation interval and must cover the claimed availability;
 replacement before expiry requires the admitted lifecycle update, not reader
 autorenewal. No private material appears in a binding, seal, response or log.
 
+For the two new fields ``frontend_tls_peer_sha256`` and
+``verifier_tls_identity_sha256``, the exact hashed bytes are the complete raw
+DER encoding of the peer's end-entity X.509 certificate from the authenticated
+TLS handshake. Encode SHA-256 as the existing 64 lowercase hexadecimal
+characters without a prefix. Do not hash PEM text, an SPKI/public key, a
+certificate chain, a URL or a measurement record instead. This follows the
+existing GUI listener's raw-certificate fingerprint byte convention, but not
+its ``sha256:`` display prefix. It does not change the historical backend
+``tls_peer_sha256`` field or any backend measurement semantics.
+
+The frontend client must independently validate the server certificate chain
+and configured server name, then require the selected frontend leaf digest.
+The frontend server must require client-certificate chain authentication and
+the selected verifier leaf digest; neither check replaces the existing pinned
+Ed25519 request-authority validation. Pins come from the protected, reviewed
+installation selection, never from the request, response or presented peer.
+A different certificate, including one reusing the same public key, does not
+match the selected leaf pin. Changing a pin requires the already defined
+admitted binding/lifecycle update; it is not automatic renewal authority.
+Synthetic existing vectors remain unchanged and are not certificate evidence.
+This byte clarification grants no companion, package or activation authority.
+
 Encrypted plaintext reuses the existing bounded systemd handoff key=value
 decoder, restricted to version=1 and role=reader, with required store_id,
 configuration_sha256, identity, aws_access_key_id, aws_secret_access_key and
