@@ -59,3 +59,21 @@ Formal runtime composition, independently measured old-client exclusion,
 credentials, one-use markers and the exact execution companion remain outside
 this slice. A real package still requires complete Kanon/Terraform provenance
 and all formal installation gates; this utility is not an escape hatch.
+
+Connected service composition
+-----------------------------
+
+Source version 0.183.0 extracts the existing daemon custody operations into a
+custody-only service controller. The existing daemon admission and retention
+entry points delegate to that controller. It requires explicit custody and
+excluded ordinary-plane configuration, a resolved catalogue and the existing
+attended credential authorities. It has no ordinary registry, ingest or service
+start/stop operation, and no default custody configuration or catalogue.
+
+Programme PR #265 accepts this connected source extraction only; Kanon PR #339
+coordinates the prospective version. The planner remains non-authoritative,
+the selected 0.181.0 package is unchanged, and no apply command or execution
+admission is added. Configuration comparisons are not evidence of actual
+network, filesystem, old-client or administrator exclusion. The inert service
+templates remain inert: this change does not establish restart policy,
+retained read-only service continuation or a live execution companion.

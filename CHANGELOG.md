@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.183.0 - 2026-09-08
+
+- Extract the existing custody provisioning, admission and retention paths into
+  an explicitly configured custody-only service controller. Existing daemon
+  entry points delegate to it; namespace claims, sealed catalogues and one-use
+  handoffs are unchanged. Programme #265 and Kanon #339 (c892a6d) coordinate
+  this source-only composition. No lifecycle execution, credentials, package
+  selection, immutable release record or custody review asset is changed.
+
 ## 0.182.1 - 2026-09-07
 
 - Correct the legacy Phoreus producer-declaration regression test to assert
