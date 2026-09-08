@@ -1,0 +1,25 @@
+Actual-Garage joined source preflight — native source tests only
+
+Rust a3c195d0; native Linux/aarch64 Rust1.97.1 allfeatures locked/offline
+compile25.34s in existing no-network source cache10209. No VM invocation.
+Stripped SHA256 894a8d041c5d61622c3f5e796a7380b61f987b76fc2deea39d4af2174e543c75.
+Unstripped SHA256 6758e44925ee5d2ac5d6b186cff85b84d533e4f449a6445f26bf2b631789d5d7.
+GNU strip Ubuntu Binutils2.42 --strip-debug, tool SHA256
+3a69e3786ea2884baf4d9811e509ba6d16be03d5d6f541103b8de317a2465fca.
+
+Fresh source-only container b1a60d97940adc9e18299611c4051f7fcd447de836c4dfa48c0dbdb6b4c3db30,
+base81597dc683e32508706300031ae0391e332f122c4d54fa92661aa674a8dda0f4.
+No network/mounts/devices, cap-dropALL, NNP,4GiB/2CPU/128PIDs,120s timeout.
+Full runtime::custody_reader group:31PASS/0FAIL/6explicit VM-only ignored,
+12.68s. Includes8 manager tests (full fault/reentry/process/thread matrix),
+five real TLS tests, actual child timeout/output overflow and descriptor checks.
+The six ignored entries require separately reviewed systemd VM execution;
+they are not passing platform evidence. No actual Garage service executed.
+Container exit0 confirmed; exact exited container removed, no image exported.
+Log SHA256 96a717f7c3ac2eb1e39aebf2a58e2489782ee6b38a5be752d4dd1826fd47e1e0.
+
+Mac focused region1 and read-grant grammar1 PASS; static source regressions
+Garage3, legacy joined4 and new joined4 PASS; shell syntax/fmt/diff PASS.
+Earlier Mac zero-winner observation remains separately unclassified; this
+native success is not a retroactive resolution of that observation.
+Joined guest execution remains held exact runner/artifact review.
