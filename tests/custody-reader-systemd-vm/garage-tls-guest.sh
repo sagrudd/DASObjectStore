@@ -70,3 +70,5 @@ test "$(systemctl show -p ActiveState --value das-vm-garage-continuation.service
 phase=protected_tls
 /bin/bash /mnt/cidata/tls-guest.sh --garage-existing
 phase=complete
+printf 'VM_GARAGE_JOIN_COMPLETE\n'
+poweroff

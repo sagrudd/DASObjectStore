@@ -24,6 +24,8 @@ class GarageJoinedGuards(unittest.TestCase):
         self.assertIn('systemctl stop das-vm-garage.service', TLS)
         self.assertIn('test "$garage_existing" = no; then systemctl start das-vm-protocol.service', TLS)
         self.assertIn("VM_GARAGE_TLS_ALL_PASS_NOT_FORMAL_CUSTODY", TLS)
+        self.assertIn('if test "$garage_existing" = no; then poweroff; fi', TLS)
+        self.assertLess(JOIN.index("VM_GARAGE_JOIN_COMPLETE"), JOIN.rindex("poweroff"))
 
     def test_actual_bytes_do_not_fabricate_attestation_or_reset_journal(self):
         self.assertIn("exact bytes acquired; fixture does not produce formal attestation", RUST)

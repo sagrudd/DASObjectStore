@@ -199,4 +199,4 @@ else
     echo VM_GARAGE_TLS_ALL_PASS_NOT_FORMAL_CUSTODY
 fi
 phase=complete
-poweroff
+if test "$garage_existing" = no; then poweroff; fi

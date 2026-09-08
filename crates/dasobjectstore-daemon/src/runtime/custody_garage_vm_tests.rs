@@ -208,8 +208,8 @@ mod actual {
         let config = fixture_config();
         let runner = ActualRunner(config.clone());
         let command = |operation: Vec<String>| {
-            let args = super::super::super::docker_compose_args(&config,
-                super::super::super::garage_exec_args(&config.service_name, operation));
+            let args = zeroize::Zeroizing::new(super::super::super::docker_compose_args(&config,
+                super::super::super::garage_exec_args(&config.service_name, operation)));
             runner.run("docker", &args)
         };
         let key = format!("GK{}", uuid::Uuid::new_v4().simple());
@@ -251,8 +251,9 @@ mod actual {
             ("get-object", probe[0].as_str(), probe[1].as_str()),
             ("put-object", key.as_str(), secret.as_str()),
         ] {
-            let environment = vec![("AWS_ACCESS_KEY_ID".into(), access.into()),
-                ("AWS_SECRET_ACCESS_KEY".into(), secret_value.into())];
+            let environment: zeroize::Zeroizing<Vec<(String, String)>> = zeroize::Zeroizing::new(
+                vec![("AWS_ACCESS_KEY_ID".into(), access.into()),
+                ("AWS_SECRET_ACCESS_KEY".into(), secret_value.into())]);
             let mut args = vec!["s3api".into(), operation.into(), "--bucket".into(),
                 definition.bucket_name.clone(), "--endpoint-url".into(), config.endpoint.clone(),
                 "--key".into(), if operation == "get-object" { object_key.into() } else { denied_key.clone() }];
