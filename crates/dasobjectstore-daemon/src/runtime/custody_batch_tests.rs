@@ -7,6 +7,7 @@ struct BatchRunner {
     operations: Mutex<Vec<String>>,
     fail: Mutex<Option<(String, usize)>>,
     ledger_failure: Mutex<Option<PathBuf>>,
+    deny_head_at: Mutex<Option<usize>>,
 }
 impl ServiceCommandRunner for BatchRunner {
     fn run(
@@ -21,7 +22,7 @@ impl ServiceCommandRunner for BatchRunner {
         _: &str,
         a: &[String],
         _: &[String],
-        _: &[(String, String)],
+        environment: &[(String, String)],
     ) -> Result<super::ServiceCommandOutput, super::DaemonServiceRuntimeError> {
         use sha2::{Digest, Sha256};
         let op = a
@@ -29,6 +30,22 @@ impl ServiceCommandRunner for BatchRunner {
             .find(|v| ["head-object", "put-object", "get-object"].contains(&v.as_str()))
             .unwrap()
             .clone();
+        let required = if op == "put-object" {
+            "writer-access"
+        } else {
+            "reader-access"
+        };
+        if !environment
+            .iter()
+            .any(|(name, value)| name == "AWS_ACCESS_KEY_ID" && value == required)
+        {
+            return Err(super::DaemonServiceRuntimeError::CommandFailed {
+                program: "aws".into(),
+                args: Vec::new(),
+                status: "254".into(),
+                stderr: "AccessDenied (403)".into(),
+            });
+        }
         let value = |flag: &str| a[a.iter().position(|v| v == flag).unwrap() + 1].clone();
         let key = value("--key");
         let error = || super::DaemonServiceRuntimeError::CommandFailed {
@@ -40,6 +57,14 @@ impl ServiceCommandRunner for BatchRunner {
         let mut operations = self.operations.lock().unwrap();
         let occurrence = operations.iter().filter(|v| **v == op).count();
         operations.push(op.clone());
+        if op == "head-object" && *self.deny_head_at.lock().unwrap() == Some(occurrence) {
+            return Err(super::DaemonServiceRuntimeError::CommandFailed {
+                program: "aws".into(),
+                args: Vec::new(),
+                status: "254".into(),
+                stderr: "AccessDenied (403)".into(),
+            });
+        }
         if self.fail.lock().unwrap().as_ref() == Some(&(op.clone(), occurrence)) {
             return Err(error());
         }
@@ -201,6 +226,61 @@ fn batch_inventory() -> crate::runtime::CustodyFiniteInventory {
             })
             .collect(),
     }
+}
+
+#[test]
+fn finite_batch_reader_head403_never_records_receipt_or_adopts_written_object() {
+    for head in [0, 1] {
+        let f = BatchFixture::new();
+        *f.runner.deny_head_at.lock().unwrap() = Some(head);
+        let before = fs::read(f.ledger()).unwrap();
+        let result = f
+            .controller()
+            .retain_custody_inventory(&batch_inventory(), batch_inputs());
+        let failure = result.unwrap_err();
+        assert_eq!(
+            failure.phase,
+            crate::runtime::CustodyBatchPhase::ObjectRetention
+        );
+        assert_eq!(failure.failed_index, Some(0));
+        assert!(failure.completed.is_empty());
+        assert_eq!(
+            dasobjectstore_object_service::inspect_custody_ledger(f.ledger())
+                .unwrap()
+                .committed_receipts,
+            0
+        );
+        assert_eq!(fs::read(f.ledger()).unwrap(), before);
+        assert_eq!(f.runner.objects.lock().unwrap().len(), head);
+        assert_eq!(fs::read_dir(f.root.join("consumed")).unwrap().count(), 2);
+    }
+}
+
+#[test]
+fn finite_batch_foreign_reader_identity_denies_before_backend() {
+    let f = BatchFixture::new();
+    let path = f.root.join("credentials/batch-reader");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(
+        path,
+        original.replace("identity=custody-reader\n", "identity=foreign-reader\n"),
+    )
+    .unwrap();
+    let error = f
+        .controller()
+        .retain_custody_inventory(&batch_inventory(), batch_inputs())
+        .unwrap_err();
+    assert_eq!(
+        error.phase,
+        crate::runtime::CustodyBatchPhase::AdapterConstruction
+    );
+    assert!(f.runner.operations.lock().unwrap().is_empty());
+    assert_eq!(
+        dasobjectstore_object_service::inspect_custody_ledger(f.ledger())
+            .unwrap()
+            .committed_receipts,
+        0
+    );
 }
 
 #[test]

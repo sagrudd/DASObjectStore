@@ -159,7 +159,7 @@ impl<R: ServiceCommandRunner> CustodyServiceController<'_, R> {
             inspection.retention_until_utc,
         )
         .map_err(|_| denied(CustodyBatchPhase::AdapterConstruction))?;
-        let mut reader = GarageCustodyS3Reader::new(
+        let reader = GarageCustodyS3Reader::new(
             self.runner,
             &config.endpoint,
             &entry.definition.bucket_name,
@@ -169,11 +169,11 @@ impl<R: ServiceCommandRunner> CustodyServiceController<'_, R> {
         );
         let mut completed = Vec::with_capacity(ordered.len());
         for (index, input) in ordered.into_iter().enumerate() {
-            match retain_custody_object_with_readback(
+            match retain_garage_custody_object_with_readback(
                 &entry.ledger_path,
                 input,
                 &mut writer,
-                &mut reader,
+                &reader,
             ) {
                 Ok(receipt) => completed.push(receipt),
                 Err(_) => {

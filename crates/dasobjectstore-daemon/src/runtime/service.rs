@@ -1905,7 +1905,7 @@ mod tests {
                 && call
                     .environment
                     .iter()
-                    .any(|(_, value)| value == "writer-key")
+                    .any(|(_, value)| value == "reader-key")
                 && call
                     .arguments
                     .iter()
@@ -2150,6 +2150,22 @@ mod tests {
                 arguments: arguments.to_vec(),
                 environment: environment.to_vec(),
             });
+            let required = if arguments.iter().any(|v| v == "put-object") {
+                "writer-key"
+            } else {
+                "reader-key"
+            };
+            if !environment
+                .iter()
+                .any(|(name, value)| name == "AWS_ACCESS_KEY_ID" && value == required)
+            {
+                return Err(super::DaemonServiceRuntimeError::CommandFailed {
+                    program: "aws".into(),
+                    args: Vec::new(),
+                    status: "254".into(),
+                    stderr: "AccessDenied (403)".into(),
+                });
+            }
             if arguments.iter().any(|argument| argument == "head-object") {
                 if self.head_object_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     return Err(super::DaemonServiceRuntimeError::CommandFailed {

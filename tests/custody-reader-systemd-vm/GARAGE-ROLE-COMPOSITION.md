@@ -1,6 +1,8 @@
-# Measured Garage HEAD role mismatch — proposed compatible source correction
+# Measured Garage HEAD role mismatch — accepted compatible source correction
 
-Review before implementation. The explicit-region actual fixture measured
+Root independently reviewed and accepted design commit a2256844 for source
+implementation under delegated coordination; no owner activation implied.
+The explicit-region actual fixture measured
 HEAD403 using the correctly provisioned W-only writer; see
 `evidence/garage-region403-run.txt`. No change to W/R grants, wire records,
 sealed policy, receipt encoding, handoff lifecycle or public generic ports.
@@ -51,3 +53,23 @@ The observer is a read capability, never extra backend permission for writer.
   WORM, Compose, independently admitted companion or physical-verifier claim.
 
 No actual run until this source correction and its frozen executable are reviewed.
+
+## Implemented source checkpoint
+
+The private helper and both service routes now use the borrowed composition.
+Legacy writer HEAD delegates to the same extracted parser with its original
+environment; legacy reader trait delegates to the unchanged shared GET body.
+Single-object credential identities now receive the same explicit sealed-role
+preflight already present in the batch route. Public/wire APIs are unchanged.
+
+Role-enforcing service fixtures now return403 for W HEAD/GET or R PUT; the
+existing single and finite success tests would fail with the old composition.
+New tests cover both HEAD observations using R, every required policy field,
+actual selected retention rather than a default, foreign endpoint/bucket and
+same identity before I/O, foreign sealed reader before backend, and403 on
+either initial or post-PUT HEAD with zero receipts and preserved ledger/objects.
+Final Mac daemon allfeatures library985tests passed10.83s (0failed/0ignored),
+including the selected-retention assertion. Strict daemon allfeatures/alltargets
+Clippy passed13.05s; workspace formatting and diff checks passed. All commands
+used locked/offline dependency resolution and the existing shared cache with
+incremental compilation disabled. Real Garage qualification remains separate.

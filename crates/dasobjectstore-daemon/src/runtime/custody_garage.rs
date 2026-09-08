@@ -5,7 +5,9 @@
 //! S3 commands for the only admitted data operation: create-if-absent content
 //! retention followed by an independent GET readback.
 mod bounded;
+mod retention;
 pub use bounded::BoundedGarageCustodyReader;
+pub(super) use retention::retain_garage_custody_object_with_readback;
 
 use super::service::{
     docker_compose_args, garage_exec_args, GarageServiceRuntimeConfig, ServiceCommandRunner,
@@ -674,31 +676,14 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
     }
 
     fn object_state(&mut self, object_key: &str) -> Result<CustodyObjectState, ObjectServiceError> {
-        let args = head_args(&self.bucket, object_key, &self.endpoint);
-        match self
-            .runner
-            .run_with_display_args_and_env("aws", &args, &args, &self.environment)
-        {
-            Ok(output) => {
-                let head: GarageHead = serde_json::from_str(&output.stdout).map_err(|error| {
-                    invalid(format!("custody Garage HEAD response is invalid: {error}"))
-                })?;
-                let sha = head
-                    .metadata
-                    .dasobjectstore_sha256
-                    .as_deref()
-                    .ok_or_else(|| invalid("custody Garage object omits SHA-256 metadata"))?;
-                self.validate_object_lock_metadata(&head.metadata)?;
-                Ok(CustodyObjectState::Existing {
-                    content_sha256: sha.to_string(),
-                    content_length: head.content_length,
-                })
-            }
-            Err(error) if is_missing_bucket_error(&error.to_string()) => {
-                Ok(CustodyObjectState::Missing)
-            }
-            Err(error) => Err(runtime_error(error)),
-        }
+        retention::observe_state(
+            self.runner,
+            &self.endpoint,
+            &self.bucket,
+            &self.environment,
+            object_key,
+            self,
+        )
     }
 
     fn put_if_absent(&mut self, object_key: &str, bytes: &[u8]) -> Result<(), ObjectServiceError> {
@@ -765,6 +750,12 @@ impl<R: ServiceCommandRunner> CustodyObjectReader for GarageCustodyS3Reader<'_, 
     }
 
     fn read_exact(&mut self, object_key: &str) -> Result<Vec<u8>, ObjectServiceError> {
+        self.read_exact_shared(object_key)
+    }
+}
+
+impl<R: ServiceCommandRunner> GarageCustodyS3Reader<'_, R> {
+    fn read_exact_shared(&self, object_key: &str) -> Result<Vec<u8>, ObjectServiceError> {
         let path = scratch_path(&self.scratch_root, "get")?;
         let args = vec![
             "s3api".into(),

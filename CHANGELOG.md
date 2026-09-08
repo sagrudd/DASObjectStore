@@ -2,6 +2,11 @@
 
 ## 0.186.0 - Unreleased
 
+- Correct concrete Garage retention role composition: metadata HEAD observations
+  and GET use the sealed read-only identity, while conditional PUT keeps the
+  write-only identity. Preserve exact policy verification, one-use handoffs,
+  immutable receipts and legacy APIs; do not broaden backend grants.
+
 - Add opt-in real TLS 1.3 exact-object server/client composition with mandatory
   mutual certificate authentication, exact DER pins, one inherited deadline,
   bounded HTTP collection and journal-before-connect/no-retry semantics.
