@@ -1,0 +1,13 @@
+Diagnostic full source a2ce276f382e39d8cddece84ed63754d55e6f3a0 compiled
+Linux successfully in38.89s; prerequisite8 tests passed0.09s.
+Containerdcc489d0c435c01544d0838c6500defdd400895ed8b1bc23b2a9dbdf7723beaf.
+Started2026-09-08T14:54:59.902524482Z, stopped14:57:28.444377951Z.
+Adaptere7f424e8a928bfa02a75e31c8fbb1cf30ea3c11ba58e63ccf5eadb2613c50bb3.
+Seed6668d81b0bc96750f36a21351bad306331870285c339fb65411c283ed0a4c1e3.
+Serial09b073d4198899573a1e95dac9b1eeb20a667960e8db7373f69fb938834b597f.
+Only firmware screen-clear output; no BdsDxe/Linux/systemd or fixture start.
+Observed0.00% CPU and212.6MiB at approximately107s. Stopped early after
+bounded observation rather than consuming900s. Owned container removed.
+No OS boot, fixture credentials, manager or loader execution occurred.
+The intermittent firmware stall's cause is not asserted. Prior TCG adapter
+ALL_PASS remains distinct. No product guard or credential policy was changed.

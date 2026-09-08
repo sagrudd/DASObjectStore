@@ -5,7 +5,17 @@ test "$(id -u)" = 1000
 test -e /.dockerenv
 test "$(awk '/CapEff:/{print $2}' /proc/self/status)" = 0000000000000000
 test "$(awk '/NoNewPrivs:/{print $2}' /proc/self/status)" = 1
-test ! -e /dev/kvm
+acceleration=(-accel tcg,thread=multi -cpu max)
+if test "${1:-adapter}" = loader-kvm; then
+    test "$(id -g)" = 1000
+    case " $(id -G) " in *' 994 '*) ;; *) exit 1;; esac
+    test -c /dev/kvm
+    test "$(stat -c '%t:%T' /dev/kvm)" = a:e8
+    test -r /dev/kvm && test -w /dev/kvm
+    acceleration=(-accel kvm -cpu host)
+else
+    test ! -e /dev/kvm
+fi
 mkdir /tmp/vm /tmp/seed
 cp /adapter /tmp/seed/adapter
 strip --strip-debug /tmp/seed/adapter
@@ -14,7 +24,7 @@ sha256sum /tmp/seed/adapter
 /tmp/seed/adapter runtime::custody_reader::systemd --skip actual_systemd_vm_adapter_boundary
 case "${1:-adapter}" in
  adapter) cp /custody-reader-systemd-vm/guest.sh /tmp/seed/guest.sh ;;
- loader)
+ loader|loader-kvm)
    test -f /aws
    cp /aws /tmp/seed/aws
    sha256sum /tmp/seed/aws
@@ -32,7 +42,7 @@ qemu-img create -q -f qcow2 -F qcow2 -b /opt/custody-systemd-vm/public/Fedora-Cl
 sha256sum /tmp/vm/seed.iso /usr/share/AAVMF/AAVMF_CODE.fd /tmp/vm/AAVMF_VARS.fd
 exec qemu-system-aarch64 -no-reboot \
  -boot order=c,menu=off,strict=on \
- -accel tcg,thread=multi -machine virt-7.2 -cpu max -smp 2 -m 2048 \
+ "${acceleration[@]}" -machine virt-7.2 -smp 2 -m 2048 \
  -nodefaults -nic none -display none -monitor none -serial stdio \
  -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd \
  -drive if=pflash,format=raw,file=/tmp/vm/AAVMF_VARS.fd \

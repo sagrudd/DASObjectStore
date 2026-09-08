@@ -120,6 +120,45 @@ fixtures cannot establish its real ACL construction. Measure and bound
 emulator-only test budgets separately from production limits; preserve the
 failed runs as evidence rather than rewriting them as successful qualification.
 
+Proposed KVM-only loader successor (not yet executed)
+---------------------------------------------------
+
+The original TCG results remain immutable. A separately reviewed successor may
+use the existing DGX KVM device, without installing/loading a host module or
+changing host users, groups, ACLs, services or packages. Read-only inspection on
+2026-09-08 found ``/dev/kvm`` character device10:232, owner0:994, mode0660,
+with an existing named UID1000 read/write ACL. This is a fixture resource fact,
+not target installation authority. Only this device is proposed; no other
+device, host filesystem mount, network or privilege is permitted.
+
+The exact proposed outer invocation is::
+
+  docker create --pull=never --name das-systemd-loader-kvm
+    --network none --cap-drop ALL --security-opt no-new-privileges
+    --cpus 4 --memory 6g --pids-limit 256 --user 1000:1000
+    --group-add 994
+    --device /dev/kvm:/dev/kvm:rw
+    --entrypoint /usr/bin/timeout
+    sha256:b3fa5d9f3fcfe6b64d73fb5ff37c0d12a972600145430d553bb54df525423865
+    --signal=TERM --kill-after=10 900
+    /bin/bash /custody-reader-systemd-vm/run.sh loader-kvm
+
+Before starting it, inspect absent mounts, networknone, no privilege, ALL
+capabilities dropped, NNP and exactly the one selected read/write device.
+The selected command explicitly adds group994 only inside the disposable
+container, because Docker may not preserve the host's named UID1000 ACL when
+constructing its device node. This does not alter host group membership or
+grant access to other host files/devices. A public, no-boot preflight must
+inspect UID/GID, supplemental group, device identity/mode and actual read/write
+access using these same flags. The non-root entry point also requires the
+actual character-device identity and read/write access. Denial stops before
+boot; there is no root-user, extra-group or accelerator fallback. QEMU differs
+only in ``-accel kvm -cpu host`` instead of TCG/max; the
+same fresh disks, seed, bootindex, two vCPUs,2GiB guest RAM and900s outer bound
+remain. There is no TCG fallback if KVM cannot initialize. Never commit the
+booted container. Record actual accelerator and source hashes separately;
+neither a KVM test nor a TCG test proves a production latency guarantee.
+
 Primary public input references
 -------------------------------
 
