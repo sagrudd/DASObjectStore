@@ -50,6 +50,7 @@ for mode in positive restart malformed wrong-key stale-current positive; do
 Description=Disposable actual complete credential loader fixture
 [Service]
 Type=exec
+RemainAfterExit=yes
 User=2000
 Group=2000
 NoNewPrivileges=yes
@@ -63,35 +64,12 @@ UNIT
     systemctl daemon-reload
     phase="load_$mode"
     systemctl start das-vm-loader.service
-    phase="process_identity_$mode"
-    # v259 dbus-service.c BUS_EXEC_STATUS_VTABLE("ExecMain", ...), with
-    # execute.c::exec_status_exit retaining pid after a fast expected denial.
-    # MainPID may already be zero for a successfully completed negative case.
-    pid=$(systemctl show -p ExecMainPID --value das-vm-loader.service)
-    invocation=$(systemctl show -p InvocationID --value das-vm-loader.service)
-    if [[ "$pid" =~ ^[0-9]+$ ]]; then printf 'VM_LOADER_OBSERVED_PID %s\n' "$pid"; fi
-    if test -n "$invocation"; then echo VM_LOADER_INVOCATION_PRESENT; else echo VM_LOADER_INVOCATION_ABSENT; fi
-    phase="nonzero_pid_$mode"
-    test "$pid" -gt 0
-    phase="invocation_shape_$mode"
-    # A completed fast rejection may clear InvocationID. Identity continuity
-    # is asserted for every positive/restart, including the final positive.
-    if test "$mode" = positive || test "$mode" = restart; then
-        [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
-    fi
-    if test -z "$first_pid"; then
-        first_pid=$pid
-        first_invocation=$invocation
-        first_publication=$publication
-    elif test "$mode" = restart; then
-        test "$pid" != "$first_pid"
-        test "$invocation" != "$first_invocation"
-        echo VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
-    fi
     success=no
     phase="terminal_result_$mode"
     for unused in $(seq 1 750); do
-        if test -f /run/das-vm-results/passed && test "$(systemctl show -p ActiveState --value das-vm-loader.service)" = inactive; then
+        if test -f /run/das-vm-results/passed &&
+           test "$(systemctl show -p ActiveState --value das-vm-loader.service)" = active &&
+           test "$(systemctl show -p SubState --value das-vm-loader.service)" = exited; then
             test "$(systemctl show -p ExecMainStatus --value das-vm-loader.service)" = 0
             test "$(systemctl show -p Result --value das-vm-loader.service)" = success
             success=yes
@@ -104,6 +82,29 @@ UNIT
         sleep .2
     done
     test "$success" = yes
+    phase="process_identity_$mode"
+    # RemainAfterExit pins the completed unit until these checks and explicit
+    # stop. v259 service.c enters SERVICE_EXITED, avoiding inactive-unit GC.
+    pid=$(systemctl show -p ExecMainPID --value das-vm-loader.service)
+    invocation=$(systemctl show -p InvocationID --value das-vm-loader.service)
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then printf 'VM_LOADER_OBSERVED_PID %s\n' "$pid"; fi
+    if test -n "$invocation"; then echo VM_LOADER_INVOCATION_PRESENT; else echo VM_LOADER_INVOCATION_ABSENT; fi
+    phase="nonzero_pid_$mode"
+    test "$pid" -gt 0
+    phase="invocation_shape_$mode"
+    [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
+    if test -z "$first_pid"; then
+        first_pid=$pid
+        first_invocation=$invocation
+        first_publication=$publication
+    elif test "$mode" = restart; then
+        test "$pid" != "$first_pid"
+        test "$invocation" != "$first_invocation"
+        echo VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
+    fi
+    phase="stop_$mode"
+    systemctl stop das-vm-loader.service
+    test "$(systemctl show -p ActiveState --value das-vm-loader.service)" = inactive
     phase="unchanged_publication_$mode"
     after=$(sha256sum "$encrypted" /run/das-systemd-vm-fixture/loader.json "${encrypted%/reader.enc}/ledger.sqlite3" "${encrypted%/reader.enc}"/records/*.jcs)
     test "$after" = "$publication"
