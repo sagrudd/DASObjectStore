@@ -1,0 +1,24 @@
+Public preparation only; no package installation or VM boot.
+
+Recipe SHA256: a99c17a379107e147704d14e89edfd4d07b0a8d2f392aa5d8f2936c7f0871c97
+Container: a20f223467131b2c6780c151e6f3bd75bbb5f16ef77ed2041b874668c19e24b1
+Started: 2026-09-08T15:20:18.59810291Z
+Finished: 2026-09-08T15:21:27.541520307Z
+Exit: 0; PUBLIC_FEDORA_QEMU_DOWNLOAD_COMPLETE
+135 RPMs, 71,577,822 bytes; signatures passed against the sole selected Fedora44 key.
+Manifest SHA256: d514c95e9123508a92ecdc96edf0e08ee0452962a7a76c58c13189c05f301f5d
+NEVRA SHA256: bf84f13a1d2794cd5359e0af9d310134b2fac2bec69c161df3361b25ab4b7029
+Full public evidence is in qemu-release/.
+
+Unbooted download-only cache:
+sha256:c182daae668d3ec0f55fbf8ca289ab84a81c1fa28fabc17505c72cdf3a00e404
+No mounts/devices/privilege; four CPU, 6 GiB, pids256, cap-drop ALL, NNP.
+The independent host timeout was 900s with forced termination after 10s;
+the container also had a 900s Bash watchdog. Public downloads used bridge
+networking only in this preparation container. Container removed afterward.
+
+The selected base already has glibc2.43-8 and systemd-libs259.8; the release
+repository closure must NOT overwrite these with older RPMs. The subsequent
+network-none repository-solved stored transaction must preserve every existing
+installed NEVRA and contain only new installs before any execution approval.
+The separately booted pristine Fedora guest remains systemd259.5.

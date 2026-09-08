@@ -1,0 +1,7 @@
+./usr/lib/.build-id/
+./usr/lib/.build-id/99/
+./usr/lib/.build-id/99/b004c533289ce312e7f56be169cd82f64680f9
+./usr/lib64/libcreaterepo_c.so.1
+./usr/lib64/libcreaterepo_c.so.1.2.1
+./usr/share/licenses/createrepo_c-libs/
+./usr/share/licenses/createrepo_c-libs/COPYING

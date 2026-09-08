@@ -1,0 +1,26 @@
+Reviewed KVM successor, source scripts d219c91035923d1e8ed629a17ccc517d174ccaca.
+Rust artifact from exacta2ce276f (identical Rust in d219), compilePASS38.89s.
+Public preflight f3bbfd14a048045074fcc137fb71d6f36e8e3470fb14f6c2352a4fd72cd91b7e:
+uid1000 gid1000 groups1000,994; /dev/kvm char10:232 root0:994 mode0660;
+actual read/write checks passed. No mounts/network/privilege/capabilities;
+only explicit device /dev/kvm rw and container-only group994, NNP.
+Preflight output SHA25676bb258671327943bfb94c9bc0e3cc7ea31e16d2c43e78f633716a8753cc52ae.
+Preflight container removed without boot.
+
+KVM run b8e388400f2e65be0e87e4f533552b4f36446b0702fba1d8a4c91f38038f255b:
+Started2026-09-08T15:05:04.65020308Z, stopped15:06:11.612627281Z.
+Same inspected isolation,4CPU/6GiB/256pids/900s; -accel kvm -cpu host,
+two guest vCPUs/2GiB, fresh overlay/vars/seed, no accelerator fallback.
+Prerequisite8 tests passed0.09s. KVM initialized, then firmware printed:
+Synchronous Exception at 0x00000000BFAF1A14
+No further registers, BdsDxe, Linux or loader output appeared.
+This is not a loader failure or qualification. No guest credential generated.
+Stopped early; owned boot container removed, no state exported/committed.
+
+Adaptere7f424e8a928bfa02a75e31c8fbb1cf30ea3c11ba58e63ccf5eadb2613c50bb3.
+Seedcd0e2beea921dc4520a86ce1405b167b5c4c6b125c35ba0cf3426fa9b8792955.
+Serial7a1efe0adb278102fb64df2d2f85505c31e3d70a092c746cec2003592212779d.
+Tools were previously authenticated Debian QEMU7.2.22 and
+qemu-efi-aarch642022.11-6+deb12u2. Their compatibility with this KVM host
+is not established by prior TCG success; no specific exception cause inferred.
+Any modern authenticated toolchain successor must retain separate provenance.

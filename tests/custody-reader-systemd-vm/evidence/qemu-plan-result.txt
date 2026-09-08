@@ -1,0 +1,32 @@
+Offline planning only: no installed package transaction was executed.
+
+Actual stored transaction: qemu-plan/transaction.json
+SHA256 c55ec4fe0d8d643cf8546be91a0dadb7fc466317df524f49d080d6d66aff0bf9
+Exactly 34 RPM actions, all Install; no upgrades, removals or downgrades.
+Installed NEVRA manifests before and after planning are byte-identical:
+SHA256 f96d1eee3844fd3468a88bb5b55cb428359a89c7aea5ec053df8d4a026665db9
+Independent local JSON inspection confirmed all 34 actions and compared both
+raw manifests. Full public receipts are in qemu-plan/.
+
+Preparation discoveries retained rather than hidden:
+1. RPM6 rpm2archive emits the archive on stdout. The initial recipe expected
+   an adjacent .tgz and failed before extraction. Corrected explicit stdout
+   capture and tar auto-detection; the failed container was removed.
+2. Extracted signed createrepo_c/libs needed libdrpm.so.0 absent from the base.
+   The dependency check denied. After review, the already authenticated exact
+   drpm0.5.3-2 payload was extracted into the same separate prefix; no RPM
+   database or base libraries changed. The failed container was removed.
+3. The solver rejected optional binutils2.46 because its release libelf0.194
+   conflicts with base libelf0.196. After review, binutils was removed from
+   requested runtime tools. The public native adapter will be pre-stripped
+   in the verified Debian build container with pre/post hashes and provenance;
+   the modern runner must not mutate it. No downgrade/skip-broken was used.
+4. DNF successfully stored the final 34-install plan, then the wrapper exited127
+   because this minimal image has no cmp. Raw before/after manifests were
+   independently verified equal; recipe now uses SHA256 equality. This is not
+   recorded as a completely successful wrapper execution.
+
+Final planning container (stopped):
+3f3eeacae6ba77479b8acfc4b14b630d78373f291fe1eb036049e607ef477ebf
+Network none, no mounts/devices/capabilities, NNP, 4 CPU/6 GiB/pids256.
+Root review of the exact stored actions is required before offline replay.
