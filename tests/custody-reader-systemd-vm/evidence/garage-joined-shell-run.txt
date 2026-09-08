@@ -1,0 +1,20 @@
+Actual Garage joined shell diagnostic — DENIED, no joined qualification
+Runner 1eb19e6f; unchanged Rust 5d49f949 / stripped 3ece032e... .
+Container 948a9ff999ca2cc07fca643c3c647469ba598ed5d4760ebe92c50ee536ec505a.
+Started 2026-09-08T18:12:42.230658218Z; finished 18:13:25.578888831Z.
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM
+VM_GARAGE_EXIT phase=complete status=0
+VM_JOINED_EXIT phase=prepare_positive status=1
+VM_TLS_PREP_SHELL_LOCATION source=tls-guest.sh line=0
+Container/QEMU exit 0 after failure shutdown; acceptance controller 1.
+Console SHA256 7a2cd29e5efbfe544da211516fb0ad63939a36fcaa04891ffad65539e5e86216.
+Exact exited container removed; no private console, keys or booted state exported.
+
+Source review corrects the interpretation of all three prior denied runs:
+prepare_positive spanned unit setup and reader readiness, not just preparation.
+Explicit readiness exits had no location assignment. Therefore none established
+a Rust preparation defect. Next frozen diagnostic separates every runtime stage,
+records all explicit exits, and applies the tested payload-free location hook
+to both reader and verifier. Private logs remain inside the disposable guest;
+only exact allowlisted source locations may be emitted. No product guard changed.

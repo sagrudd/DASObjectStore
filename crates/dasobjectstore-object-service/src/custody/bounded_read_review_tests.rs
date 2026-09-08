@@ -1,5 +1,5 @@
 //! Independent snapshot and no-side-effect regressions; synthetic data only.
-// The final two author_* cases were added by the implementation author;
+// The author_* cases were added by the implementation author;
 // the original seven review_* cases are the independent lead-agent tests.
 use super::*;
 use std::os::unix::fs::{symlink, DirBuilderExt, PermissionsExt};
@@ -71,6 +71,71 @@ fn limits() -> CustodyReadLimits {
         maximum_bytes: 1024,
         timeout: Duration::from_secs(5),
     }
+}
+
+#[test]
+fn author_full_raw_ledger_binding_rejects_wrong_digest_and_foreign_descriptor_before_get() {
+    let (_owned, path, receipt, mut reader) = fixture();
+    let original = fs::read(&path).unwrap();
+    let digest = sha256_hex(&original);
+    let mut file = fs::File::open(&path).unwrap();
+    assert!(verify_custody_readback_existing_bound(
+        &path,
+        &receipt,
+        &mut reader,
+        limits(),
+        &mut file,
+        &"f".repeat(64)
+    )
+    .is_err());
+    assert_eq!(reader.calls, 0);
+    let (_other, foreign, _, _) = fixture();
+    let mut file = fs::File::open(foreign).unwrap();
+    assert!(verify_custody_readback_existing_bound(
+        &path,
+        &receipt,
+        &mut reader,
+        limits(),
+        &mut file,
+        &digest
+    )
+    .is_err());
+    assert_eq!(reader.calls, 0);
+    let mut file = fs::File::open(&path).unwrap();
+    verify_custody_readback_existing_bound(
+        &path,
+        &receipt,
+        &mut reader,
+        limits(),
+        &mut file,
+        &digest,
+    )
+    .unwrap();
+    assert_eq!(reader.calls, 1);
+    assert_eq!(fs::read(path).unwrap(), original);
+}
+
+#[test]
+fn author_same_length_raw_ledger_drift_after_get_cannot_return_success() {
+    let (_owned, path, receipt, mut reader) = fixture();
+    let original = fs::read(&path).unwrap();
+    let digest = sha256_hex(&original);
+    let mut changed = original.clone();
+    *changed.last_mut().unwrap() ^= 1;
+    let effect_path = path.clone();
+    reader.effect = Some(Box::new(move || fs::write(effect_path, changed).unwrap()));
+    let mut file = fs::File::open(&path).unwrap();
+    assert!(verify_custody_readback_existing_bound(
+        &path,
+        &receipt,
+        &mut reader,
+        limits(),
+        &mut file,
+        &digest
+    )
+    .is_err());
+    assert_eq!(reader.calls, 1);
+    assert_eq!(fs::read(path).unwrap().len(), original.len());
 }
 fn names(path: &Path) -> Vec<std::ffi::OsString> {
     let mut names: Vec<_> = fs::read_dir(path)
@@ -229,4 +294,35 @@ fn author_exclusive_sql_lock_denies_before_get_without_busy_wait() {
     assert_eq!(reader.calls, 0);
     writer.execute_batch("ROLLBACK").unwrap();
     assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn author_inherited_budget_is_never_renewed_and_expiry_denies_before_get() {
+    let original = limits().start().unwrap();
+    assert_eq!(
+        original.capped(Duration::from_secs(300)).unwrap().0,
+        original.0
+    );
+    assert!(original.capped(Duration::from_millis(1)).unwrap().0 < original.0);
+    let (_directory, path, receipt, mut reader) = fixture();
+    let mut file = fs::File::open(&path).unwrap();
+    let digest = crate::custody_reader::raw_sha256(&fs::read(&path).unwrap());
+    let budget = CustodyReadLimits {
+        maximum_bytes: 1024,
+        timeout: Duration::from_millis(1),
+    }
+    .start()
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(3)); // ingress consumed the inherited budget
+    assert!(verify_custody_readback_existing_bound_at(
+        &path,
+        &receipt,
+        &mut reader,
+        1024,
+        (&mut file, &digest),
+        budget
+    )
+    .is_err());
+    assert_eq!(reader.calls, 0);
+    assert!(budget.capped(Duration::from_secs(300)).is_err());
 }

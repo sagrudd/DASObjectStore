@@ -1,0 +1,30 @@
+Public tool preparation plan; not a boot or loader qualification.
+
+Input: sha256:30949830d1392172b14863bafdb2afb865f3c237c6d8bf80ccb6f3b413a23935
+is the retained public-only Fedora44 metadata/download cache, derived from the
+official Fedora44/aarch64 OCI manifest
+quay.io/fedora/fedora@sha256:2278672237d26dce720494f4fd9a64ae1cbc4312d1f3c8587ef0aef4dcc80dd4.
+It contains no booted VM or generated fixture secrets.
+
+qemu-prepare.sh resolves only the Fedora44 release repository and downloads the
+complete strong dependency closure of qemu-system-aarch64-core, qemu-img,
+edk2-aarch64, genisoimage, binutils (strip is used by the existing runner), and
+createrepo_c (the separately qualified joined fixture's local RPM repository).
+Every RPM must verify against only Fedora44 primary fingerprint
+36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6 in an isolated RPM key database.
+Exact URLs, NEVRAs, signatures, SHA256 and consulted metadata hashes are retained.
+The download is capped at 1 GiB and 1024 RPMs, with 900s outer wall-clock control.
+Preparation container: no mounts/devices/host namespaces; cap-drop ALL, NNP,
+4 CPU, 6 GiB, pids 256. Public download networking is preparation-only.
+
+STOP after download: obtain root review of actual closure and the exact offline
+transaction before installing. Installation may occur only in a separate
+network-none disposable public tool container, with no guest boot or secret
+generation. Preserve transaction output and actual installed tool/firmware
+hashes. Any clean tool image is committed BEFORE boot, never afterward.
+Reuse the already authenticated pristine Fedora44 qcow2 by public image copy;
+do not download a replacement or export a booted guest.
+
+This replaces the old Debian QEMU7.2/AAVMF tool combination for a subsequent
+separately measured KVM test. The earlier firmware exception is not diagnosed
+as a product loader failure, and modern-tool success is not assumed.

@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.186.0 - Unreleased
+
+- Explicitly select the generated Garage configuration's `garage` region for
+  protected Garage reader continuation; do not inherit ambient AWS region or
+  expand the closed credential format or generic S3 defaults.
+
+- Correct concrete Garage retention role composition: metadata HEAD observations
+  and GET use the sealed read-only identity, while conditional PUT keeps the
+  write-only identity. Preserve exact policy verification, one-use handoffs,
+  immutable receipts and legacy APIs; do not broaden backend grants.
+
+- Add opt-in real TLS 1.3 exact-object server/client composition with mandatory
+  mutual certificate authentication, exact DER pins, one inherited deadline,
+  bounded HTTP collection and journal-before-connect/no-retry semantics.
+  Synthetic loopback qualification does not install a listener or grant admission.
+
+- Add an exact-envelope journal read entry point sharing the existing durable
+  started transition, with same-transaction raw/column binding and whole-call
+  deadline enforcement. Preserve legacy callers and journal schema.
+
+- Bind signed exact-object reads to server-owned receipt/measurement selection,
+  process-lifetime attempt claims and the full raw ledger digest inside the
+  verified read snapshot. Preserve the historical unbound read API; no TLS
+  listener or companion authority is inferred from this source composition.
+
+- Add accepted finite private/HTTP wire codecs with frozen vector conformance,
+  existing signed-request verification and durable off-NUC attempt regression
+  coverage. Buffer parsing supplies no TLS, peer admission or network deadline.
+
+- Add accepted ADR0011 closed reader binding/current/seal codecs and a concrete
+  existing-only complete custody-ledger receipt-set verifier. Preserve legacy
+  handoff, receipt, signed request and retention semantics. These public records
+  validate source data, not independent companion admission or live eligibility.
+- Add initial protected reader publication and bounded continuation composition,
+  with descriptor-relative file checks, ciphertext mode/hash inspection and a
+  Linux systemd metadata probe before credential decoding. Issue #212 tracks
+  remaining interruption/native-platform qualification; no endpoint activation,
+  backend rotation or production companion authority is supplied.
+- Serialize initial reader publication with a nonblocking protected-directory
+  lock, closing stale-preflight claim recreation. Exercise 27 publication
+  boundaries with process-loss/error injection and fresh-process re-entry;
+  distinguish incomplete prefixes from complete publication with a lost return.
+
 ## 0.185.0 - Unreleased
 
 - Add existing-only, single-snapshot custody verification and bounded exact-byte

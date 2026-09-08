@@ -32,3 +32,4 @@ contract, not a deployment authorisation.
    :caption: Architecture
 
    architecture/managed-compute-workspaces
+   custody-reader-continuation-source

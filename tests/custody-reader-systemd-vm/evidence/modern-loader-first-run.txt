@@ -1,0 +1,32 @@
+Overall baseline incomplete: four cases passed, then the harness exited.
+No VM_LOADER_ALL_PASS and no complete matrix qualification.
+Container924decbaf587945bfed21987b5181b59a0781ae01dfd3fd179212e231d520ac8
+Start2026-09-08T15:48:09.046874172Z
+End2026-09-08T15:49:11.243191855Z
+Controller exit0 reflects guest poweroff, NOT fixture acceptance.
+Runtime image5e516cee...; frozen scripts e82858a0; native source447174f6.
+Adapter29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+Seedc49951a0b5ae288531ff278f4da2d9b43141b9d336d840d2a8e4930673fb169e
+Full console SHA2560c913226d2f6b5913bea0ada9064766749e466e84235bd9bb064ca62f2720913
+
+Actual public KVM preflight PASS, eight native probe tests PASS0.09s.
+Actual Fedora44 Linux6.19.10/systemd259.5 booted with modern QEMU/firmware.
+VM_LOADER_PASS positive
+VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
+VM_LOADER_PASS restart
+VM_LOADER_PASS malformed
+VM_LOADER_PASS wrong-key
+VM_LOADER_EXIT phase=load_stale-current status=1
+
+The old script sampled live MainPID immediately after start and required >0
+even for fast expected-denial cases. This is a source-demonstrable harness race;
+the exact failing command was not instrumented, so it is not represented as a
+measured diagnosis. The reviewed correction uses retained ExecMainPID while
+preserving nonzero/distinct PID+InvocationID and all terminal acceptance checks.
+Primary v259 source confirms the property and retention:
+https://github.com/systemd/systemd/blob/v259/src/core/dbus-service.c#L376
+https://github.com/systemd/systemd/blob/v259/src/core/dbus-execute.h#L8
+https://github.com/systemd/systemd/blob/v259/src/core/execute.c#L2091
+
+The booted container was removed after hashing the console. No secret, overlay,
+or booted state exported/committed. Four successes are not the full matrix.

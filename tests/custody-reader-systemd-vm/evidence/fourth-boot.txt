@@ -1,0 +1,13 @@
+Fourth isolated TCG run: first actual Rust adapter attempt, positive denied.
+Container: 8ec8c497406ef223e0d7da147682c663a6e38a131b0f27832d722134f038d74a
+Seed: 871f2f4859b76577eeeb397a8795477bec68b863d79e93e16d037876209ab020
+Adapter: 789b097d99620604c4df9d6c85171e9d389c33dcf22ba7199b256bc183334f7f
+Guest systemd259.5; account, binary and actual credential-encryption setup passed.
+Actual das-vm-reader.service started; VM_EXIT phase=adapter_positive status=1.
+No inner guard claimed: initial unit deliberately suppressed test output.
+Next source adds only cfg(test) fixed stage labels and a closed ReaderError label,
+and filters only the dedicated synthetic unit journal for those prefixes.
+Production guards unchanged. No platform-positive qualification yet.
+Guest powered off at192s; entire container removed without state export/commit.
+Raw serial stream SHA256:
+dfb8e9b174a26734a2ebf997096666095dbc2e91acbe03efa917cd05e48bca93

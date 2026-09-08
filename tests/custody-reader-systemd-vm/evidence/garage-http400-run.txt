@@ -1,0 +1,27 @@
+Refined actual Garage diagnostic — DENIED, not qualification PASS
+Scripts eeaac69d; Rust45a0a1d2 native allfeatures compiled25.84s.
+Stripped def4e8538088dee72c6faf6b106564ab062f0001f4a969c49979093926b9410e;
+unstripped cdbe4f46ed97584dbb1d0cb1d057e20a7ebf3a30d6d48649cfedb9648731ccea.
+Same Garage8ced2ad3/pristine5e516cee and reviewed isolation as prior runs.
+Containerf177a6b6efced7486185cd725e5c7cc5172d0a5c8efed6d9e7474d1fa9bfa18e.
+Started2026-09-08T16:42:51.102961819Z, finished16:43:11.356687498Z.
+Acceptance controllerexit1; QEMU exited0 after guest failure poweroff.
+
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+aws-cli/2.33.0 Python/3.14.3 Linux/6.19.10-300.fc44.aarch64 source/aarch64.fedora.44
+VM_GARAGE_EXIT phase=admission_retention status=1
+VM_GARAGE_LOCATION crates/dasobjectstore-daemon/src/runtime/custody_garage_vm_tests.rs:317
+VM_GARAGE_COMMAND operation=garage category=not_found exit=1
+VM_GARAGE_COMMAND operation=head-object category=bad_request exit=254
+VM_GARAGE_BATCH phase=ObjectRetention index=0 completed=0
+
+Actual failure is HEAD400, not an observed403 or missing-region CLI error.
+No grant/metadata change. Source inspection finds fixture clean environment
+does not select region while Garage config explicitly uses garage; official
+quickstart selects AWS_DEFAULT_REGION=garage. This is a potential fixture
+configuration mismatch, not yet a proven explanation of this observed400.
+No raw stderr, request/debug trace, signed headers or secrets published.
+ConsoleSHA256316b3fbade95a694b893e04fd9b80be6dc509f49e0609e5b04f4079f3df876fc.
+Exact exited container removed, no booted state/key export.
+Native preflight8systemd+3dispatch/classifier+1listener testsPASS; source-only
+3static script testsPASS. No actual Garage retention PASS claimed.

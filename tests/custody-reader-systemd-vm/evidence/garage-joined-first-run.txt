@@ -1,0 +1,26 @@
+Actual Garage joined first run — DENIED, no joined acceptance
+
+Runner6b10eb2e; Rusta3c195d0; stripped894a8d041c5d61622c3f5e796a7380b61f987b76fc2deea39d4af2174e543c75.
+Same approved pristine5e516cee/Garage8ced2ad3, noNIC/soleKVM,
+4GiB/2CPU/256PIDs/900s controller, no mounts/caps/host keys.
+Exact owned container011cc64b41a0a17dfbe3d927437de0b9a3c91c0a4fda83b6bbb7e87021d329d1.
+Started2026-09-08T17:49:23.213082618Z; finished17:50:06.731036157Z.
+QEMU/container exit0 after guest failure shutdown; acceptance controller exit1.
+Native preflight8+1+1+3+3+9+1 PASS, zero failed/ignored.
+
+Fixed console observations:
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM
+VM_GARAGE_EXIT phase=complete status=0
+VM_JOINED_EXIT phase=prepare_positive status=1
+
+The reviewed script reached protected TLS preparation after its actual new-R
+grant/revocation/direct403 checks and continuation-unit terminal checks. This
+is a bounded inference from that control flow, not a retained passing joined
+receipt. TLS preparation's precise inner failure is not yet classified; its
+private log was not exported or printed. No correction hypothesis asserted.
+No TLS/Garage read, restart or formal custody success is claimed for this run.
+
+ConsoleSHA25610f5f6c3b35aa1bae1c8c5c3220a775454b713bcfcd75c8e4e24d37c9942bc8b.
+Only whitelisted markers/hash retained. Exact exited booted container removed;
+no booted image/disk, credential, raw console or private provider log exported.

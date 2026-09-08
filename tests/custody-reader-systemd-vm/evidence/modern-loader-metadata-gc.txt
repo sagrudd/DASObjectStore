@@ -1,0 +1,23 @@
+Measured post-exit metadata loss; baseline still incomplete.
+Scriptsad90ad15; same29ea artifact/image5e516cee.
+Containerb1f72889e2a41028e992b7515912f0589c5ff511eb7623a6b8d064f132969c85
+Start2026-09-08T15:59:25.454306167Z
+End2026-09-08T16:00:26.765417769Z
+Seedfc01feb920d084a06de02985a388ab7c74924362396ce3622a4c96c48c739f42
+Console SHA256de7653082c2b886e368f2023d0c978b331aab5d088cb92bc651b0aad2c83afc7
+
+Positive/restart/malformed/wrong-key passed, then:
+VM_LOADER_OBSERVED_PID 0
+VM_LOADER_INVOCATION_ABSENT
+VM_LOADER_EXIT phase=nonzero_pid_stale-current status=1
+Dedicated journal showed actual load followed by Boundary.
+No complete-matrix acceptance; no product change. Container removed.
+
+The approved fixture correction pins the finished unit with RemainAfterExit=yes,
+requires active/exited + actual pass marker + ExecMainStatus0 + Resultsuccess,
+then reads nonzero ExecMainPID and valid InvocationID for EVERY case. Restart
+must differ from the first positive. Explicit stop then requires inactive,
+followed by unchanged publication checks. No delay or removed identity proof.
+Primary selected-systemd sources:
+https://github.com/systemd/systemd/blob/v259/man/systemd.service.xml#L332
+https://github.com/systemd/systemd/blob/v259/src/core/service.c#L2416

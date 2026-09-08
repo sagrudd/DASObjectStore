@@ -1,0 +1,4 @@
+2c8f9b5fc52a151cf77e97792fea0401718309788dd4c8af29f21a28834ba79e  /opt/das-qemu-tools/usr/bin/qemu-system-aarch64
+fbf1d5c200c253e15c58f569388c7a20368aad456bb309c9c9e9d691f9196934  /opt/das-qemu-tools/usr/bin/qemu-img
+4c722e19492eeb9fe4b21da7921ef8adcda9797a8c89d82f923545a3e6ebea06  /opt/das-qemu-tools/usr/bin/genisoimage
+3e7e3ec49ff9bfe3ff1a2748fbafb6254379fe52e02e053438164ec03e149c1d  /opt/das-qemu-tools/usr/bin/createrepo_c

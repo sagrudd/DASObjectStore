@@ -1,0 +1,22 @@
+Overall baseline incomplete again; retained ExecMainPID change did not resolve it.
+No VM_LOADER_ALL_PASS. No product change or guessed cause is qualified.
+Container53165dea639090e08ecd03b20cedf526c378a6b9b6e4aef0ecf768f6fe7f1236
+Start2026-09-08T15:52:22.680491487Z
+End2026-09-08T15:53:24.367033436Z
+Controller exit0 is guest poweroff, not fixture acceptance.
+Scriptsd763b112; native447174f6; adapter29ea1504...; image5e516cee...
+Seed64087cecbfa36eede1be3533da38e6d2657ebdc9319933b0f63ab206bc0e92e1
+Console SHA256f426b86d599f8934eac7cd7066f95228b524957be1ca80d3d3cc862279d36ec2
+
+Public KVM preflight/eight native tests passed. Real systemd259.5.
+VM_LOADER_PASS positive
+VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
+VM_LOADER_PASS restart
+VM_LOADER_PASS malformed
+VM_LOADER_PASS wrong-key
+VM_LOADER_EXIT phase=load_stale-current status=1
+
+Next approved diagnostic adds fixed exact substage labels and selected
+VM_LOADER_STAGE/ERROR lines from only the dedicated synthetic service journal.
+No speculative acceptance change. The booted container was removed; no secret
+or disk state exported. Joined execution remains held until full baseline PASS.

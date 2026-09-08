@@ -1,0 +1,8 @@
+./usr/lib/.build-id/
+./usr/lib/.build-id/2e/
+./usr/lib/.build-id/2e/2111173196491355885b2a5b9d9177d54b8fef
+./usr/lib64/libdrpm.so.0
+./usr/lib64/libdrpm.so.0.5.3
+./usr/share/licenses/drpm/
+./usr/share/licenses/drpm/COPYING
+./usr/share/licenses/drpm/LICENSE.BSD

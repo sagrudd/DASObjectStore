@@ -1,0 +1,24 @@
+Measured fixture assertion failure, not complete matrix qualification.
+Source85ae4fb5; same29ea artifact/image5e516cee.
+Containerf8cc30d3394a77971359a9f072024f4b52409da866d6d13615279edc48a39ac8
+Start2026-09-08T15:55:54.444437688Z
+End2026-09-08T15:56:55.92604397Z
+Seed763696a02fdb2db0c2cd5a194b28a2c3c5ee41f2d1dc80d5cc25f063450f0fce
+Console SHA256f428409b60fa8d48f550cb517dd6440628180f1bfc3e227e3283aac7426bf115
+
+Positive/restart/malformed/wrong-key again passed. Actual stale-current result:
+VM_LOADER_OBSERVED_PID 1744
+VM_LOADER_INVOCATION_ABSENT
+VM_LOADER_EXIT phase=invocation_shape_stale-current status=1
+Selected dedicated service journal ended with:
+VM_LOADER_STAGE load
+VM_LOADER_ERROR Boundary
+
+The measured failure was the invocation-format assertion after a fast expected
+denial. Approved correction requires InvocationID for positive and restart
+only, including final positive, while retaining nonzero ExecMainPID, actual
+pass marker, inactive/status0/resultsuccess and unchanged publication for every
+case. Static source assertion verifies the positive/restart guard and continued
+restart-distinctness/terminal/publication checks; Bash syntax passes.
+No production code or permission guard changed. No ALL_PASS in this run.
+Booted container removed, no secret or disk state exported.

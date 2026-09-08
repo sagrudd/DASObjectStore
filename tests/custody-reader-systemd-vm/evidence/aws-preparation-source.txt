@@ -1,0 +1,36 @@
+Public-only preparation selection, 2026-09-08. Not yet package/guest qualification.
+Fedora's official download page identifies quay.io/fedora/fedora:
+https://www.fedoraproject.org/misc/
+Resolved tag44 OCI index selects linux/arm64 child manifest:
+sha256:2278672237d26dce720494f4fd9a64ae1cbc4312d1f3c8587ef0aef4dcc80dd4
+Pulled immutable reference; local image config identity:
+sha256:b1c4fd899f812af853a02f30a21f29a35d1320da3097ed731a943e8f5c0821fe
+Config: no declared volumes, no entrypoint; default /bin/bash replaced explicitly.
+Linux arm64/v8, Fedora44 labels, image size194350718 bytes.
+
+Read-only metadata probe4a333f7a148454084b48ade10e952427708a1c5936181477ec5ffdf69236a125:
+UID0:0, networknone, capdropALL, no-new-privileges, mounts[], devices[],
+2CPU/2GiB/pids128, no host namespaces. dnf5/rpmkeys/rpm/gpg/gpg2 present,
+RPM6.0.2. No Python is assumed; no package was installed.
+Probe4a333 was removed after retaining this public result.
+Initial timeout-as-PID1 probebc402fb3 exited125 with no output and was removed;
+the successful shell metadata probe used a five-second CPU limit.
+Foreground timeout also exited125; preparation instead uses a900-second independent
+host-controller timeout that stops only its exact owned container, plus an internal
+Bash watchdog. No capability, seccomp or host security settings were changed.
+
+First download-only container2bc0fc9553c0802f1e3eb17b80a6d340a932c99f4d3e11d1b26a96f768796db5
+exited1 at the final package-name check: Fedora's awscli provider is awscli2.
+The release+updates solver selected71 RPMs (including awscli2 2.36.0-1.fc44 and
+systemd-libs259.8), each passed signature checking before the final assertion.
+No package was installed. This is not a completed preparation PASS.
+Final recipe selects release-only Fedora44 packages to avoid silently upgrading
+the259.5 systemd library used by the pristine signed guest. No updates fallback.
+
+Source commands follow the official DNF5 download contract:
+https://dnf5.readthedocs.io/en/stable/commands/download.8.html
+--resolve --alldeps includes already-installed dependencies; --url fixes the
+resolved payload list. Exact signature and aggregate byte bounds remain mandatory.
+RPM signature verification uses only the separately imported approved Fedora44
+fingerprint36F612DCF27F7D1A48A835E4DBFCF71C6D9F90A6, never another image key.
+https://rpm.org/docs/6.1.x/man/rpmkeys.8

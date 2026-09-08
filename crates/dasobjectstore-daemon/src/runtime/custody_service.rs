@@ -1,5 +1,6 @@
 //! Custody-only service composition. No ordinary registry or service lifecycle is owned here.
 mod batch;
+use super::custody_garage::retain_garage_custody_object_with_readback;
 use super::service::{
     validate_distinct_custody_plane, DaemonServiceRuntimeError, GarageServiceRuntimeConfig,
     ServiceCommandRunner,
@@ -15,7 +16,7 @@ use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_object_service::{
     append_claimed_custody_catalog_entry, claim_custody_catalog_admission,
     custody_ledger_path_for_catalog, inspect_custody_ledger, read_custody_catalog,
-    retain_custody_object_with_readback, CustodyCatalogBinding,
+    CustodyCatalogBinding,
 };
 use std::{
     collections::BTreeMap,
@@ -398,6 +399,14 @@ impl<'a, R: ServiceCommandRunner> CustodyServiceController<'a, R> {
         )?;
         let (writer_identity, writer_environment) = writer.into_parts();
         let (reader_identity, reader_environment) = reader.into_parts();
+        if writer_identity != entry.definition.profile.writer_identity
+            || reader_identity != entry.definition.profile.reader_identity
+            || writer_identity == reader_identity
+        {
+            return Err(DaemonServiceRuntimeError::UnsupportedOperation {
+                operation: "custody retention credentials do not match the sealed roles".into(),
+            });
+        }
         let scratch_root = entry
             .ledger_path
             .parent()
@@ -416,7 +425,7 @@ impl<'a, R: ServiceCommandRunner> CustodyServiceController<'a, R> {
             inspection.object_lock_policy,
             inspection.retention_until_utc,
         )?;
-        let mut reader = GarageCustodyS3Reader::new(
+        let reader = GarageCustodyS3Reader::new(
             self.runner,
             &custody_config.endpoint,
             &entry.definition.bucket_name,
@@ -424,11 +433,11 @@ impl<'a, R: ServiceCommandRunner> CustodyServiceController<'a, R> {
             reader_environment,
             &scratch_root,
         );
-        let receipt = retain_custody_object_with_readback(
+        let receipt = retain_garage_custody_object_with_readback(
             &entry.ledger_path,
             request.input,
             &mut writer,
-            &mut reader,
+            &reader,
         )?;
         Ok(crate::api::CustodyRetainResponse { receipt })
     }

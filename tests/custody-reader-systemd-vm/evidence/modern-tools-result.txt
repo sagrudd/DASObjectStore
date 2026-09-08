@@ -1,0 +1,28 @@
+Authenticated payload-only tool composition PASS; no guest boot or RPM install.
+Recipe source31a58f91; qemu-payloads.sh SHA256
+b99ff4e7b43ddcec36ddc429e76803f24342159ec7904641106d1eadf4404b54.
+Containerde1766e8370823b6b21b0403d88c28b34c5cb65a04480e8811188d1f8ac105c1
+Start2026-09-08T15:42:36.016746926Z
+End2026-09-08T15:42:40.743955287Z
+Exit0: PUBLIC_QEMU_PAYLOAD_TOOLS_VERIFIED_NO_BOOT.
+All34 selected payload signatures/hashes, prefix confinement, dependency and
+version checks passed. Base before/after inventory unchanged SHA256
+f96d1eee3844fd3468a88bb5b55cb428359a89c7aea5ec053df8d4a026665db9.
+Full public tool/firmware/library records: qemu-payloads/.
+
+Clean unbooted tool image:
+8ac1d4c0850fb9c09c83374ee0ca021aa9f85b1f47c512bce39f765cc2da0b26
+Clean unbooted tools+pristine guest+public AWS payload image:
+5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6
+The only additional inputs are copied from reviewed public imageab01a453...:
+Fedora44 qcow2 SHA55c60a3b80d3616a08705afd0459e75fe9f03c54aba7a46e4002a41a72fa0d5b
+and /opt/das-aws-fedora44, rechecked against its71-RPM SHA manifest.
+No generated key, fixture secret, disk overlay or booted state was copied.
+Unprivileged UID1000/no-device/network-none checks executed modern qemu-img:
+qcow2 5GiB virtual,528154624 bytes, corrupt=false; virt-10.2 is supported.
+
+The next baseline runner uses pre-stripped public adapter SHA256
+29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+from native source447174f686fffded36bc12a156b9afda6a3b87ac,
+compiled and stripped by the independent fixture owner. No implicit re-strip.
+Tool composition is not reader-loader, actual GET, package or installation proof.

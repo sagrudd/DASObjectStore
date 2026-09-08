@@ -1,0 +1,80 @@
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  iso-codes libaio1 libasound2 libasound2-data libbpf1 libbrlapi0.8 libcacard0
+  libcap2-bin libcapstone4 libdaxctl1 libdrm-common libdrm2 libdw1 libepoxy0
+  libexecs0 libfdt1 libfuse3-3 libgbm1 libgstreamer-plugins-base1.0-0
+  libgstreamer1.0-0 libibverbs1 libkmod2 libndctl6 libnl-3-200
+  libnl-route-3-200 libnspr4 libnss3 libopus0 liborc-0.4-0 libpcsclite1
+  libpmem1 librdmacm1 libslirp0 libsndio7.0 libspice-server1 libunwind8
+  liburing2 libusb-1.0-0 libusbredirparser1 libvdeplug2 libwayland-server0
+  qemu-system-common qemu-system-data
+Suggested packages:
+  wodim cdrkit-doc isoquery libasound2-plugins alsa-utils fuse3
+  libvisual-0.4-plugins gstreamer1.0-tools opus-tools pcscd sndiod
+  gstreamer1.0-plugins-ugly samba vde2
+Recommended packages:
+  alsa-ucm-conf alsa-topology-conf libpam-cap gstreamer1.0-plugins-base
+  ibverbs-providers gstreamer1.0-libav gstreamer1.0-plugins-good
+  qemu-system-gui ipxe-qemu qemu-efi-arm qemu-block-extra
+The following NEW packages will be installed:
+  genisoimage iso-codes libaio1 libasound2 libasound2-data libbpf1
+  libbrlapi0.8 libcacard0 libcap2-bin libcapstone4 libdaxctl1 libdrm-common
+  libdrm2 libdw1 libepoxy0 libexecs0 libfdt1 libfuse3-3 libgbm1
+  libgstreamer-plugins-base1.0-0 libgstreamer1.0-0 libibverbs1 libkmod2
+  libndctl6 libnl-3-200 libnl-route-3-200 libnspr4 libnss3 libopus0
+  liborc-0.4-0 libpcsclite1 libpmem1 librdmacm1 libslirp0 libsndio7.0
+  libspice-server1 libunwind8 liburing2 libusb-1.0-0 libusbredirparser1
+  libvdeplug2 libwayland-server0 qemu-efi-aarch64 qemu-system-arm
+  qemu-system-common qemu-system-data qemu-utils
+0 upgraded, 47 newly installed, 0 to remove and 28 not upgraded.
+Need to get 25.2 MB of archives.
+After this operation, 398 MB of additional disk space will be used.
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/c/cdrkit/genisoimage_1.1.11-3.4_arm64.deb' genisoimage_9%3a1.1.11-3.4_arm64.deb 340760 MD5Sum:8d01cfd14be5677b3e494e7181f893cb
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/i/iso-codes/iso-codes_4.15.0-1_all.deb' iso-codes_4.15.0-1_all.deb 2906084 MD5Sum:1cad4067cf734be9ac3f11c1eb4eb4fb
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/liba/libaio/libaio1_0.3.113-4_arm64.deb' libaio1_0.3.113-4_arm64.deb 13344 MD5Sum:bf19e6f493774cb8892a84f7c43e99df
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/a/alsa-lib/libasound2-data_1.2.8-1_all.deb' libasound2-data_1.2.8-1_all.deb 20488 MD5Sum:8cdd32445982638bf5d024453da19673
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/a/alsa-lib/libasound2_1.2.8-1%2bb1_arm64.deb' libasound2_1.2.8-1+b1_arm64.deb 327044 MD5Sum:e02060ba3f37ed6efc093911ced2ea24
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libb/libbpf/libbpf1_1.1.2-0%2bdeb12u1_arm64.deb' libbpf1_1%3a1.1.2-0+deb12u1_arm64.deb 136376 MD5Sum:3a4386c039afc3284fd9f951ed5c3385
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/b/brltty/libbrlapi0.8_6.5-7%2bdeb12u1_arm64.deb' libbrlapi0.8_6.5-7+deb12u1_arm64.deb 89524 MD5Sum:b8b3407a3b782d1175136aa22d3dffb6
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/n/nspr/libnspr4_4.35-1_arm64.deb' libnspr4_2%3a4.35-1_arm64.deb 105324 MD5Sum:04f2cd87291680e4c2c7231e334aa48f
+'https://snapshot.debian.org/archive/debian-security/20260907T000000Z/pool/updates/main/n/nss/libnss3_3.87.1-1%2bdeb12u4_arm64.deb' libnss3_2%3a3.87.1-1+deb12u4_arm64.deb 1215528 
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/p/pcsc-lite/libpcsclite1_1.9.9-2_arm64.deb' libpcsclite1_1.9.9-2_arm64.deb 49328 MD5Sum:d041a09a9648f989c9405b9fbb79883d
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libc/libcacard/libcacard0_2.8.0-3_arm64.deb' libcacard0_1%3a2.8.0-3_arm64.deb 89388 MD5Sum:85066ba356f862b243d04d997d1b39fa
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libc/libcap2/libcap2-bin_2.66-4%2bdeb12u3%2bb1_arm64.deb' libcap2-bin_1%3a2.66-4+deb12u3+b1_arm64.deb 34452 MD5Sum:b06878dac0721f145ab2e6f2b41cba71
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/c/capstone/libcapstone4_4.0.2-5_arm64.deb' libcapstone4_4.0.2-5_arm64.deb 533032 MD5Sum:b0767e87181470cbb96912fcae1e2a20
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/k/kmod/libkmod2_30%2b20221128-1_arm64.deb' libkmod2_30+20221128-1_arm64.deb 54436 MD5Sum:d451305dc4991f0e773e50f07e801e8c
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/n/ndctl/libdaxctl1_76.1-1_arm64.deb' libdaxctl1_76.1-1_arm64.deb 19832 MD5Sum:ce47f9ca212ef11a4f0d3f31d078c599
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libd/libdrm/libdrm-common_2.4.114-1_all.deb' libdrm-common_2.4.114-1_all.deb 7112 MD5Sum:4f0ec02ca688b2a57f7fc0557011c9ad
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libd/libdrm/libdrm2_2.4.114-1%2bb1_arm64.deb' libdrm2_2.4.114-1+b1_arm64.deb 36744 MD5Sum:5c8b0b25828bd44046e667548f801dda
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/e/elfutils/libdw1_0.188-2.1_arm64.deb' libdw1_0.188-2.1_arm64.deb 218988 MD5Sum:c9efcafba4f1dacda6463ac69932a8f8
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libe/libepoxy/libepoxy0_1.5.10-1_arm64.deb' libepoxy0_1.5.10-1_arm64.deb 197548 MD5Sum:b0bf7cec00a12127292a13ca70eb6fdf
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libe/libexecs/libexecs0_1.3-2_arm64.deb' libexecs0_1.3-2_arm64.deb 8756 MD5Sum:91c6c0c059352a7ccb15fc89678cad49
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/d/device-tree-compiler/libfdt1_1.6.1-4%2bb1_arm64.deb' libfdt1_1.6.1-4+b1_arm64.deb 18716 MD5Sum:255c8c9891df22fec66773e2da57a7bb
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/f/fuse3/libfuse3-3_3.14.0-4_arm64.deb' libfuse3-3_3.14.0-4_arm64.deb 82872 MD5Sum:d14bc7f106a20c000a641ed62eda5577
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/w/wayland/libwayland-server0_1.21.0-1_arm64.deb' libwayland-server0_1.21.0-1_arm64.deb 34940 MD5Sum:f983488ff468240d84d48ee6efb603d7
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/m/mesa/libgbm1_22.3.6-1%2bdeb12u2_arm64.deb' libgbm1_22.3.6-1+deb12u2_arm64.deb 37104 MD5Sum:10e570cf9fd6bf6ef4e3e9f887f58cde
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libu/libunwind/libunwind8_1.6.2-3_arm64.deb' libunwind8_1.6.2-3_arm64.deb 47404 MD5Sum:6fbe46837a85e23ea5c897fe9f218651
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/g/gstreamer1.0/libgstreamer1.0-0_1.22.0-2%2bdeb12u1_arm64.deb' libgstreamer1.0-0_1.22.0-2+deb12u1_arm64.deb 1065300 MD5Sum:822654b4866c1bd4094f15ee74c68a73
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/o/orc/liborc-0.4-0_0.4.33-2_arm64.deb' liborc-0.4-0_1%3a0.4.33-2_arm64.deb 148336 MD5Sum:3f80211ca81567facd9e9b2897198f46
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/g/gst-plugins-base1.0/libgstreamer-plugins-base1.0-0_1.22.0-3%2bdeb12u6_arm64.deb' libgstreamer-plugins-base1.0-0_1.22.0-3+deb12u6_arm64.deb 841064 MD5Sum:7fe5c61a29a1a1ed10a982817240a715
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libn/libnl3/libnl-3-200_3.7.0-0.2%2bb1_arm64.deb' libnl-3-200_3.7.0-0.2+b1_arm64.deb 60172 MD5Sum:1f8113953d5041349abb447bd032de8f
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libn/libnl3/libnl-route-3-200_3.7.0-0.2%2bb1_arm64.deb' libnl-route-3-200_3.7.0-0.2+b1_arm64.deb 168348 MD5Sum:1764101a6d02fbebb3257ac7ebc44acb
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/r/rdma-core/libibverbs1_44.0-2_arm64.deb' libibverbs1_44.0-2_arm64.deb 56808 MD5Sum:f940e851463cbe821419736cec4feefb
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/n/ndctl/libndctl6_76.1-1_arm64.deb' libndctl6_76.1-1_arm64.deb 57404 MD5Sum:e4b6158203590491a1f33758bba5ae3f
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/o/opus/libopus0_1.3.1-3_arm64.deb' libopus0_1.3.1-3_arm64.deb 175924 MD5Sum:35a708db70267b7a317b1660695ba17c
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/p/pmdk/libpmem1_1.12.1-2_arm64.deb' libpmem1_1.12.1-2_arm64.deb 45732 MD5Sum:5351554a572d2fdef475c7d0b60882d6
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/r/rdma-core/librdmacm1_44.0-2_arm64.deb' librdmacm1_44.0-2_arm64.deb 64916 MD5Sum:ba1d4ad2212aa0f284320199599a9ec5
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libs/libslirp/libslirp0_4.7.0-1_arm64.deb' libslirp0_4.7.0-1_arm64.deb 58380 MD5Sum:3525d032eb4ad2167646fbebad737629
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/s/sndio/libsndio7.0_1.9.0-0.3%2bb2_arm64.deb' libsndio7.0_1.9.0-0.3+b2_arm64.deb 25716 MD5Sum:b2df4394461ec1f7a67d960813418115
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/s/spice/libspice-server1_0.15.1-1_arm64.deb' libspice-server1_0.15.1-1_arm64.deb 308600 MD5Sum:2354ad09030fad76b6c8b128b36be0ea
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libu/liburing/liburing2_2.3-3_arm64.deb' liburing2_2.3-3_arm64.deb 12584 MD5Sum:bb122c0c9029349b038c9ae2e693f6c2
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/libu/libusb-1.0/libusb-1.0-0_1.0.26-1_arm64.deb' libusb-1.0-0_2%3a1.0.26-1_arm64.deb 59976 MD5Sum:4ce04ff700f9c746c665683fe0ae1ac2
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/u/usbredir/libusbredirparser1_0.13.0-2_arm64.deb' libusbredirparser1_0.13.0-2_arm64.deb 18232 MD5Sum:a7e6224c5139dfaefba5d503724e2022
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/v/vdeplug4/libvdeplug2_4.0.1-4_arm64.deb' libvdeplug2_4.0.1-4_arm64.deb 27680 MD5Sum:1b11f536a5e36151000c28bd458cf56a
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/e/edk2/qemu-efi-aarch64_2022.11-6%2bdeb12u2_all.deb' qemu-efi-aarch64_2022.11-6+deb12u2_all.deb 2538280 MD5Sum:74a94ea4921e10af26a3418ec0bc5f48
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/q/qemu/qemu-system-common_7.2%2bdfsg-7%2bdeb12u18%2bb3_arm64.deb' qemu-system-common_1%3a7.2+dfsg-7+deb12u18+b3_arm64.deb 2090236 MD5Sum:5185acda93771ef1a13749076f176a57
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/q/qemu/qemu-system-data_7.2%2bdfsg-7%2bdeb12u18_all.deb' qemu-system-data_1%3a7.2+dfsg-7+deb12u18_all.deb 1297476 MD5Sum:ad8787051fb014f51bb740e788e65936
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/q/qemu/qemu-system-arm_7.2%2bdfsg-7%2bdeb12u18%2bb3_arm64.deb' qemu-system-arm_1%3a7.2+dfsg-7+deb12u18+b3_arm64.deb 8210376 MD5Sum:ee7e7c0b6d14cf18b7abdc4c91bdfc2f
+'https://snapshot.debian.org/archive/debian/20260907T000000Z/pool/main/q/qemu/qemu-utils_7.2%2bdfsg-7%2bdeb12u18%2bb3_arm64.deb' qemu-utils_1%3a7.2+dfsg-7+deb12u18+b3_arm64.deb 1227452 MD5Sum:a0a8b647b2a27a55fda5c308f30cf84f

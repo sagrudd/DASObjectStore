@@ -1,0 +1,22 @@
+Actual Garage diagnostic — DENIED, not qualification PASS
+Scripts99708523; Rust3bf4d591; strippedaa4af9d28858a7b7095e3de9359af48b3953d557f2e19f279c5fec242ce36263.
+Same verified public Garage8ced2ad3 and pristine5e516cee; same isolation as
+garage-first-run.txt. Container3be079a148d0a52f172a3b896bc26f7cd4f5e6d4de1999a100ce91690a259ced.
+Started2026-09-08T16:37:08.292089739Z, finished16:37:28.051497257Z.
+Guest powered off after test failure; QEMU exit0, acceptance controller exit1.
+
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_GARAGE_EXIT phase=admission_retention status=1
+VM_GARAGE_LOCATION crates/dasobjectstore-daemon/src/runtime/custody_garage_vm_tests.rs:281
+VM_GARAGE_COMMAND operation=garage category=not_found
+VM_GARAGE_COMMAND operation=head-object category=provider_failure
+VM_GARAGE_BATCH phase=ObjectRetention index=0 completed=0
+
+Actual fresh admission succeeds. First HEAD fails, but the current finite
+classifier does NOT identify access_denied/403, not_found/404 or timeout.
+No permission/region/provider diagnosis is inferred. No grants or metadata
+checks changed. Further diagnostic requires a source-frozen refined finite
+classifier; no raw provider stderr or credential argv may be published.
+Raw console SHA256c9998b22502fedcec0780aea11cdfd36da6ea9e41883c9a2d7c5a80f24da8ebc.
+Exact exited container removed; no booted image, disk or generated key export.
+Native preflight8 systemd+2dispatch+1listener tests passed, not backend PASS.

@@ -5,7 +5,9 @@
 //! S3 commands for the only admitted data operation: create-if-absent content
 //! retention followed by an independent GET readback.
 mod bounded;
+mod retention;
 pub use bounded::BoundedGarageCustodyReader;
+pub(super) use retention::retain_garage_custody_object_with_readback;
 
 use super::service::{
     docker_compose_args, garage_exec_args, GarageServiceRuntimeConfig, ServiceCommandRunner,
@@ -134,6 +136,45 @@ pub struct SystemdServiceCredentialHandoffResolver {
 }
 
 impl SystemdServiceCredentialHandoffResolver {
+    /// Decode only bytes acquired after the separate platform/protected-source
+    /// verifier. This helper grants no delivery provenance and touches no marker.
+    #[cfg(unix)]
+    pub(super) fn decode_continuation(
+        binding: &dasobjectstore_object_service::custody_reader::ReaderBindingV1,
+        bytes: &[u8],
+    ) -> Result<CustodyRuntimeCredential, dasobjectstore_object_service::custody_reader::ReaderError>
+    {
+        use dasobjectstore_object_service::custody_reader::ReaderError;
+        binding.encode()?;
+        if bytes.len() > 65536 {
+            return Err(ReaderError::Boundary);
+        }
+        let handoff = parse_systemd_handoff(bytes).map_err(|_| ReaderError::Boundary)?;
+        if handoff.role != CustodyRuntimeCredentialRole::Reader
+            || handoff.store_id != binding.store_id
+            || handoff.configuration_sha256 != binding.configuration_sha256
+            || handoff.identity != binding.reader_identity
+            || handoff.aws_access_key_id != binding.backend_key_id
+        {
+            return Err(ReaderError::Binding);
+        }
+        let mut environment = vec![
+            // Garage's authoritative config renderer fixes s3_region="garage".
+            // Select it explicitly in this Garage-only continuation path; the
+            // bounded child clears ambient config/environment before use.
+            ("AWS_DEFAULT_REGION".into(), "garage".into()),
+            ("AWS_ACCESS_KEY_ID".into(), handoff.aws_access_key_id),
+            (
+                "AWS_SECRET_ACCESS_KEY".into(),
+                handoff.aws_secret_access_key,
+            ),
+        ];
+        if let Some(token) = handoff.aws_session_token {
+            environment.push(("AWS_SESSION_TOKEN".into(), token));
+        }
+        CustodyRuntimeCredential::new(handoff.identity, environment)
+            .map_err(|_| ReaderError::Binding)
+    }
     /// Construct only from systemd's service credential directory. Absence is
     /// intentional fail-closed evidence that custody activation was not
     /// explicitly attended and configured.
@@ -639,31 +680,14 @@ impl<R: ServiceCommandRunner> CustodyObjectWriter for GarageCustodyS3Writer<'_, 
     }
 
     fn object_state(&mut self, object_key: &str) -> Result<CustodyObjectState, ObjectServiceError> {
-        let args = head_args(&self.bucket, object_key, &self.endpoint);
-        match self
-            .runner
-            .run_with_display_args_and_env("aws", &args, &args, &self.environment)
-        {
-            Ok(output) => {
-                let head: GarageHead = serde_json::from_str(&output.stdout).map_err(|error| {
-                    invalid(format!("custody Garage HEAD response is invalid: {error}"))
-                })?;
-                let sha = head
-                    .metadata
-                    .dasobjectstore_sha256
-                    .as_deref()
-                    .ok_or_else(|| invalid("custody Garage object omits SHA-256 metadata"))?;
-                self.validate_object_lock_metadata(&head.metadata)?;
-                Ok(CustodyObjectState::Existing {
-                    content_sha256: sha.to_string(),
-                    content_length: head.content_length,
-                })
-            }
-            Err(error) if is_missing_bucket_error(&error.to_string()) => {
-                Ok(CustodyObjectState::Missing)
-            }
-            Err(error) => Err(runtime_error(error)),
-        }
+        retention::observe_state(
+            self.runner,
+            &self.endpoint,
+            &self.bucket,
+            &self.environment,
+            object_key,
+            self,
+        )
     }
 
     fn put_if_absent(&mut self, object_key: &str, bytes: &[u8]) -> Result<(), ObjectServiceError> {
@@ -730,6 +754,12 @@ impl<R: ServiceCommandRunner> CustodyObjectReader for GarageCustodyS3Reader<'_, 
     }
 
     fn read_exact(&mut self, object_key: &str) -> Result<Vec<u8>, ObjectServiceError> {
+        self.read_exact_shared(object_key)
+    }
+}
+
+impl<R: ServiceCommandRunner> GarageCustodyS3Reader<'_, R> {
+    fn read_exact_shared(&self, object_key: &str) -> Result<Vec<u8>, ObjectServiceError> {
         let path = scratch_path(&self.scratch_root, "get")?;
         let args = vec![
             "s3api".into(),
@@ -1128,6 +1158,21 @@ fn verify_exact_custody_grants(
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn fixture_exact_read_only_grant(bucket_info: &str, key: &str) -> bool {
+    let Some((_, table)) = bucket_info.split_once("==== KEYS FOR THIS BUCKET ====") else {
+        return false;
+    };
+    if table.to_ascii_lowercase().contains("owner") {
+        return false;
+    }
+    let rows = table
+        .lines()
+        .filter_map(parse_garage_bucket_permission_row)
+        .collect::<Vec<_>>();
+    rows.len() == 1 && rows[0].access_key_id == key && rows[0].permissions == "R"
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GarageBucketPermissionRow<'a> {
     permissions: String,
@@ -1172,6 +1217,71 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn continuation_fixture_requires_only_selected_read_grant() {
+        let prefix = "==== KEYS FOR THIS BUCKET ====\nPermissions Access key Name\n";
+        assert!(fixture_exact_read_only_grant(
+            &format!("{prefix}R GKselected sealed-reader\n"),
+            "GKselected"
+        ));
+        for rows in [
+            "W GKselected sealed-reader\n",
+            "RW GKselected sealed-reader\n",
+            "R GKforeign sealed-reader\n",
+            "R GKselected sealed-reader\nW GKold writer\n",
+        ] {
+            assert!(!fixture_exact_read_only_grant(
+                &format!("{prefix}{rows}"),
+                "GKselected"
+            ));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn continuation_selects_garage_region_without_credential_override() {
+        use dasobjectstore_object_service::custody_reader::ReaderBindingV1;
+        let binding = ReaderBindingV1::decode(include_bytes!(
+            "../../../../docs/adr/fixtures/0011-reader-wire/binding.jcs.json"
+        ))
+        .unwrap();
+        let bytes = format!(
+            "version=1\nrole=reader\nstore_id={}\nconfiguration_sha256={}\nidentity={}\naws_access_key_id={}\naws_secret_access_key=synthetic-test-secret\n",
+            binding.store_id, binding.configuration_sha256,
+            binding.reader_identity, binding.backend_key_id,
+        );
+        let credential = SystemdServiceCredentialHandoffResolver::decode_continuation(
+            &binding,
+            bytes.as_bytes(),
+        )
+        .unwrap();
+        let (_, environment) = credential.into_parts();
+        assert_eq!(environment.len(), 3);
+        assert_eq!(
+            environment
+                .iter()
+                .filter(|(key, _)| key == "AWS_DEFAULT_REGION")
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>(),
+            vec!["garage"]
+        );
+        assert!(!environment.iter().any(|(key, _)| key == "AWS_REGION"));
+        for extra in ["aws_region=foreign\n", "AWS_DEFAULT_REGION=foreign\n"] {
+            assert!(
+                SystemdServiceCredentialHandoffResolver::decode_continuation(
+                    &binding,
+                    format!("{bytes}{extra}").as_bytes(),
+                )
+                .is_err()
+            );
+        }
+        // Match the authoritative producer, not a generic S3 default.
+        assert!(
+            include_str!("../../../dasobjectstore-object-service/src/garage.rs")
+                .contains("s3_region = \"garage\"")
+        );
+    }
 
     #[test]
     fn systemd_handoff_is_opaque_one_use_and_persists_no_secret_material() {

@@ -10,6 +10,7 @@
 //! The journal itself belongs off the NUC, Garage, BaseCamp, and their backup
 //! paths. This source code does not activate it or distribute a signing key.
 
+use crate::custody::CustodyReadDeadline;
 use crate::provider::ObjectServiceError;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -343,9 +344,7 @@ impl CustodyOffNucJournal {
         pinned_authority: &CustodyEd25519AuthorityV1,
         now_utc: &str,
     ) -> Result<String, ObjectServiceError> {
-        let record: CustodySignedPreReadRequestV1 = strict_jcs(raw_jcs)?;
-        verify_signed(&record, pinned_authority)?;
-        record.body.validate(now_utc)?;
+        let record = decode_pre_read(raw_jcs, pinned_authority, now_utc)?;
         let digest = sha256_hex(raw_jcs);
         let mut connection = self.open_rw()?;
         let transaction = connection
@@ -387,11 +386,37 @@ impl CustodyOffNucJournal {
         request_id: &str,
         started_at_utc: &str,
     ) -> Result<CustodyOffNucReadAttemptV1, ObjectServiceError> {
+        self.begin_pre_read_attempt_bound(request_id, started_at_utc, None, None)
+    }
+
+    fn begin_pre_read_attempt_bound(
+        &self,
+        request_id: &str,
+        started_at_utc: &str,
+        expected_raw: Option<(&[u8], &CustodyOffNucPreReadRequestV1)>,
+        deadline: Option<CustodyReadDeadline>,
+    ) -> Result<CustodyOffNucReadAttemptV1, ObjectServiceError> {
         timestamp("custody pre-read attempt start", started_at_utc)?;
-        let mut connection = self.open_rw()?;
+        let mut connection = self.open_for_attempt(deadline)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql("start custody pre-read attempt"))?;
+        if let Some((expected, _)) = expected_raw {
+            let (stored, digest): (Vec<u8>, String) = transaction
+                .query_row(
+                    "SELECT raw_jcs,raw_sha256 FROM issued_pre_read_requests \
+                 WHERE request_id=?1 AND status='issued' AND length(raw_jcs)<=1048576 \
+                 AND length(raw_sha256)=64",
+                    params![request_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(sql("load exact issued custody request"))?;
+            if stored != expected || sha256_hex(&stored) != digest {
+                return Err(invalid(
+                    "outgoing custody request differs from exact issued bytes",
+                ));
+            }
+        }
         let (target_id, nonce, sequence, previous, issued, expires): (
             String,
             String,
@@ -416,6 +441,20 @@ impl CustodyOffNucJournal {
                 },
             )
             .map_err(sql("load issued custody pre-read attempt"))?;
+        if let Some((_, body)) = expected_raw {
+            if body.request_id != request_id
+                || body.target_id != target_id
+                || body.nonce != nonce
+                || body.sequence != sequence
+                || body.previous_request_sha256 != previous
+                || body.issued_at_utc != issued
+                || body.expires_at_utc != expires
+            {
+                return Err(invalid(
+                    "issued custody columns differ from exact signed envelope",
+                ));
+            }
+        }
         let started = timestamp("custody pre-read attempt start", started_at_utc)?;
         let request_issued = timestamp("custody request issuance", &issued)?;
         let request_expiry = timestamp("custody request expiry", &expires)?;
@@ -447,9 +486,11 @@ impl CustodyOffNucJournal {
                 params![request_id, marker, started_at_utc],
             )
             .map_err(sql("persist immutable custody pre-read attempt marker"))?;
+        check_deadline(deadline)?;
         transaction
             .commit()
             .map_err(sql("commit custody pre-read attempt start"))?;
+        check_deadline(deadline)?;
         Ok(CustodyOffNucReadAttemptV1 {
             request_id: request_id.to_string(),
             target_id,
@@ -474,14 +515,66 @@ impl CustodyOffNucJournal {
         reader: impl FnOnce(&CustodyOffNucReadAttemptV1) -> Result<T, ObjectServiceError>,
     ) -> Result<T, ObjectServiceError> {
         let attempt = self.begin_pre_read_attempt(request_id, started_at_utc)?;
-        match reader(&attempt) {
+        self.complete_pre_read(request_id, started_at_utc, reader(&attempt), None)
+    }
+
+    /// Start the exact issued signed envelope and pass its original bytes to the
+    /// sole client operation only after the durable first-attempt transition.
+    /// The exact-byte check shares the same transaction as that transition.
+    /// Historical request-id-only callers and persisted schemas are unchanged.
+    ///
+    /// # Errors
+    /// Denies invalid signatures/time, substituted envelopes, stale or already
+    /// started rows before the callback. Callback failure is terminal incomplete.
+    /// An exhausted whole-call deadline leaves the durable started marker rather
+    /// than renewing the budget for settlement; it remains non-retryable.
+    pub fn perform_pre_read_exact<T>(
+        &self,
+        raw_jcs: &[u8],
+        pinned_authority: &CustodyEd25519AuthorityV1,
+        started_at_utc: &str,
+        deadline: CustodyReadDeadline,
+        reader: impl FnOnce(&CustodyOffNucReadAttemptV1, &[u8]) -> Result<T, ObjectServiceError>,
+    ) -> Result<T, ObjectServiceError> {
+        check_deadline(Some(deadline))?;
+        if raw_jcs.len() > 1_048_576 {
+            return Err(invalid(
+                "custody frontend signed envelope exceeds resource bound",
+            ));
+        }
+        let record = decode_pre_read(raw_jcs, pinned_authority, started_at_utc)?;
+        let id = &record.body.request_id;
+        let attempt = self.begin_pre_read_attempt_bound(
+            id,
+            started_at_utc,
+            Some((raw_jcs, &record.body)),
+            Some(deadline),
+        )?;
+        self.complete_pre_read(
+            id,
+            started_at_utc,
+            reader(&attempt, raw_jcs),
+            Some(deadline),
+        )
+    }
+
+    fn complete_pre_read<T>(
+        &self,
+        request_id: &str,
+        started_at_utc: &str,
+        result: Result<T, ObjectServiceError>,
+        deadline: Option<CustodyReadDeadline>,
+    ) -> Result<T, ObjectServiceError> {
+        check_deadline(deadline)?;
+        match result {
             Ok(value) => Ok(value),
             Err(error) => {
-                self.record_terminal_failure(
+                self.record_terminal_failure_bound(
                     request_id,
                     CustodyOffNucObservationResult::Incomplete,
                     &format!("target read failed after begun attempt: {error}"),
                     started_at_utc,
+                    deadline,
                 )?;
                 Err(error)
             }
@@ -498,6 +591,17 @@ impl CustodyOffNucJournal {
         result: CustodyOffNucObservationResult,
         detail: &str,
         attempted_at_utc: &str,
+    ) -> Result<(), ObjectServiceError> {
+        self.record_terminal_failure_bound(request_id, result, detail, attempted_at_utc, None)
+    }
+
+    fn record_terminal_failure_bound(
+        &self,
+        request_id: &str,
+        result: CustodyOffNucObservationResult,
+        detail: &str,
+        attempted_at_utc: &str,
+        deadline: Option<CustodyReadDeadline>,
     ) -> Result<(), ObjectServiceError> {
         if result == CustodyOffNucObservationResult::Passed {
             return Err(invalid(
@@ -517,7 +621,7 @@ impl CustodyOffNucJournal {
         } else {
             detail
         };
-        let mut connection = self.open_rw()?;
+        let mut connection = self.open_for_attempt(deadline)?;
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(sql("start custody terminal attempt"))?;
@@ -531,9 +635,11 @@ impl CustodyOffNucJournal {
             terminal_detail,
             attempted_at_utc,
         )?;
+        check_deadline(deadline)?;
         transaction
             .commit()
             .map_err(sql("commit custody terminal attempt"))?;
+        check_deadline(deadline)?;
         if let Some(error) = supplied_time_error.or(supplied_detail_error) {
             return Err(error);
         }
@@ -742,6 +848,33 @@ impl CustodyOffNucJournal {
         )
         .map_err(sql("open off-NUC custody journal"))
     }
+
+    fn open_for_attempt(
+        &self,
+        deadline: Option<CustodyReadDeadline>,
+    ) -> Result<Connection, ObjectServiceError> {
+        let Some(deadline) = deadline else {
+            return self.open_rw();
+        };
+        check_deadline(Some(deadline))?;
+        let connection = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(sql("open existing bounded custody journal"))?;
+        connection
+            .busy_timeout(std::time::Duration::ZERO)
+            .map_err(sql("bound custody journal lock wait"))?;
+        connection.progress_handler(1000, Some(move || deadline.remaining().is_err()));
+        check_deadline(Some(deadline))?;
+        Ok(connection)
+    }
+}
+
+fn check_deadline(deadline: Option<CustodyReadDeadline>) -> Result<(), ObjectServiceError> {
+    if let Some(deadline) = deadline {
+        deadline
+            .remaining()
+            .map_err(|_| invalid("custody request whole-call deadline expired"))?;
+    }
+    Ok(())
 }
 
 /// Reserve the precise next target sequence before a request can be begun.
@@ -968,6 +1101,17 @@ fn validate_attestation(
     nonblank("custody attestation result detail", &body.result_detail)
 }
 
+pub(crate) fn decode_pre_read(
+    raw: &[u8],
+    authority: &CustodyEd25519AuthorityV1,
+    now: &str,
+) -> Result<CustodySignedPreReadRequestV1, ObjectServiceError> {
+    let record: CustodySignedPreReadRequestV1 = strict_jcs(raw)?;
+    verify_signed(&record, authority)?;
+    record.body.validate(now)?;
+    Ok(record)
+}
+
 fn verify_signed<T: Serialize>(
     record: &CustodySignedRecordV1<T>,
     pinned: &CustodyEd25519AuthorityV1,
@@ -1097,6 +1241,9 @@ fn sql(operation: &'static str) -> impl FnOnce(rusqlite::Error) -> ObjectService
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    mod exact_read_tests;
+    mod reader_wire_tests;
 
     fn digest(label: &str) -> String {
         sha256_hex(label)

@@ -1,0 +1,35 @@
+Public-only extraction2026-09-08; no image/executable started.
+Official https://garagehq.deuxfleurs.fr/documentation/cookbook/real-world/
+identifies dxflrs/garage and fixed v2.3.0; download page links Docker Hub.
+Registry metadata chain verified by SHA256 over actual downloaded bytes:
+index866bd13e -> arm64 child2d3f94a8 -> config4a53620e.
+Full structured values retained garage-registry.json; registry JSON is parsed
+metadata, not original canonical/raw bytes. Authentication used only public
+anonymous registry pull token, not retained. No detached signature claim.
+
+Docker pulled exact child digest; local config/imageID:
+sha256:4a53620ee2088de01a185899412889ade13c420df74ac9ca12699c27a8ab18b2
+RootFS diffID sha256:2ece7b597203ea0db441b4f1f9b33b64e7997143fc56b5396943ff569b660b67
+Created extraction container35102ba07ce50f81090a7108a8e406effd8e39cda165d4c8b8f9319b04c5f68b;
+networknone, UID1000, capdropALL, NNP,64MiB/PIDs16. Never started:
+observed state created, StartedAt0001-01-01T00:00:00Z. Removed after copy.
+Copied only /garage to owned /tmp/das-garage-public.XXWCqD/garage.
+Executable SHA256 8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2.
+file: ELF64 LSB executable ARM aarch64, statically linked, not stripped.
+readelf: ET_EXEC, six program headers, no INTERP/DYNAMIC segment; no extra
+runtime libraries selected or copied. Executable remains unexecuted.
+Public immutable image and public staging retained for reviewed seed creation.
+
+Source-only dispatch tests: 2PASS0failed0ignored, Mac allfeatures lockedoffline,
+compile29.98s. No actual Garage backend or ignored Linux fixture execution.
+
+Native source b814a337 allfeatures lockedoffline --no-run compiled26.44s,
+including Linux ignored actual admission/retention entry. No backend execution.
+Unstripped adapter SHA256 7323e1a77201e2898aec127c045bdf93b80d5e566d0cbf826a0a30321f4faa91.
+Stripped adapter SHA256 9a4b9fb11bd59aa9a24bc71e6ea47a1574c6c359d551f7245f571f4ffb2a27a9.
+strip --strip-debug, GNU Binutils Ubuntu2.42; /usr/bin/strip SHA256
+3a69e3786ea2884baf4d9811e509ba6d16be03d5d6f541103b8de317a2465fca.
+Both public artifacts retained alongside public Garage, no executable run on
+the host. Official quick-start uses GK+openssl rand-hex16 (32hexcharacters),
+matching this fixture's generated GK+UUID.simple format; secrets are32byteshex.
+Source: https://garagehq.deuxfleurs.fr/documentation/quick-start/ .

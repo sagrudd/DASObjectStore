@@ -8,6 +8,7 @@ pub mod credentials;
 pub mod custody;
 pub mod custody_attestation;
 pub mod custody_catalog;
+pub mod custody_reader;
 pub mod garage;
 pub mod inspection;
 pub mod layout;

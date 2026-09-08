@@ -1,0 +1,15 @@
+Full loader fixture first boot, source c79a55cbeca4a90b164fefb1c015f0854f81eb3e.
+Container96d6152c5493be73a8f66ae8c89c55a75df4e0b85409357796ff9f23922fde68.
+Started2026-09-08T14:45:54.619014868Z, finished14:49:02.576704309Z.
+Native full source/test compile PASS33.35s; prerequisite8 tests PASS0.09s.
+Adapter570116abe66f7f8a99d4b163c9c2b65e0aeb552a43531f1329e36efb78bace7e.
+Seed7fe61dbffdb9ba739a52df023c552ffa15f944aad23ed345016fcca4ea15995b.
+Serial6f9a16caf553320deb3c640eec258f73c60a1bb5fa3c70346ffa94cbbd143cad.
+Actualsystemd259.5; helper input matched its separately retained exact hash.
+Root setup emitted VM_LOADER_PREP_STAGE ledger, then PREPARATION_DENIED.
+No encryption/publication/full loader invocation occurred. The coarse stage
+covered fixture creation, relocation and helper validation; cause not inferred.
+QEMU exit0 only reflects guest poweroff, not test success. No loader PASS.
+Owned guest container removed without state/credential/disk export or commit.
+Next diagnostic prints fixed stages/source location and closed rename category
+only, never panic payloads or credential data; no product guard changed.

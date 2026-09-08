@@ -1,0 +1,15 @@
+Actual Garage joined location diagnostic — DENIED, inner cause unclassified
+Runnera6b1d7ae/Rust5d49f949/stripped3ece032e..., same approved5e/8ced inputs.
+Container1a7db370d8cd6270e584faee57b35977b36c732d1327e5f3c4b3999798f7945a.
+Started2026-09-08T17:59:52.580260286Z; finished18:00:35.795167554Z.
+Container/QEMU0 after failure shutdown; acceptance controller1.
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM
+VM_GARAGE_EXIT phase=complete status=0
+VM_JOINED_EXIT phase=prepare_positive status=1
+No allowlisted Rust location marker was observed; do not infer a Rust panic.
+Shell preparation can fail before the adapter or afterward while selecting
+its output. Next diagnostic records only the shell source line, not command
+text or private log. No binding/permission correction has been guessed.
+ConsoleSHA2562ad4f0682fff1658f84f890ae96f1f67651eef875b53547bae708fb3adfed12e.
+Exact exited container removed; no private logs, booted image/disk or keys exported.
