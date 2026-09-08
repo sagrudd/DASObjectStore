@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.185.1 - Unreleased
+
+- Require signed AWS upload payloads for explicit remote sessions using a
+  process-private configuration, and in newly installed managed AWS profiles.
+  Preserve credentials, CA verification, endpoint and proxy environment; pass
+  the selected region explicitly. No shared user config is rewritten by upload.
+  Include the reviewed mounted EasyConnect polling-route correction. Kanon #339
+  3477d3a coordinates this successor; historical r7/0.177.4 remain unchanged.
+
 ## 0.185.0 - Unreleased
 
 - Add existing-only, single-snapshot custody verification and bounded exact-byte

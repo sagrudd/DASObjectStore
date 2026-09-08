@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+mod signed_payload;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AccessibleStore {
@@ -198,19 +199,7 @@ pub fn execute_aws_plan(
     credentials: Option<&RemoteS3Credentials>,
     ca_bundle_path: Option<&str>,
 ) -> Result<String, RemoteS3Error> {
-    let mut command = Command::new(&plan.program);
-    command.args(&plan.args);
-    if let Some(ca_bundle_path) = ca_bundle_path {
-        command.env("AWS_CA_BUNDLE", ca_bundle_path);
-    }
-    if let Some(credentials) = credentials {
-        command
-            .env("AWS_ACCESS_KEY_ID", &credentials.access_key_id)
-            .env("AWS_SECRET_ACCESS_KEY", &credentials.secret_access_key);
-        if let Some(session_token) = &credentials.session_token {
-            command.env("AWS_SESSION_TOKEN", session_token);
-        }
-    }
+    let (mut command, _signed_payload) = aws_command(plan, credentials, ca_bundle_path)?;
     let output = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -221,6 +210,39 @@ pub fn execute_aws_plan(
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn aws_command(
+    plan: &AwsS3CommandPlan,
+    credentials: Option<&RemoteS3Credentials>,
+    ca_bundle_path: Option<&str>,
+) -> Result<(Command, Option<signed_payload::SignedPayloadConfig>), RemoteS3Error> {
+    let mut command = Command::new(&plan.program);
+    command.args(&plan.args);
+    let _signed_payload = if credentials.is_some()
+        && !matches!(plan.operation, AwsS3Operation::ListStores)
+        && !plan.args.iter().any(|arg| arg == "--profile")
+    {
+        let config = signed_payload::SignedPayloadConfig::create()?;
+        config.configure(&mut command);
+        Some(config)
+    } else {
+        None
+    };
+    if let Some(ca_bundle_path) = ca_bundle_path {
+        command.env("AWS_CA_BUNDLE", ca_bundle_path);
+    }
+    if let Some(credentials) = credentials {
+        command
+            .env("AWS_ACCESS_KEY_ID", &credentials.access_key_id)
+            .env("AWS_SECRET_ACCESS_KEY", &credentials.secret_access_key);
+        if let Some(session_token) = &credentials.session_token {
+            command.env("AWS_SESSION_TOKEN", session_token);
+        } else {
+            command.env_remove("AWS_SESSION_TOKEN");
+        }
+    }
+    Ok((command, _signed_payload))
 }
 
 pub fn parse_list_buckets(raw: &str) -> Result<Vec<AccessibleStore>, RemoteS3Error> {
@@ -241,6 +263,7 @@ fn aws_base_args(config: &RemoteConfig, credential_source: AwsS3CredentialSource
         args.extend(["--profile".to_string(), config.profile.clone()]);
     }
     args.extend(["--endpoint-url".to_string(), config.endpoint_url.clone()]);
+    args.extend(["--region".to_string(), config.region.clone()]);
     args
 }
 

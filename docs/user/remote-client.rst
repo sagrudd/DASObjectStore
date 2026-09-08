@@ -985,3 +985,16 @@ establish the replacement. Apply writes a new immutable generation and moves
 ``state.json`` atomically; the previous generation remains the private archive.
 ``authenticate --set-s3-config`` performs this safe repair automatically and
 continues without requiring a second authentication command.
+Signed upload payloads
+----------------------
+
+Remote session uploads explicitly enable AWS payload signing using a private,
+short-lived configuration supplied only to that AWS child process. The client
+does not edit your global AWS defaults. Session credentials and the verified
+Site Trust CA remain the inputs; endpoint and region come from the selected
+remote configuration. Proxy environment variables remain unchanged. Inherited
+AWS profile selection does not override an explicitly supplied session.
+
+Newly installed DAS-managed AWS profiles also enable payload signing. Existing
+external profiles are not silently rewritten by upload. The separate optional
+daemon-submission path is not qualified by this direct-upload correction.
