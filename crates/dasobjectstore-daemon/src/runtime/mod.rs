@@ -17,6 +17,8 @@ mod capacity_provider;
 mod config;
 mod custody_activation;
 mod custody_garage;
+#[cfg(unix)]
+pub mod custody_reader;
 mod custody_service;
 mod destage_admission;
 mod destage_worker;

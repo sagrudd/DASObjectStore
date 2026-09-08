@@ -134,6 +134,41 @@ pub struct SystemdServiceCredentialHandoffResolver {
 }
 
 impl SystemdServiceCredentialHandoffResolver {
+    /// Decode only bytes acquired after the separate platform/protected-source
+    /// verifier. This helper grants no delivery provenance and touches no marker.
+    #[cfg(unix)]
+    pub(super) fn decode_continuation(
+        binding: &dasobjectstore_object_service::custody_reader::ReaderBindingV1,
+        bytes: &[u8],
+    ) -> Result<CustodyRuntimeCredential, dasobjectstore_object_service::custody_reader::ReaderError>
+    {
+        use dasobjectstore_object_service::custody_reader::ReaderError;
+        binding.encode()?;
+        if bytes.len() > 65536 {
+            return Err(ReaderError::Boundary);
+        }
+        let handoff = parse_systemd_handoff(bytes).map_err(|_| ReaderError::Boundary)?;
+        if handoff.role != CustodyRuntimeCredentialRole::Reader
+            || handoff.store_id != binding.store_id
+            || handoff.configuration_sha256 != binding.configuration_sha256
+            || handoff.identity != binding.reader_identity
+            || handoff.aws_access_key_id != binding.backend_key_id
+        {
+            return Err(ReaderError::Binding);
+        }
+        let mut environment = vec![
+            ("AWS_ACCESS_KEY_ID".into(), handoff.aws_access_key_id),
+            (
+                "AWS_SECRET_ACCESS_KEY".into(),
+                handoff.aws_secret_access_key,
+            ),
+        ];
+        if let Some(token) = handoff.aws_session_token {
+            environment.push(("AWS_SESSION_TOKEN".into(), token));
+        }
+        CustodyRuntimeCredential::new(handoff.identity, environment)
+            .map_err(|_| ReaderError::Binding)
+    }
     /// Construct only from systemd's service credential directory. Absence is
     /// intentional fail-closed evidence that custody activation was not
     /// explicitly attended and configured.

@@ -6,6 +6,11 @@
   existing-only complete custody-ledger receipt-set verifier. Preserve legacy
   handoff, receipt, signed request and retention semantics. These public records
   validate source data, not independent companion admission or live eligibility.
+- Add initial protected reader publication and bounded continuation composition,
+  with descriptor-relative file checks, ciphertext mode/hash inspection and a
+  Linux systemd metadata probe before credential decoding. Issue #212 tracks
+  remaining interruption/native-platform qualification; no endpoint activation,
+  backend rotation or production companion authority is supplied.
 
 ## 0.185.0 - Unreleased
 
