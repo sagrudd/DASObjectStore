@@ -32,3 +32,21 @@ baseline loader fixture. Neither strip nor test evidence implies a VM PASS.
 No joined guest was booted. No guest/host package transaction was executed.
 Installer guard6pure tests PASS; Bash syntax and diff-check PASS. The installer
 and guest scripts are a reviewed-next source checkpoint, not executed evidence.
+
+Readiness/replay successor: 7843e1a72fe86a993b2accd1da70f347086e81e0
+Archive SHA256d5a634567b690a85983a908f6dadf6b98c36ed665e814707af773e9f132a6fe9.
+Same source-only build container and command: PASS26.97s, no warnings.
+Unstripped SHA2562f6c51655a1aba99415702334fda1e6cef779793d232d201e24bc2b0a0ba5f31.
+Same verified strip tool; stripped SHA256e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f.
+Nonroot executable-only runner9037079a, same network/mount/capability/resource
+bounds as above: new live-listener observer1PASS0ignored0.01s, then existing
+actual TLS5PASS0ignored2.79s. Three actual joined VM entries remain unexecuted.
+The observer denies a queued connection even with a completion marker, denies
+absent completion at a finite deadline, and accepts completed/no-connection.
+The held joined driver also checks unchanged single journal marker/result and
+freshly valid re-signed same-ID/new-nonce denial, never merely expired replay.
+
+Independent root review accepted the complete source guard/installer and
+held runner proposal; root independently invoked the exact guard test script:
+6PASS0failed. Earlier generic discovery found0 and is not counted. These source
+results do not replace the independently running full-loader VM baseline.
