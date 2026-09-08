@@ -11,6 +11,10 @@
   Linux systemd metadata probe before credential decoding. Issue #212 tracks
   remaining interruption/native-platform qualification; no endpoint activation,
   backend rotation or production companion authority is supplied.
+- Serialize initial reader publication with a nonblocking protected-directory
+  lock, closing stale-preflight claim recreation. Exercise 27 publication
+  boundaries with process-loss/error injection and fresh-process re-entry;
+  distinguish incomplete prefixes from complete publication with a lost return.
 
 ## 0.185.0 - Unreleased
 

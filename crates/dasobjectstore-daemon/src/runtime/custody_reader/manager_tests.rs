@@ -1,4 +1,6 @@
 //! Independent public-operation manager tests; no systemd authentication claim.
+#[path = "interruption_tests.rs"]
+mod interruption_tests;
 use super::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use dasobjectstore_object_service::custody::*;

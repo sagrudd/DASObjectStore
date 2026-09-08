@@ -12,6 +12,39 @@ pub(super) struct Directory {
     file: File,
 }
 impl Directory {
+    pub(super) fn lock_publication(&self) -> Result<File, ReaderError> {
+        self.check()?;
+        // SAFETY: retained directory fd and static relative name. A fresh open
+        // description (not dup) gives separate threads independent flock owners.
+        let fd = unsafe {
+            libc::openat(
+                self.file.as_raw_fd(),
+                c".".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if fd < 0 {
+            return Err(ReaderError::Boundary);
+        }
+        // SAFETY: this fresh fd has no other Rust owner.
+        let lock = unsafe { File::from_raw_fd(fd) };
+        let m = lock.metadata().map_err(|_| ReaderError::Boundary)?;
+        if !m.is_dir() || (m.dev(), m.ino()) != self.identity {
+            return Err(ReaderError::Boundary);
+        }
+        // SAFETY: lock is a valid owned directory fd; LOCK_NB never waits/retries.
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return Err(
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::WouldBlock {
+                    ReaderError::Conflict
+                } else {
+                    ReaderError::Boundary
+                },
+            );
+        }
+        self.check()?;
+        Ok(lock) // closing this independent descriptor releases its advisory lock
+    }
     pub(super) fn descriptor(&self) -> &File {
         &self.file
     }
@@ -200,10 +233,26 @@ impl Directory {
     }
     pub(super) fn create(&self, name: &str, bytes: &[u8]) -> Result<(), ReaderError> {
         let mut file = self.open_child(name, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL)?;
-        file.write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|_| ReaderError::Boundary)?;
-        self.sync()
+        #[cfg(test)]
+        {
+            super::publication_faults::point(&self.path, name, "after_open")?;
+            let split = bytes.len() / 2;
+            file.write_all(&bytes[..split])
+                .map_err(|_| ReaderError::Boundary)?;
+            super::publication_faults::point(&self.path, name, "partial_write")?;
+            file.write_all(&bytes[split..])
+                .map_err(|_| ReaderError::Boundary)?;
+            super::publication_faults::point(&self.path, name, "after_write")?;
+        }
+        #[cfg(not(test))]
+        file.write_all(bytes).map_err(|_| ReaderError::Boundary)?;
+        file.sync_all().map_err(|_| ReaderError::Boundary)?;
+        #[cfg(test)]
+        super::publication_faults::point(&self.path, name, "after_file_sync")?;
+        self.sync()?;
+        #[cfg(test)]
+        super::publication_faults::point(&self.path, name, "after_dir_sync")?;
+        Ok(())
     }
     pub(super) fn sync(&self) -> Result<(), ReaderError> {
         self.check()?;
@@ -219,7 +268,12 @@ impl Directory {
         if unsafe { libc::unlinkat(self.file.as_raw_fd(), name.as_ptr(), 0) } != 0 {
             return Err(ReaderError::Boundary);
         }
-        self.sync()
+        #[cfg(test)]
+        super::publication_faults::point(&self.path, "manager.claim", "after_unlink")?;
+        self.sync()?;
+        #[cfg(test)]
+        super::publication_faults::point(&self.path, "manager.claim", "after_unlink_sync")?;
+        Ok(())
     }
 }
 fn identity(m: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64, u32, u32, u64) {

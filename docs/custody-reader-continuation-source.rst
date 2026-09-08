@@ -58,9 +58,10 @@ directory. The directory must initially be empty. An exclusive, synced
 ``manager.claim`` precedes a second complete ledger/source check. Create-only
 ``seal-<raw-sha256>.jcs``, ``binding-<raw-sha256>.jcs`` and
 ``state-<raw-sha256>.jcs`` retain the exact accepted record bytes; ``current.jcs``
-is published last, then the claim is removed and the directory synced. A failed
-operation retains its claim and any public prefix; no adoption, cleanup,
-recovery or retry path is supplied. A durability failure cannot establish a
+is published last, then the claim is removed and the directory synced. An
+incomplete operation retains its claim and public prefix. Failure after unlink
+may instead leave the complete publication with a lost return. Both deny manager
+re-entry; no adoption, cleanup, recovery or retry path is supplied. A durability failure cannot establish a
 power-loss persistence guarantee. Reader loading requires exactly those four
 final files and no claim or extra history. This is initial-only publication,
 not a replacement/revocation state machine or an anti-rollback store against
@@ -94,11 +95,39 @@ two synthetic header-classification cases, three real protected-file cases and
 three independently authored publication cases using actual ledger APIs. The
 latter cover success/replay, preflight inventory denial and preexisting partial
 claim rejection, not a process crash between every fsync/publication step. The
-full interruption matrix, Linux-only process tests and real systemd positive
-qualification remain outstanding; no exhaustive durability or platform claim
-is made by this checkpoint.
+original checkpoint did not cover the interruption matrix or Linux-only process
+tests. Later source/native receipts identify their exact successor heads; real
+systemd positive qualification remains separate and no power-loss durability
+claim is made by these process tests.
 
 The subsequent manager-reload refinement has six focused metadata tests passing,
 including legitimate initial zero-reload and reload-start-after-boot-finish
 cases, changed observations and old activation denial. This is still portable
 parser/ordering evidence, not a successful native systemd credential load.
+
+Publication interruption successor
+----------------------------------------
+
+Publication now holds a nonblocking advisory exclusive lock for the complete
+call, before empty-directory preflight through claim removal and final sync.
+Each call opens a fresh description of the same verified directory, including
+threads sharing one manager. Contention denies without waiting or retry. This
+prevents a stale preflight contender from creating a new claim after another
+publisher completed. It coordinates cooperating publishers, not a malicious
+authorized manager writing directly to the protected directory.
+
+The test-binary-only matrix terminates a child without Rust destructors, or
+returns an injected error, at 27 boundaries: exclusive file creation, partial
+write, full write, file sync and directory sync for each of five files, plus
+claim unlink and its directory sync. Every one of the 54 attempts is followed
+by a new process attempting publication. Incomplete prefixes retain a claim
+and deny record loading. Post-unlink loss leaves the complete four-record
+publication readable but still denies publication re-entry. Every re-entry
+must preserve all existing public bytes and the exact ledger bytes.
+
+Additional tests cover four competing processes, a deterministically paused
+empty-preflight contender and threads sharing one manager, including an already
+held lock. The pause has a finite ten-second rendezvous; test child guards kill
+and reap unfinished children on failure. No injection/environment branch exists
+in a production build. These tests exercise process loss and error boundaries,
+not physical power loss, disk-controller caches or a simulated kernel reboot.

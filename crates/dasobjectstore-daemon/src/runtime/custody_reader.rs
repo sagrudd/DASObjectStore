@@ -4,6 +4,8 @@ mod ciphertext;
 mod files;
 #[cfg(test)]
 mod manager_tests;
+#[cfg(test)]
+mod publication_faults;
 mod systemd;
 use super::custody_garage::{GarageCustodyS3Reader, SystemdServiceCredentialHandoffResolver};
 use super::service::ServiceCommandRunner;
@@ -69,8 +71,9 @@ impl ReaderManager {
         })
     }
     /// Publish the actual complete initial seal and selected current record once.
-    /// No existing state is adopted or overwritten. A failed publication leaves
-    /// its claim permanently fail-closed; no recovery/retry API is supplied.
+    /// No existing state is adopted or overwritten. An incomplete publication
+    /// retains its claim; failure after removing the claim may leave the complete
+    /// publication with a lost return. Both deny re-entry; no retry is supplied.
     ///
     /// # Errors
     /// Denies mismatches before writes; later faults preserve incomplete evidence.
@@ -82,6 +85,7 @@ impl ReaderManager {
         limits: CustodyReadLimits,
     ) -> Result<(), ReaderError> {
         let deadline = limits.start().map_err(|_| ReaderError::Read)?;
+        let _publication_lock = self.directory.lock_publication()?;
         let guard = files::Directory::open(selection.directory.clone(), selection.manager_uid)?;
         if selection.binding.uid == selection.manager_uid
             || selection.selected_inventory_sha256 != selection.binding.inventory_sha256
@@ -112,6 +116,8 @@ impl ReaderManager {
             return Err(ReaderError::Conflict);
         }
         self.directory.require_names(&[])?;
+        #[cfg(test)]
+        publication_faults::point(&selection.directory, "manager", "after_empty")?;
         self.directory.create("manager.claim", &[])?;
         // Recheck the whole immutable selection after winning the external claim.
         selection.binding.verify(current, seal, &clock_now())?;
