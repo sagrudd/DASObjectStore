@@ -63,7 +63,10 @@ UNIT
     systemctl daemon-reload
     phase="load_$mode"
     systemctl start das-vm-loader.service
-    pid=$(systemctl show -p MainPID --value das-vm-loader.service)
+    # v259 dbus-service.c BUS_EXEC_STATUS_VTABLE("ExecMain", ...), with
+    # execute.c::exec_status_exit retaining pid after a fast expected denial.
+    # MainPID may already be zero for a successfully completed negative case.
+    pid=$(systemctl show -p ExecMainPID --value das-vm-loader.service)
     invocation=$(systemctl show -p InvocationID --value das-vm-loader.service)
     test "$pid" -gt 0
     [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
