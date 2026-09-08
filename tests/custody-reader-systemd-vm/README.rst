@@ -186,6 +186,18 @@ The resulting clean, unbooted tool image and fixed runner command require
 review before another independently recorded loader test. The prior TCG
 adapter success and all failed loader attempts retain their original scopes.
 
+The reviewed modern composition image is
+``sha256:5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6``.
+Use the same KVM-only restrictions above with entry point ``/bin/bash`` and
+arguments ``/custody-reader-systemd-vm/run.sh loader-kvm-modern``. The external
+controller enforces900s, terminates/stops the exact owned container on exit or
+timeout, retains sanitized output, and removes it without committing booted
+state. This avoids reliance on the minimal Fedora image's timeout executable.
+The modern runner selects ``virt-10.2``, explicit prefix data/firmware files,
+and the exact independently pre-stripped adapter hash recorded in
+``evidence/modern-tools-result.txt``. No inherited/default QEMU or firmware path
+is used by this mode. Tool qualification and actual loader results are separate.
+
 Primary public input references
 -------------------------------
 
