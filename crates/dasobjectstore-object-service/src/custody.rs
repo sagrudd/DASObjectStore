@@ -13,6 +13,11 @@
 //! independently administered retained storage.
 
 use crate::provider::ObjectServiceError;
+mod bounded_read;
+pub use bounded_read::{
+    verify_custody_readback_existing, BoundedCustodyObjectReader, CustodyReadDeadline,
+    CustodyReadError, CustodyReadLimits, VerifiedCustodyRead,
+};
 use chrono::{DateTime, SecondsFormat, Utc};
 use dasobjectstore_core::ids::StoreId;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
@@ -1885,6 +1890,12 @@ fn read_sealed_configuration(
     path: &Path,
 ) -> Result<CustodySealedConfigurationV1, ObjectServiceError> {
     let connection = open_ledger_read_only(path)?;
+    read_sealed_configuration_from(&connection)
+}
+
+fn read_sealed_configuration_from(
+    connection: &Connection,
+) -> Result<CustodySealedConfigurationV1, ObjectServiceError> {
     let (configuration_jcs, configuration_sha256): (String, String) = connection
         .query_row(
             "SELECT configuration_jcs, configuration_sha256 FROM custody_store_configuration WHERE singleton = 1",
@@ -1919,6 +1930,13 @@ fn sealed_configuration_sha256(
 }
 
 fn verify_event_chain(connection: &Connection) -> Result<(), ObjectServiceError> {
+    verify_event_chain_checked(connection, || Ok(()))
+}
+
+fn verify_event_chain_checked(
+    connection: &Connection,
+    check: impl Fn() -> Result<(), ObjectServiceError>,
+) -> Result<(), ObjectServiceError> {
     let mut statement = connection
         .prepare(
             "SELECT sequence, event_jcs, previous_event_sha256, event_sha256 \
@@ -1934,6 +1952,7 @@ fn verify_event_chain(connection: &Connection) -> Result<(), ObjectServiceError>
         .next()
         .map_err(sql_error("read custody event-chain row"))?
     {
+        check()?;
         let sequence: u64 = row
             .get(0)
             .map_err(sql_error("read custody event sequence"))?;
@@ -2161,7 +2180,7 @@ fn sql_error(operation: &'static str) -> impl FnOnce(rusqlite::Error) -> ObjectS
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2778,6 +2797,18 @@ mod tests {
     ) -> Result<CustodyLedgerInspectionV1, ObjectServiceError> {
         let request = request(store, bucket);
         create_custody_ledger(path, &request, fresh_proof(&request)?, CREATED)
+    }
+
+    pub(super) fn retained_fixture(path: &Path, bytes: &[u8]) -> CustodyIntegrityReceiptV1 {
+        create_test_ledger(path, "formal-custody", "dos-formal-custody").expect("fixture ledger");
+        let backend = MemoryObjectStore::default();
+        retain_custody_object_with_readback(
+            path,
+            input(bytes),
+            &mut Writer { backend: &backend },
+            &mut Reader { backend: &backend },
+        )
+        .expect("fixture retained")
     }
 
     fn input(bytes: &[u8]) -> CustodyObjectInputV1 {

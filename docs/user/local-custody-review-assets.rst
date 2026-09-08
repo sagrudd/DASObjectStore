@@ -1,6 +1,12 @@
 Local custody review assets
 ===========================
 
+The 0.185.0 source line adds an existing-only, bounded read-verification API
+and a concrete Unix reader adapter. It is not a new operator endpoint or
+persistent reader service, and cannot reopen a consumed credential. See
+:doc:`../adr/0010-existing-only-bounded-custody-read`. The operator approval
+and activation limitations below are unchanged.
+
 The 0.184.0 source line adds an in-process finite-inventory retention call,
 not a new operator command or custody activation route. It uses each sealed
 writer/reader handoff once for the selected finite batch. Failure preserves

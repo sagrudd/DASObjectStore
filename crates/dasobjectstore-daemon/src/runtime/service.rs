@@ -1399,6 +1399,8 @@ impl ServiceCommandRunner for FakeRunner {
 mod tests {
     include!("custody_service_tests.rs");
     include!("custody_batch_tests.rs");
+    #[cfg(unix)]
+    include!("custody_bounded_joined_tests.rs");
     use super::{
         GarageServiceController, GarageServiceRuntimeConfig, ServiceCommandRunner,
         SystemServiceCommandRunner,

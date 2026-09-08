@@ -171,7 +171,7 @@ pub use custody_activation::{
     CUSTODY_ACTIVATION_MARKER_FILE_NAME, CUSTODY_ACTIVATION_MARKER_SCHEMA,
 };
 pub use custody_garage::{
-    CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredential,
+    BoundedGarageCustodyReader, CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredential,
     CustodyRuntimeCredentialResolver, CustodyRuntimeCredentialRole, GarageCustodyProvisioner,
     GarageCustodyS3Reader, GarageCustodyS3Writer, SystemdServiceCredentialHandoffResolver,
     CUSTODY_HANDOFF_CONSUMPTION_DIRECTORY, SYSTEMD_CREDENTIALS_DIRECTORY_ENV,

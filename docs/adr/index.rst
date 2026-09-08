@@ -17,4 +17,5 @@ implementation.
    0007-pistis-only-human-authority
    0008-expedition-retained-dossier-writer
    0009-finite-inventory-custody-session
+   0010-existing-only-bounded-custody-read
    fixtures/README

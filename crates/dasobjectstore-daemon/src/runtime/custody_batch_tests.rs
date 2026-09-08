@@ -92,6 +92,9 @@ impl BatchFixture {
     fn new() -> Self {
         static SEQUENCE: AtomicUsize = AtomicUsize::new(0);
         let root = temp_root().join(format!("batch-{}", SEQUENCE.fetch_add(1, Ordering::SeqCst)));
+        Self::new_at(root)
+    }
+    fn new_at(root: PathBuf) -> Self {
         let credential_dir = root.join("credentials");
         fs::create_dir_all(&credential_dir).unwrap();
         let mut definition = custody_definition();
