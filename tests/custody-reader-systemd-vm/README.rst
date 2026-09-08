@@ -159,6 +159,15 @@ remain. There is no TCG fallback if KVM cannot initialize. Never commit the
 booted container. Record actual accelerator and source hashes separately;
 neither a KVM test nor a TCG test proves a production latency guarantee.
 
+The complete loader matrix is now qualified in ``evidence/loader-all-pass.txt``:
+real systemd259.5 delivery, genuine manager publication, full zeroizing load,
+unchanged-publication restart, three denials and a fresh final positive. It does
+not qualify backend GET or installation. The fixture keeps completed units with
+``RemainAfterExit=yes`` through exit/identity verification, then explicitly
+stops them and checks inactivity. This avoids completed-unit metadata loss
+without sleeps or removal of identity checks; prior failed attempts remain
+separate evidence rather than being relabelled as product failures.
+
 Modern public tool payload composition
 --------------------------------------
 

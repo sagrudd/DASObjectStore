@@ -1,0 +1,53 @@
+Actual full zeroizing ReaderContinuation loader matrix PASS.
+This is a disposable source fixture, NOT installation/S4 or backend GET proof.
+
+Frozen shell fixture source: cc0d0737 (unchanged native source447174f686fffded36bc12a156b9afda6a3b87ac).
+Public pre-stripped adapter SHA256:
+29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+Clean unbooted image:
+5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6
+Seed SHA256:
+bd151a3aa5ccc24903cb109132aa3b0857d3d9430c1064dd1def402a539b4cec
+Console SHA256:
+598bf524a4b382af05e9a6d559996d6f8ac3755401b8e42b96d3e16e679c8ce8
+Container07d7993c05d7ea33ea424033a2d22b757230d0cf641d583cf6bba12f26c60604
+Start2026-09-08T16:03:54.118422483Z
+End2026-09-08T16:05:10.527784127Z
+Elapsed76.41s; controller exit0 AND explicit fixture complete/status0.
+
+Actual Fedora44/systemd259.5, QEMU10.2.2/edk220260213, KVM-only.
+Public KVM preflight PASS; eight native probe tests PASS0.09s.
+VM_LOADER_PASS positive
+VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
+VM_LOADER_PASS restart
+VM_LOADER_PASS malformed
+VM_LOADER_PASS wrong-key
+VM_LOADER_PASS stale-current
+VM_LOADER_PASS positive
+VM_LOADER_ALL_PASS
+VM_LOADER_EXIT phase=complete status=0
+
+Every case required actual test pass marker, active/exited, ExecMainStatus0,
+Resultsuccess, nonzero retained ExecMainPID and valid InvocationID while held
+with fixture-only RemainAfterExit, then explicit stop/inactive and unchanged
+publication/ledger hashes. Restart used identical ciphertext/publication with
+distinct process and invocation. No re-seal or re-publication between those two.
+
+The guest generated actual encrypted credentials and used genuine manager
+publication plus the complete descriptor/ACL-aware zeroizing loader. Storage
+setup uses actual public ledger APIs with an explicitly synthetic backend.
+The copied AWS file was only checked as a real protected helper path/hash;
+it was not executed. No Garage, TLS GET, S4, package or target activation claim.
+
+Outer isolation: user1000:1000, container-only group994, sole /dev/kvm10:232 rw,
+cap-drop ALL, NNP, networknone, no mounts/privilege, 4CPU/6GiB/pids256,900s
+controller. Guest2vCPU/2GiB and pristine5GiB qcow2 with fresh overlay/vars/seed.
+Booted container removed after public evidence capture. No generated secret,
+disk overlay or booted state exported/committed. Prior failures remain retained.
+
+Recurrence lesson: completed systemd test units may lose identity metadata
+through lifecycle/GC. Retain the fixture unit through terminal identity checks,
+then explicitly stop it; do not substitute sleeps or remove identity checks.
+Qualify the actual selected init-system representation and tool/firmware before
+packaging. Keep tool composition, fixture races, product guards and release
+authority as distinct claims.
