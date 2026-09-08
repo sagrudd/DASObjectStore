@@ -6,6 +6,10 @@ Date: 2026-09-08. Owner: project owner with independent source-design review.
 Issue: https://github.com/sagrudd/DASObjectStore/issues/210.
 Baseline: ``a6228f1626d2870d2464e1a59955dbf00f01fd4e`` (DAS #209).
 
+The concrete proposed field sets, frames, vectors and programme adapter
+clarification are in :doc:`0011-reader-wire-contract`. They remain review
+candidates, not accepted runtime protocol or activation authority.
+
 Purpose and existing contracts
 ------------------------------
 
