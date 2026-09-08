@@ -161,6 +161,15 @@ conformance testing, but it must be supplied in process: HTTP input, headers,
 cookies, and query parameters can never select the daemon endpoint. Normal
 packaged deployments use the daemon's standard socket path.
 
+The advertised polling URL retains the actual supported API mount: the Monas
+product route includes ``/products/dasobjectstore``, while a root-mounted API
+retains its root path. The server derives this from the routed create request,
+not forwarding headers, and binds the returned poll path to the exact daemon
+pairing identifier. An unknown mount or substituted daemon path fails closed.
+This compatible server correction is part of the unreleased 0.186 task group;
+it does not replace an already selected remote-client package or prove that a
+particular deployed server carries the correction.
+
 Inspect the enrolled, non-secret certificate identity before pairing:
 
 .. code-block:: console

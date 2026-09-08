@@ -3,6 +3,7 @@
 use super::*;
 
 mod easyconnect_approval_page;
+mod easyconnect_polling_route;
 mod pistis_approval_route;
 use dasobjectstore_daemon::{
     RemoteEasyconnectApprovalContext, RemoteEasyconnectPairingStatusRequest,
@@ -397,8 +398,17 @@ fn remote_auth_bridge_error(
 
 pub(super) async fn easyconnect_create_pairing(
     State(state): State<EasyconnectPublicRouteState>,
+    axum::extract::OriginalUri(original_uri): axum::extract::OriginalUri,
     Json(request): Json<RemoteEasyconnectCreatePairingRequest>,
 ) -> Result<Json<RemoteEasyconnectCreatePairingResponse>, (StatusCode, Json<AuthRouteError>)> {
+    let polling_mount = easyconnect_polling_route::PollingMount::from_create(&original_uri)
+        .map_err(|message| {
+            route_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_easyconnect_create_route",
+                message,
+            )
+        })?;
     request.validate().map_err(|error| {
         route_error(
             StatusCode::BAD_REQUEST,
@@ -445,11 +455,19 @@ pub(super) async fn easyconnect_create_pairing(
         )
     })?;
     response.browser_login_url = browser_url.to_string();
-    response.polling_url = format!(
-        "{}{}",
-        public_base_url.trim_end_matches('/'),
-        response.polling_url
-    );
+    response.polling_url = polling_mount
+        .polling_url(
+            &public_base_url,
+            &response.pairing_id,
+            &response.polling_url,
+        )
+        .map_err(|message| {
+            route_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "invalid_easyconnect_polling_route",
+                message,
+            )
+        })?;
     Ok(Json(response))
 }
 
