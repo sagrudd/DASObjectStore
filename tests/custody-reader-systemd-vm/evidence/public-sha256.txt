@@ -1,0 +1,4 @@
+db8f0f9768162522d0bc2843f0f32be2c4522b822249a9a5b6c31935ca2fc890  /opt/custody-systemd-vm/public/CHECKSUM
+55c60a3b80d3616a08705afd0459e75fe9f03c54aba7a46e4002a41a72fa0d5b  /opt/custody-systemd-vm/public/Fedora-Cloud-Base-Generic-44-1.7.aarch64.qcow2
+3b8a3660cca4851a67f67f56819e37e2f6b37ac8e905cb571b25d2127d1b7618  /opt/custody-systemd-vm/public/fedora.gpg
+ee42b9c07cf45061e59446506442fed9a68270e2a65b775d41b2549501fc4dbc  /opt/custody-systemd-vm/public/fedora44.gpg

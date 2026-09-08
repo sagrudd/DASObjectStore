@@ -1,0 +1,3 @@
+05d8eba0b9d1b07677aba4d8ef560e63e3ba4e315346a608a7eb5e69cb12a056  /usr/bin/qemu-system-aarch64
+59c9214d58ef2e3844fc10bc835b01edde6a850bef300169db8898f6263c1bee  /usr/bin/qemu-img
+f5804853095bf2f0cd261b6c8ec89d351f33e455e530ea3805259c694140b88b  /usr/bin/genisoimage

@@ -1,0 +1,19 @@
+{
+    "virtual-size": 5368709120,
+    "filename": "/opt/custody-systemd-vm/public/Fedora-Cloud-Base-Generic-44-1.7.aarch64.qcow2",
+    "cluster-size": 65536,
+    "format": "qcow2",
+    "actual-size": 528158720,
+    "format-specific": {
+        "type": "qcow2",
+        "data": {
+            "compat": "1.1",
+            "compression-type": "zlib",
+            "lazy-refcounts": false,
+            "refcount-bits": 16,
+            "corrupt": false,
+            "extended-l2": false
+        }
+    },
+    "dirty-flag": false
+}

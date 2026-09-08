@@ -1,0 +1,1 @@
+55c60a3b80d3616a08705afd0459e75fe9f03c54aba7a46e4002a41a72fa0d5b  Fedora-Cloud-Base-Generic-44-1.7.aarch64.qcow2
