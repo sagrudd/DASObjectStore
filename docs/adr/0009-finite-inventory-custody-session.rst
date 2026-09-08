@@ -1,5 +1,5 @@
 Finite-inventory custody session
-===============================
+================================
 
 Status: ACCEPTED bounded source design; no execution authority.
 

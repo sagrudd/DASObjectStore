@@ -1,5 +1,5 @@
 Existing-only verification and bounded custody reads
-===================================================
+====================================================
 
 Status: ACCEPTED bounded source design. Lead-agent independent review of exact
 proposal commit ``567ca93ee5c41d689224b66df0e4be159a10ecd7`` and raw ADR hash
