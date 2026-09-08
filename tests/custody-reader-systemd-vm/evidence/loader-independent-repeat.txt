@@ -1,0 +1,47 @@
+Independent full-loader repeat: PASS, reported by the lead reviewer on 2026-09-08.
+This receipt records that independent run, not a new run by its recorder.
+
+Frozen fixture source: cc0d0737
+Native Rust source: 447174f686fffded36bc12a156b9afda6a3b87ac
+Pre-stripped adapter SHA256:
+29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+Clean unbooted image:
+5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6
+Public helper SHA256 (path/hash check only, not executed):
+2a7695eaff8793186869a193da167a5e6d46826dac1a93d19d7484b27508a958
+
+Independent controller run 12265 exited 0.
+Container:
+0c5dd446cf93ce979e5520b963621eea4db42af43a7f4844e992a909b9b3b745
+Combined console SHA256:
+f2957cfd7f04a1ab589cfb35fb64908acc18af35d3b044190ce796c44a9ff245
+Combined console length: 114475 bytes.
+
+VM_LOADER_PASS positive
+VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
+VM_LOADER_PASS restart
+VM_LOADER_PASS malformed
+VM_LOADER_PASS wrong-key
+VM_LOADER_PASS stale-current
+VM_LOADER_PASS positive
+VM_LOADER_ALL_PASS
+VM_LOADER_EXIT phase=complete status=0
+
+The reviewer observed all six PID/InvocationID facts and distinct restart
+identity, in addition to the ordered case markers and successful final exit.
+The owned container was removed. No booted state or secrets were exported.
+Isolation and scope match loader-all-pass.txt: real systemd encrypted credential,
+genuine manager publication, full zeroizing loader, synthetic storage setup;
+no backend GET, Garage, package, S4, installation or activation qualification.
+
+The preceding independent run 44237 remains UNVERIFIED, NOT PASS. Its controller
+incorrectly searched for markers at raw line starts and did not retain the
+console before that assertion. The corrected controller captures combined
+stdout/stderr and recognizes the fixed cloud-init-prefixed marker suffixes.
+It requires six ordered cases, ALL_PASS, complete/status0 and container exit0.
+
+The successful invocation used the already-existing, inspected exact image
+above. Explicit --pull=never was added to the reviewed controller afterward;
+that later refinement is not attributed to run 12265. The disposable runtime
+was network-none, cap-drop ALL, NNP, UID1000 with container-only group994,
+sole /dev/kvm rw, no mounts, 4 CPUs, 6 GiB, 256 PIDs and a 900-second bound.
