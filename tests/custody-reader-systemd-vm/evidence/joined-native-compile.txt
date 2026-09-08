@@ -1,0 +1,34 @@
+Native source qualification; NOT a joined systemd/AWS/Garage run.
+
+Exact Rust source: 447174f686fffded36bc12a156b9afda6a3b87ac
+git archive SHA256: 1463532ba106f09a996283d59ec8c69c070425240f24f2bb334903c0fa3d8e73
+Base public cache image: 81597dc683e32508706300031ae0391e332f122c4d54fa92661aa674a8dda0f4
+Linux aarch64, Rust1.97.1, locked/offline, all-features, CARGO_INCREMENTAL=0.
+Daemon reader test-driver compile PASS25.72s. The preceding09cdbe96 compile
+failed on three test-only Utc::now calls (clock feature intentionally absent);
+the successor uses existing DateTime::from(SystemTime::now), no dependency change.
+
+Build container10209cc64bd7521bd5fde331ca6b9256641596ee2e89a16d1cc9051f06cee4c0:
+network none, mounts none, cap-drop ALL, no-new-privileges, 8GiB/4CPU/256PIDs,
+300s timeout plus10s kill bound. Source/cache only; no credentials or VM state.
+Unstripped /target/debug/deps/dasobjectstore_daemon-b7210d8d62136440 SHA256:
+7ad414eaf00b62efb06f88dba34cbd2eb5b6c4b1212e276a16a8160b8ad51055
+
+Nonroot UID1000:1000 executable-only runner2bd3a6c7:
+network none, mounts none, cap-drop ALL, no-new-privileges, 2GiB/2CPU/128PIDs,
+120s timeout plus5s kill bound. Actual TLS regression5PASS0failed0ignored2.78s.
+This filter tests transport/journal, not the three ignored joined guest entries.
+
+Public artifact strip: GNU Binutils for Debian2.40 from same pinned cache image.
+/usr/bin/strip SHA25609ea31b5f54325e60310f43ee17fa532b4f816a177a13f4b59f72767d26932bf.
+Command: strip --strip-debug -o /tmp/adapter.stripped <unstripped binary>.
+Stripped SHA25629ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2.
+Initial artifact listing failed because rg was absent (strip/hash succeeded).
+Separate nonroot runner e8d8d9d1 used available grep, confirmed all three joined
+test entries exist, and repeated actual TLS regression5PASS0failed0ignored2.76s.
+Audit independently copied/verified stripped bytes for the separately held
+baseline loader fixture. Neither strip nor test evidence implies a VM PASS.
+
+No joined guest was booted. No guest/host package transaction was executed.
+Installer guard6pure tests PASS; Bash syntax and diff-check PASS. The installer
+and guest scripts are a reviewed-next source checkpoint, not executed evidence.
