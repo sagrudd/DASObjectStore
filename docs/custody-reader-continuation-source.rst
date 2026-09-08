@@ -19,8 +19,9 @@ verifier does not claim to authenticate arbitrary raw inventory bytes or mint
 admission from self-agreement. Actual release composition must produce those
 inputs from the independently admitted companion, not a caller boolean.
 
-The code preserves stable logical reader identity across a valid backend key
-generation change. Codec transition validity is not proof of backend revocation.
+The contract requires stable logical reader identity across backend key
+generation changes; this checkpoint does not implement generation rotation.
+Codec transition validity is not proof of backend revocation.
 No initial source checkpoint claims qualified systemd continuation delivery,
 backend rotation, endpoint authentication or implemented complete lifecycle.
 
