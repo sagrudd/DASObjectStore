@@ -78,7 +78,7 @@ valid second choice. Object size is not used to silently exclude evacuation or
 reverification.
 
 I/O limit and SSD priority
--------------------------
+--------------------------
 
 ``disk_housekeeping`` accounts source reads and destination writes for every
 verification and relocation chunk. Its effective rate is capped at no more than

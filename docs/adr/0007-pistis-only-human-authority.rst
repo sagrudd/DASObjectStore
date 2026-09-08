@@ -1,5 +1,5 @@
 ADR-0007: Pistis-only human authority and retirement of local credentials
-=======================================================================
+=========================================================================
 
 :Status: Accepted
 :Date: 2026-08-05
@@ -152,7 +152,7 @@ Remaining route families and safe order
    assets in the order above.
 
 Daemon boundary caveat
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 The daemon may keep a dedicated service account and Unix-socket peer checks
 for its non-human boundary.  It must not retain root, ``sudo`` or
