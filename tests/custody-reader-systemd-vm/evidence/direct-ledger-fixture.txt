@@ -1,0 +1,13 @@
+Source-only fixture refinement (0.186.0)
+
+The common actual-ledger fixture now accepts an explicit parent directory.
+Existing local manager tests keep their HOME-based wrapper unchanged. The
+isolated Linux loader fixture creates its ledger directly under /var/lib,
+instead of creating elsewhere and relocating the directory. This removes a
+cross-filesystem rename dependency; it is not a diagnosis of previous VM
+failures. No host or VM execution is performed by this change.
+
+macOS focused independent_manager regression: 3 passed, 0 failed, 0 ignored.
+Compilation 19.65s; tests 0.11s; CARGO_INCREMENTAL=0, existing shared target.
+The Linux-only loader entry still requires a fresh native build and real
+systemd execution; this local result does not qualify it.

@@ -57,7 +57,10 @@ impl Drop for Fixture {
     }
 }
 fn fixture() -> Fixture {
-    let root = PathBuf::from(std::env::var_os("HOME").unwrap())
+    fixture_at(&PathBuf::from(std::env::var_os("HOME").unwrap()))
+}
+fn fixture_at(parent: &Path) -> Fixture {
+    let root = parent
         .canonicalize()
         .unwrap()
         .join(format!(".das-manager-review-{}", uuid::Uuid::new_v4()));

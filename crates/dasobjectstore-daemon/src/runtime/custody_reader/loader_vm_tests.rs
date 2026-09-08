@@ -55,23 +55,9 @@ fn prepare_actual_loader_vm() {
     // The reused fixture creates/retains/seals through real public ledger APIs;
     // its in-memory object storage does not assert a Garage retention result.
     eprintln!("VM_LOADER_PREP_STAGE ledger");
-    let mut f = fixture();
+    let mut f = fixture_at(Path::new("/var/lib"));
     eprintln!("VM_LOADER_PREP_STAGE ledger_complete");
-    let root = PathBuf::from(format!("/var/lib/das-vm-loader-{}", uuid::Uuid::new_v4()));
-    eprintln!("VM_LOADER_PREP_STAGE rename");
-    if let Err(error) = fs::rename(&f.root, &root) {
-        let label = if error.raw_os_error() == Some(libc::EXDEV) {
-            "CrossDevice"
-        } else {
-            "Other"
-        };
-        eprintln!("VM_LOADER_PREP_RENAME_ERROR {label}");
-        panic!("fixture relocation denied");
-    }
-    eprintln!("VM_LOADER_PREP_STAGE rename_complete");
-    f.root = root.clone();
-    f.selection.directory = root.join("records");
-    f.selection.ledger = root.join("ledger.sqlite3");
+    let root = f.root.clone();
     f.selection.encrypted_source = root.join("reader.enc");
     f.selection.aws_executable = HELPER.into();
     eprintln!("VM_LOADER_PREP_STAGE helper");
@@ -173,7 +159,7 @@ fn actual_loader_vm_boundary() {
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .starts_with("das-vm-loader-")
+                .starts_with(".das-manager-review-")
     );
     let binding =
         ReaderBindingV1::decode(&serde_jcs::to_vec(&selected["binding"]).unwrap()).unwrap();

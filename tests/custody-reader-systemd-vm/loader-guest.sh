@@ -40,7 +40,7 @@ for mode in positive restart malformed wrong-key stale-current positive; do
         exit 1
     fi
     encrypted=$(python3 -c 'import json; print(json.load(open("/run/das-systemd-vm-fixture/loader.json"))["root"]+"/reader.enc")')
-    case "$encrypted" in /var/lib/das-vm-loader-*/reader.enc) ;; *) exit 1;; esac
+    case "$encrypted" in /var/lib/.das-manager-review-*/reader.enc) ;; *) exit 1;; esac
     publication=$(sha256sum "$encrypted" /run/das-systemd-vm-fixture/loader.json "${encrypted%/reader.enc}/ledger.sqlite3" "${encrypted%/reader.enc}"/records/*.jcs)
     if test "$mode" = restart; then
         test "$publication" = "$first_publication"
