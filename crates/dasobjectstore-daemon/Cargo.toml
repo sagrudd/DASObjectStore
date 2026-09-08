@@ -28,6 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 rusqlite.workspace = true
 ring.workspace = true
+zeroize.workspace = true
 sha2.workspace = true
 hex.workspace = true
 serde_jcs.workspace = true

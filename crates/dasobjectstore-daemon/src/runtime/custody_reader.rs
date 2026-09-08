@@ -1,6 +1,7 @@
 //! Initial protected publication and actual continuation read composition.
 //! No activation, key provisioning, backend revocation or generation rotation.
 mod ciphertext;
+pub mod endpoint;
 mod files;
 #[cfg(test)]
 mod manager_tests;
@@ -216,7 +217,11 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             &credential_path,
             deadline,
         )?;
-        let mut secret = credentials.read_private(&selection.binding.credential_name, 65536)?;
+        let mut secret = credentials.read_systemd_credential(
+            &selection.binding.credential_name,
+            selection.binding.uid,
+            deadline,
+        )?;
         let decoded = SystemdServiceCredentialHandoffResolver::decode_continuation(
             &selection.binding,
             &secret,
@@ -271,6 +276,14 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
         receipt: &CustodyIntegrityReceiptV1,
         limits: CustodyReadLimits,
     ) -> Result<VerifiedCustodyRead, ReaderError> {
+        self.read_inner(receipt, limits, None)
+    }
+    fn read_inner(
+        &mut self,
+        receipt: &CustodyIntegrityReceiptV1,
+        limits: CustodyReadLimits,
+        raw_ledger_digest: Option<&str>,
+    ) -> Result<VerifiedCustodyRead, ReaderError> {
         let deadline = limits.start().map_err(|_| ReaderError::Read)?;
         let now = clock_now();
         self.recheck(&now)?;
@@ -293,12 +306,40 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             maximum_bytes: limits.maximum_bytes,
             timeout: deadline.remaining().map_err(|_| ReaderError::Read)?,
         };
-        let value = verify_custody_readback_existing(
-            &self.selection.ledger,
-            receipt,
-            &mut self.reader,
-            limits,
-        )
+        let value = if let Some(digest) = raw_ledger_digest {
+            use std::os::unix::fs::MetadataExt;
+            let parent = self
+                .selection
+                .ledger
+                .parent()
+                .ok_or(ReaderError::Boundary)?;
+            let owner = fs::symlink_metadata(parent)
+                .map_err(|_| ReaderError::Boundary)?
+                .uid();
+            let directory = files::Directory::open(parent.to_path_buf(), owner)?;
+            let name = self
+                .selection
+                .ledger
+                .file_name()
+                .and_then(|n| n.to_str())
+                .ok_or(ReaderError::Boundary)?;
+            let mut ledger = directory.open_ledger(name)?;
+            dasobjectstore_object_service::custody::verify_custody_readback_existing_bound(
+                &self.selection.ledger,
+                receipt,
+                &mut self.reader,
+                limits,
+                &mut ledger,
+                digest,
+            )
+        } else {
+            verify_custody_readback_existing(
+                &self.selection.ledger,
+                receipt,
+                &mut self.reader,
+                limits,
+            )
+        }
         .map_err(|_| ReaderError::Read)?;
         if value.ledger_head_sha256 != self.seal.ledger_head_sha256
             || value.configuration_sha256 != self.seal.configuration_sha256

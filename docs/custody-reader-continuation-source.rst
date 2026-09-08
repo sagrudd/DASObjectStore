@@ -161,3 +161,55 @@ not a qualified frontend. TLS identity/early-data enforcement, server-owned
 request-to-ledger/receipt binding, authenticated private peer/session sequencing,
 actual bounded transport collection, and admitted lifecycle composition remain
 required before an executable endpoint can assert custody eligibility.
+
+Server-owned signed read binding
+----------------------------------------
+
+``ExactObjectServer`` now composes an actually loaded ``ReaderContinuation``
+with fixed existing receipt bytes and existing request measurement templates.
+It accepts no caller-provided reader implementation or admission boolean. The
+authority input is the exact selected JCS ``CustodyEd25519AuthorityV1`` record;
+its raw digest must match the reader binding. This source refinement names the
+authority bytes explicitly rather than substituting a key hash or a URL hash.
+Receipt selection is a complete bijection with the protected seal. Every
+non-attempt request field must match the server-owned template; only request ID,
+nonce, sequence, previous request digest and issue/expiry times vary under the
+unchanged signed-request validator. Actual server time is used, not an HTTP
+clock field. Backend endpoint selection remains distinct from frontend Host
+and independently measured frontend/backend provenance.
+
+Used request IDs and nonces are retained for the entire reader process, including
+after expiry. They are claimed before backend access; later failure never removes
+them. A 4096-entry bound denies further attempts without eviction, retry or reset.
+This bounded local memory is not cross-restart anti-replay: the existing off-NUC
+journal remains the durable attempt authority. The server is mutable and handles
+one call at a time; a future concurrent listener must serialize access to it.
+
+The new bound read path checks the actual complete raw SQLite file digest inside
+the existing verified read transaction, both before GET and before success.
+The daemon supplies its no-follow opened descriptor; the object-service verifier
+compares that descriptor to the guarded path, streams fixed-size chunks under
+the remaining deadline, and checks identity/metadata again. It never substitutes
+the event-chain head for the raw file digest. Historical unbound read behavior
+is unchanged. Response configuration/head/receipt data comes from the verified
+snapshot, with fresh protected current-selection checks before return.
+
+This is not yet a TLS listener. The public library operation assumes its caller
+has bound the actual transport peer before invocation; the subsequent concrete
+TLS adapter must enforce that boundary. Policy tests exercise synthetic selected
+data, not a fabricated successful continuation load. Actual raw-ledger tests
+exercise real SQLite with wrong digest/descriptor before-effect denial and
+same-length post-acquisition mutation denial. Platform-positive continuation
+loading, native credentials and live admission remain separately qualified.
+
+The dedicated systemd memory-credential path now recognizes only the exact
+root-owned selected-UID read ACL emitted by the qualified systemd version, or
+its selected-UID-owned private fallback. It rejects extra ACL principals or
+permissions; generic private-file checks are not relaxed. The secret byte buffer
+is fixed-size and wrapped in ``zeroize::Zeroizing`` from allocation through
+decode, including all errors, without plaintext reallocations. The same existing
+deadline is checked around each bounded memory-file read. Kanon #339
+``9842f59`` coordinates the direct existing locked zeroize 1.9.0 dependency;
+no dependency version, credential schema or production identity changes.
+The separate VM evidence binds the actual probe it ran, not this full loader
+or a future authenticated endpoint.

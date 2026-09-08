@@ -147,8 +147,57 @@ impl Directory {
     pub(super) fn read(&self, name: &str, limit: usize) -> Result<Vec<u8>, ReaderError> {
         self.read_mode(name, limit, false)
     }
+    pub(super) fn open_ledger(&self, name: &str) -> Result<File, ReaderError> {
+        self.open_child(name, libc::O_RDONLY | libc::O_NONBLOCK)
+    }
     pub(super) fn read_private(&self, name: &str, limit: usize) -> Result<Vec<u8>, ReaderError> {
         self.read_mode(name, limit, true)
+    }
+    pub(super) fn read_systemd_credential(
+        &self,
+        name: &str,
+        uid: u32,
+        deadline: dasobjectstore_object_service::custody::CustodyReadDeadline,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, ReaderError> {
+        deadline.remaining().map_err(|_| ReaderError::Read)?;
+        let mut file = self.open_child(name, libc::O_RDONLY | libc::O_NONBLOCK)?;
+        super::systemd::verify_credential_file_permissions(&file, uid)?;
+        let before = file.metadata().map_err(|_| ReaderError::Boundary)?;
+        if before.nlink() != 1 || before.len() > 65536 {
+            return Err(ReaderError::Boundary);
+        }
+        // Fixed allocation before reading: no reallocations can leave an old
+        // plaintext allocation behind. RAII covers every subsequent error path
+        // and remains active in the caller through handoff decoding.
+        let mut bytes = zeroize::Zeroizing::new(vec![0; 65537]);
+        let mut count = 0;
+        loop {
+            deadline.remaining().map_err(|_| ReaderError::Read)?;
+            let n = file
+                .read(&mut bytes[count..])
+                .map_err(|_| ReaderError::Boundary)?;
+            deadline.remaining().map_err(|_| ReaderError::Read)?;
+            if n == 0 {
+                break;
+            }
+            count += n;
+            if count > 65536 {
+                return Err(ReaderError::Boundary);
+            }
+        }
+        bytes.truncate(count);
+        super::systemd::verify_credential_file_permissions(&file, uid)?;
+        let named = self.open_child(name, libc::O_RDONLY | libc::O_NONBLOCK)?;
+        super::systemd::verify_credential_file_permissions(&named, uid)?;
+        self.check()?;
+        if bytes.len() > 65536
+            || identity(&before) != identity(&file.metadata().map_err(|_| ReaderError::Boundary)?)
+            || identity(&before) != identity(&named.metadata().map_err(|_| ReaderError::Boundary)?)
+        {
+            return Err(ReaderError::Boundary);
+        }
+        deadline.remaining().map_err(|_| ReaderError::Read)?;
+        Ok(bytes)
     }
     fn read_mode(&self, name: &str, limit: usize, private: bool) -> Result<Vec<u8>, ReaderError> {
         let mut file = self.open_child(name, libc::O_RDONLY | libc::O_NONBLOCK)?;

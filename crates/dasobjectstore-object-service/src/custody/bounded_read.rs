@@ -1,6 +1,8 @@
 //! Existing-only snapshot verification. No credential acquisition or endpoint.
 use super::*;
 use std::time::{Duration, Instant};
+#[cfg(unix)]
+mod ledger_bytes;
 #[cfg(all(test, unix))]
 #[path = "bounded_read_review_tests.rs"]
 mod review_tests;
@@ -166,6 +168,34 @@ pub fn verify_custody_readback_existing(
     reader: &mut impl BoundedCustodyObjectReader,
     limits: CustodyReadLimits,
 ) -> Result<VerifiedCustodyRead, CustodyReadError> {
+    verify_inner(path, expected, reader, limits, None)
+}
+
+/// Verify the same snapshot plus its exact independently selected raw database digest.
+/// The supplied already-opened descriptor must match the guarded actual ledger path.
+///
+/// # Errors
+/// Denies any raw-byte/descriptor mismatch before GET and again before success.
+#[cfg(unix)]
+pub fn verify_custody_readback_existing_bound(
+    path: &Path,
+    expected: &CustodyIntegrityReceiptV1,
+    reader: &mut impl BoundedCustodyObjectReader,
+    limits: CustodyReadLimits,
+    ledger: &mut std::fs::File,
+    raw_sha256: &str,
+) -> Result<VerifiedCustodyRead, CustodyReadError> {
+    verify_inner(path, expected, reader, limits, Some((ledger, raw_sha256)))
+}
+
+#[cfg(unix)]
+fn verify_inner(
+    path: &Path,
+    expected: &CustodyIntegrityReceiptV1,
+    reader: &mut impl BoundedCustodyObjectReader,
+    limits: CustodyReadLimits,
+    mut raw_binding: Option<(&mut std::fs::File, &str)>,
+) -> Result<VerifiedCustodyRead, CustodyReadError> {
     if limits.maximum_bytes == 0
         || limits.maximum_bytes > isize::MAX as u64
         || expected.content_length == 0
@@ -243,6 +273,9 @@ pub fn verify_custody_readback_existing(
     if Guard::capture(path)? != guard {
         return Err(CustodyReadError::Boundary);
     }
+    if let Some((file, digest)) = raw_binding.as_mut() {
+        ledger_bytes::verify(path, file, digest, deadline)?;
+    }
     let bytes = reader.read_bounded(&expected.object_key, expected.content_length, deadline)?;
     deadline.remaining()?;
     if u64::try_from(bytes.len()).map_err(|_| CustodyReadError::Acquisition)?
@@ -264,6 +297,9 @@ pub fn verify_custody_readback_existing(
     .map_err(|_| CustodyReadError::Acquisition)?;
     if Guard::capture(path)? != guard {
         return Err(CustodyReadError::Boundary);
+    }
+    if let Some((file, digest)) = raw_binding.as_mut() {
+        ledger_bytes::verify(path, file, digest, deadline)?;
     }
     transaction.commit().map_err(|_| CustodyReadError::Ledger)?;
     deadline.remaining()?;

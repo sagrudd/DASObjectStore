@@ -2,6 +2,11 @@
 
 ## 0.186.0 - Unreleased
 
+- Bind signed exact-object reads to server-owned receipt/measurement selection,
+  process-lifetime attempt claims and the full raw ledger digest inside the
+  verified read snapshot. Preserve the historical unbound read API; no TLS
+  listener or companion authority is inferred from this source composition.
+
 - Add accepted finite private/HTTP wire codecs with frozen vector conformance,
   existing signed-request verification and durable off-NUC attempt regression
   coverage. Buffer parsing supplies no TLS, peer admission or network deadline.

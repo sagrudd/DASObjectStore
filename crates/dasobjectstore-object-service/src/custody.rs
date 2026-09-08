@@ -17,13 +17,15 @@ mod bounded_read;
 #[cfg(unix)]
 mod reader_seal;
 #[cfg(unix)]
-pub use reader_seal::verify_reader_seal_existing;
+pub use bounded_read::verify_custody_readback_existing_bound;
 pub use bounded_read::{
     verify_custody_readback_existing, BoundedCustodyObjectReader, CustodyReadDeadline,
     CustodyReadError, CustodyReadLimits, VerifiedCustodyRead,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use dasobjectstore_core::ids::StoreId;
+#[cfg(unix)]
+pub use reader_seal::verify_reader_seal_existing;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

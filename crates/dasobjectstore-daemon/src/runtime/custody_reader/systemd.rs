@@ -7,6 +7,74 @@ use dasobjectstore_object_service::custody::CustodyReadDeadline;
 use dasobjectstore_object_service::custody_reader::{ReaderBindingV1, ReaderError};
 use std::{fs::File, path::Path};
 
+/// Only the dedicated, already systemd-bound memory-credential read uses this.
+/// Generic protected files keep their existing private-mode rule.
+pub(super) fn verify_credential_file_permissions(file: &File, uid: u32) -> Result<(), ReaderError> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::memory_permissions(file, uid, false)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (file, uid);
+        Err(ReaderError::Boundary)
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn exact_systemd_acl(
+    owner: u32,
+    mode: u32,
+    uid: u32,
+    directory: bool,
+    access: Option<&[u8]>,
+    default: Option<&[u8]>,
+) -> Result<(), ReaderError> {
+    // v259 exec-credential.c credentials_dir_finalize_permissions and
+    // write_credential: readonly root owner, exactly one selected-UID ACL;
+    // fchown fallback only when ACL support is unavailable. Confirmed using
+    // actual retained directory/file FDs on Fedora systemd259.5.
+    if uid == 0 || uid == u32::MAX || default.is_some() {
+        return Err(ReaderError::Boundary);
+    }
+    let permission = if directory { 5_u16 } else { 4_u16 };
+    let private_mode = u32::from(permission) << 6;
+    let Some(access) = access else {
+        return if owner == uid && mode == private_mode {
+            Ok(())
+        } else {
+            Err(ReaderError::Boundary)
+        };
+    };
+    if owner != 0 || mode != (private_mode | (u32::from(permission) << 3)) {
+        return Err(ReaderError::Boundary);
+    }
+    // Linux POSIX ACL xattrs have a LE version header and fixed LE entries.
+    // Closed bytes reject extra named users/groups, duplicate or reordered
+    // entries, write bits, altered masks, malformed IDs and unknown versions.
+    let mut expected = 2_u32.to_le_bytes().to_vec();
+    for (tag, perm, id) in [
+        (1_u16, permission, u32::MAX),
+        (2, permission, uid),
+        (4, 0, u32::MAX),
+        (16, permission, u32::MAX),
+        (32, 0, u32::MAX),
+    ] {
+        expected.extend(tag.to_le_bytes());
+        expected.extend(perm.to_le_bytes());
+        expected.extend(id.to_le_bytes());
+    }
+    if access != expected {
+        return Err(ReaderError::Boundary);
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn missing_acl(error: Option<i32>) -> bool {
+    matches!(error, Some(libc::ENODATA | libc::EOPNOTSUPP))
+}
+
 pub(super) fn verify(
     binding: &ReaderBindingV1,
     encrypted_source: &Path,
@@ -547,6 +615,59 @@ mod linux {
             finish: values[1],
         })
     }
+    pub(super) fn memory_permissions(
+        file: &File,
+        uid: u32,
+        directory: bool,
+    ) -> Result<(), ReaderError> {
+        let metadata = file.metadata().map_err(|_| ReaderError::Boundary)?;
+        if (directory && !metadata.is_dir()) || (!directory && !metadata.is_file()) {
+            return Err(ReaderError::Boundary);
+        }
+        // Before xattr access, prove this FD is on readonly memory-backed
+        // storage; do not issue an xattr call to a caller-selected remote FS.
+        // SAFETY: POD outputs and a valid retained descriptor.
+        let mut fs: libc::statfs = unsafe { std::mem::zeroed() };
+        let mut vfs: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstatfs(file.as_raw_fd(), &mut fs) } != 0
+            || !matches!(fs.f_type, 0x0102_1994 | 0x8584_58f6)
+            || unsafe { libc::fstatvfs(file.as_raw_fd(), &mut vfs) } != 0
+            || vfs.f_flag & libc::ST_RDONLY == 0
+        {
+            return Err(ReaderError::Boundary);
+        }
+        let attribute = |name: &std::ffi::CStr| -> Result<Option<Vec<u8>>, ReaderError> {
+            let mut bytes = [0_u8; 128];
+            // SAFETY: bounded writable buffer, fixed NUL-terminated name, valid fd.
+            let size = unsafe {
+                libc::fgetxattr(
+                    file.as_raw_fd(),
+                    name.as_ptr(),
+                    bytes.as_mut_ptr().cast(),
+                    bytes.len(),
+                )
+            };
+            if size < 0 {
+                return if missing_acl(std::io::Error::last_os_error().raw_os_error()) {
+                    Ok(None)
+                } else {
+                    Err(ReaderError::Boundary)
+                };
+            }
+            let size = usize::try_from(size).map_err(|_| ReaderError::Boundary)?;
+            Ok(Some(
+                bytes.get(..size).ok_or(ReaderError::Boundary)?.to_vec(),
+            ))
+        };
+        exact_systemd_acl(
+            metadata.uid(),
+            metadata.mode() & 0o7777,
+            uid,
+            directory,
+            attribute(c"system.posix_acl_access")?.as_deref(),
+            attribute(c"system.posix_acl_default")?.as_deref(),
+        )
+    }
     fn directory(
         file: &File,
         path: &Path,
@@ -559,8 +680,6 @@ mod linux {
             || !p.is_dir()
             || p.file_type().is_symlink()
             || (m.dev(), m.ino()) != (p.dev(), p.ino())
-            || (m.uid() != 0 && m.uid() != uid)
-            || m.mode() & 0o077 != 0
         {
             return Err(ReaderError::Boundary);
         }
@@ -578,7 +697,7 @@ mod linux {
         {
             return Err(ReaderError::Boundary);
         }
-        Ok(())
+        memory_permissions(file, uid, true)
     }
     pub(super) fn verify(
         binding: &ReaderBindingV1,
@@ -587,12 +706,16 @@ mod linux {
         path: &Path,
         deadline: CustodyReadDeadline,
     ) -> Result<(), ReaderError> {
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE binding");
         binding.encode()?;
         let object = unit_object(&binding.service_identity)?;
         // SAFETY: get*id calls take no pointers and mutate no state.
         if unsafe { libc::geteuid() } != binding.uid || unsafe { libc::getuid() } != binding.uid {
             return Err(ReaderError::Binding);
         }
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE process");
         let pid = std::process::id();
         let status = read(Path::new("/proc/self/status"), 65536, deadline)?;
         let status = std::str::from_utf8(&status).map_err(|_| ReaderError::Boundary)?;
@@ -619,14 +742,26 @@ mod linux {
         // Real-systemd positive qualification is still mandatory. Manager-load
         // timestamps below additionally reject old activations after daemon-reload;
         // NeedDaemonReload=no by itself would not establish that property.
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE credential_mount");
         directory(dir, path, binding.uid, deadline)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE manager_times");
         let manager_before = manager_times(deadline)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE unit_properties");
         let before = scalar(&binding.service_identity, binding.uid, deadline)?;
         let started = properties(&before)?["ExecMainStartTimestampMonotonic"]
             .parse::<u64>()
             .map_err(|_| ReaderError::Boundary)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE activation_time");
         start_after_load(started, manager_before, manager_before)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE credential_properties");
         credentials(&object, &binding.credential_name, source, deadline)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE executable");
         let mut executable = File::open("/proc/self/exe").map_err(|_| ReaderError::Boundary)?;
         let metadata = executable.metadata().map_err(|_| ReaderError::Boundary)?;
         if !metadata.is_file()
@@ -657,6 +792,8 @@ mod linux {
         {
             return Err(ReaderError::Binding);
         }
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE revalidation");
         credentials(&object, &binding.credential_name, source, deadline)?;
         if scalar(&binding.service_identity, binding.uid, deadline)? != before
             || start_identity(&read(Path::new("/proc/self/stat"), 4096, deadline)?, pid)? != start
@@ -670,6 +807,8 @@ mod linux {
         directory(dir, path, binding.uid, deadline)?;
         start_after_load(started, manager_before, manager_times(deadline)?)?;
         remaining(deadline)?;
+        #[cfg(test)]
+        eprintln!("VM_PROBE_STAGE accepted");
         Ok(())
     }
 
@@ -699,6 +838,44 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measured_systemd_acl_is_closed_to_exact_selected_reader() {
+        assert!(missing_acl(Some(libc::ENODATA)));
+        assert!(missing_acl(Some(libc::EOPNOTSUPP)));
+        for error in [
+            None,
+            Some(libc::EACCES),
+            Some(libc::EPERM),
+            Some(libc::ERANGE),
+            Some(libc::EIO),
+        ] {
+            assert!(!missing_acl(error));
+        }
+        for (directory, mode, private_mode, raw) in [
+            (true, 0o550, 0o500, "0200000001000500ffffffff02000500d007000004000000ffffffff10000500ffffffff20000000ffffffff"),
+            (false, 0o440, 0o400, "0200000001000400ffffffff02000400d007000004000000ffffffff10000400ffffffff20000000ffffffff"),
+        ] {
+            let acl = raw.as_bytes().chunks_exact(2).map(|v| u8::from_str_radix(std::str::from_utf8(v).unwrap(), 16).unwrap()).collect::<Vec<_>>();
+            assert!(exact_systemd_acl(0, mode, 2000, directory, Some(&acl), None).is_ok());
+            assert!(exact_systemd_acl(2000, private_mode, 2000, directory, None, None).is_ok());
+            assert!(exact_systemd_acl(0, private_mode, 2000, directory, None, None).is_err());
+            for index in 0..acl.len() {
+                let mut changed = acl.clone(); changed[index] ^= 1;
+                assert!(exact_systemd_acl(0, mode, 2000, directory, Some(&changed), None).is_err());
+            }
+            for bad_mode in [mode | 0o002, mode | 0o020, mode | 0o200, mode | 0o4000, private_mode] {
+                assert!(exact_systemd_acl(0, bad_mode, 2000, directory, Some(&acl), None).is_err());
+            }
+            assert!(exact_systemd_acl(0, mode, 2001, directory, Some(&acl), None).is_err());
+            assert!(exact_systemd_acl(2000, mode, 2000, directory, Some(&acl), None).is_err());
+            assert!(exact_systemd_acl(0, mode, 2000, directory, Some(&acl), Some(&[])).is_err());
+            assert!(exact_systemd_acl(0, mode, 2000, directory, Some(&acl[..acl.len()-1]), None).is_err());
+            let mut extra = acl.clone(); extra.extend(&acl[4..12]);
+            assert!(exact_systemd_acl(0, mode, 2000, directory, Some(&extra), None).is_err());
+            assert!(exact_systemd_acl(2001, private_mode, 2000, directory, None, None).is_err());
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "requires reviewed disposable full-systemd VM and synthetic fixture"]
@@ -706,28 +883,89 @@ mod tests {
         use dasobjectstore_object_service::custody::CustodyReadLimits;
         use std::os::unix::fs::MetadataExt as _;
         use std::time::{Duration, Instant};
+        eprintln!("VM_PROBE_STAGE fixture_permit");
         let root = Path::new("/run/das-systemd-vm-fixture");
         let permit = std::fs::symlink_metadata(root.join("permit")).unwrap();
         assert!(permit.is_file() && permit.uid() == 0 && permit.mode() & 0o022 == 0);
         assert!(std::fs::read("/proc/1/comm").unwrap() == b"systemd\n");
+        eprintln!("VM_PROBE_STAGE fixture_binding");
         let raw = std::fs::read(root.join("binding.json")).unwrap();
         let binding = ReaderBindingV1::decode(&raw).unwrap();
         let mode = std::fs::read_to_string(root.join("mode")).unwrap();
         let path = Path::new("/run/credentials/das-vm-reader.service");
+        eprintln!("VM_PROBE_STAGE fixture_directory");
         let directory = File::open(path).unwrap();
+        if mode == "positive" {
+            use std::os::fd::AsRawFd as _;
+            use std::os::unix::fs::OpenOptionsExt as _;
+            for (label, file) in [
+                ("directory", directory.try_clone().unwrap()),
+                (
+                    "file",
+                    std::fs::OpenOptions::new()
+                        .read(true)
+                        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+                        .open(path.join(&binding.credential_name))
+                        .unwrap(),
+                ),
+            ] {
+                let metadata = file.metadata().unwrap();
+                let mut acl = [0_u8; 256];
+                // SAFETY: valid retained fd, NUL-terminated fixed attribute name,
+                // and a writable array whose exact capacity is supplied.
+                let size = unsafe {
+                    libc::fgetxattr(
+                        file.as_raw_fd(),
+                        c"system.posix_acl_access".as_ptr(),
+                        acl.as_mut_ptr().cast(),
+                        acl.len(),
+                    )
+                };
+                assert!(size >= 0 && size as usize <= acl.len());
+                let encoded = acl[..size as usize]
+                    .iter()
+                    .map(|v| format!("{v:02x}"))
+                    .collect::<String>();
+                eprintln!(
+                    "VM_PROBE_METADATA {label} uid={} gid={} mode={:o} access_acl={encoded}",
+                    metadata.uid(),
+                    metadata.gid(),
+                    metadata.mode() & 0o7777
+                );
+                if label == "file" {
+                    eprintln!("VM_PROBE_STAGE file_permissions");
+                    assert!(verify_credential_file_permissions(&file, binding.uid).is_ok());
+                }
+            }
+        }
         let check = || {
-            verify(
+            let deadline = CustodyReadLimits {
+                maximum_bytes: 4096,
+                timeout: Duration::from_secs(15),
+            }
+            .start()
+            .unwrap();
+            let result = verify(
                 &binding,
                 Path::new("/var/lib/das-vm/reader.enc"),
                 &directory,
                 path,
-                CustodyReadLimits {
-                    maximum_bytes: 4096,
-                    timeout: Duration::from_secs(15),
+                deadline,
+            );
+            if let Err(error) = result {
+                let label = match error {
+                    ReaderError::Format => "Format",
+                    ReaderError::Binding => "Binding",
+                    ReaderError::Boundary => "Boundary",
+                    ReaderError::Conflict => "Conflict",
+                    ReaderError::Read => "Read",
+                };
+                eprintln!("VM_PROBE_ERROR {label}");
+                if deadline.remaining().is_err() {
+                    eprintln!("VM_PROBE_ERROR DeadlineExpired");
                 }
-                .start()
-                .unwrap(),
-            )
+            }
+            result
         };
         if mode == "positive" {
             assert!(check().is_ok(), "actual systemd adapter positive denied");
