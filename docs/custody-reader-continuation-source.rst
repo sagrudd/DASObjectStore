@@ -1,5 +1,5 @@
 Custody reader continuation source boundaries
-============================================
+================================================
 
 Source 0.186 follows accepted DAS ADR0011 (merged #211) and programme #267,
 with Kanon #339 source coordination e81c950. It selects no live credential,
@@ -32,7 +32,7 @@ creation, and oversized corrupt receipt denial without repair. These are source
 tests, not systemd delivery, Garage content or installed custody qualification.
 
 Continuation implementation boundary
------------------------------------
+---------------------------------------
 
 The next daemon source slice inspects effective ciphertext protection without
 decrypting or selecting a key. Constants and field layout are from systemd v259
