@@ -30,8 +30,8 @@ if test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm
         # Distinct7843e1a7 joined-driver artifact; never attributed to baseline29ea.
         test "$(sha256sum /adapter | awk '{print $1}')" = e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
     elif test "${1:-adapter}" = garage-tls-kvm-modern; then
-        # Distinct a3c195d0 joined actual-Garage source; never baseline attribution.
-        test "$(sha256sum /adapter | awk '{print $1}')" = 894a8d041c5d61622c3f5e796a7380b61f987b76fc2deea39d4af2174e543c75
+        # Distinct5d49f949 diagnostic source; no production/grant correction.
+        test "$(sha256sum /adapter | awk '{print $1}')" = 3ece032e476c5e79985394074fa94d420e432d5e26210158444eac82afc4d281
     else
         # Actual Garage role-correct source1f05aced, reviewed borrowed composition.
         test "$(sha256sum /adapter | awk '{print $1}')" = 8abb7395214d5c0aa9421eca61657e6a7781e97ef00be42064c468953d90ce96
@@ -90,6 +90,7 @@ case "${1:-adapter}" in
            cp /custody-reader-systemd-vm/tls-guest.sh /tmp/seed/tls-guest.sh
            /tmp/seed/adapter continuation_fixture_requires_only_selected_read_grant --test-threads=1
            /tmp/seed/adapter continuation_selects_garage_region --test-threads=1
+           /tmp/seed/adapter prepare_diagnostics_never_emit_panic_payload --test-threads=1
        else
            cp /custody-reader-systemd-vm/garage-guest.sh /tmp/seed/guest.sh
        fi
