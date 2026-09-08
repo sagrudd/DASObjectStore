@@ -166,7 +166,10 @@ def main() -> None:
         fail(f"TERRAFORM_SUCCESSOR_LOCKSET is invalid: {error}")
     if not isinstance(lockset, dict):
         fail("TERRAFORM_SUCCESSOR_LOCKSET must contain a TOML table")
-    if lockset.get("schema_version") != "mnemosyne.kanon.lockset.v1alpha2":
+    if lockset.get("schema_version") not in (
+        "mnemosyne.kanon.lockset.v1alpha2",
+        "mnemosyne.kanon.lockset.v1alpha3",
+    ):
         fail("TERRAFORM_SUCCESSOR_LOCKSET is not a canonical Kanon lockset")
     authority = canonical_lockset_authority(lockset)
     components = lockset.get("components")
