@@ -1,4 +1,5 @@
-//! Joined guest-only loader/TLS/AWS protocol fixture, never real Garage evidence.
+//! Joined guest-only loader/TLS/AWS fixture. Default backend is synthetic;
+//! the separately selected Garage mode needs its own actual-run evidence.
 use super::super::endpoint::tls::{ExactObjectClient, ServerTls, TlsIdentity};
 use super::super::endpoint::{ExactObjectServer, SelectedRead};
 use super::*;
@@ -348,14 +349,18 @@ fn joined_retry_observer_denies_queued_connection_even_with_done_marker() {
     accepted.unwrap();
 }
 
-fn journal_snapshot(path: &Path, request_id: &str) -> (String, String, String) {
+fn journal_snapshot(
+    path: &Path,
+    request_id: &str,
+    expected_count: u64,
+) -> (String, String, String) {
     let db =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
             .unwrap();
     let count: u64 = db
         .query_row("SELECT count(*) FROM first_attempts", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(count, expected_count);
     db.query_row("SELECT r.status,a.attempt_marker_sha256,a.result FROM issued_pre_read_requests r JOIN first_attempts a ON a.request_id=r.request_id WHERE r.request_id=?1", [request_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
 }
@@ -368,7 +373,29 @@ fn verify_joined_tls_vm() {
     let authority_raw = fs::read(format!("{PUBLIC}/authority.jcs")).unwrap();
     let authority: CustodyEd25519AuthorityV1 = serde_json::from_slice(&authority_raw).unwrap();
     let seal = ReaderSealV1::decode(&fs::read(format!("{PUBLIC}/seal.jcs")).unwrap()).unwrap();
+    let journal_path = Path::new(VERIFIER).join("journal.sqlite3");
+    let previous_path = Path::new(VERIFIER).join("previous-request.jcs");
+    let previous = if super::garage_tls_vm_tests::enabled() && previous_path.exists() {
+        Some(fs::read(&previous_path).unwrap())
+    } else {
+        None
+    };
+    let prior_count: u64 = if previous.is_some() {
+        rusqlite::Connection::open_with_flags(
+            &journal_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap()
+        .query_row("SELECT count(*) FROM first_attempts", [], |row| row.get(0))
+        .unwrap()
+    } else {
+        0
+    };
     let mut request = selected().measurements;
+    if super::garage_tls_vm_tests::enabled() {
+        request.request_id = uuid::Uuid::new_v4().to_string();
+        request.nonce = uuid::Uuid::new_v4().to_string();
+    }
     request.issued_at_utc = now();
     request.expires_at_utc =
         (wall_clock() + chrono::Duration::seconds(120)).to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -382,8 +409,11 @@ fn verify_joined_tls_vm() {
         signature_base64: signature,
     })
     .unwrap();
-    let journal_path = Path::new(VERIFIER).join("journal.sqlite3");
-    let journal = CustodyOffNucJournal::create(&journal_path).unwrap();
+    let journal = if previous.is_some() {
+        CustodyOffNucJournal::open_existing(&journal_path).unwrap()
+    } else {
+        CustodyOffNucJournal::create(&journal_path).unwrap()
+    };
     journal
         .issue_pre_read_request(&raw, &authority, &now())
         .unwrap();
@@ -400,13 +430,35 @@ fn verify_joined_tls_vm() {
         )
         .unwrap()
     };
+    if let Some(old_raw) = &previous {
+        let old: CustodySignedRecordV1<CustodyOffNucPreReadRequestV1> =
+            serde_json::from_slice(old_raw).unwrap();
+        let before = journal_snapshot(&journal_path, &old.body.request_id, prior_count);
+        assert_eq!(
+            (before.0.as_str(), before.2.as_str()),
+            ("terminal", "incomplete")
+        );
+        assert!(journal
+            .issue_pre_read_request(old_raw, &authority, &now())
+            .is_err());
+        assert!(make_client().read(&journal, old_raw, limits()).is_err());
+        assert_eq!(
+            journal_snapshot(&journal_path, &old.body.request_id, prior_count),
+            before
+        );
+    }
     let result = make_client().read(&journal, &raw, limits());
     if mode() == "positive" {
         assert_eq!(result.unwrap().bytes, expected_body());
+        if super::garage_tls_vm_tests::enabled() {
+            journal.record_terminal_failure(&request.request_id,
+                dasobjectstore_object_service::custody_attestation::CustodyOffNucObservationResult::Incomplete,
+                "exact bytes acquired; fixture does not produce formal attestation", &now()).unwrap();
+        }
     } else {
         assert!(result.is_err());
     }
-    let before = journal_snapshot(&journal_path, &request.request_id);
+    let before = journal_snapshot(&journal_path, &request.request_id, prior_count + 1);
     assert!(matches!(before.0.as_str(), "started" | "terminal"));
     if mode() != "positive" {
         assert_ne!(
@@ -438,7 +490,17 @@ fn verify_joined_tls_vm() {
         .issue_pre_read_request(&changed, &authority, &now())
         .is_err());
     assert!(make_client().read(&reopened, &changed, limits()).is_err());
-    assert_eq!(journal_snapshot(&journal_path, &request.request_id), before);
+    assert_eq!(
+        journal_snapshot(&journal_path, &request.request_id, prior_count + 1),
+        before
+    );
+    if super::garage_tls_vm_tests::enabled() {
+        assert_eq!(
+            (before.0.as_str(), before.2.as_str()),
+            ("terminal", "incomplete")
+        );
+        fs::write(previous_path, &raw).unwrap();
+    }
     fs::write(REPLAY_DONE, b"done").unwrap();
     fs::set_permissions(REPLAY_DONE, fs::Permissions::from_mode(0o644)).unwrap();
     fs::write(format!("{VERIFIER}/passed"), b"passed").unwrap();

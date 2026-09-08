@@ -2,6 +2,12 @@
 # HELD source fixture. Root must review frozen artifact/runner before execution.
 # Actual Garage/overlay admission and retention; no Compose or live authority.
 set -euo pipefail
+retain_for_tls=no
+if test "${1:-}" = --retain-for-tls && test "$#" = 1; then
+    retain_for_tls=yes
+else
+    test "$#" = 0
+fi
 phase=start
 finish() {
     local status=$?
@@ -146,4 +152,4 @@ test "$(systemctl show -p ActiveState --value das-vm-garage-test.service)" = ina
 test "$(systemctl show -p ActiveState --value das-vm-garage.service)" = inactive
 printf 'VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM\n'
 phase=complete
-poweroff
+if test "$retain_for_tls" = no; then poweroff; fi

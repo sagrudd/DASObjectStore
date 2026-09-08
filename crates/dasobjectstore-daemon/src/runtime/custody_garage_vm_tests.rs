@@ -230,6 +230,48 @@ mod actual {
             definition.bucket_name.clone()]).unwrap();
         assert!(crate::runtime::custody_garage::fixture_exact_read_only_grant(
             &observed.stdout, &key));
+        let probe_path = root.join("writer-probe.private");
+        let metadata = fs::symlink_metadata(&probe_path).unwrap();
+        assert!(metadata.is_file() && metadata.nlink() == 1 && metadata.uid() == 2002
+            && metadata.mode() & 0o777 == 0o600 && metadata.len() <= 65536);
+        let probe_raw = zeroize::Zeroizing::new(fs::read(&probe_path).unwrap());
+        let probe: zeroize::Zeroizing<Vec<String>> = zeroize::Zeroizing::new(
+            serde_json::from_slice(&probe_raw).unwrap());
+        assert_eq!(probe.len(), 2);
+        assert_eq!(probe[0], old[0].1);
+        let object_key = retained["receipts"][0]["object_key"].as_str().unwrap();
+        let body = root.join("role-probe-body.private");
+        let mut body_file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(&body).unwrap();
+        body_file.write_all(b"synthetic denied role probe").unwrap();
+        drop(body_file);
+        let denied_key = format!("denied-role-probe-{}", uuid::Uuid::new_v4());
+        for (operation, access, secret_value) in [
+            ("put-object", probe[0].as_str(), probe[1].as_str()),
+            ("get-object", probe[0].as_str(), probe[1].as_str()),
+            ("put-object", key.as_str(), secret.as_str()),
+        ] {
+            let environment = vec![("AWS_ACCESS_KEY_ID".into(), access.into()),
+                ("AWS_SECRET_ACCESS_KEY".into(), secret_value.into())];
+            let mut args = vec!["s3api".into(), operation.into(), "--bucket".into(),
+                definition.bucket_name.clone(), "--endpoint-url".into(), config.endpoint.clone(),
+                "--key".into(), if operation == "get-object" { object_key.into() } else { denied_key.clone() }];
+            if operation == "get-object" {
+                args.push(root.join("role-probe-get.private").to_str().unwrap().into());
+            } else {
+                args.extend(["--body".into(), body.to_str().unwrap().into(), "--if-none-match".into(), "*".into()]);
+            }
+            let error = runner.run_with_display_args_and_env("aws", &args, &[], &environment).unwrap_err();
+            let crate::runtime::DaemonServiceRuntimeError::CommandFailed { stderr, .. } = error else {
+                panic!("role probe did not return an actual provider denial");
+            };
+            assert_eq!(provider_category(&stderr, None), "access_denied");
+        }
+        fs::remove_file(probe_path).unwrap();
+        fs::remove_file(body).unwrap();
+        if root.join("role-probe-get.private").exists() {
+            fs::remove_file(root.join("role-probe-get.private")).unwrap();
+        }
         assert_eq!(fs::read(&ledger).unwrap(), before);
         // Private generated delivery material, consumed only by root fixture
         // encryption. This is not an admitted production manager or rotation.
@@ -287,6 +329,7 @@ mod actual {
         fs::create_dir(&credential_dir).unwrap();
         fs::set_permissions(&credential_dir, fs::Permissions::from_mode(0o700)).unwrap();
         let mut key_ids = Vec::new();
+        let mut probe_writer = zeroize::Zeroizing::new(Vec::<String>::new());
         for role in ["writer", "reader"] {
             let access = format!("GK{}", uuid::Uuid::new_v4().simple());
             let secret = format!(
@@ -296,6 +339,9 @@ mod actual {
             );
             let reference = format!("systemd-credential://garage-{role}");
             key_ids.push((role.to_string(), access.clone()));
+            if role == "writer" {
+                probe_writer.extend([access.clone(), secret.clone()]);
+            }
             let credential = CustodyGarageCredential::new(reference, &access, &secret).unwrap();
             if role == "writer" {
                 request.writer = credential;
@@ -314,6 +360,16 @@ mod actual {
             write!(file,"version=1\nrole={role}\nstore_id={}\nconfiguration_sha256={digest}\nidentity=custody-{role}\naws_access_key_id={access}\naws_secret_access_key={secret}\n",definition.store_id).unwrap();
             file.sync_all().unwrap();
         }
+        // Administrative negative-test material only, separate from consumed
+        // handoffs and inaccessible to the later UID2000 reader. Never exported.
+        let bytes = zeroize::Zeroizing::new(serde_jcs::to_vec(&*probe_writer).unwrap());
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut probe = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(root.join("writer-probe.private")).unwrap();
+        probe.write_all(&bytes).unwrap();
+        probe.sync_all().unwrap();
+        drop(probe);
         // Test-only attended issuer supplies generated credentials, not fake backend proof.
         let provisioner: Arc<dyn CustodyAdmissionProvisioningAuthority> = Arc::new(
             TestOnlyCustodyAdmissionProvisioningAuthority::new([(
@@ -443,8 +499,6 @@ mod actual {
             "bootstrap_key_ids": key_ids,
         });
         let selected = root.join("retained.json");
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
         let mut file = fs::OpenOptions::new().write(true).create_new(true)
             .mode(0o600).open(selected).unwrap();
         file.write_all(&serde_jcs::to_vec(&retained).unwrap()).unwrap();

@@ -1,12 +1,24 @@
 #!/bin/bash
 # HELD until baseline full-loader PASS and independent joined-runner review.
-# Only a fresh disposable guest; no real backend or off-NUC provenance claim.
+# Fresh disposable guest only. Default uses the protocol responder; the explicit
+# Garage successor uses retained actual backend state. Neither proves off-NUC provenance.
 set -euo pipefail
+garage_existing=no
+if test "${1:-}" = --garage-existing && test "$#" = 1; then
+    garage_existing=yes
+else
+    test "$#" = 0
+fi
 phase=start
 trap 'status=$?; printf "VM_JOINED_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then poweroff -f; fi' EXIT
 test "$(cat /proc/1/comm)" = systemd
 test "$(id -u)" = 0
-test ! -e /run/das-systemd-vm-fixture
+if test "$garage_existing" = no; then
+    test ! -e /run/das-systemd-vm-fixture
+else
+    test -f /run/das-systemd-vm-fixture/garage-joined
+    test -f /var/lib/das-garage-fixture/continuation.private
+fi
 systemctl stop serial-getty@ttyAMA0.service
 for uid in 2000 2001; do
     groupadd --gid "$uid" "das-vm-$uid"
@@ -20,7 +32,7 @@ touch /run/das-systemd-vm-fixture/permit
 chmod 644 /run/das-systemd-vm-fixture/permit
 install -m 755 /mnt/cidata/adapter /opt/das-vm-adapter
 phase=offline_aws_install
-/bin/bash /mnt/cidata/aws-guest-install.sh
+if test "$garage_existing" = no; then /bin/bash /mnt/cidata/aws-guest-install.sh; fi
 sha256sum /opt/das-vm-adapter /usr/bin/aws
 readonly driver=runtime::custody_reader::manager_tests::tls_vm_tests
 
@@ -43,7 +55,9 @@ wait_success() {
     return 1
 }
 
-for mode in positive binding corrupt disconnect; do
+modes=(positive binding corrupt disconnect)
+if test "$garage_existing" = yes; then modes=(positive); fi
+for mode in "${modes[@]}"; do
     phase="prepare_$mode"
     printf '%s' "$mode" > /run/das-systemd-vm-fixture/mode
     chmod 644 /run/das-systemd-vm-fixture/mode
@@ -102,16 +116,46 @@ StandardError=null
 UNIT
     # All unit files loaded before the actual reader start; never reload beneath it.
     systemctl daemon-reload
-    systemctl start das-vm-protocol.service das-vm-tls-reader.service
+    lifecycles=(initial)
+    if test "$garage_existing" = yes; then lifecycles=(initial restart binding); fi
+    previous_reader_pid=0
+    for lifecycle in "${lifecycles[@]}"; do
+    if test "$lifecycle" != initial; then
+        rm /run/das-vm-results/ready /run/das-vm-results/server-passed \
+            /run/das-vm-verifier-material/passed /run/das-vm-verifier-results/replay-checked
+        if test "$lifecycle" = restart; then
+            systemctl stop das-vm-garage.service
+            test "$(systemctl show -p ActiveState --value das-vm-garage.service)" = inactive
+            systemctl start das-vm-garage.service
+            ready=no
+            for unused in $(seq 1 30); do
+                if runuser -u das-vm-garage -- /usr/bin/timeout --kill-after=2s 2s \
+                    /opt/das-vm-garage -c /var/lib/das-garage-fixture/garage.toml status \
+                    > /run/das-systemd-vm-fixture/restart-status.private 2>&1 \
+                    && grep -q 'v2.3.0' /run/das-systemd-vm-fixture/restart-status.private \
+                    && ! grep -q 'NO ROLE ASSIGNED' /run/das-systemd-vm-fixture/restart-status.private; then
+                    ready=yes; break
+                fi
+                sleep .2
+            done
+            test "$ready" = yes
+        fi
+        mode=positive
+        if test "$lifecycle" = binding; then mode=binding; fi
+        printf '%s' "$mode" > /run/das-systemd-vm-fixture/mode
+    fi
+    if test "$garage_existing" = no; then systemctl start das-vm-protocol.service; fi
+    systemctl start das-vm-tls-reader.service
     ready=no
     for unused in $(seq 1 750); do
-        if test -f /run/das-vm-results/ready && test -f /run/das-systemd-vm-fixture/protocol-ready \
-            && test "$(cat /run/das-systemd-vm-fixture/protocol-ready)" = "$mode"; then
+        if test -f /run/das-vm-results/ready && { test "$garage_existing" = yes || \
+            { test -f /run/das-systemd-vm-fixture/protocol-ready \
+              && test "$(cat /run/das-systemd-vm-fixture/protocol-ready)" = "$mode"; }; }; then
             ready=yes
             break
         fi
         if systemctl is-failed --quiet das-vm-tls-reader.service; then exit 1; fi
-        if systemctl is-failed --quiet das-vm-protocol.service; then exit 1; fi
+        if test "$garage_existing" = no && systemctl is-failed --quiet das-vm-protocol.service; then exit 1; fi
         sleep .2
     done
     test "$ready" = yes
@@ -119,22 +163,40 @@ UNIT
     systemctl start das-vm-tls-verifier.service
     wait_success das-vm-tls-verifier.service /run/das-vm-verifier-material/passed
     wait_success das-vm-tls-reader.service /run/das-vm-results/server-passed
+    reader_pid=$(systemctl show -p ExecMainPID --value das-vm-tls-reader.service)
+    test "$reader_pid" != "$previous_reader_pid"
+    previous_reader_pid=$reader_pid
     # Preserve completed-unit metadata until all terminal checks above, then
     # explicitly end the fixture lifecycle. No production restart policy change.
     systemctl stop das-vm-tls-reader.service das-vm-tls-verifier.service
     test "$(systemctl show -p ActiveState --value das-vm-tls-reader.service)" = inactive
     test "$(systemctl show -p ActiveState --value das-vm-tls-verifier.service)" = inactive
-    systemctl stop das-vm-protocol.service
+    if test "$garage_existing" = no; then systemctl stop das-vm-protocol.service; fi
     expected=1
     if test "$mode" = binding; then expected=0; fi
-    test "$(cat /run/das-systemd-vm-fixture/get-count)" = "$expected"
+    if test "$garage_existing" = no; then
+        test "$(cat /run/das-systemd-vm-fixture/get-count)" = "$expected"
+    fi
     after=$(sha256sum "$encrypted" "${encrypted%/reader.enc}/ledger.sqlite3" "${encrypted%/reader.enc}"/records/*.jcs)
     test "$after" = "$publication"
     # Retain each non-secret attempt journal inside this guest before the next
     # case creates fresh identities. Never export credential/key directories.
-    install -m 600 /run/das-vm-verifier-material/journal.sqlite3 "/run/das-systemd-vm-fixture/journal-$mode.sqlite3"
-    printf 'VM_JOINED_PASS mode=%s actual_GETs=%s journal_replay=denied\n' "$mode" "$expected"
+    journal_name="journal-$mode.sqlite3"
+    if test "$garage_existing" = yes; then journal_name="journal-$mode-$lifecycle.sqlite3"; fi
+    install -m 600 /run/das-vm-verifier-material/journal.sqlite3 "/run/das-systemd-vm-fixture/$journal_name"
+    if test "$garage_existing" = no; then
+        printf 'VM_JOINED_PASS mode=%s actual_GETs=%s journal_replay=denied\n' "$mode" "$expected"
+    else
+        printf 'VM_GARAGE_TLS_PASS lifecycle=%s mode=%s journal_replay=denied formal_attestation=incomplete\n' "$lifecycle" "$mode"
+    fi
+    done
 done
-echo VM_JOINED_PROTOCOL_ALL_PASS_NOT_GARAGE
+if test "$garage_existing" = no; then
+    echo VM_JOINED_PROTOCOL_ALL_PASS_NOT_GARAGE
+else
+    systemctl stop das-vm-garage.service
+    test "$(systemctl show -p ActiveState --value das-vm-garage.service)" = inactive
+    echo VM_GARAGE_TLS_ALL_PASS_NOT_FORMAL_CUSTODY
+fi
 phase=complete
 poweroff
