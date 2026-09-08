@@ -10,7 +10,7 @@ finish() {
         # Only source-location markers; never dump private command diagnostics.
         if test "$phase" = admission_retention && test -f /var/lib/das-garage-fixture/result.private; then
             grep -E '^VM_GARAGE_LOCATION [A-Za-z0-9_./-]+:[0-9]+$' /var/lib/das-garage-fixture/result.private | head -2 || true
-            grep -E '^VM_GARAGE_COMMAND operation=(garage|head-object|put-object|get-object) category=(access_denied|not_found|timeout|provider_failure)$' /var/lib/das-garage-fixture/result.private | tail -4 || true
+            grep -E '^VM_GARAGE_COMMAND operation=(garage|head-object|put-object|get-object) category=(no_region|credentials|import|signature|bad_request|access_denied|not_found|timeout|provider_failure) exit=-?[0-9]+$' /var/lib/das-garage-fixture/result.private | tail -4 || true
             grep -E '^VM_GARAGE_BATCH phase=(Prevalidation|WriterHandoff|ReaderHandoff|AdapterConstruction|ObjectRetention) index=(none|[0-9]+) completed=[0-9]+$' /var/lib/das-garage-fixture/result.private | head -1 || true
         fi
         poweroff -f
@@ -26,6 +26,7 @@ install -d -m 755 /run/das-systemd-vm-fixture
 install -m 644 /dev/null /run/das-systemd-vm-fixture/permit
 phase=offline_aws_install
 /bin/bash /mnt/cidata/aws-guest-install.sh
+/usr/bin/aws --version
 test "$(sha256sum /mnt/cidata/garage | awk '{print $1}')" = 8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2
 install -m 755 /mnt/cidata/garage /opt/das-vm-garage
 install -m 755 /mnt/cidata/adapter /opt/das-vm-adapter

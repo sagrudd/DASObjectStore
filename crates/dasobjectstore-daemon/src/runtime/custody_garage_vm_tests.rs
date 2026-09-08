@@ -1,6 +1,48 @@
 // Disposable actual-Garage fixture only; no Compose/platform admission claim.
 use super::*;
 
+fn provider_category(stderr: &str, status: Option<i32>) -> &'static str {
+    let text = stderr.to_ascii_lowercase();
+    if status == Some(124) || status == Some(137) {
+        "timeout"
+    } else if text.contains("you must specify a region") {
+        "no_region"
+    } else if text.contains("unable to locate credentials") || text.contains("no credentials found")
+    {
+        "credentials"
+    } else if text.contains("modulenotfounderror:") || text.contains("importerror:") {
+        "import"
+    } else if text.contains("signaturedoesnotmatch") || text.contains("requesttimetooskewed") {
+        "signature"
+    } else if text.contains("accessdenied") || text.contains("(403)") {
+        "access_denied"
+    } else if text.contains("notfound") || text.contains("(404)") {
+        "not_found"
+    } else if text.contains("(400)") || text.contains("bad request") {
+        "bad_request"
+    } else {
+        "provider_failure"
+    }
+}
+
+#[test]
+fn actual_garage_dispatch_classifies_only_fixed_public_categories() {
+    for (text, status, expected) in [
+        ("You must specify a region.", Some(253), "no_region"),
+        ("Unable to locate credentials", Some(253), "credentials"),
+        ("ModuleNotFoundError: fixture_module", Some(1), "import"),
+        ("SignatureDoesNotMatch", Some(254), "signature"),
+        ("An error occurred (400)", Some(254), "bad_request"),
+        ("An error occurred (403)", Some(254), "access_denied"),
+        ("An error occurred (404)", Some(254), "not_found"),
+        ("", Some(124), "timeout"),
+        ("private-unrecognized-value", Some(1), "provider_failure"),
+        ("", None, "provider_failure"),
+    ] {
+        assert_eq!(provider_category(text, status), expected);
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod actual {
     use super::*;
@@ -95,17 +137,11 @@ mod actual {
                     .find(|v| ["head-object", "put-object", "get-object"].contains(&v.as_str()))
                     .map(String::as_str)
                     .unwrap_or("garage");
-                let text = String::from_utf8_lossy(&stderr).to_ascii_lowercase();
-                let category = if text.contains("accessdenied") || text.contains("403") {
-                    "access_denied"
-                } else if text.contains("notfound") || text.contains("404") {
-                    "not_found"
-                } else if status.code() == Some(124) || status.code() == Some(137) {
-                    "timeout"
-                } else {
-                    "provider_failure"
-                };
-                eprintln!("VM_GARAGE_COMMAND operation={operation} category={category}");
+                let category = provider_category(&String::from_utf8_lossy(&stderr), status.code());
+                let exit = status.code().unwrap_or(-1);
+                eprintln!(
+                    "VM_GARAGE_COMMAND operation={operation} category={category} exit={exit}"
+                );
                 // Preserve actual provider error text for existing absence classification.
                 // The fixture panic hook never prints these values or secret argv.
                 return Err(
