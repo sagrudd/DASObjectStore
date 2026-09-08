@@ -15,6 +15,7 @@ done
 install -d -m 755 /run/das-systemd-vm-fixture /run/das-vm-tls-public
 install -d -o 2000 -g 2000 -m 700 /run/das-vm-reader-material /run/das-vm-results /run/das-vm-scratch
 install -d -o 2001 -g 2001 -m 700 /run/das-vm-verifier-material
+install -d -o 2001 -g 2001 -m 755 /run/das-vm-verifier-results
 touch /run/das-systemd-vm-fixture/permit
 chmod 644 /run/das-systemd-vm-fixture/permit
 install -m 755 /mnt/cidata/adapter /opt/das-vm-adapter
@@ -43,8 +44,9 @@ for mode in positive binding corrupt disconnect; do
     chmod 644 /run/das-systemd-vm-fixture/mode
     printf '0' > /run/das-systemd-vm-fixture/get-count
     chmod 644 /run/das-systemd-vm-fixture/get-count
+    rm -f /run/das-systemd-vm-fixture/protocol-ready
     # Exact run-owned files only; prior immutable publications/ledgers remain.
-    for path in /run/das-vm-tls-public /run/das-vm-reader-material /run/das-vm-verifier-material /run/das-vm-results; do
+    for path in /run/das-vm-tls-public /run/das-vm-reader-material /run/das-vm-verifier-material /run/das-vm-results /run/das-vm-verifier-results; do
         find "$path" -mindepth 1 -maxdepth 1 -type f -delete
         test "$(find "$path" -mindepth 1 -maxdepth 1 | wc -l)" = 0
     done
@@ -96,8 +98,13 @@ UNIT
     systemctl start das-vm-protocol.service das-vm-tls-reader.service
     ready=no
     for unused in $(seq 1 750); do
-        if test -f /run/das-vm-results/ready; then ready=yes; break; fi
+        if test -f /run/das-vm-results/ready && test -f /run/das-systemd-vm-fixture/protocol-ready \
+            && test "$(cat /run/das-systemd-vm-fixture/protocol-ready)" = "$mode"; then
+            ready=yes
+            break
+        fi
         if systemctl is-failed --quiet das-vm-tls-reader.service; then exit 1; fi
+        if systemctl is-failed --quiet das-vm-protocol.service; then exit 1; fi
         sleep .2
     done
     test "$ready" = yes

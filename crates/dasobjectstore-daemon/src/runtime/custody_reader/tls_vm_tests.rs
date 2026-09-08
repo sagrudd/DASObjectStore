@@ -25,6 +25,7 @@ const VERIFIER: &str = "/run/das-vm-verifier-material";
 const BODY: &[u8] = b"actual synthetic manager receipt";
 const BACKEND: &str = "http://127.0.0.1:19000";
 const TLS_ADDRESS: &str = "127.0.0.1:19443";
+const REPLAY_DONE: &str = "/run/das-vm-verifier-results/replay-checked";
 
 fn limits() -> CustodyReadLimits {
     CustodyReadLimits {
@@ -254,7 +255,79 @@ fn serve_joined_tls_vm() {
     if mode() == "binding" {
         assert!(result.is_err());
     }
+    // Keep the real listening socket alive until the separate verifier has
+    // completed replay checks. A second connection fails independently of GET
+    // counting, so connection-refused cannot masquerade as journal denial.
+    no_second_connection(&listener, Path::new(REPLAY_DONE), Duration::from_secs(15)).unwrap();
     fs::write("/run/das-vm-results/server-passed", b"passed").unwrap();
+}
+
+fn no_second_connection(
+    listener: &TcpListener,
+    done: &Path,
+    budget: Duration,
+) -> std::io::Result<()> {
+    let end = Instant::now() + budget;
+    loop {
+        match listener.accept() {
+            Ok(_) => return Err(std::io::Error::other("unexpected replay connection")),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(error),
+        }
+        match fs::symlink_metadata(done) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                // The verifier publishes completion after synchronous replay
+                // calls return. Check again for a connection queued between the
+                // first accept check and observing that completion.
+                return match listener.accept() {
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(()),
+                    Err(error) => Err(error),
+                    Ok(_) => Err(std::io::Error::other("unexpected replay connection")),
+                };
+            }
+            Ok(_) => return Err(std::io::Error::other("invalid fixture completion marker")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        if Instant::now() >= end {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "replay check not completed",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn joined_retry_observer_denies_queued_connection_even_with_done_marker() {
+    let path = std::env::temp_dir().join(format!("das-replay-observer-{}", uuid::Uuid::new_v4()));
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let peer = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    fs::write(&path, b"done").unwrap();
+    let denied = no_second_connection(&listener, &path, Duration::from_secs(1));
+    fs::remove_file(&path).unwrap();
+    drop(peer);
+    assert!(denied.is_err());
+    let missing = no_second_connection(&listener, &path, Duration::from_millis(5));
+    assert_eq!(missing.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    fs::write(&path, b"done").unwrap();
+    let accepted = no_second_connection(&listener, &path, Duration::from_secs(1));
+    fs::remove_file(path).unwrap();
+    accepted.unwrap();
+}
+
+fn journal_snapshot(path: &Path, request_id: &str) -> (String, String, String) {
+    let db =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    let count: u64 = db
+        .query_row("SELECT count(*) FROM first_attempts", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 1);
+    db.query_row("SELECT r.status,a.attempt_marker_sha256,a.result FROM issued_pre_read_requests r JOIN first_attempts a ON a.request_id=r.request_id WHERE r.request_id=?1", [request_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap()
 }
 
 #[test]
@@ -303,25 +376,31 @@ fn verify_joined_tls_vm() {
     } else {
         assert!(result.is_err());
     }
-    let db = rusqlite::Connection::open_with_flags(
-        &journal_path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    )
-    .unwrap();
-    let state: String = db
-        .query_row(
-            "SELECT status FROM issued_pre_read_requests WHERE request_id=?1",
-            [&request.request_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(matches!(state.as_str(), "started" | "terminal"));
-    drop(db);
+    let before = journal_snapshot(&journal_path, &request.request_id);
+    assert!(matches!(before.0.as_str(), "started" | "terminal"));
     drop(journal);
     let reopened = CustodyOffNucJournal::open_existing(&journal_path).unwrap();
     assert!(reopened
         .issue_pre_read_request(&raw, &authority, &now())
         .is_err());
     assert!(make_client().read(&reopened, &raw, limits()).is_err());
+    // A fresh signature/nonce must not turn the old ID into a new issuance.
+    request.nonce = uuid::Uuid::new_v4().to_string();
+    let changed_signature =
+        STANDARD.encode(signing.sign(&serde_jcs::to_vec(&request).unwrap()).as_ref());
+    let changed = serde_jcs::to_vec(&CustodySignedRecordV1 {
+        schema: CUSTODY_SIGNED_RECORD_SCHEMA_V1.into(),
+        body: request.clone(),
+        authority: authority.clone(),
+        signature_base64: changed_signature,
+    })
+    .unwrap();
+    assert!(reopened
+        .issue_pre_read_request(&changed, &authority, &now())
+        .is_err());
+    assert!(make_client().read(&reopened, &changed, limits()).is_err());
+    assert_eq!(journal_snapshot(&journal_path, &request.request_id), before);
+    fs::write(REPLAY_DONE, b"done").unwrap();
+    fs::set_permissions(REPLAY_DONE, fs::Permissions::from_mode(0o644)).unwrap();
     fs::write(format!("{VERIFIER}/passed"), b"passed").unwrap();
 }

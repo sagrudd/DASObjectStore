@@ -54,5 +54,8 @@ if __name__ == '__main__':
     end = time.monotonic() + 240
     with http.server.HTTPServer(('127.0.0.1', 19000), Handler) as server:
         server.timeout = 0.2
+        # HTTPServer has bound/listened successfully here. Type=exec alone
+        # cannot establish this readiness for the real first AWS GET.
+        (CONTROL / 'protocol-ready').write_text((CONTROL / 'mode').read_text().strip())
         while time.monotonic() < end:
             server.handle_request()
