@@ -2,6 +2,10 @@
 
 ## 0.186.0 - Unreleased
 
+- Add accepted finite private/HTTP wire codecs with frozen vector conformance,
+  existing signed-request verification and durable off-NUC attempt regression
+  coverage. Buffer parsing supplies no TLS, peer admission or network deadline.
+
 - Add accepted ADR0011 closed reader binding/current/seal codecs and a concrete
   existing-only complete custody-ledger receipt-set verifier. Preserve legacy
   handoff, receipt, signed request and retention semantics. These public records

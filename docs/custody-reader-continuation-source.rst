@@ -131,3 +131,33 @@ held lock. The pause has a finite ten-second rendezvous; test child guards kill
 and reap unfinished children on failure. No injection/environment branch exists
 in a production build. These tests exercise process loss and error boundaries,
 not physical power loss, disk-controller caches or a simulated kernel reboot.
+
+Finite wire codec successor
+--------------------------
+
+The object-service ``custody_reader::wire`` module implements the accepted
+bootstrap read/seal/result and reader result records, exact private length
+prefixes and fixed denial responses. It reuses the existing binding/seal record
+machinery and the existing signed pre-read parser, signature verification and
+time validation. Journal issuance and HTTP ingress share that validation sequence;
+the legacy signature schema, u64 sequence and string rules are unchanged.
+
+These are complete-buffer codecs, not an endpoint or network reader. Private
+decoding requires separately observed EOF; actual collection must enforce the
+server-owned byte/deadline limit before allocation. HTTP checks the exact route,
+configured Host, required headers, field/header/body bounds and prohibited
+framing, returning only the first request's consumed length. The eventual
+connection owner must close after that operation without dispatching pipelined
+bytes. No claim is made that HTTP detects arbitrary future bytes before dispatch.
+Complete responses bind independently selected metadata and actual content
+bytes; partial/extra responses and missing EOF cannot count as success.
+
+Tests match the frozen public private/HTTP frames byte-for-byte, exercise
+fragmentation and write-half shutdown using real Unix sockets, and run genuine
+existing Ed25519 fixtures through HTTP ingress inside the actual off-NUC
+``perform_pre_read`` journal transition. Reopening that journal cannot repeat an
+already-started request. Synthetic signatures and sockets are source conformance,
+not a qualified frontend. TLS identity/early-data enforcement, server-owned
+request-to-ledger/receipt binding, authenticated private peer/session sequencing,
+actual bounded transport collection, and admitted lifecycle composition remain
+required before an executable endpoint can assert custody eligibility.

@@ -235,3 +235,5 @@ fn decode<T: DeserializeOwned + Serialize>(
 
 #[cfg(test)]
 mod tests;
+
+pub mod wire;

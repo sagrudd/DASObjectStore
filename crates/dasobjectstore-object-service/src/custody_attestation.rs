@@ -343,9 +343,7 @@ impl CustodyOffNucJournal {
         pinned_authority: &CustodyEd25519AuthorityV1,
         now_utc: &str,
     ) -> Result<String, ObjectServiceError> {
-        let record: CustodySignedPreReadRequestV1 = strict_jcs(raw_jcs)?;
-        verify_signed(&record, pinned_authority)?;
-        record.body.validate(now_utc)?;
+        let record = decode_pre_read(raw_jcs, pinned_authority, now_utc)?;
         let digest = sha256_hex(raw_jcs);
         let mut connection = self.open_rw()?;
         let transaction = connection
@@ -968,6 +966,17 @@ fn validate_attestation(
     nonblank("custody attestation result detail", &body.result_detail)
 }
 
+pub(crate) fn decode_pre_read(
+    raw: &[u8],
+    authority: &CustodyEd25519AuthorityV1,
+    now: &str,
+) -> Result<CustodySignedPreReadRequestV1, ObjectServiceError> {
+    let record: CustodySignedPreReadRequestV1 = strict_jcs(raw)?;
+    verify_signed(&record, authority)?;
+    record.body.validate(now)?;
+    Ok(record)
+}
+
 fn verify_signed<T: Serialize>(
     record: &CustodySignedRecordV1<T>,
     pinned: &CustodyEd25519AuthorityV1,
@@ -1097,6 +1106,8 @@ fn sql(operation: &'static str) -> impl FnOnce(rusqlite::Error) -> ObjectService
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+
+    mod reader_wire_tests;
 
     fn digest(label: &str) -> String {
         sha256_hex(label)
