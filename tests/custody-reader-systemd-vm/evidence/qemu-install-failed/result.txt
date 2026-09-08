@@ -1,0 +1,18 @@
+Approved exact offline replay failed; no usable tool image was committed.
+Container4046254c1c597f719ad8ecf73668ac575e7e388625188931ce83c61b8316575a
+Start2026-09-08T15:30:12.923194933Z
+End2026-09-08T15:30:14.394493574Z
+Exit1. Exact reviewed stored transaction c55ec4fe... contained34 Install actions.
+Independent exact-key RPM signatures and copied-payload SHA checks passed
+before replay. DNF's stored-repository path separately warns that its own
+OpenPGP checks were skipped; those are not claimed as the authentication source.
+
+First failure: libnl3 payload /usr/lib64/libnl-3.so.200 temporary symlink,
+Permission denied. Further packages reported symlink Directory not empty and
+missing executable paths. No cause beyond the actual unpack failure is claimed.
+The full public transaction log is retained in install-log.txt.
+
+No added capabilities, mounts, devices, network or host changes. No boot.
+The failed container and stopped planning container were removed. Pristine
+public download cache c182daae... and unexecuted-plan cache6d2b82fe... remain.
+Do not reuse the failed transaction as an installed-tool qualification.
