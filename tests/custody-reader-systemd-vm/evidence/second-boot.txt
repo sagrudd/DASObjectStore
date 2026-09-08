@@ -1,0 +1,14 @@
+Second isolated TCG boot: precisely diagnosed pre-adapter fixture failure.
+Container: 385ee4f5e6c694196abb7b1936be135f44138e080dfd09426604e1f7e9624483
+Seed ISO: 4fde9ed5a2282da28d8d5cb6911bfc6f8528b43e1bbcc3efb989ed558023bd6e
+Actual guest systemd: 259.5-1.fc44
+PASS phases: accounts, public_files, synthetic_credential, unit.
+Synthetic ciphertext SHA256 (not plaintext):
+f2378d3a17e82bed62ddf5b8789cfc82f54a7703c47cebc6bc2f9a3067262d65
+At adapter_positive setup, systemctl reset-failed returned:
+Unit das-vm-reader.service not loaded.
+VM_EXIT phase=adapter_positive status=1; guest powered off at 189 seconds.
+The new unit had never been started. Removed unnecessary reset-failed call;
+this is a fixture sequencing correction, not a production guard relaxation.
+No Rust adapter invocation or positive qualification occurred in this run.
+Stopped booted container removed without exporting or committing guest state.

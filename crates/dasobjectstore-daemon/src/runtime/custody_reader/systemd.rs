@@ -699,6 +699,61 @@ mod linux {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires reviewed disposable full-systemd VM and synthetic fixture"]
+    fn actual_systemd_vm_adapter_boundary() {
+        use dasobjectstore_object_service::custody::CustodyReadLimits;
+        use std::os::unix::fs::MetadataExt as _;
+        use std::time::{Duration, Instant};
+        let root = Path::new("/run/das-systemd-vm-fixture");
+        let permit = std::fs::symlink_metadata(root.join("permit")).unwrap();
+        assert!(permit.is_file() && permit.uid() == 0 && permit.mode() & 0o022 == 0);
+        assert!(std::fs::read("/proc/1/comm").unwrap() == b"systemd\n");
+        let raw = std::fs::read(root.join("binding.json")).unwrap();
+        let binding = ReaderBindingV1::decode(&raw).unwrap();
+        let mode = std::fs::read_to_string(root.join("mode")).unwrap();
+        let path = Path::new("/run/credentials/das-vm-reader.service");
+        let directory = File::open(path).unwrap();
+        let check = || {
+            verify(
+                &binding,
+                Path::new("/var/lib/das-vm/reader.enc"),
+                &directory,
+                path,
+                CustodyReadLimits {
+                    maximum_bytes: 4096,
+                    timeout: Duration::from_secs(15),
+                }
+                .start()
+                .unwrap(),
+            )
+        };
+        if mode == "positive" {
+            assert!(check().is_ok(), "actual systemd adapter positive denied");
+        } else if mode == "reload" {
+            assert!(check().is_ok(), "pre-reload adapter positive denied");
+            std::fs::write("/run/das-vm-results/ready", b"ready").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !root.join("continue").exists() {
+                assert!(Instant::now() < deadline, "fixture reload signal timed out");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(
+                check().is_err(),
+                "unchanged activation survived manager reload"
+            );
+        } else {
+            assert!(matches!(
+                mode.as_str(),
+                "wrong-name" | "wrong-executable" | "plaintext"
+            ));
+            assert!(check().is_err(), "invalid systemd boundary accepted");
+        }
+        // Only coarse outcome leaves the service. Never read or display secrets.
+        std::fs::write("/run/das-vm-results/passed", b"PASS").unwrap();
+    }
+
     #[test]
     fn unit_path_escaping_is_injective_and_rejects_patterns() {
         assert_eq!(

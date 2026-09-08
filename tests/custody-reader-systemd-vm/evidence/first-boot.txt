@@ -1,0 +1,15 @@
+First isolated TCG boot: pre-adapter setup failure, NOT a Rust adapter result.
+Container: 1c4bb63df38b8b402aab8cbb8390eac6b2e08612fa520ff531d175b81eb88dc0
+Started: 2026-09-08T13:26:19.750162945Z
+Stopped: 2026-09-08T13:30:24.260632799Z
+Actual version: systemd 259 (259.5-1.fc44)
+Actual kernel: 6.19.10-300.fc44.aarch64
+Adapter input SHA256: 789b097d99620604c4df9d6c85171e9d389c33dcf22ba7199b256bc183334f7f
+Seed ISO SHA256: 223dbb35e7974697953de9f1f79eecf62296e8e49f290f71e8ba5e1d4b21c7ba
+Observed: VM_VERSION, then cloud-init scripts_user failure; no adapter-start or PASS.
+No specific cause proved. Direct console reopening overlapped serial-getty reset.
+Correction adds fixed phase/EXIT/HUP diagnostics, removes direct tty reopening,
+stops only guest serial-getty, and removes the version head/pipefail ambiguity.
+Entire stopped booted container removed; no disk/layer exported or committed.
+Only public adapter input retained for reuse. Raw serial stream SHA256:
+1aa540cc910ff17b57b021a35400aaf87dca3005308695662fc858f2937c4442
