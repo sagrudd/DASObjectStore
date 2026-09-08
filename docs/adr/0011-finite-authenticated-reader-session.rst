@@ -25,26 +25,81 @@ Reusable source is ``CustodyServiceController`` and its immutable catalogue;
 algorithm remain unchanged. Their availability does not establish a live
 signer, independently measured target or admitted execution companion.
 
-Selected lifetime proposal
----------------------------
+Restartable read-only continuation proposal
+------------------------------------------
 
-Use one continuously running, reader-only process for the explicitly finite
-declared retention period. It consumes the existing sealed Reader handoff
-exactly once on its initial start and owns the resulting credential only in
-memory. No new credential, saved secret, refreshed reference, resealed profile
-or credential reopening is proposed. Restart is disabled. A lost reader
-process or reboot causes loss of custody eligibility and denial of subsequent
-gates; it does not authorize reusing the consumed handoff. Objects/holds/ledger
-remain preserved. Availability monitoring may detect this failure, not repair
-or convert it into a new attempt.
+The original uninterrupted-process option avoids persistent credential delivery
+but permanently loses eligibility on reboot. Reject it as the normal operational
+choice: retention availability must survive routine service and host restarts.
+Propose instead a separately provisioned, protected **read-only continuation**
+credential, delivered by systemd on each authorized reader activation. This is
+an explicit new lifecycle contract, not reuse or reinterpretation of the old
+one-use Reader reference. The existing resolver and all consumed markers remain
+unchanged; neither reader restart nor this proposal re-admits Writer or Provisioner.
 
-This is viable only if the companion's availability plan genuinely permits
-that continuous process to remain available until at least the declared
-retention end. It is not a claim of reboot continuity. If operational needs
-require restart/replacement without loss of eligibility, a separately reviewed
-reopening contract is actually necessary; this proposal does not smuggle one
-in. Legal holds remain after any process expiration, and stopping a reader
-never authorizes deletion or clearing a hold.
+The smallest standard-platform candidate is ``LoadCredentialEncrypted=`` with
+a companion-selected opaque credential name and protected encrypted source.
+Systemd decrypts for service activation; DAS reads only the selected file in
+the service credential directory, never environment values, an ordinary API,
+registry, user configuration or a plaintext persistent fallback. Encryption
+must use an explicitly qualified host/TPM protection mode, never null encryption
+or automatic downgrade. No host secret, TPM enrollment, key, filename or unit
+identity is selected or created by this ADR. The existing inert DAS credential
+template already documents this platform facility, but only for one-use roles;
+it does not authorize continuation provisioning.
+
+Compared with a new always-running Thesaurophylax credential broker, this avoids
+another service, unlock session and credential-delivery protocol. Existing Thes
+custody/provisioning facilities may supply approved material during the companion
+transaction, but an attended unlocked generation is not an unattended reboot
+provider. No unrelated vault socket or automatic root-unlock capability is reused.
+The companion must qualify the selected platform mechanism on the actual host.
+Upstream mechanism reference: https://systemd.io/CREDENTIALS/ .
+
+The continuation grants only reads of the sealed store's selected immutable
+objects. It has no create/write/delete, bucket administration, policy/hold
+mutation or key-management capability. The provisioner verifies these backend
+permissions independently; a role label in a file is insufficient. A distinct
+continuation credential may be derived/provisioned in the admitted transaction;
+copying the old handoff after its consumption is not the delivery mechanism.
+The restartable service retains this credential only in memory for its current
+activation. Held objects and ledger survive all failures; expiry/revocation
+stops successful reads without deleting data or lifting legal holds.
+
+Protected continuation binding and revocation
+--------------------------------------------
+
+The proposed closed public binding commits schema/version, companion digest,
+host identity, reader service identity and UID, exact executable/package
+provenance, opaque credential name, encrypted-source digest, backend reader
+identity and credential generation, store ID, catalogue/profile digest,
+endpoint/TLS authority, namespace/bucket/policy, finite inventory digest,
+completed-bootstrap seal digest, not-before and expiry. No secret or plaintext
+secret digest belongs in that public record. All digest encodings and exact
+canonical vectors must be frozen before codec implementation. This is separate
+from, and does not extend, the existing sealed one-use profile wire.
+
+An independently protected current binding selects exactly one active generation;
+startup and every request check it plus trusted current time and the completed
+seal. Missing, expired, revoked, mismatched or regressed binding denies reads.
+Service-owned state cannot authorize its own generation. Restore of old binding
+files must not restore a revoked backend credential: revocation includes backend
+permission/key invalidation and removal of future activation delivery, not merely
+editing an in-memory flag. The companion controls that transaction and its durable
+audit; uncertain completion denies readiness. A replacement generation requires
+an explicitly admitted update with equivalent read-only scope, not an automatic
+key refresh by the reader. Actual protected binding installation, anti-rollback
+retention and revocation sequencing require reviewed lifecycle source composition
+before deployment; systemd encryption alone supplies none of those semantics.
+
+Restart recovery enters only ``ReadOnly`` after validating the independently
+protected completed seal, exact ledger/receipt inventory and current binding.
+It cannot enter ``BootstrapReadback``, repeat a batch, clear a consumed marker,
+or renew an interrupted off-NUC attempt. Bounded automatic restart/backoff may
+restore service availability after transient failures; gates stay denied until
+fresh successful verification. An incomplete initial bootstrap never becomes a
+completed seal through restart. Full declared-retention availability remains a
+qualified operational obligation, not a promise inferred from Restart settings.
 
 The reader service identity differs from the bounded writer/provisioner
 identity, as the planner already requires. Its mounts expose only its exact
@@ -60,7 +115,7 @@ be followed by this reader process using the same reference. Preserve that
 API unchanged and add a connected composition, rather than pretend otherwise:
 
 1. After independent companion/lifecycle admission, start the separately
-   constrained reader once, consuming Reader in its own boundary. It validates
+   constrained initial reader, consuming Reader in its own boundary. It validates
    exact catalogue/store/profile, selected finite inventory and writer peer.
    It starts in ``BootstrapReadback`` with a bounded private local channel.
 2. The writer consumes only Writer once. Its actual conditional retainer uses
@@ -82,7 +137,9 @@ API unchanged and add a connected composition, rather than pretend otherwise:
    ``Denied``. No public read success or automatic retry follows. Consumed
    handoffs and retained state survive, even though the in-memory process state
    itself is not a recovery journal. A fresh process cannot reconstruct a
-   Reader credential from those public records.
+   Reader credential from those public records. Only a successfully sealed
+   bootstrap permits the separately provisioned continuation service to start;
+   the continuation never substitutes for initial one-use admission.
 
 The source protocol for the private channel is deliberately small: a
 length-bounded request discriminated as readback (exact key and u64 size) or
@@ -113,8 +170,11 @@ the boundary; the endpoint need not independently prove the remote journal's
 state by inventing another marker/signature format. A bare captured signed
 request without the pinned verifier transport identity is insufficient.
 Disable transport retries and redirects. Reject duplicate attempts within the
-reader process before backend access. A process restart cannot restore its
-credential; the independent journal remains the durable attempt authority.
+reader process before backend access. Restarted continuation does not make an
+old attempt fresh: the actual off-NUC journal remains the durable attempt
+authority and the reviewed client never resends a started request. A compromised
+authorized verifier is outside that client guarantee; TLS alone does not prove
+journal consumption and target-local duplicate memory is not anti-replay storage.
 
 Each request selects exactly one existing ``CustodyIntegrityReceiptV1`` by
 its already bound ``receipt_jcs_sha256``, within the independently selected
@@ -188,6 +248,7 @@ Decisions versus execution choices
 ----------------------------------
 
 Source review must settle this connected reader-before-writer topology,
+the separate protected continuation binding/delivery/revocation contract,
 private-channel and TLS framing/limits, the exact existing-inventory mapping,
 and the supported endpoint adapter boundary. No code before those concrete
 choices and vectors are accepted; no new cryptographic purpose is required.
@@ -209,7 +270,14 @@ seal and public read of actual committed bytes. Test all old normal clients
 and writer attempts against the public reader, wrong TLS peer/signature/target,
 inventory substitution, partial retention/seal, deadline/overrun/disconnect,
 concurrent/repeated attempts, and off-NUC journal restart denial. Stop writer
-and prove the reader still serves fresh reads; stop reader and prove subsequent
-formal verification fails without credential reuse. Preserve held objects and
+and prove the reader still serves fresh reads; kill and restart the continuation
+and reboot an isolated qualified fixture, proving recovery requires the completed
+seal/current binding and never consumes the initial Reader again. Verify wrong
+host/unit/UID/credential name, altered ciphertext, stale generation, expired or
+revoked binding, backend write/delete attempts, plaintext fallback, missing seal,
+partial bootstrap and interrupted journal attempts all fail closed. Verify
+revocation of a running service as well as a stopped one, protected-file rollback,
+and bounded restart without writer/provisioner activation. During downtime,
+formal verification must fail, not reuse an earlier success. Preserve held objects and
 ordinary synthetic data throughout. Native isolation/lifetime qualification
 and admitted target capability remain distinct from these source tests.
