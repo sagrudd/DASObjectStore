@@ -347,3 +347,5 @@ fn generated_receipt_is_bounded_executor_policy_never_prehash_or_payload() {
     assert_eq!(good.object_count, 2);
     assert!(!good.execution_authorized);
 }
+#[path = "inventory_review.rs"]
+mod inventory_review;

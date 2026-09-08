@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.184.0 - Unreleased
+
+- Add a synchronous finite-inventory custody operation using the existing
+  conditional writer/readback and sealed ledger, consuming each role handoff
+  once per batch. Prevalidate the full selected inventory; preserve partial
+  retained results and consumed authority on failure without retry or cleanup.
+  Existing single-object behavior and persisted schemas remain unchanged.
+  Share inventory validation with the planner while preserving its prefixed
+  digest wire; reject aggregate-size overflow. ADR 0009, issue #205 and Kanon
+  #339 (930e58f) coordinate this source-only capability. No reader continuation,
+  lifecycle, credentials, host invocation or custody eligibility is supplied.
+
 ## 0.183.0 - 2026-09-08
 
 - Extract the existing custody provisioning, admission and retention paths into

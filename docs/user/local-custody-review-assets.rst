@@ -1,6 +1,14 @@
 Local custody review assets
 ===========================
 
+The 0.184.0 source line adds an in-process finite-inventory retention call,
+not a new operator command or custody activation route. It uses each sealed
+writer/reader handoff once for the selected finite batch. Failure preserves
+partial objects and consumed handoffs; it does not authorize retry or cleanup.
+No persistent reader, service lifecycle or execution companion is supplied.
+See :doc:`../adr/0009-finite-inventory-custody-session` for the bounded source
+contract. The review-only assets below remain inert and unchanged.
+
 DASObjectStore 0.181.0 packages three **review-only** local trusted-
 administrator custody templates below
 ``/usr/share/doc/dasobjectstore/custody-review/``:

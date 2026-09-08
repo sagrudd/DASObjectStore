@@ -16,4 +16,5 @@ implementation.
    0006-rustls-transitive-tls12-amendment
    0007-pistis-only-human-authority
    0008-expedition-retained-dossier-writer
+   0009-finite-inventory-custody-session
    fixtures/README

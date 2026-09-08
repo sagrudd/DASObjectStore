@@ -487,18 +487,16 @@ fn validate_stores(
 fn validate_content_policy(purpose: &str, policy: &ContentPolicy) -> Result<usize, PlanDenial> {
     match policy {
         ContentPolicy::PreknownInventory { objects } if purpose != "terminal-receipt" => {
-            if objects.is_empty() || objects.len() > 4096 {
+            if objects.iter().any(|object| !sha(&object.content_sha256)) {
                 return Err(PlanDenial::Custody);
             }
-            let mut digests = BTreeSet::new();
-            for object in objects {
-                if !sha(&object.content_sha256)
-                    || object.size_bytes == 0
-                    || !digests.insert(&object.content_sha256)
-                {
-                    return Err(PlanDenial::Custody);
-                }
-            }
+            crate::validate_custody_inventory(objects.iter().map(|object| {
+                (
+                    object.content_sha256.strip_prefix("sha256:").unwrap_or(""),
+                    object.size_bytes,
+                )
+            }))
+            .map_err(|_| PlanDenial::Custody)?;
             Ok(objects.len())
         }
         ContentPolicy::GeneratedTerminalReceipt {

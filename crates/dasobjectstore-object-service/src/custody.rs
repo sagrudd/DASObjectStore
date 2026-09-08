@@ -1587,7 +1587,11 @@ fn validate_new_custody_store(
     Ok(())
 }
 
-fn validate_custody_input(input: &CustodyObjectInputV1) -> Result<(), ObjectServiceError> {
+/// Validate existing object type, content and retained-at syntax without effects.
+///
+/// # Errors
+/// Rejects any input that the existing single-object retainer rejects syntactically.
+pub fn validate_custody_input(input: &CustodyObjectInputV1) -> Result<(), ObjectServiceError> {
     require_nonblank("object_type", &input.object_type)?;
     canonical_timestamp("retained_at_utc", &input.retained_at_utc)?;
     if input.bytes.is_empty() {
@@ -2148,7 +2152,7 @@ fn require_nonblank(field: &str, value: &str) -> Result<(), ObjectServiceError> 
     Ok(())
 }
 
-fn invalid(message: impl Into<String>) -> ObjectServiceError {
+pub(crate) fn invalid(message: impl Into<String>) -> ObjectServiceError {
     ObjectServiceError::InvalidConfiguration(message.into())
 }
 
