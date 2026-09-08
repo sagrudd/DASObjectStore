@@ -18,4 +18,5 @@ implementation.
    0008-expedition-retained-dossier-writer
    0009-finite-inventory-custody-session
    0010-existing-only-bounded-custody-read
+   0011-finite-authenticated-reader-session
    fixtures/README
