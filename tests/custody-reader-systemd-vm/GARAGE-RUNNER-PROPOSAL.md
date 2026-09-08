@@ -61,7 +61,8 @@ arguments. A test-only `ServiceCommandRunner` may accept only that complete
 fixed fixture wrapper and forward its remaining argv to the actual pinned
 Garage executable/config. No shell, generic passthrough, fabricated stdout,
 error translation or replacement freshness/grant verifier is permitted. AWS
-calls use the genuine existing process runner and signed Fedora AWS closure.
+calls use the signed Fedora CLI through the fixture's bounded clean-environment
+process runner, not `SystemServiceCommandRunner` qualification.
 This proves the actual CLI/S3 adapters, not Docker Compose containment. If
 review requires actual Compose itself, stop and select its coherent guest
 dependency closure instead of silently changing this attribution.
