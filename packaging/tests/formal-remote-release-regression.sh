@@ -20,7 +20,7 @@ if [[ -z "$version" || ! "$head" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 
 write_fixture() {
-  python3 - "$fixture" "$version" "$head" <<'PY'
+  python3 - "$fixture" "$version" "$head" "${schema:-v1alpha2}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -33,7 +33,7 @@ registry_digest = "sha256:" + "b" * 64
 (root / "lockset.toml").write_text(
     "\n".join(
         [
-            'schema_version = "mnemosyne.kanon.lockset.v1alpha2"',
+            f'schema_version = "mnemosyne.kanon.lockset.{sys.argv[4]}"',
             'id = "das-test-lockset"',
             f'content_digest = "{content_digest}"',
             f'registry_digest = "{registry_digest}"',
@@ -93,8 +93,9 @@ validate() {
     --package-version "$version"
 }
 
-write_fixture
 expected="das-test-lockset sha256:$(printf 'a%.0s' {1..64}) sha256:$(printf 'b%.0s' {1..64}) $head"
+for schema in v1alpha2 v1alpha3; do
+write_fixture
 actual="$(validate)" || {
   printf 'formal remote release regression: valid Terraform inputs were rejected\n' >&2
   exit 1
@@ -162,6 +163,16 @@ if validate >/dev/null 2>&1; then
   exit 1
 fi
 
+done
+
+for schema in v1alpha1 v1alpha4 unknown; do
+  write_fixture
+  if validate >/dev/null 2>&1; then
+    printf 'formal remote release regression: unsupported schema %s was accepted\n' "$schema" >&2
+    exit 1
+  fi
+done
+schema=v1alpha3
 write_fixture
 source "$source_root/packaging/package-provenance.sh"
 export DAS_PACKAGE_SOURCE_REVISION="$head"

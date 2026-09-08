@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.185.2 - Unreleased
+
+- Accept canonical Kanon v1alpha3 locksets in the remote package guard while
+  retaining v1alpha2 compatibility and all exact source, version and projection
+  authority checks. Unknown schemas still fail closed. This packaging-only
+  correction is coordinated in Kanon #339 (comment 5592127672) and requires
+  a new immutable Kanon successor before release;
+  no historical lockset or formal acceptance gate is changed.
+
 ## 0.185.1 - Unreleased
 
 - Require signed AWS upload payloads for explicit remote sessions using a
