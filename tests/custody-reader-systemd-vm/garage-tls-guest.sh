@@ -1,8 +1,10 @@
 #!/bin/bash
 # Source-only until exact frozen runner/artifact review. All keys stay in guest.
-set -euo pipefail
+set -Eeuo pipefail
 phase=bootstrap
-trap 'status=$?; printf "VM_GARAGE_JOIN_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then poweroff -f; fi' EXIT
+failure_line=0
+trap 'failure_line=$LINENO' ERR
+trap 'status=$?; printf "VM_GARAGE_JOIN_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then printf "VM_GARAGE_JOIN_SHELL_LOCATION source=garage-tls-guest.sh line=%s\n" "$failure_line"; poweroff -f; fi' EXIT
 test "$#" = 0
 test "$(id -u)" = 0
 /bin/bash /mnt/cidata/garage-guest.sh --retain-for-tls
@@ -10,7 +12,9 @@ test "$(systemctl show -p ActiveState --value das-vm-garage-test.service)" = ina
 test -f /var/lib/das-garage-fixture/retained.json
 phase=continuation_provision
 install -m 644 /dev/null /run/das-systemd-vm-fixture/garage-joined
+phase=garage_start
 systemctl start das-vm-garage.service
+phase=garage_ready
 ready=no
 for unused in $(seq 1 30); do
     if runuser -u das-vm-garage -- /usr/bin/timeout --kill-after=2s 2s \
@@ -23,6 +27,7 @@ for unused in $(seq 1 30); do
     sleep .2
 done
 test "$ready" = yes
+phase=continuation_unit_setup
 install -o 2002 -g 2002 -m 600 /dev/null /var/lib/das-garage-fixture/continuation-result.private
 cat > /etc/systemd/system/das-vm-garage-continuation.service <<'UNIT'
 [Service]
@@ -51,10 +56,12 @@ StandardOutput=append:/var/lib/das-garage-fixture/continuation-result.private
 StandardError=append:/var/lib/das-garage-fixture/continuation-result.private
 UNIT
 systemctl daemon-reload
+phase=continuation_start
 systemctl start das-vm-garage-continuation.service
+phase=continuation_terminal
 for unused in $(seq 1 900); do
     if test "$(systemctl show -p SubState --value das-vm-garage-continuation.service)" = exited; then break; fi
-    if systemctl is-failed --quiet das-vm-garage-continuation.service; then exit 1; fi
+    if systemctl is-failed --quiet das-vm-garage-continuation.service; then failure_line=$LINENO; exit 1; fi
     sleep .2
 done
 test "$(systemctl show -p ActiveState --value das-vm-garage-continuation.service)" = active
@@ -65,6 +72,7 @@ test "$(systemctl show -p ExecMainPID --value das-vm-garage-continuation.service
 invocation=$(systemctl show -p InvocationID --value das-vm-garage-continuation.service)
 [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
 grep -qx VM_GARAGE_CONTINUATION_NEW_READ_KEY_OLD_GRANTS_REVOKED /var/lib/das-garage-fixture/continuation-result.private
+phase=continuation_stop
 systemctl stop das-vm-garage-continuation.service
 test "$(systemctl show -p ActiveState --value das-vm-garage-continuation.service)" = inactive
 phase=protected_tls

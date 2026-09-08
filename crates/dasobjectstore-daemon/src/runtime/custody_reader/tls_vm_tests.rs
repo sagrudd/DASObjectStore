@@ -297,6 +297,7 @@ fn identity(reader: bool) -> TlsIdentity {
 #[test]
 #[ignore = "actual encrypted systemd reader plus genuine TLS/AWS in reviewed disposable VM"]
 fn serve_joined_tls_vm() {
+    install_prepare_diagnostics();
     loader_vm_tests::guest_guard(2000);
     let selection = loader_vm_tests::selected_fixture();
     let mut tls_binding = selection.binding.clone();
@@ -420,6 +421,7 @@ fn journal_snapshot(
 #[test]
 #[ignore = "separate guest UID verifier; functional isolation, not off-NUC provenance"]
 fn verify_joined_tls_vm() {
+    install_prepare_diagnostics();
     loader_vm_tests::guest_guard(2001);
     let selection = loader_vm_tests::selected_fixture();
     let authority_raw = fs::read(format!("{PUBLIC}/authority.jcs")).unwrap();

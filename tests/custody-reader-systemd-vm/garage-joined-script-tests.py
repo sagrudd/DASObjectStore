@@ -10,6 +10,17 @@ RUST = (HERE.parents[1] / "crates/dasobjectstore-daemon/src/runtime/custody_read
 
 
 class GarageJoinedGuards(unittest.TestCase):
+    def test_all_explicit_exits_and_runtime_stages_are_located(self):
+        for source in (TLS, JOIN):
+            for line in source.splitlines():
+                if "exit 1" in line:
+                    self.assertIn("failure_line=$LINENO; exit 1", line)
+            self.assertIn("set -Eeuo pipefail", source)
+        for stage in ("prepare_directories", "prepare_adapter", "prepare_publication", "unit_setup", "lifecycle_setup", "garage_restart", "reader_start", "reader_ready", "verifier_start", "verifier_terminal", "reader_terminal", "stop_units", "publication_journal"):
+            self.assertIn("phase=" + ('"' if stage != "garage_restart" else '') + stage, TLS)
+        for entry in ("serve_joined_tls_vm", "verify_joined_tls_vm"):
+            self.assertIn("fn " + entry + "() {\n    install_prepare_diagnostics();", RUST)
+
     def test_shell_error_diagnostic_is_line_only(self):
         self.assertIn("trap 'failure_line=$LINENO' ERR", TLS)
         self.assertIn('*) failure_line=$LINENO; exit 1;; esac', TLS)
