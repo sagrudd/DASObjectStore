@@ -2,7 +2,7 @@
 use super::super::endpoint::tls::{ExactObjectClient, ServerTls, TlsIdentity};
 use super::super::endpoint::{ExactObjectServer, SelectedRead};
 use super::*;
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use dasobjectstore_object_service::custody_attestation::{
     CustodyEd25519AuthorityV1, CustodyOffNucJournal, CustodyOffNucPreReadRequestV1,
     CustodySignedRecordV1, CUSTODY_SIGNED_RECORD_SCHEMA_V1,
@@ -56,7 +56,10 @@ fn private(directory: &str, name: &str, bytes: &[u8], uid: u32) {
     assert_eq!(unsafe { libc::chown(c.as_ptr(), uid, uid) }, 0);
 }
 fn now() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+    wall_clock().to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+fn wall_clock() -> DateTime<Utc> {
+    DateTime::<Utc>::from(std::time::SystemTime::now())
 }
 
 #[test]
@@ -164,7 +167,7 @@ fn prepare_joined_tls_vm() {
             sequence: 1,
             previous_request_sha256: None,
             issued_at_utc: now(),
-            expires_at_utc: (Utc::now() + chrono::Duration::seconds(120))
+            expires_at_utc: (wall_clock() + chrono::Duration::seconds(120))
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
         };
         public("receipt.jcs", receipt_jcs.as_bytes());
@@ -265,7 +268,7 @@ fn verify_joined_tls_vm() {
     let mut request = selected().measurements;
     request.issued_at_utc = now();
     request.expires_at_utc =
-        (Utc::now() + chrono::Duration::seconds(120)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        (wall_clock() + chrono::Duration::seconds(120)).to_rfc3339_opts(SecondsFormat::Secs, true);
     let seed = zeroize::Zeroizing::new(fs::read(format!("{VERIFIER}/signing.seed")).unwrap());
     let signing = ring::signature::Ed25519KeyPair::from_seed_unchecked(&seed).unwrap();
     let signature = STANDARD.encode(signing.sign(&serde_jcs::to_vec(&request).unwrap()).as_ref());
