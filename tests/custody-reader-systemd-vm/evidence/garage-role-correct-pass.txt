@@ -1,0 +1,42 @@
+Actual Garage role-correct admission/finite retention — ALL_PASS
+
+Scripts dda45857ccecebfbc5c2716078b47bb9fc3a9b5d.
+Production Rust 1f05acedce0cbaeee8a586e45487af6d355c8502.
+Native allfeatures locked/offline compile 25.65s.
+Stripped adapter SHA256 8abb7395214d5c0aa9421eca61657e6a7781e97ef00be42064c468953d90ce96.
+Unstripped SHA256 c72eede048ce21695fcc634a50be69ac8b1e0d338cd72a73828af7d79829b0ae.
+GNU strip (Ubuntu Binutils 2.42), --strip-debug;
+tool SHA256 3a69e3786ea2884baf4d9811e509ba6d16be03d5d6f541103b8de317a2465fca.
+Actual Garage SHA256 8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2.
+Pristine public image sha256:5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6.
+
+Owned container 01f1b8385ad141f14f129d16f421df156253a1e0844f7d8a10b15a33717d8565.
+Started 2026-09-08T17:01:43.026513469Z; finished 17:02:10.94301868Z.
+Elapsed 27.916505211s. QEMU/container exit0; acceptance controller exit0.
+Unchanged isolation: no network/mounts, UID1000, cap-dropALL, NNP,
+sole KVM device, 4GiB/2CPU/256PIDs, independent 900s controller.
+Native preflight: systemd8, dispatcher/classifier3, role retention3,
+finite batch9, listener observer1 all PASS, zero failed/ignored.
+
+Whitelisted guest output:
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+aws-cli/2.33.0 Python/3.14.3 Linux/6.19.10-300.fc44.aarch64 source/aarch64.fedora.44
+VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM
+VM_GARAGE_EXIT phase=complete status=0
+
+Actual fresh admission and exact W-only/R-only grants remained unchanged.
+Two-object conditional retention used R HEAD, W PUT, R HEAD and R GET,
+then genuine immutable receipts. Whole-inventory prevalidation, duplicate
+admission and reconstructed consumed-handoff denial passed. Terminal service
+status/retained PID/InvocationID and explicit stop checks passed.
+Root independently reran source1f05 retention3 and finite batch9 tests PASS;
+author full daemon library985 and strict alltargets Clippy passed separately.
+
+Console SHA256 b09d9d83bf7e8b4e33202deff184bbc686e78141cb0dca04280b4fadcdb15b87.
+Only fixed whitelisted results/hash retained; no raw/base64 console, private
+provider output, booted image/disk or generated credential exported.
+Exact exited booted container removed after evidence selection/hash.
+
+Not yet Garage restart, Garage-backed TLS continuation, direct reader-PUT/
+writer-GET denial matrix, physically off-NUC verifier, formal S4 acceptance,
+production companion admission, Compose containment or native Garage WORM.
