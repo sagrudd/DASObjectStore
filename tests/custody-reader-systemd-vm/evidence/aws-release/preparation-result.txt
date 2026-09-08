@@ -1,0 +1,32 @@
+Public preparation PASS only; no guest installation, AWS invocation or GET yet.
+Release-only Fedora44/aarch64 awscli2 2.33.0-1.fc44 dependency selection:
+71 packages,52657272 bytes, all exact approved Fedora44 signatures+payload hashes PASS.
+Solver includes systemd-libs259.5-1.fc44, but guest version/transaction checks
+remain mandatory before installation; no assumption that release-only suffices.
+
+Download-only containerfc6f15deb501867e7f5bd360e3c8c1a192ee2fe504a7140034bf8109f6c46c63:
+UID0, networkbridge for public HTTPS only, capdropALL, NNP, mounts[], devices[],
+2CPU/4GiB/pids256, internal900s watchdog and independent host timeout900s with
+exact-container stop on error. Completed exit0; no packages installed.
+
+Copied public payload+evidence into never-started container
+6e43fc56eb508be76d6c787cae4cb7349ecd613b936534cce51354759cfbd23d
+based on pristine approved QEMU/Fedora imageb3fa5d9f3fcfe6b64d73fb5ff37c0d12a972600145430d553bb54df525423865.
+Committed clean successor (no guest ever booted):
+sha256:ab01a453a2b25013c59c367833965233dc4d4f8659b84c1cb0d4d1465bb8794e
+Public closure path /opt/das-aws-fedora44; original pristine Fedora image retained.
+No configured volumes; entrypoint/bin/true, UID1000:1000, explicit runner override required.
+
+Independent copy/readback hash validation container
+b10e8c5f2b774395dbbc802ab915bc0b71aa3e10916d35d423ff2b0def9c50ef:
+networknone, mounts[], devices[], capdropALL, NNP, UID1000:1000,2CPU/2GiB/pids128.
+All71 manifest entries PASS, exit0. Only public payload hashes were read;
+no VM boot, package installation, host service or credential mutation occurred.
+
+Retained separate public Fedora tool/cache image for compatible future preparation:
+sha256:30949830d1392172b14863bafdb2afb865f3c237c6d8bf80ccb6f3b413a23935
+It contains unchanged Fedora base tools plus public DNF metadata/RPMs only;
+override its entrypoint when reusing. No packages or secrets were provisioned.
+The three exact stopped/unstarted task containers named above and the failed
+first-selection container2bc0fc (four total) were removed after image/evidence retention.
+Base images, public successful payloads and source receipts remain recoverable.
