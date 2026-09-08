@@ -2,7 +2,7 @@
 # Full loader only: real systemd delivery, synthetic public storage setup, no GET.
 set -euo pipefail
 phase=start
-trap 'status=$?; printf "VM_LOADER_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then poweroff -f; fi' EXIT
+trap 'status=$?; printf "VM_LOADER_EXIT phase=%s status=%s\n" "$phase" "$status"; if test "$status" != 0; then journalctl -u das-vm-loader.service -o cat --no-pager | grep -E "^VM_LOADER_(STAGE|ERROR) " || true; poweroff -f; fi' EXIT
 test "$(cat /proc/1/comm)" = systemd
 systemctl stop serial-getty@ttyAMA0.service
 version_output=$(systemctl --version)
@@ -63,12 +63,17 @@ UNIT
     systemctl daemon-reload
     phase="load_$mode"
     systemctl start das-vm-loader.service
+    phase="process_identity_$mode"
     # v259 dbus-service.c BUS_EXEC_STATUS_VTABLE("ExecMain", ...), with
     # execute.c::exec_status_exit retaining pid after a fast expected denial.
     # MainPID may already be zero for a successfully completed negative case.
     pid=$(systemctl show -p ExecMainPID --value das-vm-loader.service)
     invocation=$(systemctl show -p InvocationID --value das-vm-loader.service)
+    if [[ "$pid" =~ ^[0-9]+$ ]]; then printf 'VM_LOADER_OBSERVED_PID %s\n' "$pid"; fi
+    if test -n "$invocation"; then echo VM_LOADER_INVOCATION_PRESENT; else echo VM_LOADER_INVOCATION_ABSENT; fi
+    phase="nonzero_pid_$mode"
     test "$pid" -gt 0
+    phase="invocation_shape_$mode"
     [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
     if test -z "$first_pid"; then
         first_pid=$pid
@@ -80,6 +85,7 @@ UNIT
         echo VM_LOADER_RESTART_DISTINCT_PID_AND_INVOCATION_UNCHANGED_PUBLICATION
     fi
     success=no
+    phase="terminal_result_$mode"
     for unused in $(seq 1 750); do
         if test -f /run/das-vm-results/passed && test "$(systemctl show -p ActiveState --value das-vm-loader.service)" = inactive; then
             test "$(systemctl show -p ExecMainStatus --value das-vm-loader.service)" = 0
@@ -94,6 +100,7 @@ UNIT
         sleep .2
     done
     test "$success" = yes
+    phase="unchanged_publication_$mode"
     after=$(sha256sum "$encrypted" /run/das-systemd-vm-fixture/loader.json "${encrypted%/reader.enc}/ledger.sqlite3" "${encrypted%/reader.enc}"/records/*.jcs)
     test "$after" = "$publication"
     printf 'VM_LOADER_PASS %s\n' "$mode"
