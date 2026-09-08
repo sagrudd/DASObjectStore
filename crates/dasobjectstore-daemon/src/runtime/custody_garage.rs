@@ -159,6 +159,10 @@ impl SystemdServiceCredentialHandoffResolver {
             return Err(ReaderError::Binding);
         }
         let mut environment = vec![
+            // Garage's authoritative config renderer fixes s3_region="garage".
+            // Select it explicitly in this Garage-only continuation path; the
+            // bounded child clears ambient config/environment before use.
+            ("AWS_DEFAULT_REGION".into(), "garage".into()),
             ("AWS_ACCESS_KEY_ID".into(), handoff.aws_access_key_id),
             (
                 "AWS_SECRET_ACCESS_KEY".into(),
@@ -1198,6 +1202,51 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(unix)]
+    #[test]
+    fn continuation_selects_garage_region_without_credential_override() {
+        use dasobjectstore_object_service::custody_reader::ReaderBindingV1;
+        let binding = ReaderBindingV1::decode(include_bytes!(
+            "../../../../docs/adr/fixtures/0011-reader-wire/binding.jcs.json"
+        ))
+        .unwrap();
+        let bytes = format!(
+            "version=1\nrole=reader\nstore_id={}\nconfiguration_sha256={}\nidentity={}\naws_access_key_id={}\naws_secret_access_key=synthetic-test-secret\n",
+            binding.store_id, binding.configuration_sha256,
+            binding.reader_identity, binding.backend_key_id,
+        );
+        let credential = SystemdServiceCredentialHandoffResolver::decode_continuation(
+            &binding,
+            bytes.as_bytes(),
+        )
+        .unwrap();
+        let (_, environment) = credential.into_parts();
+        assert_eq!(environment.len(), 3);
+        assert_eq!(
+            environment
+                .iter()
+                .filter(|(key, _)| key == "AWS_DEFAULT_REGION")
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>(),
+            vec!["garage"]
+        );
+        assert!(!environment.iter().any(|(key, _)| key == "AWS_REGION"));
+        for extra in ["aws_region=foreign\n", "AWS_DEFAULT_REGION=foreign\n"] {
+            assert!(
+                SystemdServiceCredentialHandoffResolver::decode_continuation(
+                    &binding,
+                    format!("{bytes}{extra}").as_bytes(),
+                )
+                .is_err()
+            );
+        }
+        // Match the authoritative producer, not a generic S3 default.
+        assert!(
+            include_str!("../../../dasobjectstore-object-service/src/garage.rs")
+                .contains("s3_region = \"garage\"")
+        );
+    }
 
     #[test]
     fn systemd_handoff_is_opaque_one_use_and_persists_no_secret_material() {

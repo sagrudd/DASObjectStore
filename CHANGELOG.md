@@ -2,6 +2,10 @@
 
 ## 0.186.0 - Unreleased
 
+- Explicitly select the generated Garage configuration's `garage` region for
+  protected Garage reader continuation; do not inherit ambient AWS region or
+  expand the closed credential format or generic S3 defaults.
+
 - Correct concrete Garage retention role composition: metadata HEAD observations
   and GET use the sealed read-only identity, while conditional PUT keeps the
   write-only identity. Preserve exact policy verification, one-use handoffs,
