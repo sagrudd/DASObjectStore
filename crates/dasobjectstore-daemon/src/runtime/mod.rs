@@ -17,6 +17,7 @@ mod capacity_provider;
 mod config;
 mod custody_activation;
 mod custody_garage;
+mod custody_service;
 mod destage_admission;
 mod destage_worker;
 mod direct_s3_ingress;
@@ -181,6 +182,7 @@ pub(crate) use custody_garage::{
     TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
     TestOnlyCustodyRuntimeCredentialResolver,
 };
+pub use custody_service::{CustodyServiceBindings, CustodyServiceController, CustodyServiceState};
 pub(crate) use destage_admission::build_destage_capacity_claim;
 pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;
 pub use destage_worker::{
