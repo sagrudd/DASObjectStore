@@ -79,9 +79,13 @@ typed credential properties, cgroup v2 and a numeric/local passwd service user.
 It requires the selected actual MainPID/cgroup, PrivateMounts, no pending unit
 reload, a stable own mount namespace and an actual dedicated read-only
 credential mount. It does not read PID1's inaccessible namespace descriptor.
-Current unit properties cannot prove that an already running process restarted
-after an earlier daemon-reload: the independently admitted activation manager
-must bind that lifecycle, and native qualification remains necessary. Unsupported
+The process start timestamp must be later than both the manager's latest reload
+start and its boot unit-load finish; those two observations must remain unchanged
+across the probe. They are not a paired interval: the initial reload timestamp
+may be zero, and the boot finish remains earlier than a later reload start.
+This conservatively denies an old reader after any daemon-reload until
+an independently admitted new activation; the adapter never performs a restart.
+Actual activation admission and native qualification remain necessary. Unsupported
 metadata shapes or missing protections deny rather than falling back to ordinary
 files. The probe reads no ciphertext or secret and grants no companion authority.
 
@@ -93,3 +97,8 @@ claim rejection, not a process crash between every fsync/publication step. The
 full interruption matrix, Linux-only process tests and real systemd positive
 qualification remain outstanding; no exhaustive durability or platform claim
 is made by this checkpoint.
+
+The subsequent manager-reload refinement has six focused metadata tests passing,
+including legitimate initial zero-reload and reload-start-after-boot-finish
+cases, changed observations and old activation denial. This is still portable
+parser/ordering evidence, not a successful native systemd credential load.

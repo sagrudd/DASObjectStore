@@ -39,7 +39,7 @@ pub(super) fn verify(
 
 #[cfg(any(target_os = "linux", test))]
 const PROPERTIES: &str =
-    "Id,LoadState,ActiveState,MainPID,User,InvocationID,NoNewPrivileges,ControlGroup,PrivateMounts,NeedDaemonReload";
+    "Id,LoadState,ActiveState,MainPID,User,InvocationID,NoNewPrivileges,ControlGroup,PrivateMounts,NeedDaemonReload,ExecMainStartTimestampMonotonic";
 #[cfg(any(target_os = "linux", test))]
 const MAX_OUTPUT: usize = 65536;
 
@@ -115,6 +115,44 @@ fn credential_property(
     // rejects duplicate outer fields; inner values are arrays/scalars, never maps.
     let value: BusValue = serde_json::from_slice(raw).map_err(|_| ReaderError::Boundary)?;
     if value.signature != signature || value.data != expected {
+        return Err(ReaderError::Binding);
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ManagerTimes {
+    load: u64,
+    finish: u64,
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn unsigned_property(raw: &[u8]) -> Result<u64, ReaderError> {
+    if raw.len() > MAX_OUTPUT {
+        return Err(ReaderError::Boundary);
+    }
+    let value: BusValue = serde_json::from_slice(raw).map_err(|_| ReaderError::Boundary)?;
+    if value.signature != "t" {
+        return Err(ReaderError::Boundary);
+    }
+    value.data.as_u64().ok_or(ReaderError::Boundary)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn start_after_load(
+    start: u64,
+    before: ManagerTimes,
+    after: ManagerTimes,
+) -> Result<(), ReaderError> {
+    // Exact upstream systemd 9ca433482f2281d71718718705ca8cd3bf562ad6:
+    // manager.c manager_reloading_start refreshes UNITS_LOAD before reload's
+    // serialization; manager-serialize.c preserves it. service.c serializes
+    // main-exec-status-start unchanged across reload. UNITS_LOAD_FINISH covers
+    // initial boot enumeration. All are same-boot monotonic microseconds.
+    // Conservatively require a reader restart after ANY manager daemon-reload,
+    // even an unrelated unit change; no automatic restart is performed here.
+    if before != after || before.finish == 0 || start <= before.load.max(before.finish) {
         return Err(ReaderError::Binding);
     }
     Ok(())
@@ -477,6 +515,38 @@ mod linux {
         }
         Ok(())
     }
+    fn manager_times(deadline: CustodyReadDeadline) -> Result<ManagerTimes, ReaderError> {
+        let mut values = [0; 2];
+        for (index, name) in [
+            "UnitsLoadTimestampMonotonic",
+            "UnitsLoadFinishTimestampMonotonic",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let output = capture(
+                "/usr/bin/busctl",
+                &[
+                    "--system",
+                    "--no-pager",
+                    "--json=short",
+                    "--auto-start=no",
+                    "--allow-interactive-authorization=no",
+                    "get-property",
+                    "org.freedesktop.systemd1",
+                    "/org/freedesktop/systemd1",
+                    "org.freedesktop.systemd1.Manager",
+                    name,
+                ],
+                deadline,
+            )?;
+            values[index] = unsigned_property(&output)?;
+        }
+        Ok(ManagerTimes {
+            load: values[0],
+            finish: values[1],
+        })
+    }
     fn directory(
         file: &File,
         path: &Path,
@@ -546,12 +616,16 @@ mod linux {
         // unprivileged reader: Linux applies PTRACE_MODE_READ_FSCREDS there.
         // Construction is instead checked by live unit PrivateMounts=yes,
         // MainPID/cgroup plus the actual dedicated readonly credential fd mount.
-        // Real-systemd positive qualification is still mandatory. These current
-        // properties cannot prove an admitted restart occurred after daemon-reload;
-        // the admitted activation manager must bind that lifecycle, not infer it
-        // from NeedDaemonReload=no or this metadata probe's successful result.
+        // Real-systemd positive qualification is still mandatory. Manager-load
+        // timestamps below additionally reject old activations after daemon-reload;
+        // NeedDaemonReload=no by itself would not establish that property.
         directory(dir, path, binding.uid, deadline)?;
+        let manager_before = manager_times(deadline)?;
         let before = scalar(&binding.service_identity, binding.uid, deadline)?;
+        let started = properties(&before)?["ExecMainStartTimestampMonotonic"]
+            .parse::<u64>()
+            .map_err(|_| ReaderError::Boundary)?;
+        start_after_load(started, manager_before, manager_before)?;
         credentials(&object, &binding.credential_name, source, deadline)?;
         let mut executable = File::open("/proc/self/exe").map_err(|_| ReaderError::Boundary)?;
         let metadata = executable.metadata().map_err(|_| ReaderError::Boundary)?;
@@ -594,6 +668,7 @@ mod linux {
             return Err(ReaderError::Boundary);
         }
         directory(dir, path, binding.uid, deadline)?;
+        start_after_load(started, manager_before, manager_times(deadline)?)?;
         remaining(deadline)?;
         Ok(())
     }
@@ -677,7 +752,7 @@ mod tests {
     }
     #[test]
     fn metadata_requires_all_properties_once() {
-        let raw=b"Id=a.service\nLoadState=loaded\nActiveState=active\nMainPID=1\nUser=1000\nInvocationID=abc\nNoNewPrivileges=yes\nControlGroup=/system.slice/a.service\nPrivateMounts=yes\nNeedDaemonReload=no\n";
+        let raw=b"Id=a.service\nLoadState=loaded\nActiveState=active\nMainPID=1\nUser=1000\nInvocationID=abc\nNoNewPrivileges=yes\nControlGroup=/system.slice/a.service\nPrivateMounts=yes\nNeedDaemonReload=no\nExecMainStartTimestampMonotonic=1000\n";
         assert!(properties(raw).is_ok());
         let mut duplicate = raw.to_vec();
         duplicate.extend_from_slice(b"MainPID=2\n");
@@ -725,5 +800,44 @@ mod tests {
             123
         );
         assert!(start_identity(b"43 (name) R", 42).is_err());
+    }
+
+    #[test]
+    fn manager_reload_requires_new_activation_and_stable_snapshot() {
+        let boot = ManagerTimes {
+            load: 0,
+            finish: 100,
+        };
+        assert!(start_after_load(101, boot, boot).is_ok());
+        let loaded = ManagerTimes {
+            load: 200,
+            finish: 100,
+        };
+        assert!(start_after_load(201, loaded, loaded).is_ok());
+        for start in [0, 99, 100, 199, 200] {
+            assert!(start_after_load(start, loaded, loaded).is_err());
+        }
+        assert!(start_after_load(201, boot, loaded).is_err());
+        assert!(start_after_load(201, loaded, boot).is_err());
+        assert!(start_after_load(
+            201,
+            ManagerTimes { load: 0, finish: 0 },
+            ManagerTimes { load: 0, finish: 0 }
+        )
+        .is_err());
+        assert_eq!(
+            unsigned_property(br#"{"type":"t","data":123}"#).unwrap(),
+            123
+        );
+        for raw in [
+            br#"{"type":"t","data":[123]}"#.as_slice(),
+            br#"{"type":"t","data":-1}"#,
+            br#"{"type":"s","data":"123"}"#,
+            br#"{"type":"t","data":1.5}"#,
+            br#"{"type":"t","data":18446744073709551616}"#,
+            br#"{"type":"t","data":1,"data":2}"#,
+        ] {
+            assert!(unsigned_property(raw).is_err());
+        }
     }
 }
