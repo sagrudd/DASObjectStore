@@ -37,6 +37,15 @@ fn allowance() -> CustodyReadLimits {
 #[test]
 #[ignore = "root preparation in separately reviewed disposable systemd VM only"]
 fn prepare_actual_loader_vm() {
+    std::panic::set_hook(Box::new(|info| {
+        if let Some(location) = info.location() {
+            eprintln!(
+                "VM_LOADER_PREP_LOCATION {}:{}",
+                location.file(),
+                location.line()
+            );
+        }
+    }));
     guest_guard(0);
     let mode = fs::read_to_string(format!("{CONTROL}/mode")).unwrap();
     assert!(matches!(
@@ -47,19 +56,32 @@ fn prepare_actual_loader_vm() {
     // its in-memory object storage does not assert a Garage retention result.
     eprintln!("VM_LOADER_PREP_STAGE ledger");
     let mut f = fixture();
+    eprintln!("VM_LOADER_PREP_STAGE ledger_complete");
     let root = PathBuf::from(format!("/var/lib/das-vm-loader-{}", uuid::Uuid::new_v4()));
-    fs::rename(&f.root, &root).unwrap();
+    eprintln!("VM_LOADER_PREP_STAGE rename");
+    if let Err(error) = fs::rename(&f.root, &root) {
+        let label = if error.raw_os_error() == Some(libc::EXDEV) {
+            "CrossDevice"
+        } else {
+            "Other"
+        };
+        eprintln!("VM_LOADER_PREP_RENAME_ERROR {label}");
+        panic!("fixture relocation denied");
+    }
+    eprintln!("VM_LOADER_PREP_STAGE rename_complete");
     f.root = root.clone();
     f.selection.directory = root.join("records");
     f.selection.ledger = root.join("ledger.sqlite3");
     f.selection.encrypted_source = root.join("reader.enc");
     f.selection.aws_executable = HELPER.into();
+    eprintln!("VM_LOADER_PREP_STAGE helper");
     f.selection.aws_executable_sha256 = raw_sha256(&fs::read(HELPER).unwrap());
     let helper = fs::symlink_metadata(HELPER).unwrap();
     assert!(helper.is_file() && !helper.file_type().is_symlink());
     assert_eq!(helper.uid(), 0);
     assert_eq!(helper.mode() & 0o022, 0);
     assert_eq!(f.selection.aws_executable_sha256, HELPER_SHA256);
+    eprintln!("VM_LOADER_PREP_STAGE helper_complete");
     f.selection.binding.uid = 2000;
     f.selection.binding.service_identity = "das-vm-loader.service".into();
     f.selection.binding.credential_name = "reader".into();

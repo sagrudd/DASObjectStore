@@ -35,7 +35,7 @@ for mode in positive restart malformed wrong-key stale-current positive; do
     # No secret-bearing stdout/stderr leaves this root setup operation.
     install -m 600 /dev/null /run/das-systemd-vm-fixture/prepare.log
     if test "$mode" != restart && ! HOME=/root /opt/das-vm-adapter --exact runtime::custody_reader::manager_tests::loader_vm_tests::prepare_actual_loader_vm --ignored --nocapture >/run/das-systemd-vm-fixture/prepare.log 2>&1; then
-        grep -E '^VM_LOADER_PREP_STAGE ' /run/das-systemd-vm-fixture/prepare.log || true
+        grep -E '^VM_LOADER_PREP_(STAGE|LOCATION|RENAME_ERROR) ' /run/das-systemd-vm-fixture/prepare.log || true
         echo VM_LOADER_PREPARATION_DENIED
         exit 1
     fi
