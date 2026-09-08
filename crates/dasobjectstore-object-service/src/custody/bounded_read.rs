@@ -93,10 +93,10 @@ pub struct VerifiedCustodyRead {
 
 #[cfg(unix)]
 #[derive(Eq, PartialEq)]
-struct Guard(Vec<(PathBuf, u64, u64, u64, i64, i64)>);
+pub(super) struct Guard(Vec<(PathBuf, u64, u64, u64, i64, i64)>);
 #[cfg(unix)]
 impl Guard {
-    fn capture(path: &Path) -> Result<Self, CustodyReadError> {
+    pub(super) fn capture(path: &Path) -> Result<Self, CustodyReadError> {
         use std::os::unix::fs::MetadataExt;
         if !path.is_absolute()
             || path
@@ -142,7 +142,7 @@ impl Guard {
     }
 }
 
-fn schema(
+pub(super) fn schema(
     connection: &Connection,
 ) -> Result<Vec<(String, String, String, Option<String>)>, CustodyReadError> {
     connection
@@ -286,7 +286,7 @@ pub fn verify_custody_readback_existing(
     Err(CustodyReadError::Unsupported)
 }
 
-fn configure_read_connection(
+pub(super) fn configure_read_connection(
     connection: &Connection,
     deadline: CustodyReadDeadline,
 ) -> Result<(), CustodyReadError> {

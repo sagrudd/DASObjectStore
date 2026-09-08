@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.186.0 - Unreleased
+
+- Add accepted ADR0011 closed reader binding/current/seal codecs and a concrete
+  existing-only complete custody-ledger receipt-set verifier. Preserve legacy
+  handoff, receipt, signed request and retention semantics. These public records
+  validate source data, not independent companion admission or live eligibility.
+
 ## 0.185.0 - Unreleased
 
 - Add existing-only, single-snapshot custody verification and bounded exact-byte
