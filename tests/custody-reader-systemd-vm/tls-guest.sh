@@ -27,9 +27,14 @@ readonly driver=runtime::custody_reader::manager_tests::tls_vm_tests
 wait_success() {
     local unit=$1 marker=$2
     for unused in $(seq 1 900); do
-        if test -f "$marker" && test "$(systemctl show -p ActiveState --value "$unit")" = inactive; then
+        if test -f "$marker" && test "$(systemctl show -p ActiveState --value "$unit")" = active \
+            && test "$(systemctl show -p SubState --value "$unit")" = exited; then
             test "$(systemctl show -p ExecMainStatus --value "$unit")" = 0
             test "$(systemctl show -p Result --value "$unit")" = success
+            test "$(systemctl show -p ExecMainPID --value "$unit")" -gt 0
+            local invocation
+            invocation=$(systemctl show -p InvocationID --value "$unit")
+            [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
             return
         fi
         if systemctl is-failed --quiet "$unit"; then return 1; fi
@@ -70,6 +75,7 @@ UNIT
 [Service]
 Type=exec
 User=2000
+RemainAfterExit=yes
 Group=2000
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -84,6 +90,7 @@ UNIT
 [Service]
 Type=exec
 User=2001
+RemainAfterExit=yes
 Group=2001
 NoNewPrivileges=yes
 CapabilityBoundingSet=
@@ -112,6 +119,11 @@ UNIT
     systemctl start das-vm-tls-verifier.service
     wait_success das-vm-tls-verifier.service /run/das-vm-verifier-material/passed
     wait_success das-vm-tls-reader.service /run/das-vm-results/server-passed
+    # Preserve completed-unit metadata until all terminal checks above, then
+    # explicitly end the fixture lifecycle. No production restart policy change.
+    systemctl stop das-vm-tls-reader.service das-vm-tls-verifier.service
+    test "$(systemctl show -p ActiveState --value das-vm-tls-reader.service)" = inactive
+    test "$(systemctl show -p ActiveState --value das-vm-tls-verifier.service)" = inactive
     systemctl stop das-vm-protocol.service
     expected=1
     if test "$mode" = binding; then expected=0; fi

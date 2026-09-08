@@ -57,3 +57,12 @@ in `evidence/joined-native-compile.txt`; six pure transaction-guard tests. The
 guest installer, joined runner, actual AWS/FIFO exchange and loaded-server
 matrix remain unexecuted. Public preparation metadata is not formal custody
 evidence and no booted image may be exported.
+
+The reader/verifier fixture units retain active/exited state after their real
+process finishes, solely to prevent systemd unit garbage collection from
+discarding terminal metadata before inspection. Each case requires its marker,
+exit status0, success result, retained nonzero PID and valid invocation ID, then
+an explicit stop and inactive state. This is not a production lifetime policy.
+Four static script regressions cover those requirements, actual backend
+listen-readiness ordering, and offline installation before identity generation;
+they do not replace the still-required joined VM execution.
