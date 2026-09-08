@@ -30,8 +30,8 @@ if test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm
         # Distinct7843e1a7 joined-driver artifact; never attributed to baseline29ea.
         test "$(sha256sum /adapter | awk '{print $1}')" = e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
     else
-        # Actual Garage diagnostic sourcea25a3003, explicit selected fixture region.
-        test "$(sha256sum /adapter | awk '{print $1}')" = e9ed1b81920a82ae8e6b554b6d91da1b4b38fa7e53e99c4d96f56e38c0212319
+        # Actual Garage role-correct source1f05aced, reviewed borrowed composition.
+        test "$(sha256sum /adapter | awk '{print $1}')" = 8abb7395214d5c0aa9421eca61657e6a7781e97ef00be42064c468953d90ce96
     fi
 fi
 if test "${1:-adapter}" = loader-kvm || test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm-modern || test "${1:-adapter}" = garage-kvm-modern; then
@@ -83,6 +83,8 @@ case "${1:-adapter}" in
        test "$(sha256sum /tmp/seed/garage | awk '{print $1}')" = 8ced2ad3040262571de08aa600959aa51f97576d55da7946fcde6f66140705e2
        cp /custody-reader-systemd-vm/garage-guest.sh /tmp/seed/guest.sh
        /tmp/seed/adapter actual_garage_dispatch --test-threads=1
+       /tmp/seed/adapter runtime::custody_garage::retention --test-threads=1
+       /tmp/seed/adapter finite_batch --test-threads=1
    else
        cp /custody-reader-systemd-vm/tls-guest.sh /tmp/seed/guest.sh
    fi
