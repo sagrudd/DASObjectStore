@@ -158,6 +158,7 @@ pub fn install_profile(
     config_lines.extend([
         "s3 =".to_string(),
         format!("    addressing_style = {}", context.addressing_style),
+        "    payload_signing_enabled = true".to_string(),
     ]);
     let config_after = replace_section(&config_before, &config_section, &config_lines);
     let mut credential_lines = vec![
