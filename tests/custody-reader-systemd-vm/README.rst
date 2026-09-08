@@ -159,6 +159,33 @@ remain. There is no TCG fallback if KVM cannot initialize. Never commit the
 booted container. Record actual accelerator and source hashes separately;
 neither a KVM test nor a TCG test proves a production latency guarantee.
 
+Modern public tool payload composition
+--------------------------------------
+
+The retained old-tool KVM failure occurred in firmware before Linux, not in
+the reader. The reviewed modern-tool successor uses the signed Fedora44
+QEMU10.2.2 and edk2 20260213 payloads. ``qemu-prepare.sh`` authenticates the
+public closure; ``qemu-plan.sh`` stores a repository-solved, install-new-only
+selection. The attempted offline RPM replay failed and is retained as failure
+evidence, not successful installation.
+
+``qemu-payloads.sh`` instead composes only the exact34 selected payloads under
+fresh ``/opt/das-qemu-tools``, without RPM installation, scriptlets or base
+library replacement. It verifies selected hashes/signatures, confines relative
+links, rejects unresolved runtime dependencies, and records tool/firmware hashes
+and unchanged base package metadata. This is a tool-payload composition claim,
+not native RPM installation qualification. No guest boots during preparation.
+
+The runner must use explicit prefix binaries and
+``LD_LIBRARY_PATH=/opt/das-qemu-tools/usr/lib64``. QEMU's data directory is
+``-L /opt/das-qemu-tools/usr/share/qemu``; the pflash code and fresh variables
+template are the exact files under ``usr/share/edk2/aarch64`` in that prefix.
+The public test binary is pre-stripped in the verified build container with
+before/after hashes and tool provenance, and is not modified by this runner.
+The resulting clean, unbooted tool image and fixed runner command require
+review before another independently recorded loader test. The prior TCG
+adapter success and all failed loader attempts retain their original scopes.
+
 Primary public input references
 -------------------------------
 
