@@ -1,14 +1,20 @@
 Existing-only verification and bounded custody reads
 ===================================================
 
-Status: PROPOSED. Documentation only; no implementation authority until
-independent source-design review. No host execution or custody eligibility.
+Status: ACCEPTED bounded source design. Lead-agent independent review of exact
+proposal commit ``567ca93ee5c41d689224b66df0e4be159a10ecd7`` and raw ADR hash
+``1fe78fbcd7e6d68787196daf90d376059e02768cb462d310315a32aab3f54e37``
+is recorded in review comment 5584210018. This is delegated source-work
+acceptance, not a personal owner signature or host execution/custody eligibility.
+The prerequisite local AWS FIFO compatibility test passed; its narrow evidence
+is retained separately. Kanon #339 ``f95174a`` coordinates source 0.185.0.
 
 Date: 2026-09-08. Decision owner: project owner with delegated source review.
 Issue: https://github.com/sagrudd/DASObjectStore/issues/207.
 Baseline: ``c577dec41b92830a92977d101805a92817fe5777`` (DAS #206).
-Future implementation is an additive minor; exact version/Kanon coordination
-must precede code. This proposal changes no version or dependency.
+Implementation is additive source minor 0.185.0. Existing rusqlite 0.37 gains
+the Kanon-coordinated ``hooks`` feature (``0cea8fb``) for cooperative SQLite
+deadline interruption; there is no dependency version change.
 
 Context and scope
 -----------------
@@ -121,7 +127,12 @@ one additional byte is detected as an overrun and discarded before denial.
 Bound command diagnostics to 64 KiB each; an excess denies, never logs raw
 diagnostics. Use a monotonic whole-operation deadline, not only a socket timeout.
 
-The direct process starts in its own process group. On timeout, overrun,
+The direct process starts in its own process group. It remains unreaped while
+status is observed through ``waitid(WNOWAIT)``, so its PID/group identity cannot
+be reused before group termination and the final wait. This owns that process
+group, not descendants deliberately escaping it through a new session;
+trusted executable provenance and external containment remain required.
+On timeout, overrun,
 malformed output, read failure or cancellation, terminate the owned group,
 reap the direct child, close descriptors and discard retained bytes. Require
 successful child termination, exact body length and successful byte digest

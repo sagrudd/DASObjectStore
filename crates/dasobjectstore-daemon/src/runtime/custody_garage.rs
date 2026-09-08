@@ -4,6 +4,8 @@
 //! profile backends. It invokes Garage for a fresh bucket and AWS-compatible
 //! S3 commands for the only admitted data operation: create-if-absent content
 //! retention followed by an independent GET readback.
+mod bounded;
+pub use bounded::BoundedGarageCustodyReader;
 
 use super::service::{
     docker_compose_args, garage_exec_args, GarageServiceRuntimeConfig, ServiceCommandRunner,

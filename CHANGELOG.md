@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.185.0 - Unreleased
+
+- Add existing-only, single-snapshot custody verification and bounded exact-byte
+  acquisition via a concrete Unix FIFO-supervised Garage reader. Preserve old
+  APIs and persisted formats; no endpoint, credential reopening or lifecycle
+  authority is added. ADR 0010 and Kanon #339 f95174a coordinate source work.
+
 ## 0.184.0 - Unreleased
 
 - Add a synchronous finite-inventory custody operation using the existing
