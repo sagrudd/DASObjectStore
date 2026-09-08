@@ -1,4 +1,7 @@
 //! Independent public-operation manager tests; no systemd authentication claim.
+#[cfg(all(target_os = "linux", feature = "development-self-signing"))]
+#[path = "garage_tls_vm_tests.rs"]
+mod garage_tls_vm_tests;
 #[path = "interruption_tests.rs"]
 mod interruption_tests;
 #[cfg(target_os = "linux")]
@@ -188,6 +191,7 @@ fn fixture_from_retained(
     binding.uid = if manager_uid == 1000 { 1001 } else { 1000 };
     binding.companion_sha256 = seal.companion_sha256.clone();
     binding.store_id = seal.store_id.clone();
+    binding.bucket_name = receipts[0].bucket_name.clone();
     binding.configuration_sha256 = seal.configuration_sha256.clone();
     binding.inventory_sha256 = seal.inventory_sha256.clone();
     binding.seal_sha256 = raw_sha256(&seal.encode().unwrap());

@@ -49,6 +49,18 @@ mod actual {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     const ROOT: &str = "/var/lib/das-garage-fixture";
 
+    fn fixture_config() -> GarageServiceRuntimeConfig {
+        let root = PathBuf::from(ROOT);
+        let mut config = custody_config();
+        config.config_path = root.join("garage.toml");
+        config.metadata_path = root.join("meta");
+        config.data_path = root.join("data");
+        config.compose_file = root.join("unused.compose.yml");
+        config.project_directory = Some(root);
+        config.endpoint = "http://127.0.0.1:3901".into();
+        config
+    }
+
     struct ActualRunner(GarageServiceRuntimeConfig);
     impl ServiceCommandRunner for ActualRunner {
         fn run(
@@ -164,6 +176,81 @@ mod actual {
     }
 
     #[test]
+    #[ignore = "fresh read-only continuation grant in reviewed disposable Garage guest only"]
+    fn provision_garage_continuation_vm() {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        std::panic::set_hook(Box::new(|info| {
+            if let Some(l) = info.location() {
+                eprintln!("VM_GARAGE_LOCATION {}:{}", l.file(), l.line());
+            }
+        }));
+        assert_eq!(unsafe { libc::geteuid() }, 2002);
+        assert_eq!(fs::read_to_string("/proc/1/comm").unwrap().trim(), "systemd");
+        let permit = fs::symlink_metadata("/run/das-systemd-vm-fixture/permit").unwrap();
+        assert!(permit.is_file() && permit.uid() == 0 && permit.mode() & 0o022 == 0);
+        let root = PathBuf::from(ROOT);
+        let retained: serde_json::Value = serde_json::from_slice(
+            &fs::read(root.join("retained.json")).unwrap()).unwrap();
+        let definition: dasobjectstore_object_service::CustodyStoreDefinitionV1 =
+            serde_json::from_value(retained["definition"].clone()).unwrap();
+        definition.validate().unwrap();
+        let ledger = PathBuf::from(retained["ledger"].as_str().unwrap());
+        assert!(ledger.starts_with(root.join("sealed")));
+        let before = fs::read(&ledger).unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(&before)), retained["ledger_sha256"]);
+        let old: Vec<(String, String)> = serde_json::from_value(
+            retained["bootstrap_key_ids"].clone()).unwrap();
+        assert_eq!(old.len(), 2);
+        assert_eq!(old[0].0, "writer");
+        assert_eq!(old[1].0, "reader");
+        let config = fixture_config();
+        let runner = ActualRunner(config.clone());
+        let command = |operation: Vec<String>| {
+            let args = super::super::super::docker_compose_args(&config,
+                super::super::super::garage_exec_args(&config.service_name, operation));
+            runner.run("docker", &args)
+        };
+        let key = format!("GK{}", uuid::Uuid::new_v4().simple());
+        assert!(old.iter().all(|(_, value)| value != &key));
+        let secret = zeroize::Zeroizing::new(format!("{}{}",
+            uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple()));
+        // Actual acknowledged import binds this distinct backend key to the
+        // unchanged sealed logical identity. Never reopen old handoff files.
+        command(vec!["key".into(), "import".into(), "--yes".into(), "-n".into(),
+            definition.profile.reader_identity.clone(), key.clone(), secret.to_string()]).unwrap();
+        command(vec!["bucket".into(), "allow".into(), "--read".into(),
+            definition.bucket_name.clone(), "--key".into(), key.clone()]).unwrap();
+        for ((_, old_key), permission) in old.iter().zip(["--write", "--read"]) {
+            command(vec!["bucket".into(), "deny".into(), permission.into(),
+                definition.bucket_name.clone(), "--key".into(), old_key.clone()]).unwrap();
+        }
+        let observed = command(vec!["bucket".into(), "info".into(),
+            definition.bucket_name.clone()]).unwrap();
+        assert!(crate::runtime::custody_garage::fixture_exact_read_only_grant(
+            &observed.stdout, &key));
+        assert_eq!(fs::read(&ledger).unwrap(), before);
+        // Private generated delivery material, consumed only by root fixture
+        // encryption. This is not an admitted production manager or rotation.
+        let plaintext = zeroize::Zeroizing::new(format!("version=1\nrole=reader\nstore_id={}\nconfiguration_sha256={}\nidentity={}\naws_access_key_id={}\naws_secret_access_key={}\n",
+            definition.store_id, dasobjectstore_object_service::custody::inspect_custody_ledger(&ledger).unwrap().configuration_sha256,
+            definition.profile.reader_identity, key, secret.as_str()));
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(root.join("continuation.private")).unwrap();
+        file.write_all(plaintext.as_bytes()).unwrap();
+        file.sync_all().unwrap();
+        let selected = serde_json::json!({"key":key, "reader_identity":definition.profile.reader_identity,
+            "grant_sha256":format!("{:x}", Sha256::digest(observed.stdout.as_bytes())),
+            "ledger_sha256":retained["ledger_sha256"]});
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .open(root.join("continuation.json")).unwrap();
+        file.write_all(&serde_jcs::to_vec(&selected).unwrap()).unwrap();
+        file.sync_all().unwrap();
+        println!("VM_GARAGE_CONTINUATION_NEW_READ_KEY_OLD_GRANTS_REVOKED");
+    }
+
+    #[test]
     #[ignore = "actual Garage in reviewed disposable guest only; never a host invocation"]
     fn actual_garage_admission_and_finite_retention_vm() {
         use crate::runtime::{
@@ -186,13 +273,7 @@ mod actual {
         assert!(permit.is_file() && permit.uid() == 0 && permit.mode() & 0o022 == 0);
         let root = PathBuf::from(ROOT);
         assert_eq!(fs::symlink_metadata(&root).unwrap().uid(), 2002);
-        let mut config = custody_config();
-        config.config_path = root.join("garage.toml");
-        config.metadata_path = root.join("meta");
-        config.data_path = root.join("data");
-        config.compose_file = root.join("unused.compose.yml");
-        config.project_directory = Some(root.clone());
-        config.endpoint = "http://127.0.0.1:3901".into();
+        let config = fixture_config();
         let runner = ActualRunner(config.clone());
         let mut definition = custody_definition();
         definition.profile.target_id = "disposable-garage-qualification".into();
@@ -205,6 +286,7 @@ mod actual {
         let credential_dir = root.join("handoffs");
         fs::create_dir(&credential_dir).unwrap();
         fs::set_permissions(&credential_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut key_ids = Vec::new();
         for role in ["writer", "reader"] {
             let access = format!("GK{}", uuid::Uuid::new_v4().simple());
             let secret = format!(
@@ -213,6 +295,7 @@ mod actual {
                 uuid::Uuid::new_v4().simple()
             );
             let reference = format!("systemd-credential://garage-{role}");
+            key_ids.push((role.to_string(), access.clone()));
             let credential = CustodyGarageCredential::new(reference, &access, &secret).unwrap();
             if role == "writer" {
                 request.writer = credential;
@@ -357,6 +440,7 @@ mod actual {
             "receipts": receipts,
             "inventory": expected.objects.iter().map(|object|
                 (&object.content_sha256, object.size_bytes)).collect::<Vec<_>>(),
+            "bootstrap_key_ids": key_ids,
         });
         let selected = root.join("retained.json");
         use std::io::Write;
@@ -390,7 +474,7 @@ fn garage_argv(
     if !matches!(
         words.as_slice(),
         ["bucket", "info" | "create", _]
-            | ["bucket", "allow", "--write" | "--read", _, "--key", _]
+            | ["bucket", "allow" | "deny", "--write" | "--read", _, "--key", _]
             | ["key", "import", "--yes", "-n", _, _, _]
     ) {
         return None;

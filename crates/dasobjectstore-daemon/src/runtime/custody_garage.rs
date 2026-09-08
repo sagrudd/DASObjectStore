@@ -1158,6 +1158,21 @@ fn verify_exact_custody_grants(
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn fixture_exact_read_only_grant(bucket_info: &str, key: &str) -> bool {
+    let Some((_, table)) = bucket_info.split_once("==== KEYS FOR THIS BUCKET ====") else {
+        return false;
+    };
+    if table.to_ascii_lowercase().contains("owner") {
+        return false;
+    }
+    let rows = table
+        .lines()
+        .filter_map(parse_garage_bucket_permission_row)
+        .collect::<Vec<_>>();
+    rows.len() == 1 && rows[0].access_key_id == key && rows[0].permissions == "R"
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct GarageBucketPermissionRow<'a> {
     permissions: String,
@@ -1202,6 +1217,26 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn continuation_fixture_requires_only_selected_read_grant() {
+        let prefix = "==== KEYS FOR THIS BUCKET ====\nPermissions Access key Name\n";
+        assert!(fixture_exact_read_only_grant(
+            &format!("{prefix}R GKselected sealed-reader\n"),
+            "GKselected"
+        ));
+        for rows in [
+            "W GKselected sealed-reader\n",
+            "RW GKselected sealed-reader\n",
+            "R GKforeign sealed-reader\n",
+            "R GKselected sealed-reader\nW GKold writer\n",
+        ] {
+            assert!(!fixture_exact_read_only_grant(
+                &format!("{prefix}{rows}"),
+                "GKselected"
+            ));
+        }
+    }
 
     #[cfg(unix)]
     #[test]

@@ -27,6 +27,21 @@ const BACKEND: &str = "http://127.0.0.1:19000";
 const TLS_ADDRESS: &str = "127.0.0.1:19443";
 const REPLAY_DONE: &str = "/run/das-vm-verifier-results/replay-checked";
 
+fn expected_body() -> &'static [u8] {
+    if super::garage_tls_vm_tests::enabled() {
+        b"actual Garage first"
+    } else {
+        BODY
+    }
+}
+fn backend() -> &'static str {
+    if super::garage_tls_vm_tests::enabled() {
+        "http://127.0.0.1:3901"
+    } else {
+        BACKEND
+    }
+}
+
 fn limits() -> CustodyReadLimits {
     CustodyReadLimits {
         maximum_bytes: 4096,
@@ -110,28 +125,37 @@ fn prepare_joined_tls_vm() {
     };
     let authority = serde_jcs::to_vec(&authority).unwrap();
     public("authority.jcs", &authority);
-    loader_vm_tests::prepare("positive", |f| {
+    let configure = |f: &mut Fixture| {
         let connection = rusqlite::Connection::open_with_flags(
             &f.selection.ledger,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
         )
         .unwrap();
-        let receipt_jcs: String = connection
-            .query_row(
-                "SELECT receipt_jcs FROM custody_readback_receipts",
-                [],
-                |row| row.get(0),
-            )
+        let rows: Vec<String> = connection
+            .prepare("SELECT receipt_jcs FROM custody_readback_receipts")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
             .unwrap();
+        assert_eq!(rows.len(), f.selection.inventory.len());
+        let mut matching = rows.into_iter().filter(|raw| {
+            serde_json::from_str::<CustodyIntegrityReceiptV1>(raw)
+                .unwrap()
+                .content_sha256
+                == raw_sha256(expected_body())
+        });
+        let receipt_jcs = matching.next().unwrap();
+        assert!(matching.next().is_none());
         drop(connection);
         let receipt: CustodyIntegrityReceiptV1 = serde_json::from_str(&receipt_jcs).unwrap();
-        assert_eq!(receipt.content_sha256, raw_sha256(BODY));
+        assert_eq!(receipt.content_sha256, raw_sha256(expected_body()));
         f.selection.binding.service_identity = "das-vm-tls-reader.service".into();
         f.selection.binding.frontend_tls_peer_sha256 = raw_sha256(server.der());
         f.selection.binding.verifier_tls_identity_sha256 = raw_sha256(client.der());
         f.selection.binding.verifier_authority_sha256 = raw_sha256(&authority);
         f.selection.binding.object_lock_policy_sha256 = receipt.object_lock_policy_sha256.clone();
-        f.selection.backend_endpoint = BACKEND.into();
+        f.selection.backend_endpoint = backend().into();
         f.selection.aws_executable = Path::new("/usr/bin/aws").canonicalize().unwrap();
         // The guest installer independently verifies signed RPM closure and writes
         // this exact installed executable hash before fixture publication.
@@ -148,7 +172,7 @@ fn prepare_joined_tls_vm() {
             verifier_id: "isolated-functional-verifier".into(),
             target_id: receipt.target_id.clone(),
             machine_identity_sha256: b.host_identity_sha256.clone(),
-            s3_endpoint_authority: BACKEND.into(),
+            s3_endpoint_authority: backend().into(),
             endpoint_authority_sha256: b.endpoint_authority_sha256.clone(),
             tls_peer_sha256: b.tls_peer_sha256.clone(),
             routing_sha256: "a".repeat(64),
@@ -181,7 +205,13 @@ fn prepare_joined_tls_vm() {
             "object-path",
             format!("/{}/{}", receipt.bucket_name, receipt.object_key).as_bytes(),
         );
-    });
+    };
+    if super::garage_tls_vm_tests::enabled() {
+        let (fixture, secret) = super::garage_tls_vm_tests::retained_fixture();
+        loader_vm_tests::prepare_from_retained("positive", fixture, Some(secret), configure);
+    } else {
+        loader_vm_tests::prepare("positive", configure);
+    }
 }
 
 fn selected() -> SelectedRead {
@@ -372,7 +402,7 @@ fn verify_joined_tls_vm() {
     };
     let result = make_client().read(&journal, &raw, limits());
     if mode() == "positive" {
-        assert_eq!(result.unwrap().bytes, BODY);
+        assert_eq!(result.unwrap().bytes, expected_body());
     } else {
         assert!(result.is_err());
     }
