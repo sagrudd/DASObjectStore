@@ -1,0 +1,14 @@
+Public helper input for loader path/hash checks only, 2026-09-08.
+Previously authenticated source fixture image:
+sha256:0c14e31657b2fa5751063ad58ae0b088c9665fcdff6c7390e9e0bcde9c1ed108.
+Image Config.Volumes absent. Unstarted copy container:
+85deb6c64ecd4cf2147548b96600bf353f8eaf71f2cac512fbfac56396502547.
+It used network none, cap-drop ALL, no-new-privileges, no mounts/devices.
+Copied /usr/bin/aws: regular file, root0:0,0755,815 bytes.
+Raw SHA2562a7695eaff8793186869a193da167a5e6d46826dac1a93d19d7484b27508a958.
+Copy container removed; no command was executed inside it.
+
+The full-loader test pins the exact digest and checks the installed fixture
+copy is root-owned, regular and not group/other writable. The genuine public
+script is not executed. Missing Python/AWS dependencies are not fabricated or
+installed. This proves no AWS runtime, GET, package or storage qualification.

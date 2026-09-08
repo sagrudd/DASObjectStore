@@ -12,7 +12,15 @@ strip --strip-debug /tmp/seed/adapter
 ldd /tmp/seed/adapter
 sha256sum /tmp/seed/adapter
 /tmp/seed/adapter runtime::custody_reader::systemd --skip actual_systemd_vm_adapter_boundary
-cp /custody-reader-systemd-vm/guest.sh /tmp/seed/guest.sh
+case "${1:-adapter}" in
+ adapter) cp /custody-reader-systemd-vm/guest.sh /tmp/seed/guest.sh ;;
+ loader)
+   test -f /aws
+   cp /aws /tmp/seed/aws
+   sha256sum /tmp/seed/aws
+   cp /custody-reader-systemd-vm/loader-guest.sh /tmp/seed/guest.sh ;;
+ *) exit 1 ;;
+esac
 cp /binding.jcs.json /tmp/seed/binding.json
 printf '%s\n' 'instance-id: das-systemd-vm-56096818' 'local-hostname: das-systemd-vm' > /tmp/seed/meta-data
 printf '%s\n' '#cloud-config' 'runcmd:' '  - [ mkdir, -p, /mnt/cidata ]' \
