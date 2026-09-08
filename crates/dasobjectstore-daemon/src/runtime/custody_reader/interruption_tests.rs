@@ -259,14 +259,12 @@ fn shared_manager_threads_have_independent_lock_descriptions() {
             let barrier = &barrier;
             threads.push(scope.spawn(move || {
                 barrier.wait();
-                shared
-                    .publish_initial(
-                        &fixture.selection,
-                        &fixture.seal,
-                        &fixture.current,
-                        limits(),
-                    )
-                    .is_ok()
+                shared.publish_initial(
+                    &fixture.selection,
+                    &fixture.seal,
+                    &fixture.current,
+                    limits(),
+                )
             }));
         }
         threads
@@ -274,7 +272,12 @@ fn shared_manager_threads_have_independent_lock_descriptions() {
             .map(|thread| thread.join().unwrap())
             .collect::<Vec<_>>()
     });
-    assert_eq!(results.iter().filter(|value| **value).count(), 1);
+    assert_eq!(
+        results.iter().filter(|value| value.is_ok()).count(),
+        1,
+        "publication outcomes (closed categories): {results:?}; fixture={:?}",
+        f.root,
+    );
     let directory =
         files::Directory::open(f.selection.directory.clone(), f.selection.manager_uid).unwrap();
     load_records(&directory, &f.selection, &clock_now()).unwrap();

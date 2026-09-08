@@ -1,0 +1,22 @@
+Source-helper regression observation, macOS, 2026-09-08
+
+Base dd1ce8fe plus test-only retained-ledger helper extraction. No production
+publication/lock changes. Locked/offline allfeatures daemon library filter
+custody_reader::manager_tests, shared target, CARGO_INCREMENTAL=0.
+Initial run:7PASS/1FAIL,2.67s. shared_manager_threads_have_independent_lock_descriptions
+asserted zero successful publishers versus required one (interruption_tests.rs277).
+Original test discarded individual errors into booleans; the first run's UUID
+and exact failure categories were therefore not retained. Do not invent them.
+Owned fixture cleanup ran; no source/API retry or weakened assertion added.
+
+Immediate single-test repeat PASS1/1,0.09s; full repeat PASS8/8,2.64s.
+The test now preserves each closed ReaderError category and reports its owned
+fixture UUID on failure. Success still requires exactly one publisher plus
+complete publication validation; no test retry is embedded in the assertion.
+After that diagnostic change: full8PASS2.63s, then ten separate bounded runs of
+the eight-test group all PASS (80 tests total), durations2.55,2.60,2.55,2.59,
+2.57,2.55,2.64,2.83,2.43,2.52seconds.
+
+Cause remains unclassified: successful repeats are not a resolution claim.
+No new Garage/TLS fixture qualification may label this observation resolved
+without measured categorization or an independently justified cause/fix.
