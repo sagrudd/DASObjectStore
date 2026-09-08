@@ -1,0 +1,35 @@
+Final bounded custody diagnostic; joined qualification remains incomplete.
+Runner82d1f2a7; Rust3ee22821 native compile PASS26.36s; seven static guards PASS.
+Stripped SHA2560c52056b7bae44c214dbb6808f63557afb8fd7c888df4a655023d15e70a81d27.
+Unstripped SHA256b47031eea2399ce8536c0799e29b979e049427516430800fff2a2ba2168c173c.
+Container9a5d2b29df519290e394f6bd4c62b5884df45ca01a1bc5f212fe6603e05dc72c.
+Started2026-09-08T18:26:20.728785688Z; finished18:26:57.733091692Z.
+Same approved pristine5e516cee image, actual8ced Garage binary, sole KVM,
+no NIC/mounts/capabilities,4GiB/2CPU/256pids/900s controller.
+
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_GARAGE_ADMISSION_BATCH_ALL_PASS_NOT_COMPOSE_OR_WORM
+VM_GARAGE_EXIT phase=complete status=0
+VM_JOINED_EXIT phase=reader_ready_initial status=1
+VM_TLS_PREP_SHELL_LOCATION source=tls-guest.sh line=184
+VM_TLS_PREP_LOCATION source=tls_vm_tests.rs line=328
+
+Closed load stages reached directory, records, aws, seal, credential_directory,
+platform_before, secret, decode, platform_after, backend, recheck. Both actual
+platform probes reached accepted. No CONTINUATION_ERROR was emitted.
+Exact frozen source328 is ExactObjectServer::new. Full loader succeeded.
+
+Source review identifies a definite fixture closure error: vec![selected()]
+passes one receipt while the actual Garage seal contains two. Existing
+RequestPolicy::new requires expected.len()==seal.receipt_jcs_sha256.len(),
+so the fixture cannot pass. No production validation relaxation is warranted.
+The earlier exact-source318 attribution to load was mistaken and is corrected
+in garage-joined-reader-load-denial.txt. No joined GET/restart success claimed.
+
+Container/QEMU exit0 after failure shutdown; acceptance controller1.
+Console SHA256b23923038d11615ca1b2e7f60c1c0145f7dfbe74942b8b335c19052ad2c8ca56.
+Exact exited guest removed. No private logs/keys/booted state exported.
+Work stops here under the user's proof-of-concept deployment reprioritization.
+The source custody endpoint is not mounted by the ordinary daemon; completing
+this optional custody fixture is not a prerequisite for ordinary development
+GUI/daemon use. Formal custody/S4 and live companion authority remain unclaimed.

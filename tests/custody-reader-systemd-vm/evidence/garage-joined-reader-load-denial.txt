@@ -1,4 +1,4 @@
-Actual joined run: concrete ReaderContinuation::load denial, no qualification.
+Actual joined run: server-construction denial, no qualification.
 Runner e8c68a83; native source ad402b6c compiled26.34s.
 Stripped SHA256 1de24fe4983a856c4cf25aeb92c4f7df1153dc1543654f8ffc9741bf2a43885a.
 Unstripped SHA256 368075845919d020a460bb2d9fa06445de89b9733d54353c1ffae2fd718670b6.
@@ -10,8 +10,10 @@ VM_GARAGE_EXIT phase=complete status=0
 VM_JOINED_EXIT phase=reader_ready_initial status=1
 VM_TLS_PREP_SHELL_LOCATION source=tls-guest.sh line=182
 VM_TLS_PREP_LOCATION source=tls_vm_tests.rs line=318
-Source318 is actual ReaderContinuation::load unwrap. Inner guard not yet known;
-next diagnostic exposes existing closed platform stages and test-only load stages.
+Correction after checking the exact frozen source rather than moving line numbers:
+ad402b6c source318 is ExactObjectServer::new, not ReaderContinuation::load.
+The earlier load-denial interpretation was incorrect. The subsequent guard run
+confirmed successful loader stages and the same server-construction denial.
 No product validation or grants changed. Six static tests passed before run.
 Container/QEMU0 after failure shutdown; acceptance controller1.
 ConsoleSHA2566f3680df9d23480ff5f9aaf124a845af41d86d62743cec9f14b62d7fd69fa0dc.
