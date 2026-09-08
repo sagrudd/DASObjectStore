@@ -1,7 +1,9 @@
 //! Object service orchestration boundary.
 
-pub mod compose;
 pub mod bootstrap_plan;
+pub mod compose;
+mod custody_inventory;
+pub use custody_inventory::validate_custody_inventory;
 pub mod credentials;
 pub mod custody;
 pub mod custody_attestation;
@@ -31,13 +33,14 @@ pub use custody::{
     create_custody_ledger_from_definition, custody_bucket_is_reserved, custody_object_key,
     custody_provisioning_request_sha256, custody_store_definition_sha256, inspect_custody_ledger,
     plan_custody_garage_provisioning, reject_custody_mutation, retain_custody_object_with_readback,
-    verify_custody_readback_receipt, CustodyAssuranceClass, CustodyForbiddenMutation,
-    CustodyFreshBucketProofV1, CustodyGarageCredential, CustodyGarageProvisionerIdentity,
-    CustodyGarageProvisioningPlan, CustodyGarageProvisioningRequest, CustodyIntegrityReceiptV1,
-    CustodyLedgerInspectionV1, CustodyObjectInputV1, CustodyObjectLockPolicyV1,
-    CustodyObjectReader, CustodyObjectState, CustodyObjectWriter, CustodyReadbackObservationV1,
-    CustodyRetentionMode, CustodyRetentionPolicyV1, CustodyStoreDefinitionV1,
-    CustodyStoreProfileV1, CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
+    validate_custody_input, verify_custody_readback_receipt, CustodyAssuranceClass,
+    CustodyForbiddenMutation, CustodyFreshBucketProofV1, CustodyGarageCredential,
+    CustodyGarageProvisionerIdentity, CustodyGarageProvisioningPlan,
+    CustodyGarageProvisioningRequest, CustodyIntegrityReceiptV1, CustodyLedgerInspectionV1,
+    CustodyObjectInputV1, CustodyObjectLockPolicyV1, CustodyObjectReader, CustodyObjectState,
+    CustodyObjectWriter, CustodyReadbackObservationV1, CustodyRetentionMode,
+    CustodyRetentionPolicyV1, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
+    CUSTODY_ASSURANCE_CLASS_LOCAL_TRUSTED_ADMINISTRATOR_OVERLAY,
     CUSTODY_FRESH_BUCKET_PROOF_SCHEMA_V1, CUSTODY_OBJECT_LOCK_HOLD_AUTHORITY,
     CUSTODY_OBJECT_LOCK_POLICY_ID, CUSTODY_OBJECT_LOCK_POLICY_SCHEMA_V1, CUSTODY_OVERLAY_SCHEMA_V1,
     CUSTODY_PROFILE_V1,

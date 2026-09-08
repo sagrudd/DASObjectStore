@@ -182,6 +182,9 @@ pub(crate) use custody_garage::{
     TestOnlyCustodyAdmissionProvisioningAuthority, TestOnlyCustodyRuntimeCredentialHandoff,
     TestOnlyCustodyRuntimeCredentialResolver,
 };
+pub use custody_service::{
+    CustodyBatchError, CustodyBatchPhase, CustodyFiniteInventory, CustodyInventoryObject,
+};
 pub use custody_service::{CustodyServiceBindings, CustodyServiceController, CustodyServiceState};
 pub(crate) use destage_admission::build_destage_capacity_claim;
 pub(crate) use destage_worker::select_managed_hdd_roots_with_capacity;

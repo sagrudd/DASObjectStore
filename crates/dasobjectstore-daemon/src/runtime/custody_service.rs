@@ -1,4 +1,5 @@
 //! Custody-only service composition. No ordinary registry or service lifecycle is owned here.
+mod batch;
 use super::service::{
     validate_distinct_custody_plane, DaemonServiceRuntimeError, GarageServiceRuntimeConfig,
     ServiceCommandRunner,
@@ -6,6 +7,9 @@ use super::service::{
 use super::{
     CustodyAdmissionProvisioningAuthority, CustodyRuntimeCredentialResolver,
     CustodyRuntimeCredentialRole, GarageCustodyS3Reader, GarageCustodyS3Writer,
+};
+pub use batch::{
+    CustodyBatchError, CustodyBatchPhase, CustodyFiniteInventory, CustodyInventoryObject,
 };
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_object_service::{
