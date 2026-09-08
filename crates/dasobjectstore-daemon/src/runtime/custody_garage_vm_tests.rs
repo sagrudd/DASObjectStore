@@ -93,7 +93,11 @@ mod actual {
                     garage_argv(&self.0, program, args).ok_or_else(deny)?,
                 )
             } else if program == "aws" && args.iter().any(|v| v == "s3api") {
-                ("/usr/bin/aws", args.to_vec())
+                // Explicit fixture selection matches garage.toml's s3_region.
+                // This is not an ambient production region or a grant change.
+                let mut selected = vec!["--region".into(), "garage".into()];
+                selected.extend_from_slice(args);
+                ("/usr/bin/aws", selected)
             } else {
                 return Err(deny());
             };

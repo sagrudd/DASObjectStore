@@ -21,6 +21,9 @@ class GarageGuestSource(unittest.TestCase):
         self.assertNotIn("GARAGE_DEFAULT_SECRET", SOURCE)
         self.assertIn('rpc_bind_addr = "127.0.0.1:3902"', SOURCE)
         self.assertIn('api_bind_addr = "127.0.0.1:3901"', SOURCE)
+        self.assertIn('s3_region = "garage"', SOURCE)
+        rust = Path(__file__).parents[2] / "crates/dasobjectstore-daemon/src/runtime/custody_garage_vm_tests.rs"
+        self.assertIn('vec!["--region".into(), "garage".into()]', rust.read_text())
 
     def test_real_readiness_precedes_retention_and_terminal_is_retained(self):
         self.assertLess(SOURCE.index('test "$ready" = true'), SOURCE.index("phase=admission_retention"))
