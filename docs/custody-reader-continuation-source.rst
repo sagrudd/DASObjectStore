@@ -133,7 +133,7 @@ in a production build. These tests exercise process loss and error boundaries,
 not physical power loss, disk-controller caches or a simulated kernel reboot.
 
 Finite wire codec successor
---------------------------
+----------------------------------------
 
 The object-service ``custody_reader::wire`` module implements the accepted
 bootstrap read/seal/result and reader result records, exact private length
