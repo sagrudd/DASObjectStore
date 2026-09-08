@@ -1,7 +1,6 @@
 """Static fixture guard regressions only, never guest/backend execution."""
 from pathlib import Path
 import subprocess
-import re
 import unittest
 
 HERE = Path(__file__).parent

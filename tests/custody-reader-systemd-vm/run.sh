@@ -30,8 +30,8 @@ if test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm
         # Distinct7843e1a7 joined-driver artifact; never attributed to baseline29ea.
         test "$(sha256sum /adapter | awk '{print $1}')" = e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
     elif test "${1:-adapter}" = garage-tls-kvm-modern; then
-        # Distinct ad402b6c full-stage diagnostic; no production/grant correction.
-        test "$(sha256sum /adapter | awk '{print $1}')" = 1de24fe4983a856c4cf25aeb92c4f7df1153dc1543654f8ffc9741bf2a43885a
+        # Distinct 3ee22821 guard diagnostic; no production/grant correction.
+        test "$(sha256sum /adapter | awk '{print $1}')" = 0c52056b7bae44c214dbb6808f63557afb8fd7c888df4a655023d15e70a81d27
     else
         # Actual Garage role-correct source1f05aced, reviewed borrowed composition.
         test "$(sha256sum /adapter | awk '{print $1}')" = 8abb7395214d5c0aa9421eca61657e6a7781e97ef00be42064c468953d90ce96
