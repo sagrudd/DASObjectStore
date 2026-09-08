@@ -1,0 +1,23 @@
+Joined fixture source checkpoint; execution remains HELD.
+
+The Linux-only ignored tests compose the actual ReaderContinuation loader,
+ExactObjectServer, ServerTls and ExactObjectClient with the actual one-use
+SQLite journal. The root fixture reuses genuine systemd-creds encryption and
+manager publication; it binds freshly generated guest-only TLS identities and
+Ed25519 authority before publication. An explicit guest installer must supply
+the independently verified installed AWS executable hash. No supplied boolean
+replaces platform verification.
+
+The planned four cases are successful exact bytes, full ServerTls binding
+mismatch before backend read, corrupted backend bytes and backend disconnect.
+The protocol responder counts actual GETs, rejects a second GET, and never
+prints request headers. The verifier checks Started/terminal status and denial
+after reopening its actual journal. Separate guest UIDs are functional
+isolation only, not real off-NUC provenance. The loopback responder is not
+Garage and supplies no retention/authentication proof.
+
+No joined guest execution is authorized by this source checkpoint. Required
+next evidence: native test-driver compile; reviewed signed offline AWS
+install-new-only transaction guard; baseline full-loader platform PASS;
+then independently reviewed joined guest script/runner and actual outcomes.
+The public-only preparation image must never contain booted state or keys.

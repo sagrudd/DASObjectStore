@@ -4,6 +4,9 @@ mod interruption_tests;
 #[cfg(target_os = "linux")]
 #[path = "loader_vm_tests.rs"]
 mod loader_vm_tests;
+#[cfg(all(target_os = "linux", feature = "development-self-signing"))]
+#[path = "tls_vm_tests.rs"]
+mod tls_vm_tests;
 use super::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use dasobjectstore_object_service::custody::*;

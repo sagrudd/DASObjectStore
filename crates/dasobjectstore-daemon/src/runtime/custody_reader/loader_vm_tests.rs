@@ -9,7 +9,7 @@ const HELPER: &str = "/opt/das-vm-aws";
 // Public /usr/bin/aws from authenticated fixture image0c14e316, not executed.
 const HELPER_SHA256: &str = "2a7695eaff8793186869a193da167a5e6d46826dac1a93d19d7484b27508a958";
 
-fn guest_guard(uid: u32) {
+pub(super) fn guest_guard(uid: u32) {
     assert_eq!(unsafe { libc::geteuid() }, uid);
     assert_eq!(
         fs::read_to_string("/proc/1/comm").unwrap().trim(),
@@ -52,6 +52,13 @@ fn prepare_actual_loader_vm() {
         mode.trim(),
         "positive" | "malformed" | "wrong-key" | "stale-current"
     ));
+    prepare(&mode, |_| {});
+}
+
+// Fixture-only composition hook before encryption and real manager publication.
+// The hook cannot replace the real credential loader or manager verification.
+pub(super) fn prepare(mode: &str, configure: impl FnOnce(&mut Fixture)) {
+    guest_guard(0);
     // The reused fixture creates/retains/seals through real public ledger APIs;
     // its in-memory object storage does not assert a Garage retention result.
     eprintln!("VM_LOADER_PREP_STAGE ledger");
@@ -60,19 +67,23 @@ fn prepare_actual_loader_vm() {
     let root = f.root.clone();
     f.selection.encrypted_source = root.join("reader.enc");
     f.selection.aws_executable = HELPER.into();
-    eprintln!("VM_LOADER_PREP_STAGE helper");
-    f.selection.aws_executable_sha256 = raw_sha256(&fs::read(HELPER).unwrap());
-    let helper = fs::symlink_metadata(HELPER).unwrap();
-    assert!(helper.is_file() && !helper.file_type().is_symlink());
-    assert_eq!(helper.uid(), 0);
-    assert_eq!(helper.mode() & 0o022, 0);
-    assert_eq!(f.selection.aws_executable_sha256, HELPER_SHA256);
-    eprintln!("VM_LOADER_PREP_STAGE helper_complete");
+    f.selection.aws_executable_sha256 = HELPER_SHA256.into();
     f.selection.binding.uid = 2000;
     f.selection.binding.service_identity = "das-vm-loader.service".into();
     f.selection.binding.credential_name = "reader".into();
     f.selection.binding.executable_sha256 = raw_sha256(&fs::read(EXECUTABLE).unwrap());
     f.selection.binding.bucket_name = "dos-formal-custody".into();
+    configure(&mut f);
+    eprintln!("VM_LOADER_PREP_STAGE helper");
+    let helper = fs::symlink_metadata(&f.selection.aws_executable).unwrap();
+    assert!(helper.is_file() && !helper.file_type().is_symlink());
+    assert_eq!(helper.uid(), 0);
+    assert_eq!(helper.mode() & 0o022, 0);
+    assert_eq!(
+        raw_sha256(&fs::read(&f.selection.aws_executable).unwrap()),
+        f.selection.aws_executable_sha256
+    );
+    eprintln!("VM_LOADER_PREP_STAGE helper_complete");
     let key_id = if mode.trim() == "wrong-key" {
         "different-key"
     } else {
@@ -127,6 +138,8 @@ fn prepare_actual_loader_vm() {
         "inventory": f.selection.inventory,
         "inventory_sha256": f.selection.selected_inventory_sha256,
         "helper_sha256": f.selection.aws_executable_sha256,
+        "helper": f.selection.aws_executable,
+        "backend_endpoint": f.selection.backend_endpoint,
     });
     fs::write(
         format!("{CONTROL}/loader.json"),
@@ -149,33 +162,7 @@ fn prepare_actual_loader_vm() {
 #[ignore = "actual service invocation in separately reviewed disposable systemd VM only"]
 fn actual_loader_vm_boundary() {
     guest_guard(2000);
-    let raw = fs::read(format!("{CONTROL}/loader.json")).unwrap();
-    let selected: serde_json::Value = serde_json::from_slice(&raw).unwrap();
-    let root = PathBuf::from(selected["root"].as_str().unwrap());
-    assert!(
-        root.starts_with("/var/lib")
-            && root
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with(".das-manager-review-")
-    );
-    let binding =
-        ReaderBindingV1::decode(&serde_jcs::to_vec(&selected["binding"]).unwrap()).unwrap();
-    let selection = ReaderSelection {
-        binding,
-        directory: root.join("records"),
-        manager_uid: 0,
-        ledger: root.join("ledger.sqlite3"),
-        inventory: serde_json::from_value(selected["inventory"].clone()).unwrap(),
-        selected_inventory_sha256: selected["inventory_sha256"].as_str().unwrap().into(),
-        encrypted_source: root.join("reader.enc"),
-        protection: CredentialProtection::Host,
-        backend_endpoint: "https://fixture.invalid".into(),
-        aws_executable: HELPER.into(),
-        aws_executable_sha256: selected["helper_sha256"].as_str().unwrap().into(),
-    };
+    let selection = selected_fixture();
     let runner = super::super::super::service::SystemServiceCommandRunner;
     eprintln!("VM_LOADER_STAGE load");
     let result = ReaderContinuation::load(
@@ -202,4 +189,34 @@ fn actual_loader_vm_boundary() {
     }
     drop(result); // drops the actual acquired credential without any GET
     fs::write("/run/das-vm-results/passed", b"passed").unwrap();
+}
+
+pub(super) fn selected_fixture() -> ReaderSelection {
+    let raw = fs::read(format!("{CONTROL}/loader.json")).unwrap();
+    let selected: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+    let root = PathBuf::from(selected["root"].as_str().unwrap());
+    assert!(
+        root.starts_with("/var/lib")
+            && root
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with(".das-manager-review-")
+    );
+    let binding =
+        ReaderBindingV1::decode(&serde_jcs::to_vec(&selected["binding"]).unwrap()).unwrap();
+    ReaderSelection {
+        binding,
+        directory: root.join("records"),
+        manager_uid: 0,
+        ledger: root.join("ledger.sqlite3"),
+        inventory: serde_json::from_value(selected["inventory"].clone()).unwrap(),
+        selected_inventory_sha256: selected["inventory_sha256"].as_str().unwrap().into(),
+        encrypted_source: root.join("reader.enc"),
+        protection: CredentialProtection::Host,
+        backend_endpoint: selected["backend_endpoint"].as_str().unwrap().into(),
+        aws_executable: selected["helper"].as_str().unwrap().into(),
+        aws_executable_sha256: selected["helper_sha256"].as_str().unwrap().into(),
+    }
 }
