@@ -1,0 +1,25 @@
+Explicit-region actual Garage diagnostic — DENIED, concrete role mismatch
+Scripts98fa4ce9; Rusta25a3003 nativeallfeatures compiled27.22s.
+Strippede9ed1b81920a82ae8e6b554b6d91da1b4b38fa7e53e99c4d96f56e38c0212319;
+unstripped28fc84b408716a1d4f5601d3a1e3de0ab567aad1cd3152412b11972350cb4efe.
+Same verified Garage8ced2ad3/pristine5e516cee and unchanged reviewed isolation.
+Container64307deb46a2acb5c269f28a56731af8bb719c3fa3b4c2cc0f5e062f503ee0f5.
+Started2026-09-08T16:48:42.194628616Z, finished16:49:02.076310934Z.
+Native preflight8systemd+3dispatch/classifier+1listener testsPASS.
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+aws-cli/2.33.0 Python/3.14.3 Linux/6.19.10-300.fc44.aarch64 source/aarch64.fedora.44
+VM_GARAGE_EXIT phase=admission_retention status=1
+VM_GARAGE_LOCATION crates/dasobjectstore-daemon/src/runtime/custody_garage_vm_tests.rs:321
+VM_GARAGE_COMMAND operation=garage category=not_found exit=1
+VM_GARAGE_COMMAND operation=head-object category=access_denied exit=254
+VM_GARAGE_BATCH phase=ObjectRetention index=0 completed=0
+
+The sole fixture correction selected --region garage, matching server config.
+HEAD now reaches access-denied instead of400. Actual fresh admission and exact
+W-only/R-only grant verification succeeded before this first HEAD. Source
+GarageCustodyS3Writer::object_state sends HEAD with writer environment; the
+generic retainer calls it before and after PUT. This establishes an actual
+role-composition mismatch; no writer-read grant or metadata bypass is allowed.
+ConsoleSHA256f10ac15d3911eabf56a9d8704a5ebcc989c64aaa1512d3a9a8d71338e7e3bd3a.
+Acceptance controllerexit1; QEMU exited0 after guest failure. Exact exited
+container removed; no raw stderr, booted image/disk or generated key exported.
