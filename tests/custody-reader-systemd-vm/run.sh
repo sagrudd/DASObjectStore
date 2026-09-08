@@ -14,7 +14,7 @@ firmware=/usr/share/AAVMF/AAVMF_CODE.fd
 variables=/usr/share/AAVMF/AAVMF_VARS.fd
 machine=virt-7.2
 data_path=()
-if test "${1:-adapter}" = loader-kvm-modern; then
+if test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm-modern; then
     prefix=/opt/das-qemu-tools
     tool_env=(env LD_LIBRARY_PATH="$prefix/usr/lib64")
     qemu="$prefix/usr/bin/qemu-system-aarch64"
@@ -24,9 +24,14 @@ if test "${1:-adapter}" = loader-kvm-modern; then
     variables="$prefix/usr/share/edk2/aarch64/vars-template-pflash.raw"
     machine=virt-10.2
     data_path=(-L "$prefix/usr/share/qemu")
-    test "$(sha256sum /adapter | awk '{print $1}')" = 29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+    if test "${1:-adapter}" = loader-kvm-modern; then
+        test "$(sha256sum /adapter | awk '{print $1}')" = 29ea1504285ee4f6708f5cd5b11bc4d61a47b544229201d43a7237f2fe0b9fe2
+    else
+        # Distinct7843e1a7 joined-driver artifact; never attributed to baseline29ea.
+        test "$(sha256sum /adapter | awk '{print $1}')" = e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
+    fi
 fi
-if test "${1:-adapter}" = loader-kvm || test "${1:-adapter}" = loader-kvm-modern; then
+if test "${1:-adapter}" = loader-kvm || test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm-modern; then
     test "$(id -g)" = 1000
     case " $(id -G) " in *' 994 '*) ;; *) exit 1;; esac
     test -c /dev/kvm
@@ -38,7 +43,7 @@ else
 fi
 mkdir /tmp/vm /tmp/seed
 cp /adapter /tmp/seed/adapter
-if test "${1:-adapter}" != loader-kvm-modern; then strip --strip-debug /tmp/seed/adapter; fi
+if test "${1:-adapter}" != loader-kvm-modern && test "${1:-adapter}" != joined-kvm-modern; then strip --strip-debug /tmp/seed/adapter; fi
 ldd /tmp/seed/adapter
 sha256sum /tmp/seed/adapter
 /tmp/seed/adapter runtime::custody_reader::systemd --skip actual_systemd_vm_adapter_boundary
@@ -49,6 +54,31 @@ case "${1:-adapter}" in
    cp /aws /tmp/seed/aws
    sha256sum /tmp/seed/aws
    cp /custody-reader-systemd-vm/loader-guest.sh /tmp/seed/guest.sh ;;
+ joined-kvm-modern)
+   # Public-only preparation. Never copy the prep key database/GnuPG directory.
+   aws_source=/opt/das-aws-fedora44
+   test "$(sha256sum "$aws_source/evidence/sha256.txt" | awk '{print $1}')" = a4e9bc0fb3de4422e3ac814d46459f71a5677dc3516df59363cc8f2554ea52bf
+   sha256sum --check "$aws_source/evidence/sha256.txt"
+   mkdir /tmp/seed/aws-rpms /tmp/seed/aws-rpms/rpms /tmp/seed/aws-rpms/evidence
+   aws_payloads=("$aws_source"/rpms/*.rpm)
+   test "${#aws_payloads[@]}" = 71
+   for payload in "${aws_payloads[@]}"; do
+       test -f "$payload" && test ! -L "$payload"
+       cp "$payload" /tmp/seed/aws-rpms/rpms/
+   done
+   cp "$aws_source/evidence/sha256.txt" /tmp/seed/aws-rpms/evidence/
+   cp "$aws_source/fedora44.asc" /tmp/seed/aws-rpms/
+   # Copied payloads are checked against the exact same manifest, with only the
+   # fixed staging prefix changed for this verification command.
+   sed 's|/opt/das-aws-fedora44/rpms/|/tmp/seed/aws-rpms/rpms/|' "$aws_source/evidence/sha256.txt" | sha256sum --check -
+   "${tool_env[@]}" "$prefix/usr/bin/createrepo_c" /tmp/seed/aws-rpms/rpms
+   test -f /tmp/seed/aws-rpms/rpms/repodata/repomd.xml
+   cp /custody-reader-systemd-vm/tls-guest.sh /tmp/seed/guest.sh
+   for file in aws-guest-install.sh aws-transaction-guard.py s3-responder.py; do
+       cp "/custody-reader-systemd-vm/$file" /tmp/seed/
+   done
+   /tmp/seed/adapter joined_retry_observer --test-threads=1
+   ;;
  *) exit 1 ;;
 esac
 cp /binding.jcs.json /tmp/seed/binding.json
