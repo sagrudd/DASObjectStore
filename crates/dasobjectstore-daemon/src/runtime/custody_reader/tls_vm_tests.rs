@@ -378,6 +378,12 @@ fn verify_joined_tls_vm() {
     }
     let before = journal_snapshot(&journal_path, &request.request_id);
     assert!(matches!(before.0.as_str(), "started" | "terminal"));
+    if mode() != "positive" {
+        assert_ne!(
+            before.2, "passed",
+            "failed exchange must not become passing evidence"
+        );
+    }
     drop(journal);
     let reopened = CustodyOffNucJournal::open_existing(&journal_path).unwrap();
     assert!(reopened
@@ -386,6 +392,9 @@ fn verify_joined_tls_vm() {
     assert!(make_client().read(&reopened, &raw, limits()).is_err());
     // A fresh signature/nonce must not turn the old ID into a new issuance.
     request.nonce = uuid::Uuid::new_v4().to_string();
+    request.issued_at_utc = now();
+    request.expires_at_utc =
+        (wall_clock() + chrono::Duration::seconds(120)).to_rfc3339_opts(SecondsFormat::Secs, true);
     let changed_signature =
         STANDARD.encode(signing.sign(&serde_jcs::to_vec(&request).unwrap()).as_ref());
     let changed = serde_jcs::to_vec(&CustodySignedRecordV1 {
