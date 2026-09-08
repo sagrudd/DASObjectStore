@@ -342,6 +342,7 @@ pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
     // (`u32` on some targets and `u64` on others).  Normalize before
     // multiplying so the public capacity contract is always u64 and the
     // native build remains portable across macOS and Linux.
+    #[allow(clippy::unnecessary_cast)] // Required when libc uses a narrower unsigned type.
     let fragment_size = stat.f_frsize as u64;
     Some(FilesystemCapacity {
         total_bytes: (stat.f_blocks as u64).saturating_mul(fragment_size),
