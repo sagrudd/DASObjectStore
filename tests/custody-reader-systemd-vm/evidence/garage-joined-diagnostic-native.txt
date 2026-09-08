@@ -1,0 +1,14 @@
+Closed preparation diagnostic source preflight
+Rust5d49f949, runnera6b1d7ae. Native Linux/aarch64 Rust1.97.1,
+allfeatures locked/offline compile25.21s.
+Stripped3ece032e476c5e79985394074fa94d420e432d5e26210158444eac82afc4d281.
+Unstrippedf968c8d81c786e992f53fcdd794935f751c32665a855e535727d14569e0a2bc6.
+Same GNU strip2.42 --strip-debug; no production/grant correction.
+Full reader group33PASS0FAIL6explicit VM-only ignored,12.09s, including
+real bounded child panic with secret-like payload proven absent from output.
+Source-only container5eb21a07a20928a800e9ea8fc1c3a28a985a6552ffc947a1f6b6a9c61470b99e,
+same81597 cache image/no network/mount/device/caps,4GiB/2CPU/128PIDs/120s.
+Exit0 and exact exited container removed; no image exported.
+LogSHA2563b2619ce4e759602a0cbef4091e2e264f8c1cc9ba7812904279290f6c03c2ed5.
+This does not identify the earlier guest preparation cause or qualify a
+passing actual Garage/TLS run. No private log or panic payload retained.
