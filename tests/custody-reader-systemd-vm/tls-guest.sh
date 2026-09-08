@@ -10,10 +10,13 @@ else
     test "$#" = 0
 fi
 phase=start
+failure_line=0
+trap 'failure_line=$LINENO' ERR
 finish() {
     local status=$?
     printf 'VM_JOINED_EXIT phase=%s status=%s\n' "$phase" "$status"
     if test "$status" != 0; then
+        printf 'VM_TLS_PREP_SHELL_LOCATION source=tls-guest.sh line=%s\n' "$failure_line"
         if [[ "$phase" = prepare_* ]] && test -f /run/das-systemd-vm-fixture/tls-prepare.log; then
             grep -E '^VM_TLS_PREP_LOCATION source=(tls_vm_tests.rs|garage_tls_vm_tests.rs|loader_vm_tests.rs|manager_tests.rs|unknown) line=[0-9]+$' \
                 /run/das-systemd-vm-fixture/tls-prepare.log | head -1 || true
@@ -84,7 +87,7 @@ for mode in "${modes[@]}"; do
     /opt/das-vm-adapter --exact "$driver::prepare_joined_tls_vm" --ignored \
         > /run/das-systemd-vm-fixture/tls-prepare.log 2>&1
     encrypted=$(python3 -c 'import json; print(json.load(open("/run/das-systemd-vm-fixture/loader.json"))["root"]+"/reader.enc")')
-    case "$encrypted" in /var/lib/.das-manager-review-*/reader.enc) ;; *) exit 1;; esac
+    case "$encrypted" in /var/lib/.das-manager-review-*/reader.enc) ;; *) failure_line=$LINENO; exit 1;; esac
     publication=$(sha256sum "$encrypted" "${encrypted%/reader.enc}/ledger.sqlite3" "${encrypted%/reader.enc}"/records/*.jcs)
     cat > /etc/systemd/system/das-vm-protocol.service <<UNIT
 [Service]

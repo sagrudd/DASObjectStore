@@ -1,5 +1,6 @@
 """Static fixture guard regressions only, never guest/backend execution."""
 from pathlib import Path
+import subprocess
 import unittest
 
 HERE = Path(__file__).parent
@@ -9,6 +10,15 @@ RUST = (HERE.parents[1] / "crates/dasobjectstore-daemon/src/runtime/custody_read
 
 
 class GarageJoinedGuards(unittest.TestCase):
+    def test_shell_error_diagnostic_is_line_only(self):
+        self.assertIn("trap 'failure_line=$LINENO' ERR", TLS)
+        self.assertIn('*) failure_line=$LINENO; exit 1;; esac', TLS)
+        self.assertNotIn("BASH_COMMAND", TLS)
+        result = subprocess.run(["bash", "-c", "set -e\nfailure_line=0\ntrap 'failure_line=$LINENO' ERR\ntrap 'printf \"line=%s\\n\" \"$failure_line\"' EXIT\nsecret_like=synthetic_private_payload\nfalse\n"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "line=6\n")
+        self.assertNotIn("synthetic_private_payload", result.stdout + result.stderr)
+
     def test_bootstrap_stops_before_new_key_and_protected_publication(self):
         self.assertLess(JOIN.index("garage-guest.sh --retain-for-tls"), JOIN.index("phase=continuation_provision"))
         self.assertLess(JOIN.index("provision_garage_continuation_vm"), JOIN.index("phase=protected_tls"))
