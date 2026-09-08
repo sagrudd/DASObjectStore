@@ -311,8 +311,18 @@ fn serve_joined_tls_vm() {
         &runner,
         Path::new("/run/das-vm-scratch"),
         limits(),
-    )
-    .unwrap();
+    );
+    if let Err(error) = &reader {
+        let category = match error {
+            ReaderError::Format => "Format",
+            ReaderError::Binding => "Binding",
+            ReaderError::Boundary => "Boundary",
+            ReaderError::Conflict => "Conflict",
+            ReaderError::Read => "Read",
+        };
+        eprintln!("VM_CONTINUATION_ERROR {category}");
+    }
+    let reader = reader.unwrap();
     let authority = fs::read(format!("{PUBLIC}/authority.jcs")).unwrap();
     let mut server =
         ExactObjectServer::new(reader, "reader.test".into(), &authority, vec![selected()]).unwrap();

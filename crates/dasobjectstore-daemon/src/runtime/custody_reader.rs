@@ -187,9 +187,17 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
         {
             return Err(ReaderError::Binding);
         }
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE directory");
         let directory = files::Directory::open(selection.directory.clone(), selection.manager_uid)?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE records");
         let (current_raw, seal) = load_records(&directory, &selection, &now)?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE aws");
         verify_aws(&selection, deadline)?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE seal");
         verify_reader_seal_existing(
             &selection.ledger,
             &seal,
@@ -198,6 +206,8 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             deadline,
         )
         .map_err(|_| ReaderError::Read)?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE credential_directory");
         let credential_path = PathBuf::from(
             std::env::var_os(super::custody_garage::SYSTEMD_CREDENTIALS_DIRECTORY_ENV)
                 .ok_or(ReaderError::Boundary)?,
@@ -210,6 +220,8 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             return Err(ReaderError::Boundary);
         }
         let credentials = files::Directory::open(credential_path.clone(), owner)?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE platform_before");
         systemd::verify(
             &selection.binding,
             &selection.encrypted_source,
@@ -217,17 +229,23 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             &credential_path,
             deadline,
         )?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE secret");
         let mut secret = credentials.read_systemd_credential(
             &selection.binding.credential_name,
             selection.binding.uid,
             deadline,
         )?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE decode");
         let decoded = SystemdServiceCredentialHandoffResolver::decode_continuation(
             &selection.binding,
             &secret,
         );
         secret.fill(0);
         let credential = decoded?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE platform_after");
         systemd::verify(
             &selection.binding,
             &selection.encrypted_source,
@@ -235,6 +253,8 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             &credential_path,
             deadline,
         )?;
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE backend");
         let (identity, environment) = credential.into_parts();
         let reader = GarageCustodyS3Reader::new(
             runner,
@@ -254,6 +274,8 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
             reader,
             last_time: now,
         };
+        #[cfg(test)]
+        eprintln!("VM_CONTINUATION_STAGE recheck");
         value.recheck(&clock_now())?;
         deadline.remaining().map_err(|_| ReaderError::Read)?;
         Ok(value)

@@ -21,6 +21,8 @@ finish() {
             if test -f "/run/das-systemd-vm-fixture/$diagnostic.log"; then
                 grep -E '^VM_TLS_PREP_LOCATION source=(tls_vm_tests[.]rs|garage_tls_vm_tests[.]rs|loader_vm_tests[.]rs|manager_tests[.]rs|unknown) line=[0-9]+$' \
                     "/run/das-systemd-vm-fixture/$diagnostic.log" | head -1 || true
+                grep -E '^VM_(CONTINUATION_STAGE (directory|records|aws|seal|credential_directory|platform_before|secret|decode|platform_after|backend|recheck)|CONTINUATION_ERROR (Format|Binding|Boundary|Conflict|Read)|PROBE_STAGE (binding|process|credential_mount|manager_times|unit_properties|activation_time|credential_properties|executable|revalidation|accepted))$' \
+                    "/run/das-systemd-vm-fixture/$diagnostic.log" | head -40 || true
             fi
         done
         poweroff -f

@@ -1,6 +1,7 @@
 """Static fixture guard regressions only, never guest/backend execution."""
 from pathlib import Path
 import subprocess
+import re
 import unittest
 
 HERE = Path(__file__).parent
@@ -10,6 +11,13 @@ RUST = (HERE.parents[1] / "crates/dasobjectstore-daemon/src/runtime/custody_read
 
 
 class GarageJoinedGuards(unittest.TestCase):
+    def test_private_stage_extractor_rejects_payload_and_unknown_labels(self):
+        pattern = next(line.strip().split("'", 2)[1] for line in TLS.splitlines() if "grep -E '^VM_(CONTINUATION_STAGE" in line)
+        inputs = "\n".join(("VM_CONTINUATION_STAGE seal", "VM_CONTINUATION_ERROR Read", "VM_PROBE_STAGE executable", "VM_CONTINUATION_STAGE synthetic_private_payload", "VM_CONTINUATION_ERROR Read synthetic_private_payload", "VM_PROBE_STAGE executable synthetic_private_payload")) + "\n"
+        result = subprocess.run(["grep", "-E", pattern], input=inputs, text=True, capture_output=True, check=True)
+        self.assertEqual(result.stdout.splitlines(), ["VM_CONTINUATION_STAGE seal", "VM_CONTINUATION_ERROR Read", "VM_PROBE_STAGE executable"])
+        self.assertNotIn("synthetic_private_payload", result.stdout)
+
     def test_all_explicit_exits_and_runtime_stages_are_located(self):
         for source in (TLS, JOIN):
             for line in source.splitlines():
