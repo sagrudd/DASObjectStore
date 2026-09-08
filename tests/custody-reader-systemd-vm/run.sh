@@ -30,8 +30,8 @@ if test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm
         # Distinct7843e1a7 joined-driver artifact; never attributed to baseline29ea.
         test "$(sha256sum /adapter | awk '{print $1}')" = e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
     else
-        # Actual Garage fixture source b814a337, not either earlier adapter.
-        test "$(sha256sum /adapter | awk '{print $1}')" = 9a4b9fb11bd59aa9a24bc71e6ea47a1574c6c359d551f7245f571f4ffb2a27a9
+        # Actual Garage diagnostic source3bf4d591, fixed redacted classifications.
+        test "$(sha256sum /adapter | awk '{print $1}')" = aa4af9d28858a7b7095e3de9359af48b3953d557f2e19f279c5fec242ce36263
     fi
 fi
 if test "${1:-adapter}" = loader-kvm || test "${1:-adapter}" = loader-kvm-modern || test "${1:-adapter}" = joined-kvm-modern || test "${1:-adapter}" = garage-kvm-modern; then

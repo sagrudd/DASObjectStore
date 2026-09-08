@@ -23,3 +23,10 @@ Raw console SHA25623bcfb94ebb15eb228fee5113e1550cbd63c377c1584d829d68e27c4dc3d24
 only fixed vetted markers retained, no raw private command output published.
 Exact exited guest container removed. No booted image/disk/key export; public
 input image, source cache and public executable staging remain reusable.
+
+Root approved a fresh diagnostic using only fixed phase/index/operation and
+status categories, never raw stderr or secret argv. Native source3bf4d591
+compiled allfeatures lockedoffline25.87s. Stripped diagnostic SHA256
+aa4af9d28858a7b7095e3de9359af48b3953d557f2e19f279c5fec242ce36263;
+unstripped a841b77723ce9cf573c524014a2837777f7c69d1add23467b7991a6d31169d54.
+Same strip2.42 tool and public Garage/image; no production behavior changed.
