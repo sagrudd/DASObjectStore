@@ -74,7 +74,11 @@ UNIT
     phase="nonzero_pid_$mode"
     test "$pid" -gt 0
     phase="invocation_shape_$mode"
-    [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
+    # A completed fast rejection may clear InvocationID. Identity continuity
+    # is asserted for every positive/restart, including the final positive.
+    if test "$mode" = positive || test "$mode" = restart; then
+        [[ "$invocation" =~ ^[0-9a-f]{32}$ ]]
+    fi
     if test -z "$first_pid"; then
         first_pid=$pid
         first_invocation=$invocation
