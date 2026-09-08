@@ -194,7 +194,7 @@ the event-chain head for the raw file digest. Historical unbound read behavior
 is unchanged. Response configuration/head/receipt data comes from the verified
 snapshot, with fresh protected current-selection checks before return.
 
-This is not yet a TLS listener. The public library operation assumes its caller
+This phase-one operation is not itself a TLS listener. The public library operation assumes its caller
 has bound the actual transport peer before invocation; the subsequent concrete
 TLS adapter must enforce that boundary. Policy tests exercise synthetic selected
 data, not a fabricated successful continuation load. Actual raw-ledger tests
@@ -234,3 +234,36 @@ real SQLite and synthetic Ed25519 records, including resigned substitutions,
 corrupt columns/digests, legacy-start reuse, missing/busy journal and deadline
 expiry after the callback. This establishes the real client attempt boundary;
 it does not itself make a network connection or produce an attestation.
+
+Concrete bounded TLS composition
+--------------------------------
+
+The opt-in ``ServerTls``/``ExactObjectClient`` source adapter uses actual rustls
+TLS 1.3, mandatory client CA authentication, server CA and hostname validation,
+and exact end-entity DER pins as clarified in the accepted wire annex. Early data,
+resumption and tickets are disabled. Backend S3 measurement fields keep their
+original meaning; these frontend certificate checks do not measure backend
+authority or turn supplied installation facts into companion admission.
+
+``serve_connection`` requires the real loaded ``ExactObjectServer`` and verifies
+the full selected binding before TLS. It processes one request, never dispatches
+a pipelined successor, and closes the connection. Header validation bounds body
+allocation before collection. It does not claim that future request bytes were
+absent. The client requires a complete authenticated response and clean TLS EOF,
+checks all metadata and exact selected object bytes, and never reconnects or retries.
+
+The client consumes ``perform_pre_read_exact`` before even connecting, then checks
+the actual wall clock again after the handshake immediately before transmission.
+One inherited monotonic deadline governs socket I/O, SQLite verification, backend
+read and settlement; caps can shorten but never renew its instant. Valid budgets
+are nonzero and at most 300 seconds, including fractional durations. The generic
+journal callback is not preemptible: concrete callers must honor that deadline.
+This is not a claim of hard kernel filesystem preemption.
+
+The synthetic loopback tests exercise actual TLS, existing Ed25519 envelopes and
+real off-NUC SQLite journal consumption. Their server returns explicitly synthetic
+selected bytes; it does not pretend to be a successfully loaded platform reader.
+Real-loader qualification remains the separate VM fixture. No listener is installed,
+no CLI/lifecycle is added, and no live credentials or activation are supplied.
+Kanon #339 ``251724b`` coordinates the daemon's direct existing rustls dependency
+(workspace requirement 0.23.42, already locked 0.23.43), without a version upgrade.

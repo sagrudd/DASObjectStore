@@ -819,6 +819,7 @@ dependencies = [
  "reqwest",
  "ring",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_jcs",
  "serde_json",

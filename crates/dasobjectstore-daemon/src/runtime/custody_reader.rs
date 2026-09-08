@@ -285,6 +285,16 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
         raw_ledger_digest: Option<&str>,
     ) -> Result<VerifiedCustodyRead, ReaderError> {
         let deadline = limits.start().map_err(|_| ReaderError::Read)?;
+        self.read_inner_at(receipt, limits, raw_ledger_digest, deadline)
+    }
+    fn read_inner_at(
+        &mut self,
+        receipt: &CustodyIntegrityReceiptV1,
+        limits: CustodyReadLimits,
+        raw_ledger_digest: Option<&str>,
+        deadline: dasobjectstore_object_service::custody::CustodyReadDeadline,
+    ) -> Result<VerifiedCustodyRead, ReaderError> {
+        deadline.remaining().map_err(|_| ReaderError::Read)?;
         let now = clock_now();
         self.recheck(&now)?;
         self.last_time = now;
@@ -324,13 +334,13 @@ impl<'a, R: ServiceCommandRunner> ReaderContinuation<'a, R> {
                 .and_then(|n| n.to_str())
                 .ok_or(ReaderError::Boundary)?;
             let mut ledger = directory.open_ledger(name)?;
-            dasobjectstore_object_service::custody::verify_custody_readback_existing_bound(
+            dasobjectstore_object_service::custody::verify_custody_readback_existing_bound_at(
                 &self.selection.ledger,
                 receipt,
                 &mut self.reader,
-                limits,
-                &mut ledger,
-                digest,
+                limits.maximum_bytes,
+                (&mut ledger, digest),
+                deadline,
             )
         } else {
             verify_custody_readback_existing(

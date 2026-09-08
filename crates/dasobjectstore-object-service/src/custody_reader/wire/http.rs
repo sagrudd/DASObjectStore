@@ -69,6 +69,57 @@ fn length(headers: &Headers<'_>, maximum: usize) -> Result<usize, ReaderError> {
     Ok(n)
 }
 
+fn request_length(header: &Headers<'_>, authority: &str) -> Result<usize, ReaderError> {
+    if header.line != "POST /custody/v1/read-object HTTP/1.1"
+        || header.fields.get("host") != Some(&authority)
+        || header.fields.get("content-type") != Some(&"application/json")
+    {
+        return Err(ReaderError::Format);
+    }
+    length(header, SIGNED_REQUEST_LIMIT)
+}
+
+/// Validate the complete header before a network collector allocates the body.
+/// This does not authenticate the peer, collect bytes, or grant read authority.
+///
+/// # Errors
+/// Rejects trailing bytes and every unsupported or unbounded request framing.
+pub fn request_body_length(raw_header: &[u8], authority: &str) -> Result<usize, ReaderError> {
+    let header = headers(raw_header)?;
+    if header.end != raw_header.len() {
+        return Err(ReaderError::Format);
+    }
+    request_length(&header, authority)
+}
+
+/// Validate a response header before allocating its bounded body.
+/// The complete response still requires exact metadata/digest and EOF verification.
+///
+/// # Errors
+/// Rejects unsupported statuses, framing, overflow and trailing bytes.
+pub fn response_body_length(raw_header: &[u8], maximum: usize) -> Result<usize, ReaderError> {
+    let header = headers(raw_header)?;
+    if header.end != raw_header.len() {
+        return Err(ReaderError::Format);
+    }
+    match (header.line, header.fields.get("content-type").copied()) {
+        ("HTTP/1.1 200 OK", Some("application/octet-stream")) => length(
+            &header,
+            maximum
+                .checked_add(FRAME_LIMIT + 4)
+                .ok_or(ReaderError::Format)?,
+        ),
+        ("HTTP/1.1 403 Forbidden", Some("application/json")) => {
+            let n = length(&header, DENIED.len())?;
+            if n != DENIED.len() {
+                return Err(ReaderError::Format);
+            }
+            Ok(n)
+        }
+        _ => Err(ReaderError::Format),
+    }
+}
+
 /// First HTTP request's signed body and exact consumed length. No transport admission.
 pub struct SignedHttpRequest<'a> {
     /// Original bytes used by the existing signature verifier, not reserialized data.
@@ -92,13 +143,7 @@ pub fn decode_request<'a>(
     now: &str,
 ) -> Result<SignedHttpRequest<'a>, ReaderError> {
     let header = headers(raw)?;
-    if header.line != "POST /custody/v1/read-object HTTP/1.1"
-        || header.fields.get("host") != Some(&authority)
-        || header.fields.get("content-type") != Some(&"application/json")
-    {
-        return Err(ReaderError::Format);
-    }
-    let size = length(&header, SIGNED_REQUEST_LIMIT)?;
+    let size = request_length(&header, authority)?;
     let consumed = header.end.checked_add(size).ok_or(ReaderError::Format)?;
     let body = raw.get(header.end..consumed).ok_or(ReaderError::Format)?;
     let record = decode_pre_read(body, pinned, now).map_err(|_| ReaderError::Binding)?;
@@ -190,4 +235,59 @@ pub fn decode_denied(raw: &[u8], eof: bool) -> Result<(), ReaderError> {
         return Err(ReaderError::Format);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+    #[test]
+    fn preallocation_headers_use_exact_closed_bounds() {
+        let request = |size: &str| {
+            format!("POST /custody/v1/read-object HTTP/1.1\r\nHost: reader.test\r\nContent-Type: application/json\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n").into_bytes()
+        };
+        assert_eq!(
+            request_body_length(&request("1048576"), "reader.test").unwrap(),
+            SIGNED_REQUEST_LIMIT
+        );
+        for size in ["1048577", "184467440737095516160", "+1", "-1", "1 1"] {
+            assert!(request_body_length(&request(size), "reader.test").is_err());
+        }
+        // Leading zeros retain the existing decimal-only HTTP rule (not JSON JCS).
+        assert_eq!(
+            request_body_length(&request("0001"), "reader.test").unwrap(),
+            1
+        );
+        let mut trailing = request("1");
+        trailing.push(0);
+        assert!(request_body_length(&trailing, "reader.test").is_err());
+        let mut exact = request("0");
+        exact.truncate(exact.len() - 2);
+        let padding = HEADER_LIMIT - exact.len() - "X-Pad: \r\n\r\n".len();
+        exact.extend_from_slice(format!("X-Pad: {}\r\n\r\n", "x".repeat(padding)).as_bytes());
+        assert_eq!(exact.len(), HEADER_LIMIT);
+        assert!(request_body_length(&exact, "reader.test").is_ok());
+        exact.insert(exact.len() - 4, b'x');
+        assert!(request_body_length(&exact, "reader.test").is_err());
+        let response = |size: usize| {
+            format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n").into_bytes()
+        };
+        assert_eq!(
+            response_body_length(&response(10 + FRAME_LIMIT + 4), 10).unwrap(),
+            10 + FRAME_LIMIT + 4
+        );
+        assert!(response_body_length(&response(11 + FRAME_LIMIT + 4), 10).is_err());
+        assert!(response_body_length(&response(0), usize::MAX).is_err());
+        let denied = encode_denied();
+        let end = headers(&denied).unwrap().end;
+        assert_eq!(
+            response_body_length(&denied[..end], 10).unwrap(),
+            DENIED.len()
+        );
+        assert!(response_body_length(&denied, 10).is_err());
+        let wrong = String::from_utf8(denied[..end].to_vec()).unwrap().replace(
+            &format!("Content-Length: {}", DENIED.len()),
+            "Content-Length: 0",
+        );
+        assert!(response_body_length(wrong.as_bytes(), 10).is_err());
+    }
 }

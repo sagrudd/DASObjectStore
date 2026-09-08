@@ -2,6 +2,11 @@
 
 ## 0.186.0 - Unreleased
 
+- Add opt-in real TLS 1.3 exact-object server/client composition with mandatory
+  mutual certificate authentication, exact DER pins, one inherited deadline,
+  bounded HTTP collection and journal-before-connect/no-retry semantics.
+  Synthetic loopback qualification does not install a listener or grant admission.
+
 - Add an exact-envelope journal read entry point sharing the existing durable
   started transition, with same-transaction raw/column binding and whole-call
   deadline enforcement. Preserve legacy callers and journal schema.

@@ -16,11 +16,13 @@ use crate::provider::ObjectServiceError;
 mod bounded_read;
 #[cfg(unix)]
 mod reader_seal;
-#[cfg(unix)]
-pub use bounded_read::verify_custody_readback_existing_bound;
 pub use bounded_read::{
     verify_custody_readback_existing, BoundedCustodyObjectReader, CustodyReadDeadline,
     CustodyReadError, CustodyReadLimits, VerifiedCustodyRead,
+};
+#[cfg(unix)]
+pub use bounded_read::{
+    verify_custody_readback_existing_bound, verify_custody_readback_existing_bound_at,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use dasobjectstore_core::ids::StoreId;

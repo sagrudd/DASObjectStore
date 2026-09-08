@@ -295,3 +295,34 @@ fn author_exclusive_sql_lock_denies_before_get_without_busy_wait() {
     writer.execute_batch("ROLLBACK").unwrap();
     assert_eq!(fs::read(path).unwrap(), before);
 }
+
+#[test]
+fn author_inherited_budget_is_never_renewed_and_expiry_denies_before_get() {
+    let original = limits().start().unwrap();
+    assert_eq!(
+        original.capped(Duration::from_secs(300)).unwrap().0,
+        original.0
+    );
+    assert!(original.capped(Duration::from_millis(1)).unwrap().0 < original.0);
+    let (_directory, path, receipt, mut reader) = fixture();
+    let mut file = fs::File::open(&path).unwrap();
+    let digest = crate::custody_reader::raw_sha256(&fs::read(&path).unwrap());
+    let budget = CustodyReadLimits {
+        maximum_bytes: 1024,
+        timeout: Duration::from_millis(1),
+    }
+    .start()
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(3)); // ingress consumed the inherited budget
+    assert!(verify_custody_readback_existing_bound_at(
+        &path,
+        &receipt,
+        &mut reader,
+        1024,
+        (&mut file, &digest),
+        budget
+    )
+    .is_err());
+    assert_eq!(reader.calls, 0);
+    assert!(budget.capped(Duration::from_secs(300)).is_err());
+}

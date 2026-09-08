@@ -3,7 +3,7 @@ use super::*;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ring::signature::KeyPair;
 
-fn fixture() -> (ReaderBindingV1, ReaderSealV1, Vec<u8>, SelectedRead) {
+pub(super) fn fixture() -> (ReaderBindingV1, ReaderSealV1, Vec<u8>, SelectedRead) {
     let mut binding = ReaderBindingV1::decode(include_bytes!(
         "../../../../../../docs/adr/fixtures/0011-reader-wire/binding.jcs.json"
     ))

@@ -7,6 +7,7 @@ use dasobjectstore_object_service::custody_attestation::{
 };
 use dasobjectstore_object_service::custody_reader::wire::{http, ReaderResultV1};
 use std::collections::BTreeMap;
+pub mod tls;
 
 /// A receipt's exact retained bytes and independently selected request measurements.
 /// Only attempt identifiers/sequence/times vary; all other existing fields compare exactly.
@@ -79,6 +80,15 @@ impl<'a, R: ServiceCommandRunner> ExactObjectServer<'a, R> {
         limits: CustodyReadLimits,
     ) -> Result<Vec<u8>, ReaderError> {
         let deadline = limits.start().map_err(|_| ReaderError::Read)?;
+        self.read_http_at(raw, limits, deadline)
+    }
+    fn read_http_at(
+        &mut self,
+        raw: &[u8],
+        limits: CustodyReadLimits,
+        deadline: dasobjectstore_object_service::custody::CustodyReadDeadline,
+    ) -> Result<Vec<u8>, ReaderError> {
+        deadline.remaining().map_err(|_| ReaderError::Read)?;
         let now = clock_now();
         self.reader.recheck(&now)?;
         let request = http::decode_request(raw, &self.policy.host, &self.policy.authority, &now)?;
@@ -97,7 +107,7 @@ impl<'a, R: ServiceCommandRunner> ExactObjectServer<'a, R> {
         if validity_remaining.is_zero() {
             return Err(ReaderError::Binding);
         }
-        let value = self.reader.read_inner(
+        let value = self.reader.read_inner_at(
             &expected.receipt,
             CustodyReadLimits {
                 maximum_bytes: limits.maximum_bytes,
@@ -107,6 +117,9 @@ impl<'a, R: ServiceCommandRunner> ExactObjectServer<'a, R> {
                     .min(validity_remaining),
             },
             Some(&body.lock_ledger_sha256),
+            deadline
+                .capped(validity_remaining)
+                .map_err(|_| ReaderError::Read)?,
         )?;
         if value.ledger_head_sha256 != body.ledger_head_sha256
             || raw_sha256(&serde_jcs::to_vec(&value.receipt).map_err(|_| ReaderError::Format)?)

@@ -39,6 +39,20 @@ impl CustodyReadLimits {
     }
 }
 impl CustodyReadDeadline {
+    /// Shorten an existing budget without ever extending its original instant.
+    pub fn capped(self, maximum: Duration) -> Result<Self, CustodyReadError> {
+        self.remaining()?;
+        if maximum.is_zero() {
+            return Err(CustodyReadError::Deadline);
+        }
+        Ok(Self(
+            self.0.min(
+                Instant::now()
+                    .checked_add(maximum)
+                    .ok_or(CustodyReadError::Input)?,
+            ),
+        ))
+    }
     /// Remaining duration; expiration cannot be renewed by an adapter.
     pub fn remaining(self) -> Result<Duration, CustodyReadError> {
         self.0
@@ -168,7 +182,7 @@ pub fn verify_custody_readback_existing(
     reader: &mut impl BoundedCustodyObjectReader,
     limits: CustodyReadLimits,
 ) -> Result<VerifiedCustodyRead, CustodyReadError> {
-    verify_inner(path, expected, reader, limits, None)
+    verify_inner(path, expected, reader, limits, None, None)
 }
 
 /// Verify the same snapshot plus its exact independently selected raw database digest.
@@ -185,7 +199,40 @@ pub fn verify_custody_readback_existing_bound(
     ledger: &mut std::fs::File,
     raw_sha256: &str,
 ) -> Result<VerifiedCustodyRead, CustodyReadError> {
-    verify_inner(path, expected, reader, limits, Some((ledger, raw_sha256)))
+    verify_inner(
+        path,
+        expected,
+        reader,
+        limits,
+        Some((ledger, raw_sha256)),
+        None,
+    )
+}
+
+/// Exact raw-ledger verification under an already running, non-renewed deadline.
+/// # Errors
+/// Same denials as the bound reader, including expiration before any acquisition.
+#[cfg(unix)]
+pub fn verify_custody_readback_existing_bound_at(
+    path: &Path,
+    expected: &CustodyIntegrityReceiptV1,
+    reader: &mut impl BoundedCustodyObjectReader,
+    maximum_bytes: u64,
+    raw_binding: (&mut std::fs::File, &str),
+    deadline: CustodyReadDeadline,
+) -> Result<VerifiedCustodyRead, CustodyReadError> {
+    let limits = CustodyReadLimits {
+        maximum_bytes,
+        timeout: deadline.remaining()?,
+    };
+    verify_inner(
+        path,
+        expected,
+        reader,
+        limits,
+        Some(raw_binding),
+        Some(deadline),
+    )
 }
 
 #[cfg(unix)]
@@ -195,6 +242,7 @@ fn verify_inner(
     reader: &mut impl BoundedCustodyObjectReader,
     limits: CustodyReadLimits,
     mut raw_binding: Option<(&mut std::fs::File, &str)>,
+    deadline: Option<CustodyReadDeadline>,
 ) -> Result<VerifiedCustodyRead, CustodyReadError> {
     if limits.maximum_bytes == 0
         || limits.maximum_bytes > isize::MAX as u64
@@ -205,7 +253,11 @@ fn verify_inner(
     {
         return Err(CustodyReadError::Input);
     }
-    let deadline = limits.start()?;
+    let deadline = match deadline {
+        Some(value) => value,
+        None => limits.start()?,
+    };
+    deadline.remaining()?;
     let guard = Guard::capture(path)?;
     let mut connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|_| CustodyReadError::Ledger)?;
