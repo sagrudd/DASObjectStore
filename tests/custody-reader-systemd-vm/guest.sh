@@ -49,8 +49,8 @@ CapabilityBoundingSet=
 PrivateMounts=yes
 LoadCredentialEncrypted=reader:/var/lib/das-vm/reader.enc
 ExecStart=/opt/das-vm-adapter --exact runtime::custody_reader::systemd::tests::actual_systemd_vm_adapter_boundary --ignored --nocapture
-StandardOutput=null
-StandardError=null
+StandardOutput=journal
+StandardError=journal
 UNIT
 make_binding() {
     python3 - "$1" <<'PY'
@@ -67,14 +67,17 @@ if mode=='wrong-executable': x['executable_sha256']='1'*64
 PY
 }
 wait_result() {
-    for unused in $(seq 1 100); do
+    for unused in $(seq 1 450); do
         if test -f /run/das-vm-results/passed && \
            test "$(systemctl show -p ActiveState --value das-vm-reader.service)" = inactive; then
             test "$(systemctl show -p ExecMainStatus --value das-vm-reader.service)" = 0
             test "$(systemctl show -p Result --value das-vm-reader.service)" = success
             return 0
         fi
-        if systemctl is-failed --quiet das-vm-reader.service; then return 1; fi
+        if systemctl is-failed --quiet das-vm-reader.service; then
+            journalctl -u das-vm-reader.service -o cat --no-pager | grep -E '^VM_PROBE_(STAGE|ERROR|METADATA) ' || true
+            return 1
+        fi
         sleep .2
     done
     return 1
@@ -93,7 +96,7 @@ for mode in positive wrong-name wrong-executable plaintext reload positive; do
     systemctl daemon-reload
     systemctl start das-vm-reader.service
     if test "$mode" = reload; then
-        for unused in $(seq 1 100); do
+        for unused in $(seq 1 450); do
             test ! -f /run/das-vm-results/ready || break
             sleep .2
         done

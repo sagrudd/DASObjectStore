@@ -1,0 +1,26 @@
+Corrected exact-ACL run: 2026-09-08, source-only platform test.
+Container a26eb4d4b6be08749b03930efec70d254c2fa7907e30ccfb2299d5d4b8b6ce59.
+Started 14:12:36.805491563Z; finished 14:16:10.18776859Z.
+Runtime network none, no mounts/devices, cap-drop ALL, NNP, UID1000,
+4 CPU / 6 GiB / 256 pids, 900-second outer bound, QEMU TCG only.
+Native systemd tests: 8 passed, 0 failed, 0.09 seconds before guest boot.
+Actual guest: systemd259.5-1.fc44; selected service UID2000.
+
+Adapter SHA256 71afc19e5b7e75c912899582590614a3a0baa6bd4d11947727ad603fff0fe384.
+Seed SHA256 079931b096a9fa317c7d4173a802a23c072a63de276884232ef8d4c953dac637.
+systemd.rs SHA256 82333e5bb0807ade3252e8af107770dc7e079abf6c06ae511f6e5a12e7cb451d.
+Serial SHA256 754acd3cb66adef2a07ca842541589ff954f9c07340caff101c55199200a45aa.
+
+Actual driver reached file_permissions, process, credential_mount,
+manager_times, unit_properties, activation_time, credential_properties,
+and executable; then returned Boundary with explicit DeadlineExpired.
+The caller's 15-second fixture deadline expired during the executable stage.
+This is not a positive adapter result. The exact directory/file ACL correction
+cleared the previously observed permission failure without weakening generic
+private-file guards. No credential contents were read by this test driver.
+The artifact tests the adapter and file-permission helper only, not the newer
+full zeroizing loader/caller or any Garage/install/S4 path.
+
+Guest powered off and owned container was removed. No booted disk, generated
+credential or guest state was exported or committed. Exit zero from QEMU is
+not treated as test success; there was no VM_ADAPTER_PASS marker.

@@ -1,10 +1,12 @@
-Real-systemd boundary fixture: public preparation only
-====================================================
+Isolated real-systemd boundary fixture
+=====================================
 
 This directory does not install DAS or confer activation authority.  The
 preparation script downloads authenticated public inputs and extracts tool
 payloads without running package maintainer scripts.  It never boots a VM.
-The real-systemd positive remains unqualified until a separately reviewed run.
+The separate boot scripts exercise the actual Rust adapter inside a disposable
+guest. Preparation alone is not a real-systemd positive; actual run outcomes
+and limitations are retained separately below ``evidence/``.
 
 Preparation is restricted to the reviewed ARM64 base image
 ``sha256:81597dc683e32508706300031ae0391e332f122c4d54fa92661aa674a8dda0f4``.
@@ -54,10 +56,10 @@ summarized here; its stream digest was
 ``884ecf13d2f7e498c60dfc357742718aefa190508507f3108ebd5e6b841cc0ba``.
 No real-systemd or DAS runtime qualification follows from this receipt.
 
-Proposed boot boundary (not executed)
-------------------------------------
+Reviewed isolated boot boundary
+------------------------------
 
-The clean preparation image may subsequently be reviewed for a fresh container
+The clean preparation image was separately reviewed for a fresh container
 with networking disabled, no mounts/devices, all capabilities dropped and
 no-new-privileges.  QEMU runs as an unprivileged container user, using TCG only.
 No KVM, host cgroup binding, shared directory, monitor socket, or published port
@@ -66,16 +68,17 @@ NoCloud seed ISO remain inside that container.  The seed contains public fixture
 code only.  No secure-boot claim is made; distribution example snakeoil key
 payloads are not fixture identities and must not be used for credential trust.
 
-The proposed QEMU argument vector, pending root review, is::
+The reviewed QEMU argument vector, implemented in ``run.sh``, is::
 
   /usr/bin/qemu-system-aarch64
+    -no-reboot -boot order=c,menu=off,strict=on
     -accel tcg,thread=multi -machine virt-7.2 -cpu max -smp 2 -m 2048
     -nodefaults -nic none -display none -monitor none -serial stdio
     -drive if=pflash,format=raw,readonly=on,file=/usr/share/AAVMF/AAVMF_CODE.fd
-    -drive if=pflash,format=raw,file=/run/vm/AAVMF_VARS.fd
-    -drive if=none,id=os,format=qcow2,file=/run/vm/guest.qcow2
-    -device virtio-blk-pci,drive=os
-    -drive if=none,id=seed,format=raw,readonly=on,file=/run/vm/seed.iso
+    -drive if=pflash,format=raw,file=/tmp/vm/AAVMF_VARS.fd
+    -drive if=none,id=os,format=qcow2,file=/tmp/vm/guest.qcow2
+    -device virtio-blk-pci,drive=os,bootindex=1
+    -drive if=none,id=seed,format=raw,readonly=on,file=/tmp/vm/seed.iso
     -device virtio-blk-pci,drive=seed
 
 The boot/test phase also has a 900-second total bound.  It must first measure
@@ -85,6 +88,37 @@ systemd host credential key is generated only inside the disposable guest after
 boot approval.  Retain coarse results and public hashes only.  Never export or
 commit a booted container or guest disk after credential generation; remove its
 overlay, variables, seed, keys and owned container after retaining evidence.
+
+The driver tests actual encrypted credential acquisition metadata, the closed
+systemd property checks, executable identity, wrong-name/wrong-executable and
+plaintext rejection, and restart-required behavior after a real daemon reload.
+It checks the dedicated file-permission helper without reading credential
+contents. It does not exercise the complete zeroizing loader, manager, backend,
+HTTP adapter, installation or S4 path. Each case requires both its marker and
+actual successful unit exit; a powered-off QEMU process is not a test pass.
+
+Actual v259 ACL metadata exposed the old mode-only guard's false denial; the
+closed ACL correction and raw public measurements are retained in
+``evidence/acl-measurement.txt``. The corrected adapter reached executable
+validation but exhausted its 15-second caller deadline under TCG, recorded in
+``evidence/acl-corrected-deadline.txt``. The subsequent fixture uses a reviewed
+60-second caller allowance within the existing 1–300-second API bounds and
+90-second result polling; production defaults and guards are unchanged. The
+900-second outer whole-run bound remains in force. The large debug-test
+executable is stripped of debug sections, not replaced with a mock adapter.
+
+The corrected real-systemd run passed all six cases on 2026-09-08, with actual
+systemd 259.5-1.fc44 and successful unit exits, in 437.77 seconds. Its exact
+artifact/source/seed hashes and scope are retained in
+``evidence/adapter-all-pass.txt``. The booted guest was removed without state
+export. This is the adapter boundary qualification described above, not a
+whole-current-tree loader or deployment qualification.
+
+Qualification sequencing lesson: check the actual selected init system's
+credential representation before full packaging. Synthetic property/permission
+fixtures cannot establish its real ACL construction. Measure and bound
+emulator-only test budgets separately from production limits; preserve the
+failed runs as evidence rather than rewriting them as successful qualification.
 
 Primary public input references
 -------------------------------

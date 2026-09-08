@@ -1,0 +1,45 @@
+Actual real-systemd adapter qualification: PASS, 2026-09-08.
+Container 4b87105facb176250b2d5828daae41afb7d7603ba19ef79718b38ef78695bdfc.
+Started 14:19:23.481973177Z; finished 14:26:41.253138319Z (437.77 seconds).
+Clean input image b3fa5d9f3fcfe6b64d73fb5ff37c0d12a972600145430d553bb54df525423865.
+No mounts/devices, network none, cap-drop ALL, no-new-privileges, UID1000;
+4 CPUs, 6 GiB, 256 pids, 900-second outer bound, QEMU TCG only.
+Actual guest systemd 259 (259.5-1.fc44), selected service UID/GID2000.
+
+Native module tests: 8 passed / 0 failed in 0.09 seconds before boot.
+Actual guest results (guest monotonic seconds):
+225.217984 VM_ADAPTER_PASS positive
+242.481786 VM_ADAPTER_PASS wrong-name
+290.151235 VM_ADAPTER_PASS wrong-executable
+307.241657 VM_ADAPTER_PASS plaintext
+367.533636 VM_ADAPTER_PASS reload
+416.502375 VM_ADAPTER_PASS positive
+416.506712 VM_ADAPTER_ALL_PASS
+416.941836 VM_EXIT phase=complete status=0
+Each marker required actual unit inactive, ExecMainStatus=0, Result=success.
+Reload case first verified the live reader, performed actual daemon-reload,
+then denied that same process. A subsequent fresh service start passed.
+
+Stripped adapter size 91195600 bytes.
+Adapter SHA256 fb04418212a9ece8facad5edaf7a7c20e59a2bce4cd881c7e158703da17c2619.
+Seed SHA256 f60a42def0d3e678846b94e671dca6ba443415f043c7a8cb7fb7f3fb4d0fee6d.
+systemd.rs SHA256 2bcb7845a4df9310b9a7acf9ed63a45a2e9ac44c495f21e0a523c993425bfd4a.
+guest.sh SHA256 ca5c45bce515793b60e6e49fac054a8879b9b894b3a12b7e51ce64e79233c420.
+run.sh SHA256 ae67b9bee60734863e655ecd6217ae8b7cfae7da71ab7df6a7d157bfdf1bc53c.
+Serial SHA256 7191154283abc8b1746d883586909b15bfda69a83c486eb4f0b9e4809e0671ac.
+Binary compiled from source checkpoint1f239ef3 plus the exact systemd.rs above;
+it is not a whole-current-tree qualification of later reader/endpoint code.
+
+The fixture-only caller timeout is60 seconds, within existing1–300 bounds.
+The previous15-second TCG executable-stage expiry remains recorded separately;
+production defaults were not changed. The test executable is91 MB even after
+debug stripping. Native test process and actual VM executions are distinct.
+
+This qualifies actual systemd construction, credential directory/file ACL and
+read-only mount checks, typed metadata, executable pin and reload boundary.
+No plaintext contents were read by the adapter driver. It does not qualify
+the full zeroizing loader, manager publication, Garage GET, HTTP adapter,
+installation, activation, target host, companion or S4.
+The guest powered off and its owned container was removed. No generated key,
+credential, booted disk or guest state was exported or committed. Only the
+unbooted public image and source/public build artifacts remain reusable.

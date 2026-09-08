@@ -941,7 +941,9 @@ mod tests {
         let check = || {
             let deadline = CustodyReadLimits {
                 maximum_bytes: 4096,
-                timeout: Duration::from_secs(15),
+                // TCG hashes the large test executable: the measured 15-second
+                // run expired here. This fixture-only limit changes no default.
+                timeout: Duration::from_secs(60),
             }
             .start()
             .unwrap();

@@ -1,0 +1,26 @@
+Actual systemd259.5 credential permission measurement (metadata only).
+Diagnostic run165220d7: fixture inputs/process checks passed, then
+VM_PROBE_STAGE credential_mount
+VM_PROBE_ERROR Boundary
+No DeadlineExpired label; no manager or busctl stage reached.
+Serial SHA2563324bd86da8470e91c64757885a361319012e3737df00a8a2b54f3fa38ffda8f.
+
+Measurement run839c574006bca2326a8d59ea532cf070c670b89c4bb6b897aff20e2a3beea62c:
+systemd259.5-1.fc44, actual selected service UID2000.
+Directory fd: uid0 gid0 mode0550
+access_acl=0200000001000500ffffffff02000500d007000004000000ffffffff10000500ffffffff20000000ffffffff
+Credential file fd: uid0 gid0 mode0440
+access_acl=0200000001000400ffffffff02000400d007000004000000ffffffff10000400ffffffff20000000ffffffff
+No credential bytes were read. Both opened FDs were used only for metadata/xattr.
+The initial mode-only guard denied these actual systemd-generated ACL masks.
+Serial SHA256ace5942498d6c1d8d57d9cacfcb419834f3c46aca78ed9ad9ffbab7fa095aee1.
+Both powered-off guest containers removed without exporting/committing state.
+
+Official corresponding source:
+https://raw.githubusercontent.com/systemd/systemd/v259/src/core/exec-credential.c
+write_credential: fchmod0400 then selected UID ACL_READ, fchown fallback.
+credentials_dir_finalize_permissions: readonly then selected UID READ|EXECUTE.
+The corrective guard accepts only these exact five little-endian ACL entries,
+with no extra named principals, group/other access, writes or default ACL;
+the unsupported-ACL fallback requires selected-UID ownership and0400/0500.
+Readonly tmpfs/ramfs and retained descriptor identity remain mandatory.

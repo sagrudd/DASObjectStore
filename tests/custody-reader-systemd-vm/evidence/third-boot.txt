@@ -1,0 +1,10 @@
+Third isolated attempt: idle UEFI, no guest or adapter result.
+Container: bcebba7acf79cb4aca76c1102ff5bb11122381d18dec5babc0f8a76b22c23c26
+Seed ISO: 08de3e2220a77d979ad37737b7aa11e49082dcf22a9a06f44a60555a72977ff6
+Same pristine image and UEFI hashes as earlier genuine 259.5 boots.
+Observed firmware screen clear but no BdsDxe or Linux output; QEMU 0% CPU,
+212 MiB RAM, main thread polling and vCPU threads waiting, no resource pressure.
+Stopped early after bounded observation rather than spending the full timeout.
+No root cause or successful boot inferred. New fixture argv selects only the OS
+disk with bootindex=1 and strict menu-disabled disk boot; seed stays unbootable.
+Owned container removed. No booted layer or guest state exported/committed.
