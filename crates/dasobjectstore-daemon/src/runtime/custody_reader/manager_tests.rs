@@ -135,17 +135,35 @@ fn fixture_at(parent: &Path) -> Fixture {
         &mut Reader(&backend),
     )
     .unwrap();
+    fixture_from_retained(root, ledger, vec![receipt], "custody-reader-v1")
+}
+
+// Shared test-only publication setup: the caller has already retained these
+// exact objects. This function neither creates a ledger nor fabricates receipts.
+fn fixture_from_retained(
+    root: PathBuf,
+    ledger: PathBuf,
+    receipts: Vec<CustodyIntegrityReceiptV1>,
+    reader_identity: &str,
+) -> Fixture {
+    assert!(!receipts.is_empty());
+    let directory = root.join("records");
     fs::set_permissions(&ledger, fs::Permissions::from_mode(0o600)).unwrap();
     let inspection = inspect_custody_ledger(&ledger).unwrap();
+    let mut receipt_digests = receipts
+        .iter()
+        .map(|receipt| raw_sha256(&serde_jcs::to_vec(receipt).unwrap()))
+        .collect::<Vec<_>>();
+    receipt_digests.sort();
     let seal = ReaderSealV1 {
         schema: "das.custody.reader_seal.v1".into(),
         companion_sha256: "c".repeat(64),
         bootstrap_transaction_id: uuid::Uuid::new_v4().to_string(),
-        store_id: receipt.store_id.to_string(),
+        store_id: receipts[0].store_id.to_string(),
         configuration_sha256: inspection.configuration_sha256,
         inventory_sha256: "d".repeat(64),
         ledger_head_sha256: inspection.ledger_head_sha256,
-        receipt_jcs_sha256: vec![raw_sha256(&serde_jcs::to_vec(&receipt).unwrap())],
+        receipt_jcs_sha256: receipt_digests,
         completed_at_utc: "2026-09-05T12:00:00Z".into(),
     };
     // Valid format identifier, deliberately not authenticated ciphertext. This
@@ -173,7 +191,7 @@ fn fixture_at(parent: &Path) -> Fixture {
     binding.configuration_sha256 = seal.configuration_sha256.clone();
     binding.inventory_sha256 = seal.inventory_sha256.clone();
     binding.seal_sha256 = raw_sha256(&seal.encode().unwrap());
-    binding.reader_identity = "custody-reader-v1".into();
+    binding.reader_identity = reader_identity.into();
     binding.encrypted_source_sha256 = raw_sha256(encrypted.as_bytes());
     binding.not_before_utc = "2026-09-05T12:00:00Z".into();
     binding.expires_at_utc = "2030-09-05T12:00:00Z".into();
@@ -189,7 +207,10 @@ fn fixture_at(parent: &Path) -> Fixture {
         directory,
         manager_uid,
         ledger,
-        inventory: vec![(receipt.content_sha256, receipt.content_length)],
+        inventory: receipts
+            .into_iter()
+            .map(|receipt| (receipt.content_sha256, receipt.content_length))
+            .collect(),
         selected_inventory_sha256: seal.inventory_sha256.clone(),
         encrypted_source,
         protection: CredentialProtection::Host,

@@ -319,7 +319,8 @@ mod actual {
             );
         }
         assert!(receipts.is_ok());
-        assert_eq!(receipts.unwrap().len(), 2);
+        let receipts = receipts.unwrap();
+        assert_eq!(receipts.len(), 2);
         let ledger = read_custody_catalog(catalog.path()).unwrap()[0]
             .ledger_path
             .clone();
@@ -346,6 +347,24 @@ mod actual {
             crate::runtime::CustodyBatchPhase::WriterHandoff
         ));
         assert_eq!(fs::read(&ledger).unwrap(), before);
+        // Guest-only handoff for the subsequent protected publication fixture.
+        // Existing closed records are retained verbatim; this envelope is test
+        // plumbing, not a new receipt/inventory or companion protocol.
+        let retained = serde_json::json!({
+            "definition": definition,
+            "ledger": ledger,
+            "ledger_sha256": format!("{:x}", Sha256::digest(&before)),
+            "receipts": receipts,
+            "inventory": expected.objects.iter().map(|object|
+                (&object.content_sha256, object.size_bytes)).collect::<Vec<_>>(),
+        });
+        let selected = root.join("retained.json");
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new().write(true).create_new(true)
+            .mode(0o600).open(selected).unwrap();
+        file.write_all(&serde_jcs::to_vec(&retained).unwrap()).unwrap();
+        file.sync_all().unwrap();
         println!("VM_GARAGE_ADMISSION_BATCH_PASS objects=2 reconstructed_handoff=denied");
         // Retained state intentionally survives this test; guest teardown owns disposal.
     }

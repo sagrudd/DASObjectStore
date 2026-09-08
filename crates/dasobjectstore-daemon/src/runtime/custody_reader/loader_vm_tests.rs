@@ -62,7 +62,20 @@ pub(super) fn prepare(mode: &str, configure: impl FnOnce(&mut Fixture)) {
     // The reused fixture creates/retains/seals through real public ledger APIs;
     // its in-memory object storage does not assert a Garage retention result.
     eprintln!("VM_LOADER_PREP_STAGE ledger");
-    let mut f = fixture_at(Path::new("/var/lib"));
+    let f = fixture_at(Path::new("/var/lib"));
+    prepare_from_retained(mode, f, None, configure);
+}
+
+// Shared fixture composition for genuine retained ledgers. A supplied secret
+// must be a separately provisioned continuation key, never a consumed handoff.
+// No provenance is inferred here: real publication and platform load still run.
+pub(super) fn prepare_from_retained(
+    mode: &str,
+    mut f: Fixture,
+    continuation_secret: Option<zeroize::Zeroizing<String>>,
+    configure: impl FnOnce(&mut Fixture),
+) {
+    guest_guard(0);
     eprintln!("VM_LOADER_PREP_STAGE ledger_complete");
     let root = f.root.clone();
     f.selection.encrypted_source = root.join("reader.enc");
@@ -72,7 +85,6 @@ pub(super) fn prepare(mode: &str, configure: impl FnOnce(&mut Fixture)) {
     f.selection.binding.service_identity = "das-vm-loader.service".into();
     f.selection.binding.credential_name = "reader".into();
     f.selection.binding.executable_sha256 = raw_sha256(&fs::read(EXECUTABLE).unwrap());
-    f.selection.binding.bucket_name = "dos-formal-custody".into();
     configure(&mut f);
     eprintln!("VM_LOADER_PREP_STAGE helper");
     let helper = fs::symlink_metadata(&f.selection.aws_executable).unwrap();
@@ -89,12 +101,14 @@ pub(super) fn prepare(mode: &str, configure: impl FnOnce(&mut Fixture)) {
     } else {
         &f.selection.binding.backend_key_id
     };
+    let continuation_secret = continuation_secret
+        .unwrap_or_else(|| zeroize::Zeroizing::new(uuid::Uuid::new_v4().to_string()));
     let plaintext = zeroize::Zeroizing::new(if mode.trim() == "malformed" {
         "not-a-credential-record".to_owned()
     } else {
         format!("version=1\nrole=reader\nstore_id={}\nconfiguration_sha256={}\nidentity={}\naws_access_key_id={}\naws_secret_access_key={}\n",
             f.selection.binding.store_id, f.selection.binding.configuration_sha256,
-            f.selection.binding.reader_identity, key_id, uuid::Uuid::new_v4())
+            f.selection.binding.reader_identity, key_id, continuation_secret.as_str())
     });
     let plain = root.join("plain");
     fs::write(&plain, plaintext.as_bytes()).unwrap();
