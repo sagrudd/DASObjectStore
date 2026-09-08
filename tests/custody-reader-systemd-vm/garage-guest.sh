@@ -10,6 +10,8 @@ finish() {
         # Only source-location markers; never dump private command diagnostics.
         if test "$phase" = admission_retention && test -f /var/lib/das-garage-fixture/result.private; then
             grep -E '^VM_GARAGE_LOCATION [A-Za-z0-9_./-]+:[0-9]+$' /var/lib/das-garage-fixture/result.private | head -2 || true
+            grep -E '^VM_GARAGE_COMMAND operation=(garage|head-object|put-object|get-object) category=(access_denied|not_found|timeout|provider_failure)$' /var/lib/das-garage-fixture/result.private | tail -4 || true
+            grep -E '^VM_GARAGE_BATCH phase=(Prevalidation|WriterHandoff|ReaderHandoff|AdapterConstruction|ObjectRetention) index=(none|[0-9]+) completed=[0-9]+$' /var/lib/das-garage-fixture/result.private | head -1 || true
         fi
         poweroff -f
     fi

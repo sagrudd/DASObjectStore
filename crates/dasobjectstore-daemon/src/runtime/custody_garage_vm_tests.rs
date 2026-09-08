@@ -90,6 +90,22 @@ mod actual {
                 return Err(deny());
             }
             if !status.success() {
+                let operation = args
+                    .iter()
+                    .find(|v| ["head-object", "put-object", "get-object"].contains(&v.as_str()))
+                    .map(String::as_str)
+                    .unwrap_or("garage");
+                let text = String::from_utf8_lossy(&stderr).to_ascii_lowercase();
+                let category = if text.contains("accessdenied") || text.contains("403") {
+                    "access_denied"
+                } else if text.contains("notfound") || text.contains("404") {
+                    "not_found"
+                } else if status.code() == Some(124) || status.code() == Some(137) {
+                    "timeout"
+                } else {
+                    "provider_failure"
+                };
+                eprintln!("VM_GARAGE_COMMAND operation={operation} category={category}");
                 // Preserve actual provider error text for existing absence classification.
                 // The fixture panic hook never prints these values or secret argv.
                 return Err(
@@ -251,6 +267,17 @@ mod actual {
             crate::runtime::CustodyBatchPhase::Prevalidation
         ));
         let receipts = controller.retain_custody_inventory(&expected, inputs());
+        if let Err(error) = &receipts {
+            eprintln!(
+                "VM_GARAGE_BATCH phase={:?} index={} completed={}",
+                error.phase,
+                error
+                    .failed_index
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "none".into()),
+                error.completed.len()
+            );
+        }
         assert!(receipts.is_ok());
         assert_eq!(receipts.unwrap().len(), 2);
         let ledger = read_custody_catalog(catalog.path()).unwrap()[0]
