@@ -1,0 +1,56 @@
+Joined isolated protocol matrix — author execution PASS, 2026-09-08
+
+Prerequisites: root-reviewed runner and baseline six-case ALL_PASS/cleanup.
+Exactly one joined run; no retry, solver relaxation or changed acceptance.
+Scripts: 4970043d6e59eda29f88a3095e8e5a74644f42b8
+Rust source: 7843e1a72fe86a993b2accd1da70f347086e81e0
+Rust archive SHA256: d5a634567b690a85983a908f6dadf6b98c36ed665e814707af773e9f132a6fe9
+Stripped binary SHA256: e4ae758ff55bfff831e70b6b429752c398fd5ca1e9397c24d4d0f1a22622ca2f
+Unstripped binary SHA256: 2f6c51655a1aba99415702334fda1e6cef779793d232d201e24bc2b0a0ba5f31
+GNU strip Debian 2.40 tool SHA256: 09ea31b5f54325e60310f43ee17fa532b4f816a177a13f4b59f72767d26932bf
+Pristine image: sha256:5e516cee122dccf02785812c9a2b3ec1f73a2294e7259a9135fd6dcfaffa93d6
+Seed ISO SHA256: 12945846014ba0ceea525f430198945ee1edd0fef654615c2e6ce4d893c2b1fd
+Firmware SHA256: eb82984fbca3e665727a770a3a059cbab3d9fffb385fd1c5056e83301a5a4d38
+Fresh variables SHA256: b3b855c5a80310168051164986855692d1bdb06e67619856177965cd87c6774f
+Guest AWS executable SHA256: b33789111921696e9c89db3b5e9b29c536bfea0371e228a107d4f710e617335f
+
+Container: 5fb32d3e20cee7856d91b7ef436e928822c53af95c578a51cb073ea38fa3364e
+UID/GID1000:1000, supplementary994, network none, mounts [], cap-drop ALL,
+no-new-privileges, sole device /dev/kvm rw, 4GiB, 2CPU, PIDs256.
+Entry: /bin/bash /custody-reader-systemd-vm/run.sh joined-kvm-modern
+Independent host controller timeout900s, kill-after10s; no live service changes.
+Started 2026-09-08T16:08:01.57600744Z; finished 16:09:18.518792033Z.
+Exit0; elapsed76.94s. Fedora44 Linux6.19.10-300.fc44.aarch64, systemd259.5.
+
+VM_AWS_SIGNED_INSTALL_NEW_ONLY_PASS
+VM_JOINED_PASS mode=positive actual_GETs=1 journal_replay=denied
+VM_JOINED_PASS mode=binding actual_GETs=0 journal_replay=denied
+VM_JOINED_PASS mode=corrupt actual_GETs=1 journal_replay=denied
+VM_JOINED_PASS mode=disconnect actual_GETs=1 journal_replay=denied
+VM_JOINED_PROTOCOL_ALL_PASS_NOT_GARAGE
+VM_JOINED_EXIT phase=complete status=0
+
+Actual encrypted systemd loader and manager publication joined to real TLS
+client/server, signed AWS CLI/FIFO and SQLite one-use journal. Both original
+retry and freshly valid re-signed same-ID/new-nonce retry denied; live sentinel
+proved no second TCP connection, journal marker/result unchanged. Publication
+and full ledger remained unchanged. Each reader/verifier retained terminal
+status/identity was checked before explicit stop/inactive verification.
+
+Measured complete console: bytes124166;
+SHA256 a4e5cda0a481c682a6ddfeca9380c4b9df47cf8522c01492ac743c6d8595ff28.
+Only vetted fixed acceptance/identity evidence above is retained. The transient
+lossless console copy was removed before commit; raw console is not published.
+Package transaction and per-case journals were checked inside guest, not
+exported; this receipt does not claim their raw bytes were retained externally.
+Full71 signed public RPM inventory is separately retained in aws-release/.
+
+Cleanup: exact exited container above removed after console hash verification;
+only owned public /tmp/das-joined-public.2wpsGq/adapter and its empty parent
+removed. No booted image/disk, generated key or credential layer exported.
+Pristine public image and nonsecret source/build artifacts remain reusable.
+
+Scope: loopback protocol responder, NOT Garage retention/legal hold/backend
+TLS qualification. Guest UIDs2000/2001 prove functional isolation, NOT physical
+off-NUC verifier provenance. No live credentials, activation, installed release
+authority or S4 admission claimed. Parent independent review remains required.

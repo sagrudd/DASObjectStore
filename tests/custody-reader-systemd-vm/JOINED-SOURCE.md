@@ -1,7 +1,8 @@
-# Joined read fixture — source prepared, execution held
+# Joined read fixture — isolated protocol qualification passed
 
-This successor requires baseline full-loader platform PASS and independent
-review of the eventual modern runner/seed before execution. It does not change
+The baseline full-loader platform matrix and independent runner review preceded
+the single successful joined run recorded in `evidence/joined-vm-pass.txt`.
+It does not change
 production protocols, routes, authorities, keys, activation or version0.186.0.
 
 `tls_vm_tests.rs` connects the real protected publisher/encrypted loader,
@@ -52,11 +53,12 @@ versions; it does not assert that signed package scripts have no effects in
 the disposable guest. Unsupported guest tooling/solver results deny rather
 than selecting a different package closure.
 
-Current evidence: native all-features compile and transport-only regressions
-in `evidence/joined-native-compile.txt`; six pure transaction-guard tests. The
-guest installer, joined runner, actual AWS/FIFO exchange and loaded-server
-matrix remain unexecuted. Public preparation metadata is not formal custody
-evidence and no booted image may be exported.
+Evidence includes native all-features compile and transport-only regressions
+in `evidence/joined-native-compile.txt`, six transaction-guard tests (also
+independently rerun by root), and the four-case actual joined VM PASS. The
+guest installer, actual AWS/FIFO exchange and loaded-server matrix executed
+successfully. Public preparation metadata is not formal custody evidence;
+the booted guest was removed, never exported.
 
 The reader/verifier fixture units retain active/exited state after their real
 process finishes, solely to prevent systemd unit garbage collection from
@@ -65,4 +67,4 @@ exit status0, success result, retained nonzero PID and valid invocation ID, then
 an explicit stop and inactive state. This is not a production lifetime policy.
 Four static script regressions cover those requirements, actual backend
 listen-readiness ordering, and offline installation before identity generation;
-they do not replace the still-required joined VM execution.
+they remain distinct from the actual joined VM execution evidence.
