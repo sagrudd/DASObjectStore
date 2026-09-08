@@ -1,14 +1,16 @@
 Finite authenticated custody reader session
-==========================================
+===========================================
 
-Status: PROPOSED source architecture; no implementation or activation authority.
+Status: ACCEPTED SOURCE CONTRACT / NO ACTIVATION AUTHORITY.
 Date: 2026-09-08. Owner: project owner with independent source-design review.
 Issue: https://github.com/sagrudd/DASObjectStore/issues/210.
 Baseline: ``a6228f1626d2870d2464e1a59955dbf00f01fd4e`` (DAS #209).
 
-The concrete proposed field sets, frames, vectors and programme adapter
-clarification are in :doc:`0011-reader-wire-contract`. They remain review
-candidates, not accepted runtime protocol or activation authority.
+The lead agent ``/root`` and independent ``/root/release_capability_audit``
+reviewed source ``04cbfec9a694f81ebbd21086ed15ff9eb2e8a265`` under delegated
+source-work authority. Exact concrete annex review and merge conditions are
+recorded in :doc:`0011-reader-wire-contract`. This is not a personal owner
+signature, implemented runtime or live capability finding.
 
 Purpose and existing contracts
 ------------------------------
@@ -30,7 +32,7 @@ algorithm remain unchanged. Their availability does not establish a live
 signer, independently measured target or admitted execution companion.
 
 Restartable read-only continuation proposal
-------------------------------------------
+-------------------------------------------
 
 The original uninterrupted-process option avoids persistent credential delivery
 but permanently loses eligibility on reboot. Reject it as the normal operational
@@ -71,7 +73,7 @@ activation. Held objects and ledger survive all failures; expiry/revocation
 stops successful reads without deleting data or lifting legal holds.
 
 Protected continuation binding and revocation
---------------------------------------------
+---------------------------------------------
 
 The proposed closed public binding commits schema/version, companion digest,
 host identity, reader service identity and UID, exact executable/package
@@ -79,8 +81,8 @@ provenance, opaque credential name, encrypted-source digest, backend reader
 identity and credential generation, store ID, catalogue/profile digest,
 endpoint/TLS authority, namespace/bucket/policy, finite inventory digest,
 completed-bootstrap seal digest, not-before and expiry. No secret or plaintext
-secret digest belongs in that public record. All digest encodings and exact
-canonical vectors must be frozen before codec implementation. This is separate
+secret digest belongs in that public record. Exact digest encodings and
+canonical vectors are frozen in the accepted wire annex. This is separate
 from, and does not extend, the existing sealed one-use profile wire.
 
 An independently protected current binding selects exactly one active generation;
@@ -152,11 +154,11 @@ Peer identity is kernel-authenticated on a lifecycle-created private Unix
 socket, bound to the selected writer UID and exact process transaction.
 The lifecycle-supplied private socket and admission remain real prerequisites;
 an arbitrary UID string or caller boolean cannot create them. No normal DAS
-API gains this channel. Exact frame bytes and conformance vectors require
-review before protocol implementation; this ADR selects architecture only.
+API gains this channel. Exact frame bytes and conformance vectors are in the
+accepted wire annex; implementation follows the linked source-contract merges.
 
 Finite remote endpoint and authentication
-----------------------------------------
+-----------------------------------------
 
 Propose a dedicated TLS read-only endpoint, separate from normal daemon routes,
 with one bounded operation: ``POST /custody/v1/read-object``. Only the
@@ -193,7 +195,7 @@ Exact bounded HTTP framing is to be frozen with conformance vectors before
 protocol code, not implemented as an unbounded body meanwhile.
 
 Reuse r237 inventory and receipt semantics
------------------------------------------
+------------------------------------------
 
 For the initial r237 NUC-delivery selection, reuse Jenkins 0.112/0.113 rather
 than invent an inventory codec. ``r237_manifest`` already checks the 13 ordinary
@@ -229,7 +231,7 @@ success. Formal consumption must cover the full expected set; partial
 consumption/failure remains terminal and cannot authorize a gate or read retry.
 
 Off-NUC verification and authority limits
-----------------------------------------
+-----------------------------------------
 
 The client checks all selected bytes, sizes, receipts, policy/hold/retention,
 inventory and raw receipt bindings and independently measured endpoint/source
@@ -245,17 +247,18 @@ authorize S5--S8. Fresh selected evidence and the actual gate's independently
 admitted companion remain necessary. The local class currently says direct
 DAS-supported S3 endpoint: the proposed dedicated TLS object operation is
 a supported DAS custody-read adapter, not raw Garage or an S3-compatibility
-claim. That terminology/adapter boundary needs explicit programme review,
-not silent substitution in an implementation.
+claim. Programme PR #267 accepts the explicit opt-in adapter boundary; its
+linked merge is required before implementation, never silent substitution.
 
 Decisions versus execution choices
 ----------------------------------
 
-Source review must settle this connected reader-before-writer topology,
-the separate protected continuation binding/delivery/revocation contract,
-private-channel and TLS framing/limits, the exact existing-inventory mapping,
-and the supported endpoint adapter boundary. No code before those concrete
-choices and vectors are accepted; no new cryptographic purpose is required.
+Source review accepts the connected topology, separate protected continuation
+contract, exact framing and supported opt-in adapter semantics. Implementation
+is authorized after DAS #211 and programme #267 merge, with Kanon #339 source
+coordination ``e81c950cfab7116b0094b795f64291b7a19a1643``. Actual inventory
+selection and activation remain the execution companion's responsibility.
+No new cryptographic purpose is required. Runtime/lifecycle is not yet implemented.
 
 The owner execution companion selects actual service identities/UIDs, private
 socket, configuration, namespace/network isolation, endpoint TLS identities,

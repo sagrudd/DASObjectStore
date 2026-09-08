@@ -1,10 +1,19 @@
 Reader continuation records and finite wire contract
-===================================================
+====================================================
 
-Status: PROPOSED companion to ADR0011, issue #210 / PR #211. This document
-freezes a review candidate, not runtime or execution authority. No production
+Status: ACCEPTED SOURCE CONTRACT / NO ACTIVATION AUTHORITY. Issue #210 / PR #211.
+Lead agent ``/root`` and independent ``/root/release_capability_audit`` reviewed
+exact annex SHA-256
+``d3357335da5e5a5970543c5cf172115519ea29cbb9e37685c498310203b4427d``
+at source ``04cbfec9a694f81ebbd21086ed15ff9eb2e8a265`` under delegated
+source-work authority, not a personal owner signature. Programme PR #267
+supplies the accepted source adapter amendment. Implementation is authorized
+after both source-contract PRs merge; Kanon #339 coordination
+``e81c950cfab7116b0094b795f64291b7a19a1643`` records minor 0.186 and these
+source coordinates. Runtime/lifecycle remains unimplemented and the NUC
+custody NO-GO is not changed. No production
 credential names, paths, accounts, keys or sockets are selected. Schema names
-below are proposed coordinates requiring linked Kanon review before code.
+below are source-coordinated, not installed or selected lockset identities.
 
 Encoding and common limits
 --------------------------
@@ -52,7 +61,7 @@ The exact flat field set for schema ``das.custody.reader_binding.v1`` is::
     not_before_utc, expires_at_utc
 
 uid is a nonzero platform-valid UID; credential_generation is positive.
-credential_name matches [A-Za-z0-9_-]{1,128}, without path or scheme. Other
+credential_name matches ``[A-Za-z0-9_-]{1,128}``, without path or scheme. Other
 identity strings match the existing independently selected values exactly.
 read_adapter_profile is exactly ``das.custody.exact_object_frontend.v1`` for
 this proposed opt-in profile. endpoint_authority_sha256 and tls_peer_sha256
@@ -108,7 +117,7 @@ activation, accepting a bounded outage rather than overlapping authority.
 Deletion of retained objects or legal holds is never part of this transition.
 
 Stable identity is not credential generation
--------------------------------------------
+--------------------------------------------
 
 Existing receipts and sealed profile both compare reader_identity exactly;
 ``validate_reader_identity`` and ``verify_custody_readback_existing`` retain
@@ -230,8 +239,8 @@ Disable automatic retries in both HTTP and backend clients. The server must
 check full selected raw ledger digest and all existing signed request bindings,
 not just fields passed through the response metadata.
 
-Programme adapter clarification proposed for joint review
----------------------------------------------------------
+Accepted source programme adapter clarification
+-----------------------------------------------
 
 The local class's direct DAS-supported S3 read requirement would gain an explicit
 opt-in ``das.custody.exact_object_frontend.v1`` adapter profile backed by a
@@ -250,8 +259,9 @@ independent facts, it cannot select this profile or produce a passing attestatio
 The companion must explicitly select this profile in its reviewed configuration
 and supported source closure; an old companion/direct-S3 consumer does not
 automatically accept it merely because existing signature fields parse. This is
-a proposed explicit programme terminology/adapter amendment, not an accepted
-substitution. No implementation should imply it has already changed governance.
+the explicit source programme amendment in PR #267, not a default substitution
+for historical consumers. Its merge is required before implementation; no
+live companion or custody eligibility follows from source-contract acceptance.
 
 Conformance and qualification matrix
 ------------------------------------

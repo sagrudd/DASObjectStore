@@ -1,5 +1,5 @@
 Proposed ADR0011 public wire vectors
-===================================
+====================================
 
 No deployment identity, key, credential, actual receipt or authority is present.
 All repeated-letter digests and fixture identities are deliberately synthetic.
