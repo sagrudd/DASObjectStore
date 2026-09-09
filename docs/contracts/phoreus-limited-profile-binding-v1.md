@@ -14,6 +14,12 @@ schema remains `dasobjectstore.profile_readiness.v1` on
 `mnemosyne-monas` peer for store `phoreus` may supply the associated binding
 request; DASObjectStore itself retains authority for those checks.
 
+The fixed Monas peer can ask for this path-free readiness result before the
+store exists. It then receives `profile_binding_not_found`, not ready evidence,
+so its genuinely authenticated browser workflow can request provisioning.
+Provisioning still requires the existing validated Pistis subject. Socket
+access, a caller-supplied name, or readiness permission is not human authority.
+
 The readiness result has no embedded timestamp. Monas is the freshness owner:
 it signs the observed result into its short-lived host context. Missing,
 substituted, incompatible, unready, or unauthorized evidence must therefore

@@ -243,6 +243,13 @@ locations or pretending that hardware-only health is available locally:
 
    dasobjectstore store profile-readiness generated-data --json
 
+The packaged Monas service may inspect the path-free readiness of its exact
+``phoreus`` and ``ergasterion`` profiles before registration. A missing binding
+is reported as missing, never ready. This fixed socket-peer exception does not
+grant payload access or administrator membership; provisioning still requires
+the real browser's verified Pistis subject. Other callers and stores retain
+the ordinary administrator or store-read checks.
+
 The command is read-only. A missing or unreadable root, unmanaged/unsafe folder
 entries, or unavailable/blocked capacity appears as an explicit not-ready
 reason and must be resolved through the daemon's managed workflow. Folder

@@ -990,6 +990,7 @@ where
                 )));
             };
             if !actor.is_administrator()
+                && !actor.is_monas_host_profile_observer(request.store_id.as_str())
                 && handler
                     .authorize_endpoint_read(Some(actor), &request.store_id)
                     .is_err()

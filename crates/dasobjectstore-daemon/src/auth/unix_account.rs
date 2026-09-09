@@ -76,6 +76,34 @@ fn groups_for_actor(
     groups.into_iter().collect()
 }
 
+#[cfg(test)]
+mod monas_profile_peer_tests {
+    use super::actor_from_account_text;
+
+    #[test]
+    fn host_profile_observer_uses_actual_peer_uid_not_group_or_claimed_name() {
+        let passwd = "root:x:0:0::/:/bin/false\nmnemosyne-monas:x:993:969::/:/bin/false\nguest:x:1000:1000::/:/bin/false\n";
+        let groups = "mnemosyne-monas:x:969:guest\n";
+        for uid in [0, 993, 1000, 1001] {
+            // A client choosing Monas's GID or joining its group cannot choose
+            // the username resolved from the kernel's actual peer UID.
+            let actor = actor_from_account_text(uid, 969, passwd, groups);
+            for store in [
+                "phoreus",
+                "ergasterion",
+                "other",
+                "Phoreus",
+                "phoreus-extra",
+            ] {
+                assert_eq!(
+                    actor.is_monas_host_profile_observer(store),
+                    uid == 993 && matches!(store, "phoreus" | "ergasterion")
+                );
+            }
+        }
+    }
+}
+
 fn parse_passwd(contents: &str) -> Vec<PasswdEntry> {
     contents
         .lines()

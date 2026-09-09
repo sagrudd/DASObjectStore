@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.185.3 - Unreleased
+
+- Let the existing peer-authenticated Monas service inspect readiness of its
+  exact `phoreus` and `ergasterion` profiles before their store registration
+  exists. Preserve other administrator/store-read checks and every verified
+  Pistis subject requirement for provisioning. No administrator group is added,
+  no payload access is granted, and a missing binding is not readiness. This
+  source correction requires the coordinated immutable dev6 Kanon successor.
+
 ## 0.185.2 - Unreleased
 
 - Accept canonical Kanon v1alpha3 locksets in the remote package guard while
