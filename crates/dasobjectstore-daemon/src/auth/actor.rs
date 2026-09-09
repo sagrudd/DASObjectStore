@@ -39,6 +39,14 @@ impl DaemonLocalActor {
         self.uid == 0 || self.has_group("dasobjectstore-admin") || self.has_group("sudo")
     }
 
+    /// Readiness only: the socket layer resolves this name from SO_PEERCRED's
+    /// UID, never from request JSON. No store payload or mutation is admitted.
+    pub(crate) fn is_monas_host_profile_observer(&self, store_id: &str) -> bool {
+        self.uid != 0
+            && self.username.as_deref() == Some("mnemosyne-monas")
+            && matches!(store_id, "phoreus" | "ergasterion")
+    }
+
     pub fn display_name(&self) -> String {
         self.username
             .clone()

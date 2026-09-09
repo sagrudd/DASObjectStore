@@ -7090,6 +7090,75 @@ mod tests {
     }
 
     #[test]
+    fn monas_host_profile_readiness_bootstraps_without_existing_store() {
+        let root = temp_root("monas-host-profile-readiness-bootstrap");
+        cleanup(&root);
+        let handler = DaemonRequestHandler::new(
+            FakeService::default(),
+            FixedDaemonClock::new("2026-07-13T11:05:00Z"),
+        )
+        .with_profile_binding_registry_path(root.join("profile-bindings.json"))
+        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+        .with_live_sqlite_path(root.join("live.sqlite"));
+        for store in ["phoreus", "ergasterion", "other", "phoreus-extra"] {
+            for name in [Some("mnemosyne-monas"), Some("guest"), None] {
+                let mut actor = DaemonLocalActor::new(993);
+                actor.username = name.map(str::to_owned);
+                let response = handler
+                    .handle_with_progress_for_actor(
+                        DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
+                            store_id: StoreId::new(store).unwrap(),
+                        }),
+                        Some(&actor),
+                        |_| Ok(()),
+                    )
+                    .unwrap();
+                let expected = if name == Some("mnemosyne-monas")
+                    && matches!(store, "phoreus" | "ergasterion")
+                {
+                    "profile_binding_not_found"
+                } else {
+                    "profile_readiness_authorization_required"
+                };
+                assert!(
+                    matches!(response, DaemonApiResponse::Error(ref error) if error.code == expected),
+                    "store={store} peer={name:?}: {response:?}"
+                );
+            }
+        }
+        assert!(!root.join("profile-bindings.json").exists());
+        assert!(!root.join("stores.json").exists());
+        let monas = DaemonLocalActor::new(993).with_username("mnemosyne-monas");
+        for store in ["phoreus", "ergasterion"] {
+            assert!(handler
+                .authorize_endpoint_read(Some(&monas), &StoreId::new(store).unwrap())
+                .is_err());
+        }
+        assert_eq!(
+            require_verified_pistis_host_authority(Some(&monas), None, "profile binding")
+                .unwrap_err()
+                .code,
+            "preverified_host_subject_required"
+        );
+        for (actor, code) in [
+            (None, "profile_readiness_authentication_required"),
+            (Some(DaemonLocalActor::new(0)), "profile_binding_not_found"),
+        ] {
+            let response = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
+                        store_id: StoreId::new("other").unwrap(),
+                    }),
+                    actor.as_ref(),
+                    |_| Ok(()),
+                )
+                .unwrap();
+            assert!(matches!(response, DaemonApiResponse::Error(error) if error.code == code));
+        }
+        cleanup(&root);
+    }
+
+    #[test]
     fn monas_peer_reads_only_the_phoreus_profile_readiness_gate() {
         let root = temp_root("profile-readiness-monas-phoreus");
         cleanup(&root);
