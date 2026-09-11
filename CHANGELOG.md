@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.185.4 - Unreleased
+
+- Advance the DASObjectStore and `dasobjectstore-remote` source closure to
+  canonical Proxenos 0.61.0. This repairs the release-train witness mismatch
+  caused by the retired 0.58.0 public Site Trust source pin, while preserving
+  the existing keyless remote client boundary and all credential, provenance,
+  and host-activation gates.
+
 ## 0.185.3 - Unreleased
 
 - Let the existing peer-authenticated Monas service inspect readiness of its
