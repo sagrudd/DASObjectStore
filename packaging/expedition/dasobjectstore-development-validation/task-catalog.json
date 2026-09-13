@@ -1,0 +1,11 @@
+{
+  "tasks": {
+    "dasobjectstore-development-validation": {
+      "command": [
+        "bash",
+        "-ceu",
+        "set -euo pipefail; umask 022; export CARGO_HOME=/expedition-output/cargo-home; export CARGO_TARGET_DIR=/expedition-output/target; for directory in /workspace /prosopikon /proxenos /thesaurophylax; do git config --global --add safe.directory \"$directory\"; done; test \"$(git -C /workspace rev-parse HEAD)\" = 86284df32372d7758f2917928cd6adef2eb93516; test \"$(git -C /prosopikon rev-parse HEAD)\" = f09749273ef382c1b42bf04a77d96189dd7361b3; test \"$(git -C /proxenos rev-parse HEAD)\" = d4c3054fb7d88c9f718d2987ec19bf7bc444d391; test \"$(git -C /thesaurophylax rev-parse HEAD)\" = 0bfb16857d135d2830de2cf53d245b68ed2d051f; git config --global url.\"file:///prosopikon\".insteadOf https://github.com/sagrudd/prosopikon.git; git config --global url.\"file:///proxenos\".insteadOf https://github.com/sagrudd/proxenos.git; git config --global url.\"file:///thesaurophylax\".insteadOf https://github.com/sagrudd/thesaurophylax.git; rustup component add rustfmt clippy; cargo fetch --locked; export CARGO_NET_OFFLINE=true; cargo fmt --all -- --check; bash tools/check-rust-module-size.sh; cargo clippy --workspace --all-targets -- -D warnings; cargo test --workspace --locked --offline"
+      ]
+    }
+  }
+}

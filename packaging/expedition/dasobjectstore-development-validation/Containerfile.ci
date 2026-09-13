@@ -1,0 +1,10 @@
+FROM docker.io/library/rust@sha256:3914072ca0c3b8aad871db9169a651ccfce30cf58303e5d6f2db16d1d8a7e58f
+
+RUN apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        acl \
+        clang \
+        libclang-dev \
+        libpam0g-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*

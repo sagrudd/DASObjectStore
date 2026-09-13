@@ -1,0 +1,8 @@
+{
+  "schema_version": "mnemosyne.expedition.github-development-cohort.v1",
+  "manifest_path": "/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/manifest.json",
+  "policy_path": "/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/policy.json",
+  "task_catalog_path": "/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/task-catalog.json",
+  "vault_secret_id": "github.dasobjectstore-development-source",
+  "jenkins_credential_id": "dasobjectstore-development-source"
+}

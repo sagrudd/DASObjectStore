@@ -33,6 +33,7 @@ packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
 packaging_reporting="$repo_root/packaging/reporting"
+packaging_expedition="$repo_root/packaging/expedition"
 web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
@@ -143,6 +144,7 @@ install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$payload_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
 das_stage_custody_review_assets "$payload_root"
+"$packaging_expedition/stage-development-validation-cohort.sh" "$payload_root"
 cp -a "$web_dist/." "$payload_root/opt/dasobjectstore/web/"
 
 bash "$repo_root/packaging/validate-package-auth-content.sh" "$payload_root"
@@ -477,6 +479,12 @@ fi
 %doc /usr/share/doc/dasobjectstore/remote-site-trust-provisioning-v1.md
 %doc /usr/share/doc/dasobjectstore/remote-site-trust-source-v1.schema.json
 %doc /usr/share/doc/dasobjectstore/custody-review
+/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/Containerfile.ci
+/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/README.md
+/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/manifest.json
+/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/policy.json
+/usr/share/mnemosyne-expedition/dasobjectstore-development-validation/task-catalog.json
+/usr/share/mnemosyne-expedition/development-cohorts/dasobjectstore-development-validation.json
 %license /usr/share/licenses/dasobjectstore/LICENSE
 
 %changelog

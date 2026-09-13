@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.4.0",
+  "id": "mnemosyne/dasobjectstore-development-validation",
+  "version": "1.0.0",
+  "required_modules": [],
+  "module_registry": {},
+  "required_targets": ["linux_amd64", "linux_arm64"],
+  "minimum_retention_days": 90,
+  "approved_tasks": ["dasobjectstore-development-validation"],
+  "allowed_capabilities": ["read_only_source", "network"],
+  "required_acceptance": [
+    {
+      "kind": "stage_passed",
+      "id": "dasobjectstore-development-validation-amd64-passed",
+      "stage": "rust-development-validation-amd64"
+    },
+    {
+      "kind": "stage_passed",
+      "id": "dasobjectstore-development-validation-arm64-passed",
+      "stage": "rust-development-validation-arm64"
+    }
+  ]
+}

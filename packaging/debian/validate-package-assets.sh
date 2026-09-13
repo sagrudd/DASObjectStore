@@ -47,6 +47,8 @@ custody_service_template="$repo_root/packaging/linux/systemd/dasobjectstore-cust
 custody_compose_template="$repo_root/packaging/linux/templates/custody-garage.compose.yml.template"
 custody_credential_template="$repo_root/packaging/linux/systemd/dasobjectstored-custody-credentials.conf.template"
 custody_review_readme="$repo_root/docs/user/local-custody-review-assets.rst"
+development_validation_stager="$repo_root/packaging/expedition/stage-development-validation-cohort.sh"
+development_validation_test="$repo_root/packaging/tests/dasobjectstore-development-validation-cohort.sh"
 
 require_file() {
   local path="$1"
@@ -137,6 +139,10 @@ require_file "$custody_service_template"
 require_file "$custody_compose_template"
 require_file "$custody_credential_template"
 require_file "$custody_review_readme"
+require_file "$development_validation_stager"
+require_executable "$development_validation_stager"
+require_file "$development_validation_test"
+require_executable "$development_validation_test"
 
 require_text "$service" "User=dasobjectstore"
 require_text "$service" "Group=dasobjectstore"
@@ -235,6 +241,7 @@ if "$custody_review_asset_stager" / >/dev/null 2>&1; then
   printf 'custody review stager must refuse the live root filesystem\n' >&2
   exit 1
 fi
+"$development_validation_test"
 custody_payload_link="$custody_payload_root-link"
 ln -s "$custody_payload_root" "$custody_payload_link"
 if "$custody_review_asset_stager" "$custody_payload_link" >/dev/null 2>&1; then

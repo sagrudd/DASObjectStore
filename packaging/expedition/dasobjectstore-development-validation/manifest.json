@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.4.0",
+  "expedition": {
+    "id": "dasobjectstore-development-validation",
+    "title": "DASObjectStore development validation"
+  },
+  "extends": {
+    "id": "mnemosyne/dasobjectstore-development-validation",
+    "version": "1.0.0"
+  },
+  "source": {
+    "repository": "https://github.com/sagrudd/DASObjectStore",
+    "revision": "86284df32372d7758f2917928cd6adef2eb93516"
+  },
+  "source_dependencies": [
+    {
+      "repository": "https://github.com/sagrudd/prosopikon",
+      "revision": "f09749273ef382c1b42bf04a77d96189dd7361b3",
+      "mount_path": "../prosopikon"
+    },
+    {
+      "repository": "https://github.com/sagrudd/proxenos",
+      "revision": "d4c3054fb7d88c9f718d2987ec19bf7bc444d391",
+      "mount_path": "../proxenos"
+    },
+    {
+      "repository": "https://github.com/sagrudd/thesaurophylax",
+      "revision": "0bfb16857d135d2830de2cf53d245b68ed2d051f",
+      "mount_path": "../thesaurophylax"
+    }
+  ],
+  "trust": "trusted_revision",
+  "modules": [],
+  "targets": ["linux_amd64", "linux_arm64"],
+  "retention_days": 90,
+  "requested_capabilities": ["read_only_source", "network"],
+  "stages": [
+    {
+      "id": "rust-development-validation-amd64",
+      "target": "linux_amd64",
+      "container": {
+        "image": "mnemosyne/dasobjectstore-ci",
+        "digest": "sha256:ca381b82ddece5d1c925de08d365181d1e5fca490b6b6c8bec23b065cffee4aa"
+      },
+      "task": {
+        "kind": "approved_task",
+        "task": "dasobjectstore-development-validation",
+        "parameters": {}
+      },
+      "resources": {
+        "cpu_millicores": 8000,
+        "memory_mib": 16384
+      },
+      "performance": [
+        {
+          "id": "dasobjectstore-development-validation-amd64-duration",
+          "metric": "stage_duration",
+          "comparison": "less_than_or_equal",
+          "threshold": 1800000,
+          "unit": "milliseconds",
+          "warm_up_runs": 0,
+          "sample_count": 1
+        }
+      ]
+    },
+    {
+      "id": "rust-development-validation-arm64",
+      "target": "linux_arm64",
+      "container": {
+        "image": "mnemosyne/dasobjectstore-ci",
+        "digest": "sha256:bbfd394f17465446269083e6b128e9640191c4341853ab7760d61c5ef3b7d407"
+      },
+      "task": {
+        "kind": "approved_task",
+        "task": "dasobjectstore-development-validation",
+        "parameters": {}
+      },
+      "resources": {
+        "cpu_millicores": 8000,
+        "memory_mib": 16384
+      },
+      "performance": [
+        {
+          "id": "dasobjectstore-development-validation-arm64-duration",
+          "metric": "stage_duration",
+          "comparison": "less_than_or_equal",
+          "threshold": 1800000,
+          "unit": "milliseconds",
+          "warm_up_runs": 0,
+          "sample_count": 1
+        }
+      ]
+    }
+  ],
+  "acceptance": []
+}
