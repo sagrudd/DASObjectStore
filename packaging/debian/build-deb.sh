@@ -37,6 +37,7 @@ packaging_debian="$repo_root/packaging/debian"
 packaging_linux="$repo_root/packaging/linux"
 packaging_product="$packaging_linux/opt/dasobjectstore"
 packaging_reporting="$repo_root/packaging/reporting"
+packaging_expedition="$repo_root/packaging/expedition"
 web_dist="$(bash "$repo_root/packaging/web/prepare-web-dist.sh")"
 bash "$packaging_debian/validate-package-assets.sh"
 
@@ -145,6 +146,7 @@ install -m 0644 "$packaging_linux/sysusers.d/dasobjectstore.conf" \
 install -m 0644 "$packaging_linux/tmpfiles.d/dasobjectstore.conf" \
   "$build_root/usr/lib/tmpfiles.d/dasobjectstore.conf"
 das_stage_custody_review_assets "$build_root"
+"$packaging_expedition/stage-development-validation-cohort.sh" "$build_root"
 cp -a "$web_dist/." "$build_root/opt/dasobjectstore/web/"
 install -m 0755 "$packaging_debian/postinst" "$build_root/DEBIAN/postinst"
 install -m 0755 "$packaging_debian/prerm" "$build_root/DEBIAN/prerm"

@@ -1,5 +1,10 @@
 # DASObjectStore TODO
 
+Development-validation cohort: source and package-layout work is implemented
+in 0.185.5. It remains unconfigured and unrun until a supported Base Camp
+package closure, separate scoped source credential, authenticated webhook and
+attended authority gates exist. It is not DAS or remote deployment evidence.
+
 0.182.1 source follow-up: remove the stale current-version assertion from the
 legacy Phoreus declaration test and align the root product manifest. Historical
 compatibility remains unchanged; Kanon #335 coordinates this regression repair.

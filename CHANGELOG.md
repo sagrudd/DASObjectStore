@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.185.5 - Unreleased
+
+- Package an inert, product-owned DASObjectStore development-validation cohort
+  for Base Camp 0.127.0. The selector, immutable source manifest, policy,
+  task catalogue and reviewed CI recipe are installed only as data; package
+  installation neither configures a webhook or credential nor starts Jenkins
+  or a DAS service. The task binds the canonical 0.185.4 source revision and
+  its exact Prosopikon, Proxenos and Thesaurophylax dependency closure, uses
+  the mounted checkouts as credential-free Cargo mirrors, and runs the existing Rust checks only after a normal
+  authenticated checkout boundary. This is source/package layout work, not a
+  package release, Jenkins execution, dossier, signature, deployment or host
+  activation claim.
+
 ## 0.185.4 - Unreleased
 
 - Advance the DASObjectStore and `dasobjectstore-remote` source closure to
