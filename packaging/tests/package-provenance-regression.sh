@@ -15,9 +15,15 @@ for builder in packaging/debian/build-deb.sh packaging/rpm/build-rpm.sh; do
   grep -Fq '"$cargo_target_dir/release/dasobjectstore"' "$repo_root/$builder"
   grep -Fq '"$cargo_target_dir/release/dasobjectstored"' "$repo_root/$builder"
 done
-for builder in packaging/debian/build-remote-deb.sh packaging/rpm/build-remote-rpm.sh; do
+for builder in packaging/rpm/build-remote-rpm.sh; do
   grep -Fq '"$cargo_target_dir/release/dasobjectstore-remote"' "$repo_root/$builder"
 done
+remote_deb="$repo_root/packaging/debian/build-remote-deb.sh"
+grep -Fq 'DAS_REMOTE_DEBIAN_ARCHITECTURE' "$remote_deb"
+grep -Fq 'aarch64-unknown-linux-gnu' "$remote_deb"
+grep -Fq 'x86_64-unknown-linux-gnu' "$remote_deb"
+grep -Fq 'cargo build --release --locked -p dasobjectstore-remote --target "$cargo_target"' "$remote_deb"
+grep -Fq '"$cargo_target_dir/$cargo_target/release/dasobjectstore-remote"' "$remote_deb"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 [[ "$(env -u CARGO_TARGET_DIR bash -c 'source "$1"; das_cargo_target_dir "$2"' _ "$repo_root/packaging/cargo-target-dir.sh" "$repo_root")" == "$repo_root/target" ]]
 [[ "$(CARGO_TARGET_DIR=isolated-target bash -c 'source "$1"; das_cargo_target_dir "$2"' _ "$repo_root/packaging/cargo-target-dir.sh" "$repo_root")" == "$repo_root/isolated-target" ]]

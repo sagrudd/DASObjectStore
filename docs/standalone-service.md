@@ -335,6 +335,15 @@ remote-client documentation only. They intentionally do not install the daemon
 service identity, local appliance configuration, managed storage directories,
 Web UI assets, or object-service lifecycle units.
 
+The Debian builder maps the selected `DAS_REMOTE_DEBIAN_ARCHITECTURE` to one
+reviewed Linux Rust target (`amd64` to `x86_64-unknown-linux-gnu`, or `arm64`
+to `aarch64-unknown-linux-gnu`) and packages that target directory. On a
+non-Linux build host the architecture is required explicitly; the builder
+rejects any unrecognised host coordinate rather than producing a relabelled
+non-Linux binary. Terraform supplies this selection from the Kanon-supported
+target description for formal delivery. A source-only package build is not a
+release or installation authorization.
+
 The remote Debian package requires `ca-certificates` and suggests `awscli`.
 The remote RPM requires `ca-certificates` and recommends `awscli`. AWS CLI is
 still required for concrete `stores list` and `upload` transfers unless a

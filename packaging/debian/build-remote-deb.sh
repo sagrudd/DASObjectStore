@@ -31,12 +31,34 @@ ERROR
   exit 1
 fi
 
-arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+host_arch="$(dpkg --print-architecture 2>/dev/null || true)"
+arch="${DAS_REMOTE_DEBIAN_ARCHITECTURE:-$host_arch}"
+case "$arch" in
+  amd64) default_target="x86_64-unknown-linux-gnu" ;;
+  arm64) default_target="aarch64-unknown-linux-gnu" ;;
+  *)
+    cat >&2 <<ERROR
+unsupported remote Debian package architecture: ${arch:-unset}
+Set DAS_REMOTE_DEBIAN_ARCHITECTURE to one of the Kanon-declared Debian
+architectures (amd64 or arm64). A development laptop's package-manager
+architecture is not a deployable target description.
+ERROR
+    exit 2
+    ;;
+esac
+cargo_target="${DAS_REMOTE_CARGO_TARGET:-$default_target}"
+if [ "$cargo_target" != "$default_target" ]; then
+  printf 'remote Debian Cargo target %s does not match package architecture %s\n' "$cargo_target" "$arch" >&2
+  exit 2
+fi
 cargo_target_dir="$(das_cargo_target_dir "$repo_root")"
 build_root="$cargo_target_dir/deb/${package_name}_${version}_${arch}"
 package_path="$cargo_target_dir/deb/${package_name}_${version}_${arch}.deb"
 
-cargo build --release --locked -p dasobjectstore-remote --manifest-path "$repo_root/Cargo.toml"
+# Never relabel a build-host binary as a deployable Linux package. The selected
+# Debian coordinate has one reviewed Rust target triple, and Cargo writes the
+# payload below that triple even when the builder itself is not the target host.
+cargo build --release --locked -p dasobjectstore-remote --target "$cargo_target" --manifest-path "$repo_root/Cargo.toml"
 
 rm -rf "$build_root"
 install -d \
@@ -45,7 +67,7 @@ install -d \
   "$build_root/etc/dasobjectstore-remote/site-trust-sources.d" \
   "$build_root/usr/bin" \
   "$build_root/usr/share/doc/$package_name"
-install -m 0755 "$cargo_target_dir/release/dasobjectstore-remote" \
+install -m 0755 "$cargo_target_dir/$cargo_target/release/dasobjectstore-remote" \
   "$build_root/usr/bin/dasobjectstore-remote"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/docs/user/remote-client.rst" \

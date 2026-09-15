@@ -41,6 +41,24 @@ hosts:
 RPM tooling for the packaging host. Both targets compile the release
 ``dasobjectstore-remote`` binary before assembling the package.
 
+For a Debian package, ``make remote-deb`` uses the host's Debian architecture
+only when it is already ``amd64`` or ``arm64``. A non-Linux development host
+must declare the target explicitly and provide the matching installed Rust
+target/toolchain; it must never relabel a macOS binary as a Linux package. For
+example, the DGX remote-client coordinate is built as follows once its
+``aarch64-unknown-linux-gnu`` toolchain is available:
+
+.. code-block:: console
+
+   DAS_REMOTE_DEBIAN_ARCHITECTURE=arm64 \\
+   DAS_REMOTE_CARGO_TARGET=aarch64-unknown-linux-gnu \\
+   make remote-deb
+
+The resulting ``arm64`` package remains a build candidate until the selected
+Terraform/Kanon delivery path validates its exact source, lockset and package
+provenance. This command does not authorize release, installation, service
+activation, trust changes, or a remote login.
+
 These package targets produce packages named ``dasobjectstore-remote`` and
 install only the remote client binary and its documentation. They do not install
 ``dasobjectstored``, systemd service units, local appliance configuration, or
