@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.185.7 - Unreleased
+
+- Make the remote Debian builder bind its package architecture to a reviewed
+  Linux Rust target. A formal `arm64` build now compiles
+  `aarch64-unknown-linux-gnu` and packages that target output; `amd64` uses
+  `x86_64-unknown-linux-gnu`. Builders on non-Linux development hosts must
+  declare the selected Debian coordinate and fail before compiling if it is
+  unsupported, rather than relabelling a host binary as deployable Linux code.
+  The change does not authorize a release, installation, service activation,
+  trust change, or remote login.
+
 ## 0.185.6 - Unreleased
 
 - Advance the DASObjectStore and `dasobjectstore-remote` package version after
