@@ -132,9 +132,11 @@ from ``direct_gateway`` to ``external_gateway`` before starting the Web/API
 server when the dedicated gateway unit is active. Do not stop or replace the
 dedicated gateway merely to make the Web listener start.
 
-The aggregate package installs both units but does not enable, start, restart,
-or stop either ``dasobjectstore-server.service`` or
-``dasobjectstore-s3-gateway.service``. Monas deployment owns their explicit,
+The aggregate package installs both units but does not enable or start either
+``dasobjectstore-server.service`` or ``dasobjectstore-s3-gateway.service``. On
+a compatible Debian upgrade it restarts either service only when it was already
+running; an inactive listener remains inactive. Monas deployment owns their
+explicit,
 ordered activation. The integrated server configuration must continue to use
 Monas/Pistis authority; configuration validation rejects ``local_user`` with
 ``external_gateway`` and provides no local authentication fallback.

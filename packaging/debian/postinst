@@ -279,9 +279,12 @@ if [[ -x /usr/libexec/dasobjectstore/configure-external-mount-policy ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  # Package installation must not alter a live storage data plane.  Runtime
-  # activation is a separately attended, Pistis-authorised operator action.
+  # Package installation must not alter a live storage data plane through
+  # first activation. On a compatible upgrade, package-owned running services
+  # are restarted by the reviewed helper so no process retains replaced
+  # executable bytes.
   systemctl daemon-reload || true
+  /usr/libexec/dasobjectstore/restart-running-services
 fi
 
 ensure_report_provider

@@ -19,6 +19,7 @@ monas_root_traversal_helper="$repo_root/packaging/linux/usr/libexec/dasobjectsto
 monas_access_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/manage-monas-access-boundary"
 mount_policy_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 storage_mount_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/verify-managed-storage-mounts"
+restart_running_services_helper="$repo_root/packaging/linux/usr/libexec/dasobjectstore/restart-running-services"
 sysusers="$repo_root/packaging/linux/sysusers.d/dasobjectstore.conf"
 tmpfiles="$repo_root/packaging/linux/tmpfiles.d/dasobjectstore.conf"
 daemon_config="$repo_root/packaging/linux/etc/dasobjectstore/daemon.json"
@@ -110,7 +111,9 @@ require_file "$monas_root_traversal_helper"
 require_file "$monas_access_helper"
 require_file "$mount_policy_helper"
 require_file "$storage_mount_helper"
+require_file "$restart_running_services_helper"
 require_executable "$storage_mount_helper"
+require_executable "$restart_running_services_helper"
 require_file "$sysusers"
 require_file "$tmpfiles"
 require_file "$daemon_config"
@@ -177,6 +180,12 @@ require_text "$managed_storage_manifest" '"ssd"'
 require_text "$managed_storage_manifest" '"hdds"'
 require_text "$storage_mount_helper" "findmnt"
 require_text "$storage_mount_helper" "mount"
+require_text "$restart_running_services_helper" 'systemctl is-active --quiet "$unit"'
+require_text "$restart_running_services_helper" 'systemctl restart "$unit"'
+require_absent "$restart_running_services_helper" 'systemctl enable'
+require_absent "$restart_running_services_helper" 'systemctl start'
+require_absent "$restart_running_services_helper" 'dasobjectstore-garage.service'
+require_absent "$restart_running_services_helper" 'dasobjectstore-storage-ready.service'
 require_text "$garage_renderer" 'restart: \"no\"'
 require_absent "$garage_renderer" 'push_str("    restart: unless-stopped'
 
@@ -398,6 +407,7 @@ require_text "$postinst" 'store_registry_state=/var/lib/dasobjectstore/stores.js
 require_text "$postinst" 'manage-monas-access-boundary publish-identity'
 require_text "$postinst" 'store_registry_config=/etc/dasobjectstore/stores.json'
 require_text "$postinst" 'Package installation must not alter a live storage data plane'
+require_text "$postinst" '/usr/libexec/dasobjectstore/restart-running-services'
 require_absent "$postinst" 'systemctl enable'
 require_absent "$postinst" 'systemctl start'
 require_absent "$postinst" 'systemctl restart'

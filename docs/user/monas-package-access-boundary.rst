@@ -12,7 +12,10 @@ Service startup refuses missing registries, substituted paths, unsafe metadata
 or stale socket inodes. The stable appliance identity is published after its
 create-once write and is reconciled during package upgrades. The socket is
 published only after it is listening and is retired only after it is no longer
-listening. Package upgrades do not start or restart the data plane.
+listening. A Debian package upgrade does not enable or start the data plane. It
+restarts only already-running DAS application services after package
+configuration, so they execute the newly installed bytes while retaining the
+existing configuration, credentials and storage data.
 
 Credential and local-auth state, storage content and private TLS material must
 not use the shared group and must grant no access to other users. The package

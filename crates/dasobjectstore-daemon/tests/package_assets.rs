@@ -43,6 +43,8 @@ const MONAS_ACCESS_BOUNDARY: &str = include_str!(
 const EXTERNAL_MOUNT_POLICY: &str = include_str!(
     "../../../packaging/linux/usr/libexec/dasobjectstore/configure-external-mount-policy"
 );
+const RESTART_RUNNING_SERVICES: &str =
+    include_str!("../../../packaging/linux/usr/libexec/dasobjectstore/restart-running-services");
 const REPORTING_WRAPPER: &str =
     include_str!("../../../packaging/reporting/gnostikon-workflow-control");
 const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
@@ -1192,7 +1194,10 @@ fn deb_postinst_rejects_user_owned_managed_root() {
     );
     assert_contains(POSTINST, "usermod -aG docker \"$service_user\"");
     assert_not_contains(POSTINST, "dasobjectstore-local-auth-helper");
-    assert_not_contains(POSTINST, "systemctl restart");
+    assert_contains(
+        POSTINST,
+        "/usr/libexec/dasobjectstore/restart-running-services",
+    );
     assert_contains(POSTINST, "reject_user_owned_managed_root \"$managed_root\"");
     assert_contains(
         POSTINST,
@@ -1226,7 +1231,10 @@ fn deb_postinst_repairs_existing_managed_member_roots() {
     assert_contains(POSTINST, "repair_marked_managed_tree \"$root\"");
     assert_not_contains(POSTINST, "systemctl enable");
     assert_not_contains(POSTINST, "systemctl start");
-    assert_not_contains(POSTINST, "systemctl restart");
+    assert_contains(
+        POSTINST,
+        "/usr/libexec/dasobjectstore/restart-running-services",
+    );
     assert_not_contains(POSTINST, "systemctl stop");
 }
 
@@ -1244,23 +1252,38 @@ fn rpm_post_requires_profile_marker_before_repairing_existing_trees() {
 }
 
 #[test]
-fn package_scripts_never_auto_activate_the_operator_gated_s3_gateway() {
+fn package_upgrade_restarts_only_running_package_owned_application_services() {
     for script in [POSTINST, BUILD_RPM] {
-        for unit in [
-            "dasobjectstore-s3-gateway.service",
-            "dasobjectstore-server.service",
-        ] {
-            assert_no_automatic_unit_activation(script, unit);
-        }
+        assert_no_automatic_unit_activation(script, "dasobjectstore-s3-gateway.service");
+        assert_no_automatic_unit_activation(script, "dasobjectstore-server.service");
     }
 
-    // The guard must detect a future accidental lifecycle activation while
-    // allowing the current legacy-service assertions to remain explicit until
-    // the Monas-only package migration removes them.
-    assert_no_automatic_unit_activation(
-        "systemctl enable --now dasobjectstored.service",
-        "dasobjectstore-s3-gateway.service",
+    assert_contains(
+        POSTINST,
+        "/usr/libexec/dasobjectstore/restart-running-services",
     );
+    assert_contains(
+        RESTART_RUNNING_SERVICES,
+        "systemctl is-active --quiet \"$unit\"",
+    );
+    assert_contains(RESTART_RUNNING_SERVICES, "systemctl restart \"$unit\"");
+    for unit in [
+        "dasobjectstored.service",
+        "dasobjectstore-server.service",
+        "dasobjectstore-s3-gateway.service",
+        "dasobjectstore-workspace-host.service",
+    ] {
+        assert_contains(RESTART_RUNNING_SERVICES, unit);
+    }
+    for excluded in [
+        "dasobjectstore-garage.service",
+        "dasobjectstore-storage-ready.service",
+    ] {
+        assert_not_contains(RESTART_RUNNING_SERVICES, excluded);
+    }
+    assert_not_contains(RESTART_RUNNING_SERVICES, "systemctl enable");
+    assert_not_contains(RESTART_RUNNING_SERVICES, "systemctl start");
+
     let accidental = "systemctl enable --now dasobjectstore-s3-gateway.service";
     assert!(unit_activation_is_automatic(
         accidental,
