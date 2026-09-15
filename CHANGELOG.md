@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.185.6 - Unreleased
+
+- Advance the DASObjectStore and `dasobjectstore-remote` package version after
+  the compatible 0.185.5 package-lifecycle repair. This allows the formal
+  package builder to distinguish the changed service-restart assets from the
+  retained 0.185.5 package source while preserving the existing exact lock,
+  provenance, signature and host-activation boundaries.
+
 ## 0.185.5 - Unreleased
 
 - Package an inert, product-owned DASObjectStore development-validation cohort
