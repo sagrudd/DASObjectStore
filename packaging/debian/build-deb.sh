@@ -95,6 +95,8 @@ install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/migrate-monas-integ
   "$build_root/usr/libexec/dasobjectstore/migrate-monas-integrated-config"
 install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/manage-monas-access-boundary" \
   "$build_root/usr/libexec/dasobjectstore/manage-monas-access-boundary"
+install -m 0755 "$packaging_linux/usr/libexec/dasobjectstore/restart-running-services" \
+  "$build_root/usr/libexec/dasobjectstore/restart-running-services"
 install -m 0644 "$repo_root/README.md" "$build_root/usr/share/doc/$package_name/README.md"
 install -m 0644 "$repo_root/docs/contracts/remote-site-trust-provisioning-v1.md" \
   "$build_root/usr/share/doc/$package_name/remote-site-trust-provisioning-v1.md"

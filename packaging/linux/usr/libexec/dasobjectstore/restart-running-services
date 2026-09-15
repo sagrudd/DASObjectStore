@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# An ordinary package upgrade replaces executable bytes. Restart only the
+# application services that were already running so they cannot retain a
+# deleted executable. This is deliberately not an activation mechanism:
+# disabled/inactive services, the storage readiness watcher, and Garage keep
+# their existing state. A restart failure fails the package transaction so the
+# operator has an unambiguous recovery point.
+
+if [[ ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+  exit 0
+fi
+
+for unit in \
+  dasobjectstored.service \
+  dasobjectstore-server.service \
+  dasobjectstore-s3-gateway.service \
+  dasobjectstore-workspace-host.service; do
+  if systemctl is-active --quiet "$unit"; then
+    systemctl restart "$unit"
+  fi
+done
