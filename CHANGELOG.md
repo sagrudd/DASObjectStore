@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.185.9 - Unreleased
+
+- Align the product manifest with the workspace and package version. This
+  restores the fail-closed release-version guard used by the native DEB
+  builders; it does not alter package activation, trust, installation or
+  service lifecycle behaviour.
+
 ## 0.185.8 - Unreleased
 
 - Correct the Debian package-asset validator to require the declared Linux
