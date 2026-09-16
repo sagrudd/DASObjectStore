@@ -580,7 +580,7 @@ require_text "$build_remote_deb" "dpkg-deb is required to build the DASObjectSto
 require_file "$cargo_target_dir_helper"
 require_text "$build_remote_deb" 'packaging/cargo-target-dir.sh'
 require_text "$build_remote_deb" 'das_cargo_target_dir'
-require_text "$build_remote_deb" '"$cargo_target_dir/release/dasobjectstore-remote"'
+require_text "$build_remote_deb" '"$cargo_target_dir/$cargo_target/release/dasobjectstore-remote"'
 require_text "$build_remote_deb" 'docs/user/remote-client.rst'
 require_text "$build_remote_deb" 'docs/contracts/remote-site-trust-provisioning-v1.md'
 require_text "$build_remote_deb" 'docs/schemas/dasobjectstore.remote-site-trust-source.v1.schema.json'

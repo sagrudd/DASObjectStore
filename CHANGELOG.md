@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.185.8 - Unreleased
+
+- Correct the Debian package-asset validator to require the declared Linux
+  target output used by the remote-DEB builder. This restores the reviewed
+  `amd64` and `arm64` build path without changing package activation, trust,
+  installation or service lifecycle behaviour.
+
 ## 0.185.7 - Unreleased
 
 - Make the remote Debian builder bind its package architecture to a reviewed
