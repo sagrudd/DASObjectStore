@@ -51,6 +51,8 @@ const BUILD_DEB: &str = include_str!("../../../packaging/debian/build-deb.sh");
 const BUILD_RPM: &str = include_str!("../../../packaging/rpm/build-rpm.sh");
 const BUILD_REMOTE_DEB: &str = include_str!("../../../packaging/debian/build-remote-deb.sh");
 const BUILD_REMOTE_RPM: &str = include_str!("../../../packaging/rpm/build-remote-rpm.sh");
+const PACKAGE_ASSET_VALIDATOR: &str =
+    include_str!("../../../packaging/debian/validate-package-assets.sh");
 const PINNED_MNEMOSYNE_SOURCES: &str =
     include_str!("../../../packaging/pinned-mnemosyne-package-sources.sh");
 const PACKAGE_AUTH_GUARD: &str =
@@ -1054,6 +1056,22 @@ fn deb_build_installs_daemon_boundary_assets() {
     assert_contains(BUILD_DEB, "DEBIAN/postinst");
     assert_contains(BUILD_DEB, DEBIAN_RUNTIME_DEPENDENCIES);
     assert_contains(BUILD_DEB, "X-DASObjectStore-Build-Depends");
+}
+
+#[test]
+fn remote_deb_validation_tracks_the_declared_linux_target_output() {
+    assert_contains(
+        BUILD_REMOTE_DEB,
+        "cargo build --release --locked -p dasobjectstore-remote --target \"$cargo_target\"",
+    );
+    assert_contains(
+        BUILD_REMOTE_DEB,
+        "\"$cargo_target_dir/$cargo_target/release/dasobjectstore-remote\"",
+    );
+    assert_contains(
+        PACKAGE_ASSET_VALIDATOR,
+        "\"$cargo_target_dir/$cargo_target/release/dasobjectstore-remote\"",
+    );
 }
 
 #[test]
