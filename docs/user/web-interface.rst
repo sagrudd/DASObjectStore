@@ -87,7 +87,10 @@ DAS appliance default is Monas/Pistis authority:
 product owns login, session validation, logout, entitlement, audit, and
 correlation through Pistis/Prosopikon. DASObjectStore receives only the
 verified host context and does not ship a PAM service, password helper, or
-product-local browser session issuer.
+product-local browser session issuer. A bundle with no explicit host marker
+defaults to Monas/Pistis rather than a local sign-in form; a direct appliance
+server cannot establish a human session unless its Monas host injects that
+verified context.
 
 The daemon still owns storage policy and mutation. Local Unix groups may be
 used as a storage-policy or device-ownership input, but they are not an

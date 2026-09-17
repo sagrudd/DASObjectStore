@@ -37,6 +37,7 @@ pub fn gui_api_router_for_host_mode_with_application_auth(
                 router
             }
         }
+        GuiApiHostMode::MonasIntegrated => host_composed_gui_api_router(),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }
@@ -87,6 +88,7 @@ pub fn gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
                 router
             }
         }
+        GuiApiHostMode::MonasIntegrated => host_composed_gui_api_router(),
         GuiApiHostMode::SynoptikonIntegrated => crate::gui_api_router(),
     }
 }

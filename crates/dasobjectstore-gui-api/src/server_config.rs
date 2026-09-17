@@ -335,8 +335,8 @@ impl StandaloneAuthenticationConfig {
 
     pub fn gui_api_host_mode(&self) -> GuiApiHostMode {
         match self.authority {
-            StandaloneAuthenticationAuthority::LocalUser
-            | StandaloneAuthenticationAuthority::Monas => GuiApiHostMode::Standalone,
+            StandaloneAuthenticationAuthority::LocalUser => GuiApiHostMode::Standalone,
+            StandaloneAuthenticationAuthority::Monas => GuiApiHostMode::MonasIntegrated,
             StandaloneAuthenticationAuthority::Synoptikon => GuiApiHostMode::SynoptikonIntegrated,
         }
     }
@@ -689,11 +689,11 @@ mod tests {
     }
 
     #[test]
-    fn maps_monas_authentication_to_standalone_host_mode() {
+    fn maps_monas_authentication_to_integrated_host_mode() {
         let config = StandaloneServerConfig::default();
         assert_eq!(
             config.gui_api_host_mode(),
-            crate::GuiApiHostMode::Standalone
+            crate::GuiApiHostMode::MonasIntegrated
         );
     }
 
