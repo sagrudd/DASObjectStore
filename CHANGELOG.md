@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.185.10 - Unreleased
+
+- Make Monas the fail-closed Web default: a DASObjectStore browser bundle with no explicit host marker now selects the federated Monas/Pistis flow rather than rendering a local username/password form. Monas-configured server routers use the host-composed API only, so local browser authentication and local session issuance remain unavailable. A direct appliance server without an injected verified host context cannot establish a human session.
+
 ## 0.185.9 - Unreleased
 
 - Align the product manifest with the workspace and package version. This

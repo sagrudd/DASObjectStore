@@ -21,7 +21,8 @@ impl FrontendHost {
         match value {
             Some("monas") => Self::Monas,
             Some("synoptikon") => Self::Synoptikon,
-            _ => Self::Standalone,
+            Some("standalone") => Self::Standalone,
+            _ => Self::Monas,
         }
     }
 
@@ -96,5 +97,10 @@ mod tests {
         assert!(host.is_federated());
         assert_eq!(mount.base_path, "/products/dasobjectstore");
         assert_eq!(mount.api_base_path, "/products/dasobjectstore/api/v1");
+    }
+
+    #[test]
+    fn missing_host_marker_defaults_to_monas_pistis_authority() {
+        assert_eq!(FrontendHost::from_marker(None), FrontendHost::Monas);
     }
 }

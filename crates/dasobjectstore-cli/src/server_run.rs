@@ -461,6 +461,7 @@ mod tests {
         assert_eq!(output["server"]["bind_address"], "127.0.0.1");
         assert_eq!(output["server"]["https_port"], 8448);
         assert_eq!(output["tls_assets"], serde_json::Value::Null);
+        assert_eq!(output["auth_host_mode"], "monas_integrated");
     }
 
     #[tokio::test]

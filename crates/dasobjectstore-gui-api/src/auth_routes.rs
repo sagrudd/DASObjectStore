@@ -166,6 +166,7 @@ pub struct EasyconnectBrowserApprovalIntent {
 #[serde(rename_all = "snake_case")]
 pub enum GuiApiHostMode {
     Standalone,
+    MonasIntegrated,
     SynoptikonIntegrated,
 }
 
