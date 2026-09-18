@@ -137,6 +137,10 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "external attempt root must be empty",
         "cp -a \"$sealed_root\" \"$copied_closure\"",
         "chmod -R u+w \"$copied_closure\"",
+        "copied_manifest=\"$copied_source/Cargo.toml\"",
+        "copied_lock=\"$copied_source/Cargo.lock\"",
+        "copied closure requires a physical non-symlink",
+        "--manifest-path \"$copied_manifest\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
         "terminal-status",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
@@ -162,9 +166,23 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         ));
     fs::create_dir(&temp).expect("temporary harness root");
     let sealed = staged_fixture(&temp);
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(
+        &staged_cargo,
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+            .expect("make capturing staged Cargo executable");
+    }
+    write_f05_manifest(&sealed);
     let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
     let attempt = temp.join("attempt");
     fs::create_dir(&attempt).expect("create external attempt root");
+    let non_workspace_cwd = temp.join("outside-workspace");
+    fs::create_dir(&non_workspace_cwd).expect("create non-workspace cwd");
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
 
@@ -174,11 +192,25 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         .arg(&sealed)
         .args(["--attempt-root"])
         .arg(&attempt)
+        .current_dir(&non_workspace_cwd)
         .status()
         .expect("run forced-failure package attempt");
     assert!(
         !status.success(),
         "stub staged Cargo must force a real failure"
+    );
+    let cargo_invocation = fs::read_to_string(attempt.join("cargo-invocation.log"))
+        .expect("captured staged Cargo invocation");
+    assert!(
+        cargo_invocation.contains(&format!("cwd={}", attempt.join("closure/source").display())),
+        "Cargo must run from the copied source rather than the caller cwd"
+    );
+    assert!(
+        cargo_invocation.contains(&format!(
+            "--manifest-path {}",
+            attempt.join("closure/source/Cargo.toml").display()
+        )),
+        "Cargo must receive the explicit copied manifest path"
     );
     assert_eq!(
         fs::read_to_string(attempt.join("terminal-status")).expect("read terminal status"),
