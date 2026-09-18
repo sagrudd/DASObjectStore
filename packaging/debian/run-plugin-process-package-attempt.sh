@@ -76,8 +76,12 @@ fi
 chmod -R u+w "$copied_closure"
 
 copied_source="$copied_closure/source"
+copied_manifest="$copied_source/Cargo.toml"
+copied_lock="$copied_source/Cargo.lock"
 copied_config="$copied_source/.cargo/f05-vendor-config.toml"
-[[ -f "$copied_config" ]] || die 'copied closure requires a vendor config'
+for copied_input in "$copied_manifest" "$copied_lock" "$copied_config"; do
+  [[ -f "$copied_input" && ! -L "$copied_input" ]] || die "copied closure requires a physical non-symlink $(basename "$copied_input")"
+done
 sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
 mv "$copied_config.next" "$copied_config"
 (
@@ -102,6 +106,9 @@ export RUSTC="$copied_closure/toolchain/bin/rustc"
 export PATH="$copied_closure/network-denied-bin:$copied_closure/toolchain/bin:/usr/bin:/bin"
 
 cp "$copied_source/.cargo/f05-vendor-config.toml" "$CARGO_HOME/config.toml"
-"$copied_closure/toolchain/bin/cargo" --offline --config "$copied_source/.cargo/f05-vendor-config.toml" build --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
+(
+  cd "$copied_source"
+  "$copied_closure/toolchain/bin/cargo" --manifest-path "$copied_manifest" --offline --config "$copied_config" build --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
+)
 "$copied_source/packaging/web/prepare-web-dist.sh"
 "$copied_source/packaging/debian/build-plugin-process-deb.sh" --server "$server" --web-dist "$web_dist" --output-dir "$output_dir"
