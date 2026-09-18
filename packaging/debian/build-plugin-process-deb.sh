@@ -46,7 +46,7 @@ if das_plugin_process_f05_staged_closure_enabled; then
 fi
 
 version=$("${metadata_environment[@]}" "$metadata_cargo" --offline --config "$repo_root/.cargo/f05-vendor-config.toml" metadata --locked --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "dasobjectstore-cli") | .version')
-[[ "$version" =~ ^0\.186\.2$ ]] || { echo "plugin package requires DASObjectStore 0.186.2" >&2; exit 1; }
+[[ "$version" =~ ^0\.186\.3$ ]] || { echo "plugin package requires DASObjectStore 0.186.3" >&2; exit 1; }
 source_revision="${DASOBJECTSTORE_SOURCE_REVISION:-$(git -C "$repo_root" rev-parse HEAD)}"
 source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" log -1 --format=%ct)}"
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ && "$source_epoch" =~ ^[0-9]+$ ]] || { echo "plugin package requires exact source inputs" >&2; exit 1; }

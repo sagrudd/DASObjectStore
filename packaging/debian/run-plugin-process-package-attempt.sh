@@ -22,12 +22,26 @@ die() {
   exit 1
 }
 
+reject_symlink_ancestry() {
+  local path=$1 label=$2 component current=''
+  [[ "$path" = /* ]] || die "requires an absolute $label"
+  IFS=/ read -r -a components <<< "$path"
+  for component in "${components[@]}"; do
+    [[ -z "$component" ]] && continue
+    [[ "$component" != . && "$component" != .. ]] || die "$label must not contain . or .. path components"
+    current="$current/$component"
+    [[ ! -L "$current" ]] || die "$label must not pass through a symlink: $current"
+  done
+}
+
 canonical_directory() {
   local path=$1 label=$2
   [[ "$path" = /* && -d "$path" && ! -L "$path" ]] || die "requires an absolute, non-symlink $label"
   (cd "$path" && pwd -P)
 }
 
+reject_symlink_ancestry "$sealed_root" 'sealed closure root'
+reject_symlink_ancestry "$attempt_root" 'external attempt root'
 sealed_root=$(canonical_directory "$sealed_root" 'sealed closure root')
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')
 [[ "$attempt_root" != "$sealed_root" && "$attempt_root" != "$sealed_root"/* && "$sealed_root" != "$attempt_root"/* ]] || die 'sealed closure and external attempt root must not overlap'
