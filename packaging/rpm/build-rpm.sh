@@ -115,6 +115,8 @@ install -m 0640 "$packaging_linux/etc/dasobjectstore/workspace-host.json" \
   "$payload_root/etc/dasobjectstore/workspace-host.json"
 install -m 0644 "$packaging_product/config.json" \
   "$payload_root/opt/dasobjectstore/config.json"
+install -m 0644 "$packaging_product/plugin-process-descriptor.json" \
+  "$payload_root/opt/dasobjectstore/plugin-process-descriptor.json"
 install -m 0644 "$packaging_linux/systemd/dasobjectstored.service" \
   "$payload_root/usr/lib/systemd/system/dasobjectstored.service"
 install -m 0644 "$packaging_linux/systemd/dasobjectstore-storage-ready.service" \
