@@ -17,7 +17,7 @@ das_plugin_process_f05_staged_closure_enabled() {
 
 das_plugin_process_f05_staged_closure_error() {
   echo "plugin package F05 staged closure $*" >&2
-  return 1
+  exit 1
 }
 
 das_plugin_process_f05_manifest_requires() {
@@ -31,6 +31,7 @@ das_plugin_process_f05_require_staged_closure() {
   staged_root=$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT
   [[ "$staged_root" = /* && -d "$staged_root" && ! -L "$staged_root" ]] || das_plugin_process_f05_staged_closure_error 'requires an absolute closure root'
   staged_root="$(cd "$staged_root" && pwd -P)"
+  repo_root="$(cd "$repo_root" && pwd -P)"
   [[ "$repo_root" = "$staged_root/source" ]] || das_plugin_process_f05_staged_closure_error 'requires stage/source as the package repository root'
   [[ -f "$staged_root/f05-inputs.sha256" && -f "$staged_root/inputs/component-candidate-input.toml" && -f "$staged_root/inputs/source-tree" && -f "$staged_root/inputs/compiled-dependency-witness.json" && -f "$staged_root/inputs/package-recipe.json" ]] || das_plugin_process_f05_staged_closure_error 'requires admitted candidate and package inputs'
   [[ -d "$repo_root/vendor" && -f "$repo_root/.cargo/f05-vendor-config.toml" ]] || das_plugin_process_f05_staged_closure_error 'requires a staged vendor tree and vendor config'
@@ -45,11 +46,13 @@ das_plugin_process_f05_require_staged_closure() {
     das_plugin_process_f05_manifest_requires "$staged_root" "$required"
   done
   find "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -print -quit | grep -q . || das_plugin_process_f05_staged_closure_error 'requires a non-empty staged wasm32-unknown-unknown target'
-  find "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -printf '%P\n' | while IFS= read -r wasm_input; do
+  find "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f | while IFS= read -r wasm_path; do
+    wasm_input=${wasm_path#"$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown/"}
     das_plugin_process_f05_manifest_requires "$staged_root" "toolchain/lib/rustlib/wasm32-unknown-unknown/$wasm_input"
   done
   find "$repo_root/vendor" -type f -print -quit | grep -q . || das_plugin_process_f05_staged_closure_error 'requires a non-empty staged vendor tree'
-  find "$repo_root/vendor" -type f -printf '%P\n' | while IFS= read -r vendor_input; do
+  find "$repo_root/vendor" -type f | while IFS= read -r vendor_path; do
+    vendor_input=${vendor_path#"$repo_root/vendor/"}
     das_plugin_process_f05_manifest_requires "$staged_root" "source/vendor/$vendor_input"
   done
   grep -Eq '^toolchain_image = ".+@sha256:[0-9a-f]{64}"$' "$staged_root/inputs/component-candidate-input.toml" || das_plugin_process_f05_staged_closure_error 'requires an immutable staged toolchain image'
@@ -64,7 +67,7 @@ das_plugin_process_f05_require_staged_closure() {
 
 das_plugin_process_f05_staged_provenance() {
   local staged_root=$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT
-  printf '\"f05_staged_inputs_manifest_sha256\":\"%s\",\"f05_component_candidate_input_sha256\":\"%s\",\"f05_source_tree_sha256\":\"%s\",\"f05_dependency_witness_sha256\":\"%s\",\"f05_package_recipe_sha256\":\"%s\",\"f05_vendor_tree_sha256\":\"%s\",\"f05_vendor_config_sha256\":\"%s\",\"f05_cargo_sha256\":\"%s\",\"f05_rustc_sha256\":\"%s\",\"f05_trunk_sha256\":\"%s\",\"f05_wasm_target_sha256\":\"%s\",\"f05_toolchain_image\":\"%s\",\"f05_toolchain_image_sha256\":\"%s\",\"f05_cargo_version\":\"%s\",\"f05_rustc_version\":\"%s\",\"f05_trunk_version\":\"%s\"' \
+  printf '"f05_staged_inputs_manifest_sha256":"%s","f05_component_candidate_input_sha256":"%s","f05_source_tree_sha256":"%s","f05_dependency_witness_sha256":"%s","f05_package_recipe_sha256":"%s","f05_vendor_tree_sha256":"%s","f05_vendor_config_sha256":"%s","f05_cargo_sha256":"%s","f05_rustc_sha256":"%s","f05_trunk_sha256":"%s","f05_wasm_target_sha256":"%s","f05_toolchain_image":"%s","f05_toolchain_image_sha256":"%s","f05_cargo_version":"%s","f05_rustc_version":"%s","f05_trunk_version":"%s"' \
     "$(das_plugin_process_sha256 "$staged_root/f05-inputs.sha256")" \
     "$(das_plugin_process_sha256 "$staged_root/inputs/component-candidate-input.toml")" \
     "$(das_plugin_process_sha256 "$staged_root/inputs/source-tree")" \

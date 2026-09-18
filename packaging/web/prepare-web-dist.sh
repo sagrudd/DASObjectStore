@@ -37,6 +37,7 @@ validate_f05_staged_closure() {
   [[ "$staged_closure_root" = /* ]] || staged_closure_error 'requires an absolute DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT'
   [[ -d "$staged_closure_root" && ! -L "$staged_closure_root" ]] || staged_closure_error 'requires a real staged closure root'
   staged_closure_root="$(cd "$staged_closure_root" && pwd -P)"
+  repo_root="$(cd "$repo_root" && pwd -P)"
   [[ "$repo_root" = "$staged_closure_root/source" ]] || staged_closure_error 'requires stage/source to be the repository root'
   [[ -f "$staged_closure_root/f05-inputs.sha256" ]] || staged_closure_error 'requires f05-inputs.sha256'
   [[ -d "$repo_root/vendor" && -f "$repo_root/.cargo/f05-vendor-config.toml" ]] || staged_closure_error 'requires a staged vendor tree and vendor config'
@@ -55,11 +56,13 @@ validate_f05_staged_closure() {
     staged_closure_manifest_requires "$staged_input"
   done
   find "$staged_wasm_target" -type f -print -quit | grep -q . || staged_closure_error 'requires a non-empty staged wasm32-unknown-unknown target'
-  find "$staged_wasm_target" -type f -printf '%P\n' | while IFS= read -r wasm_input; do
+  find "$staged_wasm_target" -type f | while IFS= read -r wasm_path; do
+    wasm_input=${wasm_path#"$staged_wasm_target/"}
     staged_closure_manifest_requires "toolchain/lib/rustlib/wasm32-unknown-unknown/$wasm_input"
   done
   find "$repo_root/vendor" -type f -print -quit | grep -q . || staged_closure_error 'requires a non-empty staged vendor tree'
-  find "$repo_root/vendor" -type f -printf '%P\n' | while IFS= read -r vendor_input; do
+  find "$repo_root/vendor" -type f | while IFS= read -r vendor_path; do
+    vendor_input=${vendor_path#"$repo_root/vendor/"}
     staged_closure_manifest_requires "source/vendor/$vendor_input"
   done
   grep -Fx "prosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon manifest revision'
