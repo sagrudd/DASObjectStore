@@ -5,12 +5,40 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/dasobjectstore-gui-web"
 prosopikon_core_root="$repo_root/../prosopikon/crates/prosopikon-core"
 prosopikon_yew_root="$repo_root/../prosopikon/crates/prosopikon-yew"
+readonly F05_PROSOPIKON_REVISION=f09749273ef382c1b42bf04a77d96189dd7361b3
+staged_closure_root=${DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT:-}
 dist="${DASOBJECTSTORE_PREBUILT_WEB_DIST:-$web_root/dist}"
 allow_fallback=0
 
 if [[ "${1:-}" == "--allow-fallback" ]]; then
   allow_fallback=1
 fi
+
+staged_closure_enabled() {
+  [[ -n "$staged_closure_root" ]]
+}
+
+staged_closure_error() {
+  printf 'F05 staged web closure %s\n' "$*" >&2
+  exit 1
+}
+
+validate_f05_staged_closure() {
+  staged_closure_enabled || return 0
+  [[ "$staged_closure_root" = /* ]] || staged_closure_error 'requires an absolute DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT'
+  [[ -d "$staged_closure_root" && ! -L "$staged_closure_root" ]] || staged_closure_error 'requires a real staged closure root'
+  staged_closure_root="$(cd "$staged_closure_root" && pwd -P)"
+  [[ "$repo_root" = "$staged_closure_root/source" ]] || staged_closure_error 'requires stage/source to be the repository root'
+  [[ -f "$staged_closure_root/f05-inputs.sha256" ]] || staged_closure_error 'requires f05-inputs.sha256'
+  [[ -d "$repo_root/vendor" && -f "$repo_root/.cargo/f05-vendor-config.toml" ]] || staged_closure_error 'requires a staged vendor tree and vendor config'
+  [[ -d "$staged_closure_root/staging-home" && -d "$staged_closure_root/network-denied-bin" ]] || staged_closure_error 'requires isolated staged HOME and network denial inputs'
+  [[ ! -e "$repo_root/../prosopikon" ]] || staged_closure_error 'rejects an ambient Prosopikon sibling'
+  (cd "$staged_closure_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || staged_closure_error 'has a missing or altered staged input'
+  grep -Fx "prosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon manifest revision'
+  grep -Fx "prosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon Yew manifest revision'
+  grep -F "git+https://github.com/sagrudd/prosopikon.git?rev=$F05_PROSOPIKON_REVISION#$F05_PROSOPIKON_REVISION" "$repo_root/Cargo.lock" >/dev/null || staged_closure_error 'requires the exact Prosopikon lock revision'
+  grep -F "directory = \"$repo_root/vendor\"" "$repo_root/.cargo/f05-vendor-config.toml" >/dev/null || staged_closure_error 'requires a vendor config bound to the staged source'
+}
 
 validate_prosopikon_checkout() {
   if [[ ! -f "$prosopikon_core_root/Cargo.toml" || ! -f "$prosopikon_yew_root/Cargo.toml" ]]; then
@@ -39,7 +67,11 @@ ERROR
 }
 
 build_web_dist() {
-  validate_prosopikon_checkout
+  if staged_closure_enabled; then
+    validate_f05_staged_closure
+  else
+    validate_prosopikon_checkout || return 1
+  fi
 
   if ! command -v trunk >/dev/null 2>&1; then
     cat >&2 <<'ERROR'
@@ -60,7 +92,15 @@ ERROR
   rm -rf "$dist"
   (
     cd "$web_root"
-    env -u NO_COLOR trunk build --release >&2
+    if staged_closure_enabled; then
+      local isolated_cargo_home
+      isolated_cargo_home=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-f05-cargo-home.XXXXXX")
+      trap 'rm -rf "$isolated_cargo_home"' EXIT HUP INT TERM
+      cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
+      env -u NO_COLOR HOME="$staged_closure_root/staging-home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$staged_closure_root/target" PATH="$staged_closure_root/network-denied-bin:$PATH" trunk build --release >&2
+    else
+      env -u NO_COLOR trunk build --release >&2
+    fi
   )
 }
 
@@ -95,6 +135,10 @@ validate_web_dist() {
   fi
 }
 
+if staged_closure_enabled && [[ -n "${DASOBJECTSTORE_PREBUILT_WEB_DIST:-}" ]]; then
+  staged_closure_error 'does not accept a prebuilt web distribution'
+fi
+
 if use_prebuilt_web_dist; then
   printf '%s\n' "$dist"
   exit 0
@@ -102,6 +146,10 @@ fi
 
 if [[ -n "${DASOBJECTSTORE_PREBUILT_WEB_DIST:-}" ]]; then
   exit 1
+fi
+
+if staged_closure_enabled && [[ "$allow_fallback" = 1 ]]; then
+  staged_closure_error 'does not permit the developer fallback'
 fi
 
 if build_web_dist && validate_web_dist; then

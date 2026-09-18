@@ -28,7 +28,7 @@ command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
 version=$(cargo metadata --locked --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "dasobjectstore-cli") | .version')
-[[ "$version" =~ ^0\.186\.0$ ]] || { echo "plugin package requires DASObjectStore 0.186.0" >&2; exit 1; }
+[[ "$version" =~ ^0\.186\.1$ ]] || { echo "plugin package requires DASObjectStore 0.186.1" >&2; exit 1; }
 source_revision="${DASOBJECTSTORE_SOURCE_REVISION:-$(git -C "$repo_root" rev-parse HEAD)}"
 source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" log -1 --format=%ct)}"
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ && "$source_epoch" =~ ^[0-9]+$ ]] || { echo "plugin package requires exact source inputs" >&2; exit 1; }
