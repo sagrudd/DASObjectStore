@@ -498,11 +498,19 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use clap::Parser;
+    use dasobjectstore_gui_api::StandaloneAuthenticationAuthority;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
+
+    fn direct_standalone_authentication() -> super::StandaloneAuthenticationConfig {
+        super::StandaloneAuthenticationConfig {
+            authority: StandaloneAuthenticationAuthority::LocalUser,
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
     async fn emits_pretty_check_config() {
@@ -582,7 +590,7 @@ mod tests {
         write_web_asset(&root, "dasobjectstore-gui-web-abcdef_bg.wasm", "wasm");
         write_web_asset(&root, "styles-abcdef.css", "body{}");
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
@@ -595,7 +603,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/dasobjectstore-gui-web-abcdef.js")
@@ -611,7 +619,7 @@ mod tests {
             "public, max-age=31536000, immutable"
         );
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/api/v1/health")
@@ -639,7 +647,7 @@ mod tests {
 
         let isolated = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             false,
             None,
             None,
@@ -654,7 +662,7 @@ mod tests {
 
         let compatible = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             true,
             None,
             None,
@@ -674,7 +682,7 @@ mod tests {
         let root = temp_root("server-run-public-base");
         let response = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             true,
             None,
             Some("https://192.0.2.10:8448".to_string()),
