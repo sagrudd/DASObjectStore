@@ -130,6 +130,9 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
     for required in [
         "--sealed-root",
         "--attempt-root",
+        "reject_symlink_ancestry \"$sealed_root\" 'sealed closure root'",
+        "reject_symlink_ancestry \"$attempt_root\" 'external attempt root'",
+        "must not pass through a symlink",
         "sealed closure must not contain symlinks",
         "external attempt root must be empty",
         "cp -a \"$sealed_root\" \"$copied_closure\"",
@@ -147,14 +150,16 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
 
 #[test]
 fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status() {
-    let temp = std::env::temp_dir().join(format!(
-        "dasobjectstore-plugin-process-attempt-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos()
-    ));
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-attempt-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
     fs::create_dir(&temp).expect("temporary harness root");
     let sealed = staged_fixture(&temp);
     let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
@@ -219,6 +224,30 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     assert!(
         !escape.join("terminal-status").exists(),
         "harness must not write through the symlink escape"
+    );
+
+    let symlink_parent_target = temp.join("symlink-parent-target");
+    fs::create_dir(&symlink_parent_target).expect("create symlink parent target");
+    let symlink_parent = temp.join("symlink-parent");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&symlink_parent_target, &symlink_parent)
+        .expect("create symlinked attempt parent");
+    let attempt_below_symlink = symlink_parent.join("attempt");
+    let ancestry_rejected = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt_below_symlink)
+        .status()
+        .expect("run symlink-parent attempt");
+    assert!(
+        !ancestry_rejected.success(),
+        "harness must reject an attempt root below a symlinked parent"
+    );
+    assert!(
+        !symlink_parent_target.join("attempt").exists(),
+        "harness must not create a closure or terminal status through a symlinked parent"
     );
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
@@ -355,7 +384,7 @@ fn staged_provenance(stage: &Path) -> std::process::ExitStatus {
     let source_script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/plugin-process-package-provenance.sh");
     Command::new("bash")
-        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.2 amd64 \"$2/web\" \"$2/server\"", "fixture"])
+        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.3 amd64 \"$2/web\" \"$2/server\"", "fixture"])
         .arg(source_script)
         .arg(stage)
         .env("DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT", stage)
