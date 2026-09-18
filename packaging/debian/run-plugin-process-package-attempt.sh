@@ -46,7 +46,7 @@ finish() {
   if [[ "$sealed_status" -ne 0 && "$status" -eq 0 ]]; then
     status=1
   fi
-  printf '%s\n' "$status" > "$status_file"
+  printf 'exit_code=%s\n' "$status" > "$status_file"
   exit "$status"
 }
 trap finish EXIT HUP INT TERM

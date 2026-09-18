@@ -136,7 +136,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "chmod -R u+w \"$copied_closure\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
         "terminal-status",
-        "printf '%s\\n' \"$status\" > \"$status_file\"",
+        "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
     ] {
         assert!(
             ATTEMPT.contains(required),
@@ -177,7 +177,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     );
     assert_eq!(
         fs::read_to_string(attempt.join("terminal-status")).expect("read terminal status"),
-        format!("{}\n", status.code().expect("exit code")),
+        format!("exit_code={}\n", status.code().expect("exit code")),
         "attempt must retain the actual nonzero terminal status"
     );
     assert_eq!(
