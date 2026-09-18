@@ -31,15 +31,22 @@ metadata_cargo=cargo
 metadata_environment=()
 if das_plugin_process_f05_staged_closure_enabled; then
   das_plugin_process_f05_require_staged_closure "$repo_root"
+  attempt_root=${DASOBJECTSTORE_F05_ATTEMPT_ROOT:-}
+  [[ "$attempt_root" = /* && -d "$attempt_root" && ! -L "$attempt_root" ]] || { echo "plugin package requires an absolute, non-symlink F05 attempt root" >&2; exit 1; }
+  attempt_root="$(cd "$attempt_root" && pwd -P)"
+  [[ -d "$output_dir" && ! -L "$output_dir" ]] || { echo "plugin package requires a real F05 output directory" >&2; exit 1; }
+  output_dir="$(cd "$output_dir" && pwd -P)"
+  [[ "$repo_root" = "$attempt_root"/* && "$output_dir" = "$attempt_root"/* ]] || { echo "plugin package requires copied source and output within the F05 attempt root" >&2; exit 1; }
   metadata_cargo=$DASOBJECTSTORE_F05_STAGED_CARGO
-  metadata_home=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-f05-metadata-home.XXXXXX")
-  trap 'rm -rf "$metadata_home"' EXIT HUP INT TERM
+  metadata_home="$attempt_root/metadata-home"
+  rm -rf "$metadata_home"
+  install -d "$metadata_home"
   cp "$repo_root/.cargo/f05-vendor-config.toml" "$metadata_home/config.toml"
-  metadata_environment=(env HOME="$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/staging-home" CARGO_HOME="$metadata_home" CARGO_NET_OFFLINE=true PATH="$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/network-denied-bin:$PATH")
+  metadata_environment=(env HOME="$attempt_root/home" CARGO_HOME="$metadata_home" CARGO_NET_OFFLINE=true PATH="$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/network-denied-bin:$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/toolchain/bin:/usr/bin:/bin")
 fi
 
 version=$("${metadata_environment[@]}" "$metadata_cargo" --offline --config "$repo_root/.cargo/f05-vendor-config.toml" metadata --locked --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "dasobjectstore-cli") | .version')
-[[ "$version" =~ ^0\.186\.1$ ]] || { echo "plugin package requires DASObjectStore 0.186.1" >&2; exit 1; }
+[[ "$version" =~ ^0\.186\.2$ ]] || { echo "plugin package requires DASObjectStore 0.186.2" >&2; exit 1; }
 source_revision="${DASOBJECTSTORE_SOURCE_REVISION:-$(git -C "$repo_root" rev-parse HEAD)}"
 source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" log -1 --format=%ct)}"
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ && "$source_epoch" =~ ^[0-9]+$ ]] || { echo "plugin package requires exact source inputs" >&2; exit 1; }
