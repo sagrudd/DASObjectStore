@@ -12,6 +12,7 @@ staged_rustc=''
 staged_trunk=''
 staged_wasm_target=''
 dist="${DASOBJECTSTORE_PREBUILT_WEB_DIST:-$web_root/dist}"
+attempt_root=${DASOBJECTSTORE_F05_ATTEMPT_ROOT:-}
 allow_fallback=0
 
 if [[ "${1:-}" == "--allow-fallback" ]]; then
@@ -39,6 +40,9 @@ validate_f05_staged_closure() {
   staged_closure_root="$(cd "$staged_closure_root" && pwd -P)"
   repo_root="$(cd "$repo_root" && pwd -P)"
   [[ "$repo_root" = "$staged_closure_root/source" ]] || staged_closure_error 'requires stage/source to be the repository root'
+  [[ "$attempt_root" = /* && -d "$attempt_root" && ! -L "$attempt_root" ]] || staged_closure_error 'requires an absolute, non-symlink F05 attempt root'
+  attempt_root="$(cd "$attempt_root" && pwd -P)"
+  [[ "$staged_closure_root" = "$attempt_root"/* && "$repo_root" = "$attempt_root"/* && "$web_root" = "$attempt_root"/* && "$dist" = "$attempt_root"/* ]] || staged_closure_error 'requires copied closure source and web output within the F05 attempt root'
   [[ -f "$staged_closure_root/f05-inputs.sha256" ]] || staged_closure_error 'requires f05-inputs.sha256'
   [[ -d "$repo_root/vendor" && -f "$repo_root/.cargo/f05-vendor-config.toml" ]] || staged_closure_error 'requires a staged vendor tree and vendor config'
   [[ -d "$staged_closure_root/staging-home" && -d "$staged_closure_root/network-denied-bin" ]] || staged_closure_error 'requires isolated staged HOME and network denial inputs'
@@ -125,10 +129,11 @@ ERROR
     cd "$web_root"
     if staged_closure_enabled; then
       local isolated_cargo_home
-      isolated_cargo_home=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-f05-cargo-home.XXXXXX")
-      trap 'rm -rf "$isolated_cargo_home"' EXIT HUP INT TERM
+      isolated_cargo_home="$attempt_root/cargo-home/web"
+      rm -rf "$isolated_cargo_home"
+      install -d "$isolated_cargo_home" "$attempt_root/home" "$attempt_root/target"
       cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
-      env -u NO_COLOR HOME="$staged_closure_root/staging-home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$staged_closure_root/target" PATH="$staged_closure_root/network-denied-bin:$PATH" RUSTC="$staged_rustc" "$staged_trunk" build --release >&2
+      env -u NO_COLOR HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" "$staged_trunk" build --release >&2
     else
       env -u NO_COLOR trunk build --release >&2
     fi

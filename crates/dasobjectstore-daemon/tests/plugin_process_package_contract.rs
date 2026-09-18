@@ -1,4 +1,6 @@
 const BUILD: &str = include_str!("../../../packaging/debian/build-plugin-process-deb.sh");
+const ATTEMPT: &str =
+    include_str!("../../../packaging/debian/run-plugin-process-package-attempt.sh");
 const VALIDATE: &str = include_str!("../../../packaging/debian/validate-plugin-process-package.sh");
 const PROVENANCE: &str = include_str!("../../../packaging/plugin-process-package-provenance.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
@@ -113,12 +115,112 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "rejects an ambient Prosopikon sibling",
         "does not accept a prebuilt web distribution",
         "does not permit the developer fallback",
+        "DASOBJECTSTORE_F05_ATTEMPT_ROOT",
+        "requires an absolute, non-symlink F05 attempt root",
     ] {
         assert!(
             PREPARE_WEB_DIST.contains(required),
             "missing staged closure contract: {required}"
         );
     }
+}
+
+#[test]
+fn external_attempt_harness_confines_writes_to_a_copied_closure() {
+    for required in [
+        "--sealed-root",
+        "--attempt-root",
+        "sealed closure must not contain symlinks",
+        "external attempt root must be empty",
+        "cp -a \"$sealed_root\" \"$copied_closure\"",
+        "chmod -R u+w \"$copied_closure\"",
+        "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
+        "terminal-status",
+        "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
+    ] {
+        assert!(
+            ATTEMPT.contains(required),
+            "missing external attempt harness contract: {required}"
+        );
+    }
+}
+
+#[test]
+fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status() {
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-plugin-process-attempt-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    fs::create_dir(&temp).expect("temporary harness root");
+    let sealed = staged_fixture(&temp);
+    let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
+    let attempt = temp.join("attempt");
+    fs::create_dir(&attempt).expect("create external attempt root");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .status()
+        .expect("run forced-failure package attempt");
+    assert!(
+        !status.success(),
+        "stub staged Cargo must force a real failure"
+    );
+    assert_eq!(
+        fs::read_to_string(attempt.join("terminal-status")).expect("read terminal status"),
+        format!("exit_code={}\n", status.code().expect("exit code")),
+        "attempt must retain the actual nonzero terminal status"
+    );
+    assert_eq!(
+        fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
+        manifest,
+        "attempt must not modify the sealed original"
+    );
+    assert!(
+        attempt.join("closure/source").is_dir(),
+        "attempt has a work copy"
+    );
+    assert!(
+        Command::new("shasum")
+            .args(["-a", "256", "-c", "f05-inputs.sha256"])
+            .current_dir(attempt.join("closure"))
+            .status()
+            .expect("verify copied manifest")
+            .success(),
+        "copied closure manifest must bind the copied vendor configuration"
+    );
+
+    let escape = temp.join("escape");
+    fs::create_dir(&escape).expect("create symlink escape target");
+    let symlink_attempt = temp.join("attempt-link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&escape, &symlink_attempt).expect("create attempt symlink");
+    let escaped = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&symlink_attempt)
+        .status()
+        .expect("run symlink escape attempt");
+    assert!(
+        !escaped.success(),
+        "harness must reject an attempt-root symlink"
+    );
+    assert!(
+        !escape.join("terminal-status").exists(),
+        "harness must not write through the symlink escape"
+    );
+    fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
 
 fn write(path: impl AsRef<Path>, contents: &str) {
@@ -253,7 +355,7 @@ fn staged_provenance(stage: &Path) -> std::process::ExitStatus {
     let source_script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/plugin-process-package-provenance.sh");
     Command::new("bash")
-        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.1 amd64 \"$2/web\" \"$2/server\"", "fixture"])
+        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.2 amd64 \"$2/web\" \"$2/server\"", "fixture"])
         .arg(source_script)
         .arg(stage)
         .env("DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT", stage)
