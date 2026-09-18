@@ -1,0 +1,12 @@
+{
+  "schema": "mnemosyne.plugin-process-descriptor/v1",
+  "productId": "dasobjectstore",
+  "hostProtocolMin": 1,
+  "hostProtocolMax": 1,
+  "upstreamUnixSocket": "/run/dasobjectstore/plugin-process.sock",
+  "healthPath": "/health",
+  "uiMount": "/products/dasobjectstore/",
+  "apiMount": "/products/dasobjectstore/api/",
+  "audience": "monas:dasobjectstore",
+  "version": "0.185.11"
+}

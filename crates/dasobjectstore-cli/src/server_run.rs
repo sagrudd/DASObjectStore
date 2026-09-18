@@ -15,11 +15,13 @@ use dasobjectstore_gui_api::{
 use std::fmt::{self, Display};
 use std::io::{self, Write};
 use std::net::SocketAddr;
+use std::os::unix::fs::FileTypeExt;
 use std::path::{Component, PathBuf};
 use std::sync::{Arc, OnceLock};
-use tokio::sync::Semaphore;
+use tokio::{net::UnixListener, sync::Semaphore};
 
 const STATIC_ASSET_READ_PERMITS: usize = 4;
+const PLUGIN_PROCESS_SOCKET_PATH: &str = "/run/dasobjectstore/plugin-process.sock";
 
 fn static_asset_read_permits() -> &'static Arc<Semaphore> {
     static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -82,13 +84,33 @@ async fn start_server(
         _ => None,
     };
     let primary_router = standalone_router_with_application_auth(
-        web_root,
+        web_root.clone(),
         config.authentication.clone(),
         !mtls_enabled,
-        public_s3_descriptor,
+        public_s3_descriptor.clone(),
         Some(config.public_base_url.clone()),
         s3_tls_certificate_path,
     );
+    let plugin_process_router = plugin_process_router(
+        web_root,
+        config.authentication.clone(),
+        public_s3_descriptor,
+        Some(config.public_base_url.clone()),
+        config.tls.certificate_path.clone(),
+    );
+    let plugin_process_listener = bind_plugin_process_listener()?;
+    writeln!(
+        writer,
+        "dasobjectstore-server plugin-process listener on {}",
+        PLUGIN_PROCESS_SOCKET_PATH
+    )?;
+    let plugin_process = async move {
+        axum::serve(
+            plugin_process_listener,
+            plugin_process_router.into_make_service(),
+        )
+        .await
+    };
     let direct_s3 = async move {
         if s3_ingress.binds_listener() {
             let address = s3_ingress.socket_addr().map_err(io::Error::other)?;
@@ -112,13 +134,34 @@ async fn start_server(
             application_mtls_router()
                 .into_make_service_with_connect_info::<MtlsApplicationConnectInfo>(),
         );
-        tokio::try_join!(primary, applications, direct_s3)?;
+        tokio::try_join!(primary, applications, direct_s3, plugin_process)?;
     } else {
         let primary =
             axum_server::bind_rustls(socket_addr, tls).serve(primary_router.into_make_service());
-        tokio::try_join!(primary, direct_s3)?;
+        tokio::try_join!(primary, direct_s3, plugin_process)?;
     }
     Ok(())
+}
+
+/// Bind the process-plugin surface on its own fixed socket.
+///
+/// This socket is deliberately distinct from the daemon control endpoint. It
+/// carries only the existing Web UI/API HTTP router for the Monas process
+/// adapter; it is not a daemon command transport.
+fn bind_plugin_process_listener() -> io::Result<UnixListener> {
+    let socket_path = std::path::Path::new(PLUGIN_PROCESS_SOCKET_PATH);
+    match std::fs::symlink_metadata(socket_path) {
+        Ok(metadata) if metadata.file_type().is_socket() => std::fs::remove_file(socket_path)?,
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "plugin-process socket path exists and is not a socket",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    UnixListener::bind(socket_path)
 }
 
 /// Serve packaged direct S3 ingress through the appliance-owned TLS boundary.
@@ -198,6 +241,43 @@ fn standalone_router_with_application_auth(
         )
         .merge(root_api)
         .nest("/products/dasobjectstore", product_api)
+}
+
+/// Existing DAS UI/API routes exposed with paths relative to the descriptor
+/// mounts. Monas removes the public `/products/dasobjectstore` prefix before
+/// forwarding to this listener, so the UI is rooted at `/` and API remains at
+/// `/api/v1/...`. The final authenticated host-context handoff is intentionally
+/// not implemented by this packaging bridge.
+fn plugin_process_router(
+    web_root: PathBuf,
+    authentication: StandaloneAuthenticationConfig,
+    s3_descriptor: Option<StandaloneS3ConnectionDescriptor>,
+    public_base_url: Option<String>,
+    s3_tls_certificate_path: PathBuf,
+) -> Router {
+    let index_root = web_root.clone();
+    let asset_root = web_root;
+    let host_mode = authentication.gui_api_host_mode();
+    let api = gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate(
+        host_mode,
+        false,
+        s3_descriptor,
+        public_base_url,
+        s3_tls_certificate_path,
+    );
+    Router::new()
+        .route("/health", get(|| async { StatusCode::OK }))
+        .route(
+            "/",
+            get(move || serve_asset(index_root.join("index.html"), "text/html; charset=utf-8")),
+        )
+        .route(
+            "/{*asset}",
+            get(move |AxumPath(asset): AxumPath<String>| {
+                serve_named_asset(asset_root.clone(), asset)
+            }),
+        )
+        .merge(api)
 }
 
 async fn root_redirect() -> Redirect {
@@ -418,11 +498,19 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use clap::Parser;
+    use dasobjectstore_gui_api::StandaloneAuthenticationAuthority;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tower::ServiceExt;
+
+    fn direct_standalone_authentication() -> super::StandaloneAuthenticationConfig {
+        super::StandaloneAuthenticationConfig {
+            authority: StandaloneAuthenticationAuthority::LocalUser,
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
     async fn emits_pretty_check_config() {
@@ -502,7 +590,7 @@ mod tests {
         write_web_asset(&root, "dasobjectstore-gui-web-abcdef_bg.wasm", "wasm");
         write_web_asset(&root, "styles-abcdef.css", "body{}");
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/")
@@ -515,7 +603,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/dasobjectstore-gui-web-abcdef.js")
@@ -531,7 +619,7 @@ mod tests {
             "public, max-age=31536000, immutable"
         );
 
-        let response = standalone_router(root.clone(), Default::default())
+        let response = standalone_router(root.clone(), direct_standalone_authentication())
             .oneshot(
                 Request::builder()
                     .uri("/products/dasobjectstore/api/v1/health")
@@ -559,7 +647,7 @@ mod tests {
 
         let isolated = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             false,
             None,
             None,
@@ -574,7 +662,7 @@ mod tests {
 
         let compatible = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             true,
             None,
             None,
@@ -594,7 +682,7 @@ mod tests {
         let root = temp_root("server-run-public-base");
         let response = standalone_router_with_application_auth(
             root.clone(),
-            Default::default(),
+            direct_standalone_authentication(),
             true,
             None,
             Some("https://192.0.2.10:8448".to_string()),

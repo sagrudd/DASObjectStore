@@ -27,6 +27,7 @@ managed_storage_manifest="$repo_root/packaging/linux/etc/dasobjectstore/managed-
 s3_gateway_config="$repo_root/packaging/linux/etc/dasobjectstore/s3-gateway.json"
 workspace_host_config="$repo_root/packaging/linux/etc/dasobjectstore/workspace-host.json"
 web_config="$repo_root/packaging/linux/opt/dasobjectstore/config.json"
+plugin_process_descriptor="$repo_root/packaging/linux/opt/dasobjectstore/plugin-process-descriptor.json"
 reporting_wrapper="$repo_root/packaging/reporting/gnostikon-workflow-control"
 postinst="$repo_root/packaging/debian/postinst"
 prerm="$repo_root/packaging/debian/prerm"
@@ -121,6 +122,7 @@ require_file "$managed_storage_manifest"
 require_file "$s3_gateway_config"
 require_file "$workspace_host_config"
 require_file "$web_config"
+require_file "$plugin_process_descriptor"
 require_file "$reporting_wrapper"
 require_file "$postinst"
 require_file "$prerm"
@@ -368,6 +370,13 @@ require_text "$tmpfiles" "d /var/lib/dasobjectstore/report-rebuild 0750 dasobjec
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/telemetry 0750 dasobjectstore dasobjectstore -"
 require_text "$web_config" "\"bind_address\": \"0.0.0.0\""
 require_text "$web_config" "\"https_port\": 8448"
+require_text "$plugin_process_descriptor" '"schema": "mnemosyne.plugin-process-descriptor/v1"'
+require_text "$plugin_process_descriptor" '"productId": "dasobjectstore"'
+require_text "$plugin_process_descriptor" '"upstreamUnixSocket": "/run/dasobjectstore/plugin-process.sock"'
+require_text "$plugin_process_descriptor" '"healthPath": "/health"'
+require_text "$plugin_process_descriptor" '"uiMount": "/products/dasobjectstore/"'
+require_text "$plugin_process_descriptor" '"apiMount": "/products/dasobjectstore/api/"'
+require_text "$plugin_process_descriptor" '"audience": "monas:dasobjectstore"'
 require_text "$daemon_config" "\"socket_path\": \"/run/dasobjectstore/dasobjectstored.sock\""
 require_text "$daemon_config" "\"telemetry\": {"
 require_text "$daemon_config" "\"cadence_seconds\": 30"
