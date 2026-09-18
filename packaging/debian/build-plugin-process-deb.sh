@@ -27,8 +27,19 @@ file -b "$server" | grep -Eq 'ELF 64-bit.*x86-64' || { echo "plugin package requ
 command -v dpkg-deb >/dev/null || { echo "dpkg-deb is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
-version=$(cargo metadata --locked --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "dasobjectstore-cli") | .version')
-[[ "$version" =~ ^0\.186\.0$ ]] || { echo "plugin package requires DASObjectStore 0.186.0" >&2; exit 1; }
+metadata_cargo=cargo
+metadata_environment=()
+if das_plugin_process_f05_staged_closure_enabled; then
+  das_plugin_process_f05_require_staged_closure "$repo_root"
+  metadata_cargo=$DASOBJECTSTORE_F05_STAGED_CARGO
+  metadata_home=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-f05-metadata-home.XXXXXX")
+  trap 'rm -rf "$metadata_home"' EXIT HUP INT TERM
+  cp "$repo_root/.cargo/f05-vendor-config.toml" "$metadata_home/config.toml"
+  metadata_environment=(env HOME="$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/staging-home" CARGO_HOME="$metadata_home" CARGO_NET_OFFLINE=true PATH="$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/network-denied-bin:$PATH")
+fi
+
+version=$("${metadata_environment[@]}" "$metadata_cargo" --offline --config "$repo_root/.cargo/f05-vendor-config.toml" metadata --locked --no-deps --format-version 1 --manifest-path "$repo_root/Cargo.toml" | jq -r '.packages[] | select(.name == "dasobjectstore-cli") | .version')
+[[ "$version" =~ ^0\.186\.1$ ]] || { echo "plugin package requires DASObjectStore 0.186.1" >&2; exit 1; }
 source_revision="${DASOBJECTSTORE_SOURCE_REVISION:-$(git -C "$repo_root" rev-parse HEAD)}"
 source_epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo_root" log -1 --format=%ct)}"
 [[ "$source_revision" =~ ^[0-9a-f]{40}$ && "$source_epoch" =~ ^[0-9]+$ ]] || { echo "plugin package requires exact source inputs" >&2; exit 1; }
