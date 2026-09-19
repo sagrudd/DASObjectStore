@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.186.20 - Unreleased
+
+- Stage, bind and use all four exact locked Git dependency checkouts in the
+  offline plugin-process closure. The source-only runner now rejects missing,
+  substituted or symlinked Git cache inputs before locked offline resolution;
+  it does not establish package, installation or deployment acceptance.
+
 ## 0.186.19 - Unreleased
 
 - Make ``dasobjectstore-remote upload --dry-run`` render its validated plan

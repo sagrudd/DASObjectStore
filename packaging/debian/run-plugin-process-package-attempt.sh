@@ -5,6 +5,7 @@ usage() {
   echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY [--stage-cache-root LEASED_STAGE_CACHE_DIRECTORY] [--preflight-only]" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-toolchain-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-git-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   exit 2
 }
 
@@ -16,6 +17,8 @@ preflight_only=0
 stage_closure_config=0
 stage_closure_toolchain_inputs=0
 toolchain_input_root=''
+stage_closure_git_inputs=0
+git_input_root=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -25,14 +28,17 @@ while [[ $# -gt 0 ]]; do
     --preflight-only) preflight_only=1; shift ;;
     --stage-closure-config) stage_closure_config=1; shift ;;
     --stage-closure-toolchain-inputs) stage_closure_toolchain_inputs=1; toolchain_input_root=${2-}; shift 2 ;;
+    --stage-closure-git-inputs) stage_closure_git_inputs=1; git_input_root=${2-}; shift 2 ;;
     *) usage ;;
   esac
 done
-(( stage_closure_config + stage_closure_toolchain_inputs <= 1 )) || usage
+(( stage_closure_config + stage_closure_toolchain_inputs + stage_closure_git_inputs <= 1 )) || usage
 if [[ "$stage_closure_config" -eq 1 ]]; then
   [[ -n "$sealed_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 elif [[ "$stage_closure_toolchain_inputs" -eq 1 ]]; then
   [[ -n "$sealed_root" && -n "$toolchain_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
+elif [[ "$stage_closure_git_inputs" -eq 1 ]]; then
+  [[ -n "$sealed_root" && -n "$git_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 else
   [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 fi
@@ -80,14 +86,38 @@ hash_jobs=${DASOBJECTSTORE_F05_HASH_JOBS:-4}
 [[ "$hash_jobs" =~ ^[1-9][0-9]*$ && "$hash_jobs" -le 16 ]] || die 'requires DASOBJECTSTORE_F05_HASH_JOBS between 1 and 16'
 
 sha256_file() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+sha256_stream() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    shasum -a 256 | awk '{print $1}'
+  fi
+}
+
+verify_sha256_manifest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$1"
+  else
+    shasum -a 256 -c "$1"
+  fi
 }
 
 sha256_tree() {
   local root=$1
   (
     cd "$root"
-    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r shasum -a 256 | shasum -a 256 | awk '{print $1}'
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r /usr/bin/bash -c '
+      for input; do
+        if command -v sha256sum >/dev/null 2>&1; then sha256sum "$input"; else shasum -a 256 "$input"; fi
+      done
+    ' bash | sha256_stream
   )
 }
 
@@ -98,7 +128,8 @@ write_batched_manifest() {
     find . -type f ! -name f05-inputs.sha256 ! -name f05-inputs.sha256.next -print0 | LC_ALL=C sort -z |
       xargs -0 -r -n 128 -P "$hash_jobs" /usr/bin/bash -c '
         for input; do
-          printf "%s  %s\\n" "$(shasum -a 256 "$input" | cut -d " " -f1)" "${input#./}"
+          if command -v sha256sum >/dev/null 2>&1; then digest=$(sha256sum "$input" | cut -d " " -f1); else digest=$(shasum -a 256 "$input" | cut -d " " -f1); fi
+          printf "%s  %s\\n" "$digest" "${input#./}"
         done
       ' bash | LC_ALL=C sort -k2 > "$temporary"
   )
@@ -143,7 +174,7 @@ produce_closure_vendor_config() {
   [[ -f "$config" && ! -L "$config" ]] || die 'closure stage failed to create a physical vendor config'
   grep -Fx "directory = \"$vendor\"" "$config" >/dev/null || die 'closure stage generated vendor config does not bind the physical staged vendor tree'
   write_batched_manifest "$sealed_root"
-  (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'closure stage manifest does not bind generated inputs'
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'closure stage manifest does not bind generated inputs'
   printf 'closure_stage_vendor_config=PASS generator_runner_sha256=%s config_sha256=%s vendor=%s\n' "$generator_sha" "$(sha256_file "$config")" "$vendor"
 }
 
@@ -220,7 +251,7 @@ produce_closure_toolchain_inputs() {
   [[ -d "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown" ]] || die 'toolchain input stage requires the wasm32 target'
   [[ -n "$(find "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -print -quit)" ]] || die 'toolchain input stage requires a non-empty wasm32 target'
   [[ -d "$toolchain_input_root/network-denied-bin" && -d "$toolchain_input_root/staging-home" ]] || die 'toolchain input stage requires network denial and staging home inputs'
-  (cd "$toolchain_input_root" && shasum -a 256 -c tool-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage rejects altered input bytes'
+  (cd "$toolchain_input_root" && verify_sha256_manifest tool-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage rejects altered input bytes'
   [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/cargo")" = "$(tool_inventory_value "$input_inventory" cargo sha256)" ]] || die 'toolchain input stage rejects a substituted cargo input'
   [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/rustc")" = "$(tool_inventory_value "$input_inventory" rustc sha256)" ]] || die 'toolchain input stage rejects a substituted rustc input'
   [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/trunk")" = "$(tool_inventory_value "$input_inventory" trunk sha256)" ]] || die 'toolchain input stage rejects a substituted trunk input'
@@ -270,12 +301,53 @@ produce_closure_toolchain_inputs() {
     "$input_revision" "$candidate_version" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" "$prior_inventory_sha" > "$temporary"
   mv "$temporary" "$receipt"
   write_batched_manifest "$sealed_root"
-  (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'
   printf 'closure_stage_toolchain_inputs=PASS inventory_sha256=%s tool_input_manifest_sha256=%s\n' "$input_inventory_sha" "$input_manifest_sha"
 }
 
+produce_closure_git_inputs() {
+  local manifest inventory admission cargo_home receipt source lock input_manifest_sha inventory_sha admitted_inventory_sha checkout db name url revision checkout_rel db_rel
+  manifest="$git_input_root/git-inputs.sha256"
+  inventory="$git_input_root/git-inputs.toml"
+  admission="$sealed_root/inputs/git-input-admission-receipt.toml"
+  cargo_home="$git_input_root/cargo-home"
+  source="$sealed_root/source"
+  lock="$source/Cargo.lock"
+  [[ -z "$(find "$git_input_root" -type l -print -quit)" && -z "$(find "$git_input_root" -perm /0222 -print -quit)" ]] || die 'git input stage requires immutable physical non-symlink inputs'
+  [[ -f "$manifest" && -f "$inventory" && -f "$admission" && ! -L "$admission" && -d "$cargo_home" && -f "$cargo_home/config.toml" ]] || die 'git input stage requires an offline Cargo cache, reviewed inventory, admission receipt, and manifest'
+  (cd "$git_input_root" && verify_sha256_manifest git-inputs.sha256) >/dev/null 2>&1 || die 'git input stage rejects altered input bytes'
+  inventory_sha=$(sha256_file "$inventory")
+  admitted_inventory_sha=$(tool_input_toml_value "$admission" git_input_inventory_sha256)
+  [[ "$admitted_inventory_sha" = "$inventory_sha" && "$inventory_sha" =~ ^[0-9a-f]{64}$ ]] || die 'git input stage rejects an inventory not bound by the admission receipt'
+  grep -Fx '[net]' "$cargo_home/config.toml" >/dev/null && grep -Fx 'offline = true' "$cargo_home/config.toml" >/dev/null || die 'git input stage requires an offline Cargo cache config'
+  [[ ! -e "$sealed_root/cargo-home" && ! -e "$sealed_root/inputs/git-input-receipt.toml" ]] || die 'git input stage refuses to overwrite closure Git inputs'
+  while IFS='|' read -r name url revision checkout_rel db_rel; do
+    [[ -n "$name" ]] || continue
+    grep -Fx "${name}_url = \"$url\"" "$inventory" >/dev/null && grep -Fx "${name}_revision = \"$revision\"" "$inventory" >/dev/null || die "git input stage rejects a mismatched $name inventory binding"
+    grep -Fq "git+$url?rev=$revision#$revision" "$lock" || die "git input stage requires the locked $name source"
+    checkout="$cargo_home/$checkout_rel"; db="$cargo_home/$db_rel"
+    [[ -d "$checkout" && -d "$db" && ! -L "$checkout" && ! -L "$db" ]] || die "git input stage requires physical $name checkout and cache"
+    [[ "$(git -c safe.directory="$checkout" -C "$checkout" rev-parse HEAD)" = "$revision" ]] || die "git input stage rejects a mismatched $name revision"
+    grep -Fx "${name}_checkout_tree_sha256 = \"$(sha256_tree "$checkout")\"" "$inventory" >/dev/null || die "git input stage rejects a substituted $name checkout"
+    grep -Fx "${name}_db_tree_sha256 = \"$(sha256_tree "$db")\"" "$inventory" >/dev/null || die "git input stage rejects a substituted $name cache"
+  done <<'SOURCES'
+pistis|https://github.com/sagrudd/pistis.git|14e481497d3838d3310df3b0a21232f5d01d6f9f|git/checkouts/pistis-13d5c72a63ff6278/14e4814|git/db/pistis-13d5c72a63ff6278
+prosopikon|https://github.com/sagrudd/prosopikon.git|f09749273ef382c1b42bf04a77d96189dd7361b3|git/checkouts/prosopikon-739f7520363f0e4d/f097492|git/db/prosopikon-739f7520363f0e4d
+proxenos|https://github.com/sagrudd/proxenos.git|d4c3054fb7d88c9f718d2987ec19bf7bc444d391|git/checkouts/proxenos-10a0a1d74c5551fd/d4c3054|git/db/proxenos-10a0a1d74c5551fd
+thesaurophylax|https://github.com/sagrudd/thesaurophylax.git|0bfb16857d135d2830de2cf53d245b68ed2d051f|git/checkouts/thesaurophylax-08d7bd2129966817/0bfb168|git/db/thesaurophylax-08d7bd2129966817
+SOURCES
+  cp -a "$cargo_home" "$sealed_root/cargo-home"
+  [[ -z "$(find "$sealed_root/cargo-home" -type l -print -quit)" ]] || die 'git input stage copied a symlinked Cargo cache'
+  input_manifest_sha=$(sha256_file "$manifest")
+  receipt="$sealed_root/inputs/git-input-receipt.toml"
+  printf 'git_input_manifest_sha256 = "%s"\ngit_input_inventory_sha256 = "%s"\n' "$input_manifest_sha" "$inventory_sha" > "$receipt"
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'git input stage manifest does not bind copied Cargo cache'
+  printf 'closure_stage_git_inputs=PASS git_input_manifest_sha256=%s\n' "$input_manifest_sha"
+}
+
 reject_symlink_ancestry "$sealed_root" 'sealed closure root'
-if [[ "$stage_closure_config" -eq 0 && "$stage_closure_toolchain_inputs" -eq 0 ]]; then
+if [[ "$stage_closure_config" -eq 0 && "$stage_closure_toolchain_inputs" -eq 0 && "$stage_closure_git_inputs" -eq 0 ]]; then
   reject_symlink_ancestry "$attempt_root" 'external attempt root'
   reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
 fi
@@ -291,6 +363,12 @@ if [[ "$stage_closure_toolchain_inputs" -eq 1 ]]; then
   reject_symlink_ancestry "$toolchain_input_root" 'toolchain input root'
   toolchain_input_root=$(canonical_directory "$toolchain_input_root" 'toolchain input root')
   produce_closure_toolchain_inputs
+  exit 0
+fi
+if [[ "$stage_closure_git_inputs" -eq 1 ]]; then
+  reject_symlink_ancestry "$git_input_root" 'git input root'
+  git_input_root=$(canonical_directory "$git_input_root" 'git input root')
+  produce_closure_git_inputs
   exit 0
 fi
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')
@@ -343,7 +421,7 @@ sealed_status=0
 finish() {
   local status=$?
   set +e
-  (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || sealed_status=1
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || sealed_status=1
   if [[ "$sealed_status" -ne 0 && "$status" -eq 0 ]]; then
     status=1
   fi
@@ -353,7 +431,7 @@ finish() {
 }
 trap finish EXIT HUP INT TERM
 
-(cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'sealed closure has a missing or altered input'
+(cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'sealed closure has a missing or altered input'
 
 copy_stage_to_attempt() {
   local stage=$1
@@ -371,8 +449,8 @@ if [[ -n "$stage_cache_root" ]]; then
   sealed_manifest_sha256=$(sha256_file "$sealed_root/f05-inputs.sha256")
   runner_sha256=$(sha256_file "$0")
   cache_config="$stage_cache_root/current/source/.cargo/f05-vendor-config.toml"
-  copied_config_sha256=$(sed -E 's|^directory = ".*"$|directory = "/mnt/current/source/vendor"|' "$sealed_root/source/.cargo/f05-vendor-config.toml" | shasum -a 256 | awk '{print $1}')
-  stage_cache_key=$(printf '%s\n%s\n%s\n' "$sealed_manifest_sha256" "$runner_sha256" "$copied_config_sha256" | shasum -a 256 | awk '{print $1}')
+  copied_config_sha256=$(sed -E 's|^directory = ".*"$|directory = "/mnt/current/source/vendor"|' "$sealed_root/source/.cargo/f05-vendor-config.toml" | sha256_stream)
+  stage_cache_key=$(printf '%s\n%s\n%s\n' "$sealed_manifest_sha256" "$runner_sha256" "$copied_config_sha256" | sha256_stream)
   cache_stage="$stage_cache_root/current"
   cache_receipt="$stage_cache_root/stage-reuse-receipt"
   expected_receipt=$(printf 'lease_key=%s\nsealed_manifest_sha256=%s\nrunner_sha256=%s\ncopied_config_sha256=%s\n' "$stage_cache_key" "$sealed_manifest_sha256" "$runner_sha256" "$copied_config_sha256")
@@ -385,7 +463,7 @@ if [[ -n "$stage_cache_root" ]]; then
     cmp -s <(printf '%s' "$expected_receipt") "$cache_receipt" || die 'leased stage cache receipt does not bind this manifest, runner, and copied config'
     [[ -f "$cache_config" && ! -L "$cache_config" ]] || die 'leased stage cache requires a physical copied vendor config'
     [[ "$(sha256_file "$cache_config")" = "$copied_config_sha256" ]] || die 'leased stage cache copied vendor config does not match its receipt'
-    (cd "$cache_stage" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'leased stage cache has a missing or altered input'
+    (cd "$cache_stage" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'leased stage cache has a missing or altered input'
     record_diagnostic "stage_cache_reuse=PASS key=$stage_cache_key"
     copy_stage_to_attempt "$cache_stage"
   else
@@ -420,43 +498,55 @@ copied_source="$copied_closure/source"
 copied_manifest="$copied_source/Cargo.toml"
 copied_lock="$copied_source/Cargo.lock"
 copied_config="$copied_source/.cargo/f05-vendor-config.toml"
+copied_cargo_home="$copied_closure/cargo-home"
 for copied_input in "$copied_manifest" "$copied_lock" "$copied_config"; do
   [[ -f "$copied_input" && ! -L "$copied_input" ]] || die "copied closure requires a physical non-symlink $(basename "$copied_input")"
 done
+[[ -d "$copied_cargo_home" && ! -L "$copied_cargo_home" && -f "$copied_cargo_home/config.toml" && ! -L "$copied_cargo_home/config.toml" ]] || die 'copied closure requires a physical staged offline Cargo cache'
+grep -Fx '[net]' "$copied_cargo_home/config.toml" >/dev/null && grep -Fx 'offline = true' "$copied_cargo_home/config.toml" >/dev/null || die 'copied closure requires an offline staged Cargo cache config'
 # The cache config is deliberately bound to /mnt/current so the immutable
 # cache has a stable receipt.  Derive a new config only in this writable
 # attempt copy before the preparer sees it; never rewrite the cached bytes.
 sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
 mv "$copied_config.next" "$copied_config"
-write_batched_manifest "$copied_closure"
-
-if [[ "$preflight_only" -eq 1 ]]; then
-  # This is the identical copied-vendor binding required by
-  # prepare-web-dist.sh before it can invoke Trunk.  Keep it on the
-  # preflight side of every build, web-preparation, and package command.
-  grep -Fx "directory = \"$copied_source/vendor\"" "$copied_config" >/dev/null || die 'preflight requires a vendor config bound to the copied staged source'
-  (cd "$copied_closure" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'preflight copied closure has a missing or altered input'
-  [[ -z "$(find "$stage_cache_root" -perm /0222 -print -quit)" ]] || die 'preflight leased stage cache must remain immutable'
-  record_diagnostic "preflight_only=PASS copied_vendor=$copied_source/vendor"
-  exit 0
+if [[ ! -x "$copied_closure/network-denied-bin/shasum" ]]; then
+  cat > "$copied_closure/network-denied-bin/shasum" <<'SHASUM'
+#!/bin/sh
+set -eu
+if [ "${1-}" = -a ] && [ "${2-}" = 256 ]; then shift 2; fi
+exec /usr/bin/sha256sum "$@"
+SHASUM
+  chmod 0755 "$copied_closure/network-denied-bin/shasum"
 fi
+[[ -f "$copied_closure/network-denied-bin/shasum" && ! -L "$copied_closure/network-denied-bin/shasum" ]] || die 'copied closure requires a physical SHA-256 compatibility command'
+write_batched_manifest "$copied_closure"
 
 server="$attempt_root/target/release/dasobjectstore-server"
 web_dist="$copied_source/crates/dasobjectstore-gui-web/dist"
 output_dir="$attempt_root/output"
-install -d -m 0755 "$attempt_root/home" "$attempt_root/cargo-home/server" "$attempt_root/target" "$attempt_root/tmp" "$output_dir"
-
+install -d -m 0755 "$attempt_root/home" "$attempt_root/tmp"
 export DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT="$copied_closure"
 export DASOBJECTSTORE_F05_ATTEMPT_ROOT="$attempt_root"
 export HOME="$attempt_root/home"
-export CARGO_HOME="$attempt_root/cargo-home/server"
+export CARGO_HOME="$copied_cargo_home"
 export CARGO_NET_OFFLINE=true
 export CARGO_TARGET_DIR="$attempt_root/target"
 export TMPDIR="$attempt_root/tmp"
 export RUSTC="$copied_closure/toolchain/bin/rustc"
 export PATH="$copied_closure/network-denied-bin:$copied_closure/toolchain/bin:/usr/bin:/bin"
 
-cp "$copied_source/.cargo/f05-vendor-config.toml" "$CARGO_HOME/config.toml"
+if [[ "$preflight_only" -eq 1 ]]; then
+  # This is the identical copied-vendor binding required by
+  # prepare-web-dist.sh before it can invoke Trunk.  Keep it on the
+  # preflight side of every build, web-preparation, and package command.
+  grep -Fx "directory = \"$copied_source/vendor\"" "$copied_config" >/dev/null || die 'preflight requires a vendor config bound to the copied staged source'
+  (cd "$copied_closure" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'preflight copied closure has a missing or altered input'
+  [[ -z "$(find "$stage_cache_root" -perm /0222 -print -quit)" ]] || die 'preflight leased stage cache must remain immutable'
+  (cd "$copied_source" && "$copied_closure/toolchain/bin/cargo" build --dry-run --manifest-path "$copied_manifest" --offline --config "$copied_config" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server)
+  record_diagnostic "preflight_only=PASS offline_locked_resolution=PASS copied_vendor=$copied_source/vendor"
+  exit 0
+fi
+install -d -m 0755 "$attempt_root/target" "$output_dir"
 (
   cd "$copied_source"
   "$copied_closure/toolchain/bin/cargo" build --manifest-path "$copied_manifest" --offline --config "$copied_config" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
