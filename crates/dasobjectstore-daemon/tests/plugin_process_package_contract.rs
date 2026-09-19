@@ -251,7 +251,7 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
 #[test]
 fn package_attempt_requires_real_network_namespace_isolation() {
     for required in [
-        "/usr/bin/bwrap --unshare-net --ro-bind / / --bind \"$attempt_root\" \"$attempt_root\" --proc /proc --dev /dev",
+        "/usr/bin/bwrap --unshare-net --ro-bind / / --bind \"$attempt_root\" \"$attempt_root\" --bind \"$diagnostic_root\" \"$diagnostic_root\" --proc /proc --dev /dev",
         "requires /usr/bin/bwrap network isolation",
         "requires loopback-only network interfaces",
         "requires empty IPv4 routes",
@@ -268,11 +268,18 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
     for required in [
         "--sealed-root",
         "--attempt-root",
+        "--diagnostic-root",
         "reject_symlink_ancestry \"$sealed_root\" 'sealed closure root'",
         "reject_symlink_ancestry \"$attempt_root\" 'external attempt root'",
+        "reject_symlink_ancestry \"$diagnostic_root\" 'external diagnostic root'",
         "must not pass through a symlink",
         "sealed closure must not contain symlinks",
         "external attempt root must be empty",
+        "external diagnostic root must be empty",
+        "external diagnostic root and external attempt root must not overlap",
+        "preflight.log",
+        "attempt_root_empty=PASS",
+        "preflight_failure=$*",
         "cp -a \"$sealed_root\" \"$copied_closure\"",
         "chmod -R u+w \"$copied_closure\"",
         "copied_manifest=\"$copied_source/Cargo.toml\"",
@@ -280,7 +287,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "copied closure requires a physical non-symlink",
         "build --manifest-path \"$copied_manifest\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
-        "terminal-status",
+        "diagnostic_status=\"$diagnostic_root/terminal-status\"",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
     ] {
         assert!(
@@ -320,6 +327,8 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
     let attempt = temp.join("attempt");
     fs::create_dir(&attempt).expect("create external attempt root");
+    let diagnostic = temp.join("diagnostic");
+    fs::create_dir(&diagnostic).expect("create external diagnostic root");
     let non_workspace_cwd = temp.join("outside-workspace");
     fs::create_dir(&non_workspace_cwd).expect("create non-workspace cwd");
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -331,6 +340,8 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         .arg(&sealed)
         .args(["--attempt-root"])
         .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
         .current_dir(&non_workspace_cwd)
         .status()
         .expect("run forced-failure package attempt");
@@ -358,7 +369,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "Cargo must receive the build subcommand before its manifest argument"
     );
     assert_eq!(
-        fs::read_to_string(attempt.join("terminal-status")).expect("read terminal status"),
+        fs::read_to_string(diagnostic.join("terminal-status")).expect("read terminal status"),
         format!("exit_code={}\n", status.code().expect("exit code")),
         "attempt must retain the actual nonzero terminal status"
     );
@@ -370,6 +381,16 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     assert!(
         attempt.join("closure/source").is_dir(),
         "attempt has a work copy"
+    );
+    assert!(
+        fs::read_to_string(diagnostic.join("preflight.log"))
+            .expect("read external preflight log")
+            .contains("attempt_root_empty=PASS"),
+        "diagnostics must prove the attempt root was empty at runner entry"
+    );
+    assert!(
+        !attempt.join("preflight.log").exists() && !attempt.join("terminal-status").exists(),
+        "diagnostics must remain outside the supplied attempt root"
     );
     assert!(
         Command::new("shasum")
@@ -384,6 +405,8 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let escape = temp.join("escape");
     fs::create_dir(&escape).expect("create symlink escape target");
     let symlink_attempt = temp.join("attempt-link");
+    let symlink_diagnostic = temp.join("symlink-diagnostic");
+    fs::create_dir(&symlink_diagnostic).expect("create symlink diagnostic root");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&escape, &symlink_attempt).expect("create attempt symlink");
     let escaped = Command::new("bash")
@@ -392,6 +415,8 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         .arg(&sealed)
         .args(["--attempt-root"])
         .arg(&symlink_attempt)
+        .args(["--diagnostic-root"])
+        .arg(&symlink_diagnostic)
         .status()
         .expect("run symlink escape attempt");
     assert!(
@@ -410,12 +435,16 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     std::os::unix::fs::symlink(&symlink_parent_target, &symlink_parent)
         .expect("create symlinked attempt parent");
     let attempt_below_symlink = symlink_parent.join("attempt");
+    let parent_diagnostic = temp.join("parent-diagnostic");
+    fs::create_dir(&parent_diagnostic).expect("create parent diagnostic root");
     let ancestry_rejected = Command::new("bash")
         .arg(&script)
         .args(["--sealed-root"])
         .arg(&sealed)
         .args(["--attempt-root"])
         .arg(&attempt_below_symlink)
+        .args(["--diagnostic-root"])
+        .arg(&parent_diagnostic)
         .status()
         .expect("run symlink-parent attempt");
     assert!(
@@ -425,6 +454,39 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     assert!(
         !symlink_parent_target.join("attempt").exists(),
         "harness must not create a closure or terminal status through a symlinked parent"
+    );
+
+    let nonempty_attempt = temp.join("nonempty-attempt");
+    fs::create_dir(&nonempty_attempt).expect("create nonempty attempt root");
+    write(
+        nonempty_attempt.join("launcher.log"),
+        "external diagnostic\n",
+    );
+    let preflight_diagnostic = temp.join("preflight-diagnostic");
+    fs::create_dir(&preflight_diagnostic).expect("create preflight diagnostic root");
+    let preflight_rejected = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&nonempty_attempt)
+        .args(["--diagnostic-root"])
+        .arg(&preflight_diagnostic)
+        .status()
+        .expect("run nonempty attempt-root rejection");
+    assert!(
+        !preflight_rejected.success(),
+        "harness must reject a nonempty attempt root before Bubblewrap"
+    );
+    assert!(
+        fs::read_to_string(preflight_diagnostic.join("preflight.log"))
+            .expect("read external preflight failure")
+            .contains("preflight_failure=external attempt root must be empty"),
+        "preflight failure must be retained outside the rejected attempt root"
+    );
+    assert!(
+        !nonempty_attempt.join("terminal-status").exists(),
+        "runner must not write a status into the rejected attempt root"
     );
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
