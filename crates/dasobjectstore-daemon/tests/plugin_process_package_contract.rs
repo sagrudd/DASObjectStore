@@ -4,6 +4,7 @@ const ATTEMPT: &str =
 const VALIDATE: &str = include_str!("../../../packaging/debian/validate-plugin-process-package.sh");
 const PROVENANCE: &str = include_str!("../../../packaging/plugin-process-package-provenance.sh");
 const PREPARE_WEB_DIST: &str = include_str!("../../../packaging/web/prepare-web-dist.sh");
+const PROMOTE: &str = include_str!("../../../packaging/debian/promote-plugin-process-package.sh");
 
 use std::{
     fs,
@@ -1111,6 +1112,232 @@ fn real_staged_trunk_uses_hydrated_xdg_cache_without_a_downloader() {
         "real staged Trunk fixture must leave the sealed source closure immutable"
     );
     fs::remove_dir_all(temp).expect("remove external real Trunk fixture root");
+}
+
+#[test]
+fn plugin_process_promotion_is_same_artifact_fail_closed_and_never_builds() {
+    for required in [
+        "mnemosyne.dasobjectstore.plugin-process-package-provenance.v1",
+        "promotion-receipt.json",
+        "source DEB changed during promotion",
+        "mv \"$stage_dir\" \"$final_dir\"",
+    ] {
+        assert!(
+            PROMOTE.contains(required),
+            "promotion helper is missing required contract: {required}"
+        );
+    }
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-promotion-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("temporary promotion root");
+    let inputs = temp.join("inputs");
+    let destination = temp.join("destination");
+    let markers = temp.join("markers");
+    fs::create_dir_all(&inputs).expect("promotion input root");
+    fs::create_dir(&destination).expect("caller-owned destination");
+    fs::create_dir(&markers).expect("forbidden executable markers");
+
+    let source = inputs.join("dasobjectstore-plugin-process_0.186.12_amd64.deb");
+    write(&source, "fixture plugin-process DEB bytes\n");
+    let digest = sha256(&source);
+    let provenance = inputs.join("plugin-process.provenance.json");
+    let revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let provenance_json = |package_digest: &str, version: &str, source_revision: &str| {
+        format!(
+            "{{\"schema\":\"mnemosyne.dasobjectstore.plugin-process-package-provenance.v1\",\"package_name\":\"dasobjectstore-plugin-process\",\"package_version\":\"{version}\",\"architecture\":\"amd64\",\"source_revision\":\"{source_revision}\",\"package_sha256\":\"{package_digest}\"}}\n"
+        )
+    };
+    write(&provenance, &provenance_json(&digest, "0.186.12", revision));
+
+    let marker_log = temp.join("forbidden-invocation.log");
+    for name in [
+        "cargo",
+        "rustc",
+        "trunk",
+        "build-plugin-process-deb.sh",
+        "dpkg",
+        "systemctl",
+        "apt",
+        "apt-get",
+    ] {
+        write(
+            markers.join(name),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"{name}\" >> \"{}\"\nexit 97\n",
+                marker_log.display()
+            ),
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(markers.join(name), fs::Permissions::from_mode(0o755))
+                .expect("make forbidden invocation marker executable");
+        }
+    }
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/promote-plugin-process-package.sh");
+    let run = |deb: &Path, sidecar: &Path, expected: &str, destination: &Path| {
+        Command::new("bash")
+            .arg(&script)
+            .args(["--source-deb"])
+            .arg(deb)
+            .args(["--provenance"])
+            .arg(sidecar)
+            .args(["--expected-sha256", expected, "--destination-dir"])
+            .arg(destination)
+            .args([
+                "--source-revision",
+                revision,
+                "--package-version",
+                "0.186.12",
+                "--architecture",
+                "amd64",
+            ])
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    markers.display(),
+                    std::env::var("PATH").expect("PATH")
+                ),
+            )
+            .output()
+            .expect("run source-only promotion helper")
+    };
+
+    let accepted = run(&source, &provenance, &digest, &destination);
+    assert!(
+        accepted.status.success(),
+        "matching fixture promotion must succeed: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let promotion = destination.join(format!(
+        "dasobjectstore-plugin-process-0.186.12-amd64-{digest}"
+    ));
+    let promoted_deb = promotion.join("dasobjectstore-plugin-process_0.186.12_amd64.deb");
+    assert_eq!(
+        sha256(&promoted_deb),
+        digest,
+        "promotion retains exact DEB bytes"
+    );
+    let receipt = promotion.join("promotion-receipt.json");
+    let receipt_check = Command::new("jq")
+        .args([
+            "-e",
+            &format!(
+                ".source_deb_sha256 == \"{digest}\" and .destination_deb_sha256 == \"{digest}\" and .source_revision == \"{revision}\" and .package_version == \"0.186.12\" and .architecture == \"amd64\""
+            ),
+        ])
+        .arg(&receipt)
+        .status()
+        .expect("validate promotion receipt");
+    assert!(
+        receipt_check.success(),
+        "receipt must bind the promoted bytes and tuple"
+    );
+    assert!(
+        !marker_log.exists(),
+        "success path must not invoke Cargo, Rustc, Trunk, packaging, installer, or service markers"
+    );
+
+    let reject = |name: &str, deb: &Path, sidecar: &Path, expected: &str| {
+        let rejected_destination = temp.join(format!("rejected-{name}"));
+        fs::create_dir(&rejected_destination).expect("rejected caller destination");
+        let result = run(deb, sidecar, expected, &rejected_destination);
+        assert!(
+            !result.status.success(),
+            "promotion must reject {name}: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            fs::read_dir(&rejected_destination)
+                .expect("read rejected destination")
+                .next()
+                .is_none(),
+            "failed {name} promotion must leave no accepted destination or receipt"
+        );
+    };
+    let wrong_digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    reject(
+        "expected-digest-mismatch",
+        &source,
+        &provenance,
+        wrong_digest,
+    );
+    let bad_provenance = inputs.join("bad-provenance.json");
+    write(
+        &bad_provenance,
+        &provenance_json(wrong_digest, "0.186.12", revision),
+    );
+    reject(
+        "provenance-digest-mismatch",
+        &source,
+        &bad_provenance,
+        &digest,
+    );
+    write(&bad_provenance, "not json\n");
+    reject("malformed-provenance", &source, &bad_provenance, &digest);
+    write(
+        &bad_provenance,
+        &provenance_json(&digest, "0.186.13", revision),
+    );
+    reject("wrong-provenance-tuple", &source, &bad_provenance, &digest);
+    reject(
+        "missing-source",
+        &inputs.join("missing.deb"),
+        &provenance,
+        &digest,
+    );
+    reject(
+        "missing-sidecar",
+        &source,
+        &inputs.join("missing.json"),
+        &digest,
+    );
+
+    let tampered = inputs.join("tampered.deb");
+    fs::copy(&source, &tampered).expect("copy tamper fixture");
+    write(&tampered, "tampered after provenance verification\n");
+    reject("tampered-source", &tampered, &provenance, &digest);
+    #[cfg(unix)]
+    {
+        let symlink = inputs.join("source-link.deb");
+        std::os::unix::fs::symlink(&source, &symlink).expect("source symlink fixture");
+        reject("symlink-source", &symlink, &provenance, &digest);
+
+        let escape = temp.join("destination-escape");
+        let symlink_parent = temp.join("destination-link");
+        fs::create_dir(&escape).expect("destination symlink escape target");
+        std::os::unix::fs::symlink(&escape, &symlink_parent).expect("destination symlink fixture");
+        let escaped = run(
+            &source,
+            &provenance,
+            &digest,
+            &symlink_parent.join("destination"),
+        );
+        assert!(
+            !escaped.status.success(),
+            "promotion must reject a destination under a symlinked ancestor"
+        );
+        assert!(
+            !escape.join("destination").exists(),
+            "symlinked destination ancestry must not receive a promotion output"
+        );
+    }
+    assert!(
+        !marker_log.exists(),
+        "rejection paths must not invoke Cargo, Rustc, Trunk, builders, installers, or services"
+    );
+    fs::remove_dir_all(temp).expect("remove promotion fixture root");
 }
 
 fn write(path: impl AsRef<Path>, contents: &str) {
