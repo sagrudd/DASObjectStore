@@ -211,11 +211,12 @@ copied_config="$copied_source/.cargo/f05-vendor-config.toml"
 for copied_input in "$copied_manifest" "$copied_lock" "$copied_config"; do
   [[ -f "$copied_input" && ! -L "$copied_input" ]] || die "copied closure requires a physical non-symlink $(basename "$copied_input")"
 done
-if [[ -z "$stage_cache_root" ]]; then
-  sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
-  mv "$copied_config.next" "$copied_config"
-  write_batched_manifest "$copied_closure"
-fi
+# The cache config is deliberately bound to /mnt/current so the immutable
+# cache has a stable receipt.  Derive a new config only in this writable
+# attempt copy before the preparer sees it; never rewrite the cached bytes.
+sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
+mv "$copied_config.next" "$copied_config"
+write_batched_manifest "$copied_closure"
 server="$attempt_root/target/release/dasobjectstore-server"
 web_dist="$copied_source/crates/dasobjectstore-gui-web/dist"
 output_dir="$attempt_root/output"

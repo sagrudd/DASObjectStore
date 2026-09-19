@@ -614,12 +614,16 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         cache
             .join("current/source/.cargo/f05-vendor-config.toml")
             .is_file()
-            && fs::read_to_string(
-                cold_attempt.join("closure/source/.cargo/f05-vendor-config.toml")
-            )
-            .expect("read copied cache config")
-            .contains("/mnt/current/source/vendor"),
-        "cache reuse must bind the copied config to the fixed Bubblewrap cache path"
+            && fs::read_to_string(cache.join("current/source/.cargo/f05-vendor-config.toml"))
+                .expect("read immutable cache config")
+                .contains("/mnt/current/source/vendor"),
+        "the immutable cache receipt must retain its fixed Bubblewrap cache path"
+    );
+    assert!(
+        fs::read_to_string(cold_attempt.join("closure/source/.cargo/f05-vendor-config.toml"))
+            .expect("read cold attempt config")
+            .contains("directory = \"/var/tmp/closure/source/vendor\""),
+        "cold execution must derive an attempt-local config bound to its copied vendor tree"
     );
     assert_eq!(
         fs::metadata(&cache)
@@ -650,6 +654,12 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     assert!(
         warm_attempt.join("cargo.log").is_file(),
         "warm attempt must reach staged Cargo"
+    );
+    assert!(
+        fs::read_to_string(warm_attempt.join("closure/source/.cargo/f05-vendor-config.toml"))
+            .expect("read warm attempt config")
+            .contains("directory = \"/var/tmp/closure/source/vendor\""),
+        "warm execution must derive an attempt-local config without modifying the cache"
     );
 
     let writable_mode = temp.join("writable-mode-cache");
