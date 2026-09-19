@@ -50,6 +50,13 @@ attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')
 if find "$sealed_root" -type l -print -quit | grep -q .; then
   die 'sealed closure must not contain symlinks'
 fi
+if [[ "${DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE:-}" != 1 ]]; then
+  [[ -x /usr/bin/bwrap ]] || die 'requires /usr/bin/bwrap network isolation'
+  exec /usr/bin/bwrap --unshare-net --ro-bind / / --bind "$attempt_root" "$attempt_root" --proc /proc --dev /dev \
+    --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- "$0" --sealed-root "$sealed_root" --attempt-root "$attempt_root"
+fi
+[[ "$(/usr/sbin/ip -o link show | awk -F': ' '{print $2}' | sed 's/@.*//')" == lo ]] || die 'requires loopback-only network interfaces'
+[[ -z "$(/usr/sbin/ip -4 route show)" ]] || die 'requires empty IPv4 routes'
 
 status_file="$attempt_root/terminal-status"
 sealed_status=0

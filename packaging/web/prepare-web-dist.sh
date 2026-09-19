@@ -10,6 +10,7 @@ staged_closure_root=${DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT:-}
 staged_cargo=''
 staged_rustc=''
 staged_trunk=''
+staged_trunk_tools=''
 staged_wasm_target=''
 dist="${DASOBJECTSTORE_PREBUILT_WEB_DIST:-$web_root/dist}"
 attempt_root=${DASOBJECTSTORE_F05_ATTEMPT_ROOT:-}
@@ -49,14 +50,21 @@ validate_f05_staged_closure() {
   staged_cargo="$staged_closure_root/toolchain/bin/cargo"
   staged_rustc="$staged_closure_root/toolchain/bin/rustc"
   staged_trunk="$staged_closure_root/toolchain/bin/trunk"
+  staged_trunk_tools="$staged_closure_root/toolchain/trunk-tools"
   staged_wasm_target="$staged_closure_root/toolchain/lib/rustlib/wasm32-unknown-unknown"
   for staged_tool in "$staged_cargo" "$staged_rustc" "$staged_trunk"; do
     [[ "$staged_tool" = "$staged_closure_root"/* && -x "$staged_tool" && ! -L "$staged_tool" ]] || staged_closure_error 'requires absolute, non-symlink staged cargo, rustc, and trunk tools'
+  done
+  for staged_tool in "$staged_trunk_tools/wasm-bindgen-0.2.128/wasm-bindgen" "$staged_trunk_tools/wasm-opt-version_123/wasm-opt"; do
+    [[ "$staged_tool" = "$staged_closure_root"/* && -x "$staged_tool" && ! -L "$staged_tool" ]] || staged_closure_error 'requires hash-bound staged wasm-bindgen 0.2.128 and wasm-opt version_123 tools'
   done
   [[ -d "$staged_wasm_target" && ! -L "$staged_wasm_target" ]] || staged_closure_error 'requires a staged wasm32-unknown-unknown target'
   [[ ! -e "$repo_root/../prosopikon" ]] || staged_closure_error 'rejects an ambient Prosopikon sibling'
   (cd "$staged_closure_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || staged_closure_error 'has a missing or altered staged input'
   for staged_input in source/.cargo/f05-vendor-config.toml inputs/component-candidate-input.toml inputs/source-tree inputs/compiled-dependency-witness.json inputs/package-recipe.json toolchain/bin/cargo toolchain/bin/rustc toolchain/bin/trunk; do
+    staged_closure_manifest_requires "$staged_input"
+  done
+  for staged_input in toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen toolchain/trunk-tools/wasm-opt-version_123/wasm-opt; do
     staged_closure_manifest_requires "$staged_input"
   done
   find "$staged_wasm_target" -type f -print -quit | grep -q . || staged_closure_error 'requires a non-empty staged wasm32-unknown-unknown target'
@@ -133,7 +141,7 @@ ERROR
       rm -rf "$isolated_cargo_home"
       install -d "$isolated_cargo_home" "$attempt_root/home" "$attempt_root/target"
       cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
-      env -u NO_COLOR HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" "$staged_trunk" build --release >&2
+      env -i HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" TRUNK_TOOLS_DIR="$staged_trunk_tools" "$staged_trunk" build --release >&2
     else
       env -u NO_COLOR trunk build --release >&2
     fi
