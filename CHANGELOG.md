@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.186.17 - Unreleased
+
+- Reject `dasobjectstore-remote upload --daemon-socket` unless
+  `--submit-to-daemon` is also selected. This prevents a custom socket from
+  being silently ignored while the client takes the local AWS upload path;
+  ordinary local uploads and explicit daemon submission remain unchanged.
+  This is a source-only fail-closed CLI correction, not a daemon, package,
+  installation, activation or runtime claim.
+
 ## 0.186.10 - Unreleased
 
 - Make the F05 network-isolated package runner bind each external attempt at a
