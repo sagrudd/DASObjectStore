@@ -380,7 +380,7 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity archive recipe validator validator_receipt source revision tree archive_sha source_content_sha lock_sha witness candidate tool_receipt image image_sha report
+  local input registry identity archive recipe validator validator_receipt source revision expected_revision tree archive_sha source_content_sha lock_sha witness candidate tool_receipt image image_sha report
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
@@ -400,10 +400,11 @@ produce_closure_provenance_inputs() {
   done
   [[ -x "$validator" && "$(sha256_file "$validator")" = "$(tool_input_toml_value "$validator_receipt" sha256)" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
   revision=$(tool_input_toml_value "$identity" source_revision)
+  expected_revision=$(tool_input_toml_value "$identity" expected_source_revision)
   tree=$(tool_input_toml_value "$identity" git_tree)
   archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
   source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
-  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty, wrong, or historical source archive'
+  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" = "$expected_revision" && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty, wrong, or expected-candidate-mismatched source archive'
   lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
   image=$(tool_input_toml_value "$tool_receipt" toolchain_image)
   image_sha=$(tool_input_toml_value "$tool_receipt" toolchain_image_sha256)

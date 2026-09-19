@@ -18,7 +18,7 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "--stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT",
         "produce_closure_provenance_inputs",
         "requires immutable non-symlink inputs",
-        "rejects a dirty, wrong, or historical source archive",
+        "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
         "rejects an unpinned Kanon validator",
         "component-candidate-input validate",
         "Kanon validator rejected emitted inputs",
@@ -42,6 +42,129 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
             "provenance stage must not perform {forbidden}"
         );
     }
+}
+
+#[test]
+fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_mismatch() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-provenance-stage-{}",
+        std::process::id()
+    ));
+    let sealed = staged_fixture(&temp);
+    for name in [
+        "component-candidate-input.toml",
+        "source-tree",
+        "compiled-dependency-witness.json",
+        "f05-inputs.sha256",
+    ] {
+        fs::remove_file(sealed.join("inputs").join(name)).expect("clear producer output fixture");
+    }
+    let input = temp.join("provenance-inputs");
+    fs::create_dir(&input).expect("create provenance inputs");
+    let archive = input.join("source-archive.tar");
+    write(&archive, "immutable source archive fixture\n");
+    let revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    write(
+        input.join("source-identity.toml"),
+        &format!(
+            "source_revision = \"{revision}\"\nexpected_source_revision = \"{revision}\"\ngit_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\n",
+            sha256(&archive),
+            tree_sha256(&sealed.join("source")),
+        ),
+    );
+    write(
+        input.join("registry.toml"),
+        "[products.dasobjectstore]\nbinaries = [\"dasobjectstore\"]\n",
+    );
+    fs::copy(
+        sealed.join("inputs/package-recipe.json"),
+        input.join("package-recipe.json"),
+    )
+    .expect("copy immutable recipe");
+    let validator = input.join("kanon-component-candidate-input");
+    executable(&validator, "{\"valid\":true}");
+    write(&validator, "#!/bin/sh\nprintf '%s\\n' '{\"valid\":true}'\n");
+    fs::set_permissions(&validator, fs::Permissions::from_mode(0o755))
+        .expect("make pinned validator executable");
+    write(
+        input.join("kanon-component-candidate-input.receipt"),
+        &format!(
+            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nsha256 = \"{}\"\n",
+            sha256(&validator)
+        ),
+    );
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&input)
+        .status()
+        .expect("seal provenance inputs");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let run = |stage: &Path, inputs: &Path| {
+        Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(inputs)
+            .output()
+            .expect("run provenance stage")
+    };
+    let accepted = run(&sealed, &input);
+    assert!(
+        accepted.status.success(),
+        "producer stderr: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert!(sealed
+        .join("inputs/component-candidate-input.toml")
+        .is_file());
+    assert!(sealed
+        .join("inputs/compiled-dependency-witness.json")
+        .is_file());
+    assert!(sealed
+        .join("inputs/component-candidate-input.validation.json")
+        .is_file());
+    let mismatch = temp.join("mismatch-inputs");
+    copy_tree(&input, &mismatch);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&mismatch)
+        .status()
+        .expect("unseal mismatch");
+    let identity =
+        fs::read_to_string(mismatch.join("source-identity.toml")).expect("read identity");
+    write(
+        mismatch.join("source-identity.toml"),
+        &identity.replace(revision, "cccccccccccccccccccccccccccccccccccccccc"),
+    );
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&mismatch)
+        .status()
+        .expect("reseal mismatch");
+    let fresh = staged_fixture(&temp.join("mismatch-stage"));
+    for name in [
+        "component-candidate-input.toml",
+        "source-tree",
+        "compiled-dependency-witness.json",
+        "f05-inputs.sha256",
+    ] {
+        fs::remove_file(fresh.join("inputs").join(name)).expect("clear mismatch output");
+    }
+    let denied = run(&fresh, &mismatch);
+    assert!(
+        !denied.status.success()
+            && String::from_utf8_lossy(&denied.stderr).contains("expected-candidate-mismatched")
+    );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal fixture");
+    fs::remove_dir_all(temp).expect("remove fixture");
 }
 
 #[test]
