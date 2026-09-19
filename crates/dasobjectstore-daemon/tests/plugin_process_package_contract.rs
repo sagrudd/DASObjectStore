@@ -683,6 +683,11 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     write(&tampered_vendor, "tampered cached input\n");
     fs::set_permissions(&tampered_vendor, fs::Permissions::from_mode(0o444))
         .expect("restore immutable tampered vendor input mode");
+    fs::set_permissions(
+        tampered_vendor.parent().expect("vendor parent"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .expect("restore immutable tampered vendor parent mode");
     fs::set_permissions(&tampered, fs::Permissions::from_mode(0o555))
         .expect("restore immutable tampered cache root");
     let (_, tampered_diagnostic, tampered_status) = run("tampered", &tampered);
