@@ -6,7 +6,7 @@ usage() {
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-toolchain-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-git-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
-  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT [--dependency-witness-only]" >&2
   exit 2
 }
 
@@ -22,6 +22,7 @@ stage_closure_git_inputs=0
 git_input_root=''
 stage_closure_provenance_inputs=0
 provenance_input_root=''
+dependency_witness_only=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --stage-closure-toolchain-inputs) stage_closure_toolchain_inputs=1; toolchain_input_root=${2-}; shift 2 ;;
     --stage-closure-git-inputs) stage_closure_git_inputs=1; git_input_root=${2-}; shift 2 ;;
     --stage-closure-provenance-inputs) stage_closure_provenance_inputs=1; provenance_input_root=${2-}; shift 2 ;;
+    --dependency-witness-only) dependency_witness_only=1; shift ;;
     *) usage ;;
   esac
 done
@@ -48,6 +50,7 @@ elif [[ "$stage_closure_provenance_inputs" -eq 1 ]]; then
 else
   [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 fi
+[[ "$dependency_witness_only" -eq 0 || "$stage_closure_provenance_inputs" -eq 1 ]] || usage
 [[ "$preflight_only" -eq 0 || -n "$stage_cache_root" ]] || {
   echo 'F05 package attempt: preflight-only requires a leased stage cache root' >&2
   exit 2
@@ -191,6 +194,33 @@ tool_input_toml_value() {
   printf '%s\n' "$value"
 }
 
+tool_input_toml_optional_value() {
+  local file=$1 key=$2 value count
+  value=$(sed -n "s/^${key} = \"\([^\"]*\)\"$/\1/p" "$file")
+  count=$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)
+  [[ "$count" -le 1 ]] || die "toolchain input receipt permits at most one ${key}"
+  [[ "$count" -eq 0 ]] || printf '%s\n' "$value"
+}
+
+toolchain_mode_from_receipt() {
+  local receipt=$1 kind image image_sha inventory_sha
+  kind=$(tool_input_toml_value "$receipt" toolchain_kind)
+  image=$(tool_input_toml_optional_value "$receipt" toolchain_image)
+  image_sha=$(tool_input_toml_optional_value "$receipt" toolchain_image_sha256)
+  inventory_sha=$(tool_input_toml_optional_value "$receipt" tool_inventory_sha256)
+  case "$kind" in
+    native-tool-bundle)
+      [[ -z "$image" && -z "$image_sha" && "$inventory_sha" =~ ^[0-9a-f]{64}$ ]] || die 'toolchain native mode requires only one inventory digest and no image fields'
+      printf 'native-tool-bundle\n'
+      ;;
+    container-image)
+      [[ -n "$image" && -n "$image_sha" && -z "$inventory_sha" && "$image" =~ @sha256:[0-9a-f]{64}$ && "$image_sha" =~ ^sha256:[0-9a-f]{64}$ && "sha256:${image##*@sha256:}" = "$image_sha" ]] || die 'toolchain container mode requires only one matching immutable image receipt'
+      printf 'container-image\n'
+      ;;
+    *) die 'toolchain receipt requires one supported selected mode' ;;
+  esac
+}
+
 tool_inventory_value() {
   local file=$1 section=$2 key=$3 value
   value=$(awk -v section="$section" -v key="$key" '
@@ -239,17 +269,17 @@ probe_declared_staged_tool() {
 }
 
 produce_closure_toolchain_inputs() {
-  local input_receipt input_manifest input_inventory admission_receipt candidate source_tree witness staged_runner
+  local input_receipt input_manifest input_inventory expected candidate source_tree witness staged_runner
   local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha candidate_version
   local input_revision input_image input_image_sha input_inventory_sha input_manifest_sha receipt temporary
   local inventory_target inventory_version inventory_binding_revision inventory_binding_version prior_inventory_sha
-  local admitted_revision admitted_version admitted_inventory_sha admitted_image admitted_image_sha admitted_prior_inventory_sha
+  local expected_mode input_mode expected_inventory_sha expected_image expected_image_sha candidate_expected_image candidate_expected_image_sha
   local required inventory_sha
 
   input_receipt="$toolchain_input_root/tool-inputs.toml"
   input_manifest="$toolchain_input_root/tool-inputs.sha256"
   input_inventory="$toolchain_input_root/tool-input-inventory.txt"
-  admission_receipt="$sealed_root/inputs/toolchain-input-admission-receipt.toml"
+  expected="$sealed_root/inputs/provenance-tuple.toml"
   candidate="$sealed_root/inputs/component-candidate-input.toml"
   source_tree="$sealed_root/inputs/source-tree"
   witness="$sealed_root/inputs/compiled-dependency-witness.json"
@@ -258,8 +288,9 @@ produce_closure_toolchain_inputs() {
   [[ "$toolchain_input_root" = /* && -d "$toolchain_input_root" && ! -L "$toolchain_input_root" ]] || die 'toolchain input stage requires an absolute, physical input root'
   [[ -z "$(find "$toolchain_input_root" -type l -print -quit)" ]] || die 'toolchain input stage rejects symlinked inputs'
   [[ -z "$(find "$toolchain_input_root" -perm /0222 -print -quit)" ]] || die 'toolchain input stage requires an immutable input root'
-  for required in "$input_receipt" "$input_manifest" "$input_inventory" "$admission_receipt" "$candidate" "$source_tree" "$witness" "$staged_runner"; do
+  for required in "$input_receipt" "$input_manifest" "$input_inventory" "$expected" "$candidate" "$source_tree" "$witness" "$staged_runner"; do
     [[ -f "$required" && ! -L "$required" ]] || die 'toolchain input stage requires physical receipt, manifest, and identity witnesses'
+    [[ ! -w "$required" ]] || die 'toolchain input stage requires immutable sealed identity inputs while leaving fresh output roots writable'
   done
   [[ "$(sha256_file "$staged_runner")" = "$(sha256_file "$0")" ]] || die 'toolchain input stage must execute the runner bytes that it binds'
   inventory_sha=$(sha256_file "$input_inventory")
@@ -306,20 +337,23 @@ produce_closure_toolchain_inputs() {
   inventory_binding_revision=$(tool_inventory_value "$input_inventory" candidate_binding source_revision)
   inventory_binding_version=$(tool_inventory_value "$input_inventory" candidate_binding workspace_version)
   prior_inventory_sha=$(tool_inventory_value "$input_inventory" reusable_tool_provenance inventory_sha256)
-  admitted_revision=$(tool_input_toml_value "$admission_receipt" source_revision)
-  admitted_version=$(tool_input_toml_value "$admission_receipt" workspace_version)
-  admitted_inventory_sha=$(tool_input_toml_value "$admission_receipt" inventory_sha256)
-  admitted_image=$(tool_input_toml_value "$admission_receipt" toolchain_image)
-  admitted_image_sha=$(tool_input_toml_value "$admission_receipt" toolchain_image_sha256)
-  admitted_prior_inventory_sha=$(tool_input_toml_value "$admission_receipt" reusable_tool_provenance_inventory_sha256)
+  expected_mode=$(toolchain_mode_from_receipt "$expected")
+  input_mode=$(toolchain_mode_from_receipt "$input_receipt")
   input_revision=$(tool_input_toml_value "$input_receipt" source_revision)
-  input_image=$(tool_input_toml_value "$input_receipt" toolchain_image)
-  input_image_sha=$(tool_input_toml_value "$input_receipt" toolchain_image_sha256)
   input_inventory_sha=$(tool_input_toml_value "$input_receipt" inventory_sha256)
-  [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" && "$candidate_revision" = "$input_revision" ]] || die 'toolchain input stage requires matching candidate image and revision witnesses'
+  [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" && "$candidate_revision" = "$input_revision" && "$candidate_revision" = "$(tool_input_toml_value "$expected" source_revision)" && "$candidate_version" = "$(tool_input_toml_value "$expected" workspace_version)" ]] || die 'toolchain input stage requires matching candidate and expected-tuple revision witnesses'
   [[ "$inventory_target" = "$candidate_revision" && "$inventory_binding_revision" = "$candidate_revision" && "$inventory_version" = "$candidate_version" && "$inventory_binding_version" = "$candidate_version" ]] || die 'toolchain input stage rejects inventory not bound to this candidate source and version'
-  [[ "$admitted_revision" = "$candidate_revision" && "$admitted_version" = "$candidate_version" && "$admitted_inventory_sha" = "$inventory_sha" && "$admitted_image" = "$candidate_image" && "$admitted_image_sha" = "$candidate_image_sha" && "$admitted_prior_inventory_sha" = "$prior_inventory_sha" ]] || die 'toolchain input stage rejects an admission receipt not bound to this candidate and inventory'
-  [[ "$candidate_image" = "$input_image" && "$candidate_image_sha" = "$input_image_sha" && "$candidate_image" =~ @sha256:[0-9a-f]{64}$ && "$candidate_image_sha" =~ ^sha256:[0-9a-f]{64}$ && "sha256:${candidate_image##*@sha256:}" = "$candidate_image_sha" ]] || die 'toolchain input stage rejects a candidate image mismatch'
+  [[ "$expected_mode" = "$input_mode" ]] || die 'toolchain input stage rejects mixed native and container modes'
+  if [[ "$expected_mode" = native-tool-bundle ]]; then
+    expected_inventory_sha=$(tool_input_toml_value "$expected" tool_inventory_sha256)
+    [[ "$expected_inventory_sha" = "$inventory_sha" && "$candidate_image" = "native-tool-bundle@sha256:$inventory_sha" && "$candidate_image_sha" = "sha256:$inventory_sha" ]] || die 'toolchain input stage rejects a native bundle not bound to the expected tuple'
+  else
+    input_image=$(tool_input_toml_value "$input_receipt" toolchain_image)
+    input_image_sha=$(tool_input_toml_value "$input_receipt" toolchain_image_sha256)
+    expected_image=$(tool_input_toml_value "$expected" toolchain_image)
+    expected_image_sha=$(tool_input_toml_value "$expected" toolchain_image_sha256)
+    [[ "$candidate_image" = "$expected_image" && "$candidate_image_sha" = "$expected_image_sha" && "$candidate_image" = "$input_image" && "$candidate_image_sha" = "$input_image_sha" ]] || die 'toolchain input stage rejects a container image not bound to the expected tuple'
+  fi
   [[ "$input_inventory_sha" = "$inventory_sha" ]] || die 'toolchain input stage rejects an inventory receipt not bound to the reviewed document'
   [[ ! -e "$sealed_root/toolchain" && ! -e "$sealed_root/network-denied-bin" && ! -e "$sealed_root/staging-home" && ! -e "$sealed_root/inputs/toolchain-input-receipt.toml" ]] || die 'toolchain input stage refuses to overwrite closure inputs'
 
@@ -330,8 +364,13 @@ produce_closure_toolchain_inputs() {
   input_manifest_sha=$(sha256_file "$input_manifest")
   receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
   temporary="$receipt.next"
-  printf 'source_revision = "%s"\nworkspace_version = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\nreusable_tool_provenance_inventory_sha256 = "%s"\n' \
-    "$input_revision" "$candidate_version" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" "$prior_inventory_sha" > "$temporary"
+  printf 'source_revision = "%s"\nworkspace_version = "%s"\ntoolchain_kind = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\nreusable_tool_provenance_inventory_sha256 = "%s"\n' \
+    "$input_revision" "$candidate_version" "$expected_mode" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" "$prior_inventory_sha" > "$temporary"
+  if [[ "$expected_mode" = native-tool-bundle ]]; then
+    printf 'tool_inventory_sha256 = "%s"\n' "$inventory_sha" >> "$temporary"
+  else
+    printf 'toolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\n' "$input_image" "$input_image_sha" >> "$temporary"
+  fi
   mv "$temporary" "$receipt"
   write_batched_manifest "$sealed_root"
   (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'
@@ -380,56 +419,84 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity archive recipe validator validator_receipt source revision expected_revision version expected_version tree archive_sha source_content_sha lock_sha witness candidate tool_receipt image image_sha report
+  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
+  expected="$input/expected-tuple.toml"
   archive="$input/source-archive.tar"
   recipe="$input/package-recipe.json"
   validator="$input/kanon-component-candidate-input"
   validator_receipt="$input/kanon-component-candidate-input.receipt"
   source="$sealed_root/source"
   witness="$sealed_root/inputs/compiled-dependency-witness.json"
+  witness_receipt="$sealed_root/inputs/dependency-witness-receipt.toml"
   candidate="$sealed_root/inputs/component-candidate-input.toml"
-  tool_receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
 
   [[ -f "$sealed_root/f05-inputs.sha256" && ! -L "$sealed_root/f05-inputs.sha256" ]] || die 'provenance input stage requires a pre-producer sealed manifest'
   (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage rejects an altered pre-producer sealed manifest'
   for bound in \
     source/Cargo.toml \
     source/Cargo.lock \
-    inputs/toolchain-input-receipt.toml; do
+    source/packaging/debian/run-plugin-process-package-attempt.sh; do
     grep -F "  $bound" "$sealed_root/f05-inputs.sha256" >/dev/null || die "provenance input stage requires pre-producer manifest binding for $bound"
+    [[ ! -w "$sealed_root/$bound" ]] || die 'provenance input stage requires immutable sealed source inputs while leaving fresh output roots writable'
   done
   grep -F '  source/' "$sealed_root/f05-inputs.sha256" >/dev/null || die 'provenance input stage requires a bound physical source tree'
-  for generated in "$witness" "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json"; do
+  for generated in "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
     [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
   done
+  [[ ! -e "$witness" && ! -e "$witness_receipt" ]] || die 'provenance input stage refuses to overwrite an existing dependency witness'
   [[ "$input" = /* && -d "$input" && ! -L "$input" ]] || die 'provenance input stage requires an absolute physical input root'
   [[ -z "$(find "$input" -type l -print -quit)" && -z "$(find "$input" -perm /0222 -print -quit)" ]] || die 'provenance input stage requires immutable non-symlink inputs'
-  for required in "$registry" "$identity" "$archive" "$recipe" "$validator" "$validator_receipt"; do
-    [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical registry, identity, recipe, validator, and tool receipt inputs'
+  for required in "$identity" "$archive"; do
+    [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical expected tuple, registry, identity, recipe, and validator inputs'
   done
-  [[ -f "$tool_receipt" && ! -L "$tool_receipt" ]] || die 'provenance input stage requires a sealed, externally admitted tool receipt'
-  [[ -x "$validator" && "$(sha256_file "$validator")" = "$(tool_input_toml_value "$validator_receipt" sha256)" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
+  if [[ "$dependency_witness_only" -eq 0 ]]; then
+    for required in "$registry" "$expected" "$recipe" "$validator" "$validator_receipt"; do
+      [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical expected tuple, registry, identity, recipe, and validator inputs'
+    done
+  fi
   revision=$(tool_input_toml_value "$identity" source_revision)
-  # The expected tuple is already bound by the independently admitted tool
-  # receipt.  The provenance input may describe an archive, but cannot select
-  # the candidate it is allowed to emit.
-  expected_revision=$(tool_input_toml_value "$tool_receipt" source_revision)
-  expected_version=$(tool_input_toml_value "$tool_receipt" workspace_version)
   version=$(tool_input_toml_value "$identity" workspace_version)
   tree=$(tool_input_toml_value "$identity" git_tree)
   archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
   source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
-  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$version" = "$(workspace_package_version "$source/Cargo.toml")" && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty, wrong, or expected-candidate-mismatched source archive'
+  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$version" = "$(workspace_package_version "$source/Cargo.toml")" && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty or source-identity-mismatched archive'
   lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
-  image=$(tool_input_toml_value "$tool_receipt" toolchain_image)
-  image_sha=$(tool_input_toml_value "$tool_receipt" toolchain_image_sha256)
-  [[ "$image" =~ @sha256:[0-9a-f]{64}$ && "$image_sha" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'provenance input stage requires an immutable toolchain image receipt'
+  [[ -d "$source/vendor" && ! -L "$source/vendor" ]] || die 'provenance input stage requires a physical dependency closure'
+  vendor_sha="sha256:$(sha256_tree "$source/vendor")"
+  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "%s",\n  "source_archive_sha256": "%s",\n  "source_git_tree": "%s"\n}\n' "$revision" "$lock_sha" "$vendor_sha" "$archive_sha" "$tree" > "$witness"
+  printf 'source_revision = "%s"\nworkspace_version = "%s"\nsource_git_tree = "%s"\nsource_archive_sha256 = "%s"\ncargo_lock_sha256 = "%s"\ndependency_closure_sha256 = "%s"\n' "$revision" "$version" "$tree" "$archive_sha" "$lock_sha" "$vendor_sha" > "$witness_receipt"
+  chmod a-w "$witness" "$witness_receipt"
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind the generated dependency witness'
+  if [[ "$dependency_witness_only" -eq 1 ]]; then
+    printf 'closure_stage_dependency_witness=PASS source_revision=%s cargo_lock_sha256=%s\n' "$revision" "$lock_sha"
+    return 0
+  fi
+  local validator_sha
+  validator_sha=$(tool_input_toml_value "$validator_receipt" binary_sha256)
+  [[ "$validator_sha" =~ ^[0-9a-f]{64}$ && -x "$validator" && "$(sha256_file "$validator")" = "$validator_sha" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
+  expected_revision=$(tool_input_toml_value "$expected" source_revision)
+  expected_version=$(tool_input_toml_value "$expected" workspace_version)
+  expected_tree=$(tool_input_toml_value "$expected" source_git_tree)
+  [[ "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$tree" = "$expected_tree" && "$archive_sha" = "$(tool_input_toml_value "$expected" source_archive_sha256)" && "$source_content_sha" = "$(tool_input_toml_value "$expected" source_content_sha256)" && "$(sha256_file "$recipe")" = "$(tool_input_toml_value "$expected" recipe_sha256)" && "$validator_sha" = "$(tool_input_toml_value "$expected" validator_binary_sha256)" && "$(tool_input_toml_value "$expected" validator_revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an expected tuple not bound to the generated dependency witness'
+  expected_mode=$(toolchain_mode_from_receipt "$expected")
+  if [[ "$expected_mode" = native-tool-bundle ]]; then
+    inventory_sha=$(tool_input_toml_value "$expected" tool_inventory_sha256)
+    # Kanon's schema deliberately has one immutable tool identity slot.  A
+    # native bundle has no container image to infer or invent, so represent
+    # precisely the independently supplied inventory digest in that slot.
+    image="native-tool-bundle@sha256:$inventory_sha"
+    image_sha="sha256:$inventory_sha"
+  else
+    image=$(tool_input_toml_value "$expected" toolchain_image)
+    image_sha=$(tool_input_toml_value "$expected" toolchain_image_sha256)
+  fi
   mkdir -p "$sealed_root/inputs"
+  cp -a "$expected" "$sealed_root/inputs/provenance-tuple.toml"
   printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
-  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "sha256:%s"\n}\n' "$revision" "$lock_sha" "$(sha256_tree "$sealed_root/cargo-home")" > "$witness"
   printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
     "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
   report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'

@@ -20,6 +20,12 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "requires immutable non-symlink inputs",
         "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
         "rejects an unpinned Kanon validator",
+        "binary_sha256",
+        "validator_sha=$(tool_input_toml_value \"$validator_receipt\" binary_sha256)",
+        "toolchain_mode_from_receipt",
+        "native-tool-bundle@sha256:$inventory_sha",
+        "rejects mixed native and container modes",
+        "requires immutable sealed identity inputs while leaving fresh output roots writable",
         "component-candidate-input validate",
         "Kanon validator rejected emitted inputs",
         "compiled-dependency-witness.json",
@@ -61,11 +67,11 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         fs::remove_file(sealed.join("inputs").join(name)).expect("clear producer output fixture");
     }
     fs::remove_file(sealed.join("f05-inputs.sha256")).expect("clear producer manifest fixture");
-    fs::copy(
-        sealed.join("inputs/toolchain-input-admission-receipt.toml"),
-        sealed.join("inputs/toolchain-input-receipt.toml"),
-    )
-    .expect("bind externally admitted expected tuple receipt");
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(sealed.join("source"))
+        .status()
+        .expect("seal source inputs before provenance staging");
     write_f05_manifest(&sealed);
     let input = temp.join("provenance-inputs");
     fs::create_dir(&input).expect("create provenance inputs");
@@ -97,8 +103,19 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     write(
         input.join("kanon-component-candidate-input.receipt"),
         &format!(
-            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nsha256 = \"{}\"\n",
+            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nbinary_sha256 = \"{}\"\n",
             sha256(&validator)
+        ),
+    );
+    write(
+        input.join("expected-tuple.toml"),
+        &format!(
+            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\nrecipe_sha256 = \"{}\"\nvalidator_revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nvalidator_binary_sha256 = \"{}\"\ntoolchain_kind = \"native-tool-bundle\"\ntool_inventory_sha256 = \"{}\"\n",
+            sha256(&archive),
+            tree_sha256(&sealed.join("source")),
+            sha256(&input.join("package-recipe.json")),
+            sha256(&validator),
+            "a".repeat(64),
         ),
     );
     Command::new("chmod")
@@ -124,20 +141,35 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "producer stderr: {}",
         String::from_utf8_lossy(&accepted.stderr)
     );
+    assert!(sealed
+        .join("inputs/component-candidate-input.toml")
+        .is_file());
+    assert!(sealed
+        .join("inputs/compiled-dependency-witness.json")
+        .is_file());
+    assert!(sealed
+        .join("inputs/component-candidate-input.validation.json")
+        .is_file());
+    let candidate = fs::read_to_string(sealed.join("inputs/component-candidate-input.toml"))
+        .expect("read emitted candidate");
     assert!(
-        sealed
-            .join("inputs/component-candidate-input.toml")
-            .is_file()
+        candidate.contains("toolchain_image = \"native-tool-bundle@sha256:")
+            && candidate.contains("toolchain_image_sha256 = \"sha256:"),
+        "native expected tuples must map only their explicit inventory digest into Kanon's immutable tool identity slots"
     );
     assert!(
-        sealed
-            .join("inputs/compiled-dependency-witness.json")
-            .is_file()
+        sealed.join("inputs/provenance-tuple.toml").is_file(),
+        "the emitted candidate must retain the independently supplied selected-mode tuple"
     );
+    let witness = sealed.join("inputs/compiled-dependency-witness.json");
     assert!(
-        sealed
-            .join("inputs/component-candidate-input.validation.json")
-            .is_file()
+        witness.is_file()
+            && sealed.join("inputs/dependency-witness-receipt.toml").is_file()
+            && fs::metadata(&witness)
+                .expect("read generated witness mode")
+                .permissions()
+                .readonly(),
+        "the provenance stage must generate and freeze an archive/lock-bound witness before candidate emission"
     );
     let mismatch = temp.join("mismatch-inputs");
     copy_tree(&input, &mismatch);
@@ -166,17 +198,18 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         fs::remove_file(fresh.join("inputs").join(name)).expect("clear mismatch output");
     }
     fs::remove_file(fresh.join("f05-inputs.sha256")).expect("clear mismatch manifest");
-    fs::copy(
-        fresh.join("inputs/toolchain-input-admission-receipt.toml"),
-        fresh.join("inputs/toolchain-input-receipt.toml"),
-    )
-    .expect("bind mismatch expected tuple receipt");
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(fresh.join("source"))
+        .status()
+        .expect("seal mismatch source inputs before provenance staging");
     write_f05_manifest(&fresh);
     let pre_producer_manifest = sha256(&fresh.join("f05-inputs.sha256"));
     let denied = run(&fresh, &mismatch);
     assert!(
         !denied.status.success()
-            && String::from_utf8_lossy(&denied.stderr).contains("expected-candidate-mismatched")
+            && String::from_utf8_lossy(&denied.stderr)
+                .contains("rejects a dirty or source-identity-mismatched archive")
     );
     assert!(
         !fresh.join("inputs/component-candidate-input.toml").exists()
@@ -2114,7 +2147,7 @@ fn tree_sha256(path: &Path) -> String {
     let output = Command::new("bash")
         .args([
             "-c",
-            "cd \"$1\" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r shasum -a 256 | shasum -a 256 | awk '{print $1}'",
+            "cd \"$1\" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sh -c 'for file; do if command -v sha256sum >/dev/null 2>&1; then sha256sum \"$file\"; else shasum -a 256 \"$file\"; fi; done' sh | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; } | awk '{print $1}'",
             "fixture",
         ])
         .arg(path)
@@ -2251,11 +2284,9 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(
-        sealed
-            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-            .is_dir()
-    );
+    assert!(sealed
+        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+        .is_dir());
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
@@ -2367,7 +2398,7 @@ fn write_tool_input_manifest(input: &Path) {
         .expect("name disposable tool-input manifest");
 }
 
-fn immutable_tool_input_fixture(root: &Path, stage: &Path) -> PathBuf {
+fn immutable_tool_input_fixture(root: &Path, stage: &Path, native: bool) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let input = root.join("tool-inputs");
@@ -2431,26 +2462,36 @@ tree_sha256={}\n",
         ),
     );
     let inventory_sha = sha256(&inventory);
+    let mode = if native {
+        "native-tool-bundle"
+    } else {
+        "container-image"
+    };
+    let tool_identity = if native {
+        format!("tool_inventory_sha256 = \"{inventory_sha}\"\n")
+    } else {
+        "toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n".to_owned()
+    };
     write(
         input.join("tool-inputs.toml"),
         &format!(
-            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-inventory_sha256 = \"{inventory_sha}\"\n"
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_kind = \"{mode}\"\ninventory_sha256 = \"{inventory_sha}\"\n{tool_identity}"
         ),
     );
     write(
-        stage.join("inputs/toolchain-input-admission-receipt.toml"),
+        stage.join("inputs/provenance-tuple.toml"),
         &format!(
-            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-workspace_version = \"0.186.17\"\n\
-toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-inventory_sha256 = \"{inventory_sha}\"\n\
-reusable_tool_provenance_inventory_sha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nworkspace_version = \"0.186.17\"\ntoolchain_kind = \"{mode}\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n{tool_identity}"
         ),
     );
+    if native {
+        write(
+            stage.join("inputs/component-candidate-input.toml"),
+            &format!(
+                "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image = \"native-tool-bundle@sha256:{inventory_sha}\"\ntoolchain_image_sha256 = \"sha256:{inventory_sha}\"\n"
+            ),
+        );
+    }
     write_tool_input_manifest(&input);
     assert!(
         Command::new("chmod")
@@ -2464,6 +2505,83 @@ reusable_tool_provenance_inventory_sha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     fs::set_permissions(&input, fs::Permissions::from_mode(0o555))
         .expect("make disposable tool-input root immutable");
     input
+}
+
+fn seal_tool_stage_identity_inputs(stage: &Path) {
+    for relative in [
+        "source/packaging/debian/run-plugin-process-package-attempt.sh",
+        "inputs/component-candidate-input.toml",
+        "inputs/source-tree",
+        "inputs/compiled-dependency-witness.json",
+        "inputs/provenance-tuple.toml",
+    ] {
+        assert!(
+            Command::new("chmod")
+                .args(["a-w"])
+                .arg(stage.join(relative))
+                .status()
+                .expect("seal disposable staged identity input")
+                .success(),
+            "staged identity input {relative} must be immutable while the inputs directory stays available for generated receipts"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn native_tool_input_stage_emits_only_a_native_receipt_into_a_fresh_output_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-native-tool-input-stage-{}",
+        std::process::id()
+    ));
+    let sealed = staged_fixture(&temp);
+    let input = immutable_tool_input_fixture(&temp, &sealed, true);
+    fs::set_permissions(&sealed, fs::Permissions::from_mode(0o755))
+        .expect("make fresh closure output root writable");
+    for path in ["toolchain", "network-denied-bin", "staging-home"] {
+        fs::remove_dir_all(sealed.join(path)).expect("remove disposable pre-stage output");
+    }
+    fs::remove_file(sealed.join("f05-inputs.sha256"))
+        .expect("remove disposable pre-stage manifest");
+    seal_tool_stage_identity_inputs(&sealed);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let result = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&input)
+        .output()
+        .expect("run native tool-input stage");
+    assert!(
+        result.status.success(),
+        "native tool-input stage failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let receipt = fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
+        .expect("read generated native receipt");
+    let inventory = sha256(&input.join("tool-input-inventory.txt"));
+    assert!(
+        receipt.contains("toolchain_kind = \"native-tool-bundle\"")
+            && receipt.contains(&format!("tool_inventory_sha256 = \"{inventory}\""))
+            && !receipt.contains("toolchain_image ="),
+        "native stage must bind only its reviewed inventory digest"
+    );
+    assert!(
+        sealed.join("toolchain/bin/cargo").is_file()
+            && sealed.join("inputs/toolchain-input-receipt.toml").is_file()
+            && !sealed.join("output").exists(),
+        "fresh closure output paths may receive only staged inputs, never a package output"
+    );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal disposable native fixture");
+    fs::remove_dir_all(temp).expect("remove disposable native fixture");
 }
 
 #[cfg(target_os = "linux")]
@@ -2488,7 +2606,7 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
     let input = if let Some(root) = &reviewed_input {
         fs::canonicalize(root).expect("canonical reviewed tool-input root")
     } else {
-        immutable_tool_input_fixture(&temp, &sealed)
+        immutable_tool_input_fixture(&temp, &sealed, false)
     };
     if reviewed_input.is_some() {
         write(
@@ -2520,6 +2638,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .expect("remove pre-stage network fixture");
     fs::remove_dir_all(sealed.join("staging-home")).expect("remove pre-stage home fixture");
     fs::remove_file(sealed.join("f05-inputs.sha256")).expect("remove pre-stage manifest");
+    seal_tool_stage_identity_inputs(&sealed);
 
     let staged = Command::new("bash")
         .arg(&script)
@@ -2639,6 +2758,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         version_mismatch_stage.join("source/Cargo.toml"),
         "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.18\"\n",
     );
+    seal_tool_stage_identity_inputs(&version_mismatch_stage);
     let version_mismatch = Command::new("bash")
         .arg(&script)
         .args(["--sealed-root"])
@@ -2650,8 +2770,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     assert!(
         !version_mismatch.status.success()
             && String::from_utf8_lossy(&version_mismatch.stderr)
-                .contains("rejects inventory not bound to this candidate source and version"),
-        "a reviewed inventory must reject a mismatched candidate workspace version"
+                .contains("requires matching candidate and expected-tuple revision witnesses"),
+        "an expected tuple must reject a mismatched candidate workspace version before a reviewed inventory can be copied"
     );
 
     for (name, mutate) in [
@@ -2731,6 +2851,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             .expect("remove negative stage receipt");
         fs::remove_file(negative_stage.join("f05-inputs.sha256"))
             .expect("remove negative stage manifest");
+        seal_tool_stage_identity_inputs(&negative_stage);
         let denied = Command::new("bash")
             .arg(&script)
             .args(["--sealed-root"])
@@ -2747,16 +2868,92 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             "missing-tool" => "requires complete executable tool inputs",
             "altered-tool" => "rejects a substituted rustc input",
             "symlink-escape" => "rejects symlinked inputs",
-            "inventory-replacement" => {
-                "rejects an admission receipt not bound to this candidate and inventory"
-            }
-            "revision-mismatch" => "requires matching candidate image and revision witnesses",
-            "image-mismatch" => "rejects a candidate image mismatch",
+            "inventory-replacement" => "rejects an inventory receipt not bound to the reviewed document",
+            "revision-mismatch" => "requires matching candidate and expected-tuple revision witnesses",
+            "image-mismatch" => "rejects a container image not bound to the expected tuple",
             _ => unreachable!("known tool-input negative fixture"),
         };
         assert!(
             String::from_utf8_lossy(&denied.stderr).contains(expected),
             "{name} must fail closed with its specific tool-input contract error"
+        );
+    }
+
+    for (name, mutate, expected) in [
+        (
+            "duplicate-mode",
+            "printf '\\ntoolchain_kind = \\\"container-image\\\"\\n' >> inputs/provenance-tuple.toml",
+            "requires exactly one toolchain_kind",
+        ),
+        (
+            "missing-mode",
+            "sed -i '/^toolchain_kind = /d' inputs/provenance-tuple.toml",
+            "requires exactly one toolchain_kind",
+        ),
+        (
+            "mixed-native-container",
+            "sed -i 's/toolchain_kind = \\\"container-image\\\"/toolchain_kind = \\\"native-tool-bundle\\\"/' inputs/provenance-tuple.toml",
+            "native mode requires only one inventory digest and no image fields",
+        ),
+        (
+            "writable-sealed-input",
+            "true",
+            "requires immutable sealed identity inputs while leaving fresh output roots writable",
+        ),
+    ] {
+        let mode_stage = temp.join(format!("stage-{name}"));
+        copy_tree(&sealed, &mode_stage);
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "u+w"])
+                .arg(&mode_stage)
+                .status()
+                .expect("make disposable mode stage writable")
+                .success(),
+            "mode-stage fixture must be writable before its controlled mutation"
+        );
+        for path in [
+            "toolchain",
+            "network-denied-bin",
+            "staging-home",
+            "inputs/toolchain-input-receipt.toml",
+            "f05-inputs.sha256",
+        ] {
+            let path = mode_stage.join(path);
+            if path.is_dir() {
+                fs::remove_dir_all(path).expect("remove disposable staged directory");
+            } else {
+                fs::remove_file(path).expect("remove disposable staged file");
+            }
+        }
+        assert!(
+            Command::new("sh")
+                .args(["-c", mutate])
+                .current_dir(&mode_stage)
+                .status()
+                .expect("mutate disposable mode fixture")
+                .success(),
+            "prepare {name} mode fixture"
+        );
+        if name != "writable-sealed-input" {
+            seal_tool_stage_identity_inputs(&mode_stage);
+        }
+        let denied = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&mode_stage)
+            .args(["--stage-closure-toolchain-inputs"])
+            .arg(&input)
+            .output()
+            .expect("run selected-mode denial");
+        assert!(
+            !denied.status.success() && String::from_utf8_lossy(&denied.stderr).contains(expected),
+            "toolchain stage must reject {name}: {}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            !mode_stage.join("toolchain").exists(),
+            "{name} must deny before copying a toolchain into a closure"
         );
     }
 
@@ -2843,6 +3040,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         unlaunchable_stage.join("inputs/toolchain-input-admission-receipt.toml"),
         &copied_tool_receipt.replace(&original_inventory_sha, &unlaunchable_inventory_sha),
     );
+    seal_tool_stage_identity_inputs(&unlaunchable_stage);
     let unlaunchable = Command::new("bash")
         .arg(&script)
         .args(["--sealed-root"])
