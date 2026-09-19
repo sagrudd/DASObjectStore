@@ -6,7 +6,7 @@ usage() {
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-toolchain-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-git-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
-  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT [--dependency-witness-only]" >&2
   exit 2
 }
 
@@ -22,6 +22,7 @@ stage_closure_git_inputs=0
 git_input_root=''
 stage_closure_provenance_inputs=0
 provenance_input_root=''
+dependency_witness_only=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -33,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --stage-closure-toolchain-inputs) stage_closure_toolchain_inputs=1; toolchain_input_root=${2-}; shift 2 ;;
     --stage-closure-git-inputs) stage_closure_git_inputs=1; git_input_root=${2-}; shift 2 ;;
     --stage-closure-provenance-inputs) stage_closure_provenance_inputs=1; provenance_input_root=${2-}; shift 2 ;;
+    --dependency-witness-only) dependency_witness_only=1; shift ;;
     *) usage ;;
   esac
 done
@@ -48,6 +50,7 @@ elif [[ "$stage_closure_provenance_inputs" -eq 1 ]]; then
 else
   [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 fi
+[[ "$dependency_witness_only" -eq 0 || "$stage_closure_provenance_inputs" -eq 1 ]] || usage
 [[ "$preflight_only" -eq 0 || -n "$stage_cache_root" ]] || {
   echo 'F05 package attempt: preflight-only requires a leased stage cache root' >&2
   exit 2
@@ -416,7 +419,7 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness candidate image image_sha report expected_mode inventory_sha
+  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
@@ -427,6 +430,7 @@ produce_closure_provenance_inputs() {
   validator_receipt="$input/kanon-component-candidate-input.receipt"
   source="$sealed_root/source"
   witness="$sealed_root/inputs/compiled-dependency-witness.json"
+  witness_receipt="$sealed_root/inputs/dependency-witness-receipt.toml"
   candidate="$sealed_root/inputs/component-candidate-input.toml"
 
   [[ -f "$sealed_root/f05-inputs.sha256" && ! -L "$sealed_root/f05-inputs.sha256" ]] || die 'provenance input stage requires a pre-producer sealed manifest'
@@ -439,27 +443,45 @@ produce_closure_provenance_inputs() {
     [[ ! -w "$sealed_root/$bound" ]] || die 'provenance input stage requires immutable sealed source inputs while leaving fresh output roots writable'
   done
   grep -F '  source/' "$sealed_root/f05-inputs.sha256" >/dev/null || die 'provenance input stage requires a bound physical source tree'
-  for generated in "$witness" "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
+  for generated in "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
     [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
   done
+  [[ ! -e "$witness" && ! -e "$witness_receipt" ]] || die 'provenance input stage refuses to overwrite an existing dependency witness'
   [[ "$input" = /* && -d "$input" && ! -L "$input" ]] || die 'provenance input stage requires an absolute physical input root'
   [[ -z "$(find "$input" -type l -print -quit)" && -z "$(find "$input" -perm /0222 -print -quit)" ]] || die 'provenance input stage requires immutable non-symlink inputs'
-  for required in "$registry" "$identity" "$expected" "$archive" "$recipe" "$validator" "$validator_receipt"; do
+  for required in "$identity" "$archive"; do
     [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical expected tuple, registry, identity, recipe, and validator inputs'
   done
+  if [[ "$dependency_witness_only" -eq 0 ]]; then
+    for required in "$registry" "$expected" "$recipe" "$validator" "$validator_receipt"; do
+      [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical expected tuple, registry, identity, recipe, and validator inputs'
+    done
+  fi
+  revision=$(tool_input_toml_value "$identity" source_revision)
+  version=$(tool_input_toml_value "$identity" workspace_version)
+  tree=$(tool_input_toml_value "$identity" git_tree)
+  archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
+  source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
+  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$version" = "$(workspace_package_version "$source/Cargo.toml")" && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty or source-identity-mismatched archive'
+  lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
+  [[ -d "$source/vendor" && ! -L "$source/vendor" ]] || die 'provenance input stage requires a physical dependency closure'
+  vendor_sha="sha256:$(sha256_tree "$source/vendor")"
+  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "%s",\n  "source_archive_sha256": "%s",\n  "source_git_tree": "%s"\n}\n' "$revision" "$lock_sha" "$vendor_sha" "$archive_sha" "$tree" > "$witness"
+  printf 'source_revision = "%s"\nworkspace_version = "%s"\nsource_git_tree = "%s"\nsource_archive_sha256 = "%s"\ncargo_lock_sha256 = "%s"\ndependency_closure_sha256 = "%s"\n' "$revision" "$version" "$tree" "$archive_sha" "$lock_sha" "$vendor_sha" > "$witness_receipt"
+  chmod a-w "$witness" "$witness_receipt"
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind the generated dependency witness'
+  if [[ "$dependency_witness_only" -eq 1 ]]; then
+    printf 'closure_stage_dependency_witness=PASS source_revision=%s cargo_lock_sha256=%s\n' "$revision" "$lock_sha"
+    return 0
+  fi
   local validator_sha
   validator_sha=$(tool_input_toml_value "$validator_receipt" binary_sha256)
   [[ "$validator_sha" =~ ^[0-9a-f]{64}$ && -x "$validator" && "$(sha256_file "$validator")" = "$validator_sha" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
-  revision=$(tool_input_toml_value "$identity" source_revision)
   expected_revision=$(tool_input_toml_value "$expected" source_revision)
   expected_version=$(tool_input_toml_value "$expected" workspace_version)
-  version=$(tool_input_toml_value "$identity" workspace_version)
-  tree=$(tool_input_toml_value "$identity" git_tree)
   expected_tree=$(tool_input_toml_value "$expected" source_git_tree)
-  archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
-  source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
-  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$version" = "$(workspace_package_version "$source/Cargo.toml")" && "$tree" =~ ^[0-9a-f]{40}$ && "$tree" = "$expected_tree" && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$archive_sha" = "$(tool_input_toml_value "$expected" source_archive_sha256)" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" && "$source_content_sha" = "$(tool_input_toml_value "$expected" source_content_sha256)" && "$(sha256_file "$recipe")" = "$(tool_input_toml_value "$expected" recipe_sha256)" && "$validator_sha" = "$(tool_input_toml_value "$expected" validator_binary_sha256)" && "$(tool_input_toml_value "$expected" validator_revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects a dirty, wrong, or expected-candidate-mismatched source archive'
-  lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
+  [[ "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$tree" = "$expected_tree" && "$archive_sha" = "$(tool_input_toml_value "$expected" source_archive_sha256)" && "$source_content_sha" = "$(tool_input_toml_value "$expected" source_content_sha256)" && "$(sha256_file "$recipe")" = "$(tool_input_toml_value "$expected" recipe_sha256)" && "$validator_sha" = "$(tool_input_toml_value "$expected" validator_binary_sha256)" && "$(tool_input_toml_value "$expected" validator_revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an expected tuple not bound to the generated dependency witness'
   expected_mode=$(toolchain_mode_from_receipt "$expected")
   if [[ "$expected_mode" = native-tool-bundle ]]; then
     inventory_sha=$(tool_input_toml_value "$expected" tool_inventory_sha256)
@@ -475,7 +497,6 @@ produce_closure_provenance_inputs() {
   mkdir -p "$sealed_root/inputs"
   cp -a "$expected" "$sealed_root/inputs/provenance-tuple.toml"
   printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
-  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "sha256:%s"\n}\n' "$revision" "$lock_sha" "$(sha256_tree "$sealed_root/cargo-home")" > "$witness"
   printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
     "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
   report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'

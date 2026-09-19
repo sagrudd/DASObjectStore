@@ -161,6 +161,16 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         sealed.join("inputs/provenance-tuple.toml").is_file(),
         "the emitted candidate must retain the independently supplied selected-mode tuple"
     );
+    let witness = sealed.join("inputs/compiled-dependency-witness.json");
+    assert!(
+        witness.is_file()
+            && sealed.join("inputs/dependency-witness-receipt.toml").is_file()
+            && fs::metadata(&witness)
+                .expect("read generated witness mode")
+                .permissions()
+                .readonly(),
+        "the provenance stage must generate and freeze an archive/lock-bound witness before candidate emission"
+    );
     let mismatch = temp.join("mismatch-inputs");
     copy_tree(&input, &mismatch);
     Command::new("chmod")
@@ -198,7 +208,8 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     let denied = run(&fresh, &mismatch);
     assert!(
         !denied.status.success()
-            && String::from_utf8_lossy(&denied.stderr).contains("expected-candidate-mismatched")
+            && String::from_utf8_lossy(&denied.stderr)
+                .contains("rejects a dirty or source-identity-mismatched archive")
     );
     assert!(
         !fresh.join("inputs/component-candidate-input.toml").exists()
@@ -2387,7 +2398,7 @@ fn write_tool_input_manifest(input: &Path) {
         .expect("name disposable tool-input manifest");
 }
 
-fn immutable_tool_input_fixture(root: &Path, stage: &Path) -> PathBuf {
+fn immutable_tool_input_fixture(root: &Path, stage: &Path, native: bool) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
     let input = root.join("tool-inputs");
@@ -2451,27 +2462,36 @@ tree_sha256={}\n",
         ),
     );
     let inventory_sha = sha256(&inventory);
+    let mode = if native {
+        "native-tool-bundle"
+    } else {
+        "container-image"
+    };
+    let tool_identity = if native {
+        format!("tool_inventory_sha256 = \"{inventory_sha}\"\n")
+    } else {
+        "toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n".to_owned()
+    };
     write(
         input.join("tool-inputs.toml"),
         &format!(
-            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_kind = \"container-image\"\n\
-toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-inventory_sha256 = \"{inventory_sha}\"\n"
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_kind = \"{mode}\"\ninventory_sha256 = \"{inventory_sha}\"\n{tool_identity}"
         ),
     );
     write(
         stage.join("inputs/provenance-tuple.toml"),
         &format!(
-            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-workspace_version = \"0.186.17\"\n\
-toolchain_kind = \"container-image\"\n\
-toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-source_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nworkspace_version = \"0.186.17\"\ntoolchain_kind = \"{mode}\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n{tool_identity}"
         ),
     );
+    if native {
+        write(
+            stage.join("inputs/component-candidate-input.toml"),
+            &format!(
+                "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image = \"native-tool-bundle@sha256:{inventory_sha}\"\ntoolchain_image_sha256 = \"sha256:{inventory_sha}\"\n"
+            ),
+        );
+    }
     write_tool_input_manifest(&input);
     assert!(
         Command::new("chmod")
@@ -2509,6 +2529,63 @@ fn seal_tool_stage_identity_inputs(stage: &Path) {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn native_tool_input_stage_emits_only_a_native_receipt_into_a_fresh_output_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-native-tool-input-stage-{}",
+        std::process::id()
+    ));
+    let sealed = staged_fixture(&temp);
+    let input = immutable_tool_input_fixture(&temp, &sealed, true);
+    fs::set_permissions(&sealed, fs::Permissions::from_mode(0o755))
+        .expect("make fresh closure output root writable");
+    for path in ["toolchain", "network-denied-bin", "staging-home"] {
+        fs::remove_dir_all(sealed.join(path)).expect("remove disposable pre-stage output");
+    }
+    fs::remove_file(sealed.join("f05-inputs.sha256"))
+        .expect("remove disposable pre-stage manifest");
+    seal_tool_stage_identity_inputs(&sealed);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let result = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&input)
+        .output()
+        .expect("run native tool-input stage");
+    assert!(
+        result.status.success(),
+        "native tool-input stage failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let receipt = fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
+        .expect("read generated native receipt");
+    let inventory = sha256(&input.join("tool-input-inventory.txt"));
+    assert!(
+        receipt.contains("toolchain_kind = \"native-tool-bundle\"")
+            && receipt.contains(&format!("tool_inventory_sha256 = \"{inventory}\""))
+            && !receipt.contains("toolchain_image ="),
+        "native stage must bind only its reviewed inventory digest"
+    );
+    assert!(
+        sealed.join("toolchain/bin/cargo").is_file()
+            && sealed.join("inputs/toolchain-input-receipt.toml").is_file()
+            && !sealed.join("output").exists(),
+        "fresh closure output paths may receive only staged inputs, never a package output"
+    );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal disposable native fixture");
+    fs::remove_dir_all(temp).expect("remove disposable native fixture");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -2529,7 +2606,7 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
     let input = if let Some(root) = &reviewed_input {
         fs::canonicalize(root).expect("canonical reviewed tool-input root")
     } else {
-        immutable_tool_input_fixture(&temp, &sealed)
+        immutable_tool_input_fixture(&temp, &sealed, false)
     };
     if reviewed_input.is_some() {
         write(
