@@ -138,11 +138,27 @@ ERROR
     cd "$web_root"
     if staged_closure_enabled; then
       local isolated_cargo_home
+      local isolated_xdg_cache staged_wasm_bindgen staged_wasm_opt
       isolated_cargo_home="$attempt_root/cargo-home/web"
+      isolated_xdg_cache="$attempt_root/xdg-cache"
+      staged_wasm_bindgen="$staged_trunk_tools/wasm-bindgen-0.2.128/wasm-bindgen"
+      staged_wasm_opt="$staged_trunk_tools/wasm-opt-version_123/wasm-opt"
       rm -rf "$isolated_cargo_home"
-      install -d "$isolated_cargo_home" "$attempt_root/home" "$attempt_root/target"
+      rm -rf "$isolated_xdg_cache"
+      install -d "$isolated_cargo_home" "$attempt_root/home" "$attempt_root/target" \
+        "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128" \
+        "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin"
       cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
-      env -i HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" TMPDIR="$attempt_root/tmp" TMP="$attempt_root/tmp" TEMP="$attempt_root/tmp" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" TRUNK_TOOLS_DIR="$staged_trunk_tools" "$staged_trunk" build --release >&2
+      cp -p "$staged_wasm_bindgen" "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen"
+      cp -p "$staged_wasm_opt" "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin/wasm-opt"
+      for staged_cache_tool in \
+        "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen" \
+        "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin/wasm-opt"; do
+        [[ -x "$staged_cache_tool" && ! -L "$staged_cache_tool" ]] || staged_closure_error 'requires physical staged Trunk cache tools'
+      done
+      [[ "$(shasum -a 256 "$staged_wasm_bindgen" | awk '{print $1}')" = "$(shasum -a 256 "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen" | awk '{print $1}')" ]] || staged_closure_error 'requires hash-verified staged wasm-bindgen cache input'
+      [[ "$(shasum -a 256 "$staged_wasm_opt" | awk '{print $1}')" = "$(shasum -a 256 "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin/wasm-opt" | awk '{print $1}')" ]] || staged_closure_error 'requires hash-verified staged wasm-opt cache input'
+      env -i HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" XDG_CACHE_HOME="$isolated_xdg_cache" TMPDIR="$attempt_root/tmp" TMP="$attempt_root/tmp" TEMP="$attempt_root/tmp" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" "$staged_trunk" build --release >&2
     else
       env -u NO_COLOR trunk build --release >&2
     fi

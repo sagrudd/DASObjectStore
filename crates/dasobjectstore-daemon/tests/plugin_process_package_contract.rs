@@ -226,7 +226,11 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "requires a staged wasm32-unknown-unknown target",
         "wasm-bindgen-0.2.128/wasm-bindgen",
         "wasm-opt-version_123/wasm-opt",
-        "TRUNK_TOOLS_DIR=\"$staged_trunk_tools\"",
+        "XDG_CACHE_HOME=\"$isolated_xdg_cache\"",
+        "wasm-bindgen-0.2.128/wasm-bindgen",
+        "wasm-opt-version_123/bin/wasm-opt",
+        "requires hash-verified staged wasm-bindgen cache input",
+        "requires hash-verified staged wasm-opt cache input",
         "requires f05-inputs.sha256 to bind",
         "requires a non-empty staged vendor tree",
         "requires a non-empty staged wasm32-unknown-unknown target",
@@ -271,7 +275,7 @@ fn package_attempt_requires_real_network_namespace_isolation() {
 fn staged_web_build_binds_writable_attempt_tmp_to_rust_and_trunk() {
     for required in [
         "requires a writable per-attempt temporary directory",
-        "TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
+        "XDG_CACHE_HOME=\"$isolated_xdg_cache\" TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
     ] {
         assert!(
             PREPARE_WEB_DIST.contains(required),
@@ -540,12 +544,25 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
 
+    let network_download = attempt.join("network-download");
+    let staged_curl = sealed.join("network-denied-bin/curl");
+    write(
+        &staged_curl,
+        &format!(
+            "#!/bin/sh\nprintf 'network_request=UNEXPECTED\\n' > \"{}\"\nexit 75\n",
+            network_download.display()
+        ),
+    );
+    fs::set_permissions(&staged_curl, fs::Permissions::from_mode(0o755))
+        .expect("make staged downloader denial executable");
+
     let staged_trunk = sealed.join("toolchain/bin/trunk");
     write(
         &staged_trunk,
         &format!(
-            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
-            attempt.join("tmp").display()
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"{}\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
+            attempt.join("tmp").display(),
+            attempt.join("xdg-cache").display()
         ),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
@@ -579,16 +596,33 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
         .expect("read staged Trunk temporary-storage evidence");
     let expected_tmp = attempt.join("tmp").display().to_string();
+    let expected_xdg_cache = attempt.join("xdg-cache").display().to_string();
     assert!(
         trunk_environment.contains(&format!("tmpdir={expected_tmp}"))
             && trunk_environment.contains(&format!("tmp={expected_tmp}"))
             && trunk_environment.contains(&format!("temp={expected_tmp}"))
+            && trunk_environment.contains(&format!("xdg_cache={expected_xdg_cache}"))
+            && trunk_environment.contains(&format!(
+                "cached_wasm_bindgen={expected_xdg_cache}/trunk/wasm-bindgen-0.2.128/wasm-bindgen"
+            ))
+            && trunk_environment.contains(&format!(
+                "cached_wasm_opt={expected_xdg_cache}/trunk/wasm-opt-version_123/bin/wasm-opt"
+            ))
+            && trunk_environment.contains("downloader=NOT_INVOKED")
             && trunk_environment.contains("host_tmp_writable=DENIED"),
-        "staged Trunk must receive only the writable external attempt tmp directory"
+        "staged Trunk must receive only the external temporary and hash-verified tool cache directories"
     );
     assert!(
-        attempt.join("tmp/trunk-temp-proof").is_file() && !sealed.join("tmp").exists(),
-        "temporary writes must remain under the external attempt root, never host or sealed tmp"
+        attempt.join("tmp/trunk-temp-proof").is_file()
+            && attempt
+                .join("xdg-cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen")
+                .is_file()
+            && attempt
+                .join("xdg-cache/trunk/wasm-opt-version_123/bin/wasm-opt")
+                .is_file()
+            && !network_download.exists()
+            && !sealed.join("tmp").exists(),
+        "temporary and Trunk-cache writes must remain under the external attempt root without downloader fallback"
     );
     assert_eq!(
         fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
