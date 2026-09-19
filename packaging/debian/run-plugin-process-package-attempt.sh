@@ -165,10 +165,29 @@ tool_inventory_value() {
   printf '%s\n' "$value"
 }
 
+tool_inventory_root_value() {
+  local file=$1 key=$2 value
+  value=$(sed -n "s/^${key}=\(.*\)$/\1/p" "$file")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "toolchain input inventory requires exactly one ${key}"
+  printf '%s\n' "$value"
+}
+
+workspace_package_version() {
+  local manifest=$1 value
+  value=$(awk '
+    $0 == "[workspace.package]" { active=1; next }
+    /^\[/ { active=0 }
+    active && /^version = "[0-9]+\.[0-9]+\.[0-9]+"$/ { print substr($0, 12, length($0) - 12) }
+  ' "$manifest")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 && "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'toolchain input stage requires one strict candidate workspace version'
+  printf '%s\n' "$value"
+}
+
 produce_closure_toolchain_inputs() {
   local input_receipt input_manifest input_inventory candidate source_tree witness staged_runner
-  local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha
+  local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha candidate_version
   local input_revision input_image input_image_sha input_inventory_sha input_manifest_sha receipt temporary
+  local inventory_target inventory_version inventory_binding_revision inventory_binding_version prior_inventory_sha
   local required inventory_sha
 
   input_receipt="$toolchain_input_root/tool-inputs.toml"
@@ -187,7 +206,7 @@ produce_closure_toolchain_inputs() {
   done
   [[ "$(sha256_file "$staged_runner")" = "$(sha256_file "$0")" ]] || die 'toolchain input stage must execute the runner bytes that it binds'
   inventory_sha=$(sha256_file "$input_inventory")
-  [[ "$inventory_sha" = 'de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f' ]] || die 'toolchain input stage requires the reviewed physical inventory document'
+  [[ "$inventory_sha" = '9e28c1ef0c4f86ade290cec25f25f132cba5f239b277299177ef5fa56bf11188' ]] || die 'toolchain input stage requires the reviewed physical inventory document'
   for required in \
     "$toolchain_input_root/toolchain/bin/cargo" \
     "$toolchain_input_root/toolchain/bin/rustc" \
@@ -216,11 +235,18 @@ produce_closure_toolchain_inputs() {
   witness_revision=$(sed -n 's/.*"source_revision": "\([0-9a-f]\{40\}\)".*/\1/p' "$witness")
   candidate_image=$(tool_input_toml_value "$candidate" toolchain_image)
   candidate_image_sha=$(tool_input_toml_value "$candidate" toolchain_image_sha256)
+  candidate_version=$(workspace_package_version "$sealed_root/source/Cargo.toml")
+  inventory_target=$(tool_inventory_root_value "$input_inventory" source_contract_target)
+  inventory_version=$(tool_inventory_root_value "$input_inventory" source_contract_version)
+  inventory_binding_revision=$(tool_inventory_value "$input_inventory" candidate_binding source_revision)
+  inventory_binding_version=$(tool_inventory_value "$input_inventory" candidate_binding workspace_version)
+  prior_inventory_sha=$(tool_inventory_value "$input_inventory" reusable_tool_provenance inventory_sha256)
   input_revision=$(tool_input_toml_value "$input_receipt" source_revision)
   input_image=$(tool_input_toml_value "$input_receipt" toolchain_image)
   input_image_sha=$(tool_input_toml_value "$input_receipt" toolchain_image_sha256)
   input_inventory_sha=$(tool_input_toml_value "$input_receipt" inventory_sha256)
   [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" && "$candidate_revision" = "$input_revision" ]] || die 'toolchain input stage requires matching candidate image and revision witnesses'
+  [[ "$inventory_target" = "$candidate_revision" && "$inventory_binding_revision" = "$candidate_revision" && "$inventory_version" = "$candidate_version" && "$inventory_binding_version" = "$candidate_version" && "$prior_inventory_sha" = 'de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f' ]] || die 'toolchain input stage rejects inventory not bound to this candidate source and version'
   [[ "$candidate_image" = "$input_image" && "$candidate_image_sha" = "$input_image_sha" && "$candidate_image" =~ @sha256:[0-9a-f]{64}$ && "$candidate_image_sha" =~ ^sha256:[0-9a-f]{64}$ && "sha256:${candidate_image##*@sha256:}" = "$candidate_image_sha" ]] || die 'toolchain input stage rejects a candidate image mismatch'
   [[ "$input_inventory_sha" = "$inventory_sha" ]] || die 'toolchain input stage rejects an inventory receipt not bound to the reviewed document'
   [[ ! -e "$sealed_root/toolchain" && ! -e "$sealed_root/network-denied-bin" && ! -e "$sealed_root/staging-home" && ! -e "$sealed_root/inputs/toolchain-input-receipt.toml" ]] || die 'toolchain input stage refuses to overwrite closure inputs'
@@ -232,8 +258,8 @@ produce_closure_toolchain_inputs() {
   input_manifest_sha=$(sha256_file "$input_manifest")
   receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
   temporary="$receipt.next"
-  printf 'source_revision = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\n' \
-    "$input_revision" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" > "$temporary"
+  printf 'source_revision = "%s"\nworkspace_version = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\nreusable_tool_provenance_inventory_sha256 = "%s"\n' \
+    "$input_revision" "$candidate_version" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" "$prior_inventory_sha" > "$temporary"
   mv "$temporary" "$receipt"
   write_batched_manifest "$sealed_root"
   (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'

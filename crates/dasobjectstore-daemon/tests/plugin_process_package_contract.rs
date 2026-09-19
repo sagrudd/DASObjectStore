@@ -1834,6 +1834,26 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
     } else {
         immutable_tool_input_fixture(&temp, &sealed)
     };
+    if reviewed_input.is_some() {
+        write(
+            sealed.join("inputs/component-candidate-input.toml"),
+            "source_revision = \"c7b38a244a8a515f865058d09f67e4abe61978cc\"\n\
+toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
+        );
+        write(
+            sealed.join("inputs/source-tree"),
+            "revision=c7b38a244a8a515f865058d09f67e4abe61978cc\n",
+        );
+        write(
+            sealed.join("inputs/compiled-dependency-witness.json"),
+            "{\"source_revision\": \"c7b38a244a8a515f865058d09f67e4abe61978cc\", \"dependencies\":[]}\n",
+        );
+        write(
+            sealed.join("source/Cargo.toml"),
+            "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.18\"\n",
+        );
+    }
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
 
@@ -1906,8 +1926,14 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
     assert!(
         fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
             .expect("read copied tool-input receipt")
-            .contains("inventory_sha256 = \"de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f\""),
+            .contains("inventory_sha256 = \"9e28c1ef0c4f86ade290cec25f25f132cba5f239b277299177ef5fa56bf11188\""),
         "stage must bind the reviewed tool-input inventory"
+    );
+    assert!(
+        fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
+            .expect("read copied tool-input receipt")
+            .contains("workspace_version = \"0.186.18\""),
+        "stage must bind the candidate workspace version"
     );
 
     let attempt = temp.join("attempt");
@@ -1938,6 +1964,46 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         "tool-input handoff must not compile or package"
     );
 
+    let version_mismatch_stage = temp.join("stage-version-mismatch");
+    copy_tree(&sealed, &version_mismatch_stage);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&version_mismatch_stage)
+            .status()
+            .expect("make disposable version-mismatch stage writable")
+            .success(),
+        "version-mismatch stage must be writable only in its disposable fixture"
+    );
+    fs::remove_dir_all(version_mismatch_stage.join("toolchain"))
+        .expect("remove version-mismatch stage toolchain");
+    fs::remove_dir_all(version_mismatch_stage.join("network-denied-bin"))
+        .expect("remove version-mismatch stage network input");
+    fs::remove_dir_all(version_mismatch_stage.join("staging-home"))
+        .expect("remove version-mismatch stage home input");
+    fs::remove_file(version_mismatch_stage.join("inputs/toolchain-input-receipt.toml"))
+        .expect("remove version-mismatch stage receipt");
+    fs::remove_file(version_mismatch_stage.join("f05-inputs.sha256"))
+        .expect("remove version-mismatch stage manifest");
+    write(
+        version_mismatch_stage.join("source/Cargo.toml"),
+        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.19\"\n",
+    );
+    let version_mismatch = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&version_mismatch_stage)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&input)
+        .output()
+        .expect("run candidate-version mismatch tool-input stage");
+    assert!(
+        !version_mismatch.status.success()
+            && String::from_utf8_lossy(&version_mismatch.stderr)
+                .contains("rejects inventory not bound to this candidate source and version"),
+        "a reviewed inventory must reject a mismatched candidate workspace version"
+    );
+
     for (name, mutate) in [
         ("missing-tool", "rm toolchain/bin/trunk"),
         ("altered-tool", "printf altered >> toolchain/bin/rustc"),
@@ -1951,7 +2017,7 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         ),
         (
             "revision-mismatch",
-            "sed -i 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
+            "sed -i 's/c7b38a244a8a515f865058d09f67e4abe61978cc/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
         ),
         (
             "image-mismatch",
