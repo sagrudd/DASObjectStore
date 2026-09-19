@@ -446,7 +446,11 @@ produce_closure_provenance_inputs() {
   for generated in "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
     [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
   done
-  [[ ! -e "$witness" && ! -e "$witness_receipt" ]] || die 'provenance input stage refuses to overwrite an existing dependency witness'
+  if [[ "$dependency_witness_only" -eq 1 ]]; then
+    [[ ! -e "$witness" && ! -e "$witness_receipt" && ! -e "$sealed_root/inputs/source-tree" ]] || die 'provenance input stage refuses to overwrite an existing dependency witness skeleton'
+  else
+    [[ -f "$witness" && -f "$witness_receipt" && -f "$sealed_root/inputs/source-tree" && ! -L "$witness" && ! -L "$witness_receipt" && ! -L "$sealed_root/inputs/source-tree" && ! -w "$witness" && ! -w "$witness_receipt" && ! -w "$sealed_root/inputs/source-tree" ]] || die 'provenance input stage requires an immutable source-owned dependency witness skeleton'
+  fi
   [[ "$input" = /* && -d "$input" && ! -L "$input" ]] || die 'provenance input stage requires an absolute physical input root'
   [[ -z "$(find "$input" -type l -print -quit)" && -z "$(find "$input" -perm /0222 -print -quit)" ]] || die 'provenance input stage requires immutable non-symlink inputs'
   for required in "$identity" "$archive"; do
@@ -466,12 +470,13 @@ produce_closure_provenance_inputs() {
   lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
   [[ -d "$source/vendor" && ! -L "$source/vendor" ]] || die 'provenance input stage requires a physical dependency closure'
   vendor_sha="sha256:$(sha256_tree "$source/vendor")"
-  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "%s",\n  "source_archive_sha256": "%s",\n  "source_git_tree": "%s"\n}\n' "$revision" "$lock_sha" "$vendor_sha" "$archive_sha" "$tree" > "$witness"
-  printf 'source_revision = "%s"\nworkspace_version = "%s"\nsource_git_tree = "%s"\nsource_archive_sha256 = "%s"\ncargo_lock_sha256 = "%s"\ndependency_closure_sha256 = "%s"\n' "$revision" "$version" "$tree" "$archive_sha" "$lock_sha" "$vendor_sha" > "$witness_receipt"
-  chmod a-w "$witness" "$witness_receipt"
-  write_batched_manifest "$sealed_root"
-  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind the generated dependency witness'
   if [[ "$dependency_witness_only" -eq 1 ]]; then
+    printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "%s",\n  "source_archive_sha256": "%s",\n  "source_git_tree": "%s"\n}\n' "$revision" "$lock_sha" "$vendor_sha" "$archive_sha" "$tree" > "$witness"
+    printf 'source_revision = "%s"\nworkspace_version = "%s"\nsource_git_tree = "%s"\nsource_archive_sha256 = "%s"\ncargo_lock_sha256 = "%s"\ndependency_closure_sha256 = "%s"\n' "$revision" "$version" "$tree" "$archive_sha" "$lock_sha" "$vendor_sha" > "$witness_receipt"
+    printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
+    chmod a-w "$witness" "$witness_receipt" "$sealed_root/inputs/source-tree"
+    write_batched_manifest "$sealed_root"
+    (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind the generated dependency witness'
     printf 'closure_stage_dependency_witness=PASS source_revision=%s cargo_lock_sha256=%s\n' "$revision" "$lock_sha"
     return 0
   fi
@@ -494,9 +499,7 @@ produce_closure_provenance_inputs() {
     image=$(tool_input_toml_value "$expected" toolchain_image)
     image_sha=$(tool_input_toml_value "$expected" toolchain_image_sha256)
   fi
-  mkdir -p "$sealed_root/inputs"
   cp -a "$expected" "$sealed_root/inputs/provenance-tuple.toml"
-  printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
   printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
     "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
   report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'

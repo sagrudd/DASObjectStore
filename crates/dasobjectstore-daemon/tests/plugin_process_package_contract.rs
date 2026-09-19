@@ -135,6 +135,20 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             .output()
             .expect("run provenance stage")
     };
+    let witness = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-provenance-inputs"])
+        .arg(&input)
+        .arg("--dependency-witness-only")
+        .output()
+        .expect("run source-owned dependency-witness stage");
+    assert!(
+        witness.status.success(),
+        "dependency-witness stage stderr: {}",
+        String::from_utf8_lossy(&witness.stderr)
+    );
     let accepted = run(&sealed, &input);
     assert!(
         accepted.status.success(),
@@ -205,7 +219,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         .expect("seal mismatch source inputs before provenance staging");
     write_f05_manifest(&fresh);
     let pre_producer_manifest = sha256(&fresh.join("f05-inputs.sha256"));
-    let denied = run(&fresh, &mismatch);
+    let denied = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&fresh)
+        .args(["--stage-closure-provenance-inputs"])
+        .arg(&mismatch)
+        .arg("--dependency-witness-only")
+        .output()
+        .expect("run denied dependency-witness stage");
     assert!(
         !denied.status.success()
             && String::from_utf8_lossy(&denied.stderr)
