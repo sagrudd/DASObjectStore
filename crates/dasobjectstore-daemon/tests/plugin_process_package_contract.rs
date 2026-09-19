@@ -57,10 +57,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "component-candidate-input.toml",
         "source-tree",
         "compiled-dependency-witness.json",
-        "f05-inputs.sha256",
     ] {
         fs::remove_file(sealed.join("inputs").join(name)).expect("clear producer output fixture");
     }
+    fs::remove_file(sealed.join("f05-inputs.sha256")).expect("clear producer manifest fixture");
+    fs::copy(
+        sealed.join("inputs/toolchain-input-admission-receipt.toml"),
+        sealed.join("inputs/toolchain-input-receipt.toml"),
+    )
+    .expect("bind externally admitted expected tuple receipt");
     let input = temp.join("provenance-inputs");
     fs::create_dir(&input).expect("create provenance inputs");
     let archive = input.join("source-archive.tar");
@@ -69,7 +74,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     write(
         input.join("source-identity.toml"),
         &format!(
-            "source_revision = \"{revision}\"\nexpected_source_revision = \"{revision}\"\ngit_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\n",
+            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\ngit_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\n",
             sha256(&archive),
             tree_sha256(&sealed.join("source")),
         ),
@@ -150,14 +155,24 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "component-candidate-input.toml",
         "source-tree",
         "compiled-dependency-witness.json",
-        "f05-inputs.sha256",
     ] {
         fs::remove_file(fresh.join("inputs").join(name)).expect("clear mismatch output");
     }
+    fs::remove_file(fresh.join("f05-inputs.sha256")).expect("clear mismatch manifest");
+    fs::copy(
+        fresh.join("inputs/toolchain-input-admission-receipt.toml"),
+        fresh.join("inputs/toolchain-input-receipt.toml"),
+    )
+    .expect("bind mismatch expected tuple receipt");
     let denied = run(&fresh, &mismatch);
     assert!(
         !denied.status.success()
             && String::from_utf8_lossy(&denied.stderr).contains("expected-candidate-mismatched")
+    );
+    assert!(
+        !fresh.join("inputs/component-candidate-input.toml").exists()
+            && !fresh.join("f05-inputs.sha256").exists(),
+        "a rejected tuple must not emit new provenance inputs or a manifest"
     );
     Command::new("chmod")
         .args(["-R", "u+w"])
