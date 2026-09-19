@@ -258,7 +258,9 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
 #[test]
 fn package_attempt_requires_real_network_namespace_isolation() {
     for required in [
-        "/usr/bin/bwrap --unshare-net --ro-bind / / --ro-bind \"$sealed_root\" /opt --bind \"$attempt_root\" /var/tmp --bind \"$diagnostic_root\" /var/cache --proc /proc --dev /dev",
+        "bwrap_args=(--unshare-net)",
+        "bwrap_args+=(--ro-bind / / --ro-bind \"$sealed_root\" /opt --bind \"$attempt_root\" /var/tmp --bind \"$diagnostic_root\" /var/cache --proc /proc --dev /dev)",
+        "exec /usr/bin/bwrap \"${bwrap_args[@]}\"",
         "--sealed-root /opt --attempt-root /var/tmp --diagnostic-root /var/cache",
         "requires /usr/bin/bwrap network isolation",
         "requires loopback-only network interfaces",
@@ -294,6 +296,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "--sealed-root",
         "--attempt-root",
         "--diagnostic-root",
+        "--stage-cache-root",
         "reject_symlink_ancestry \"$sealed_root\" 'sealed closure root'",
         "reject_symlink_ancestry \"$attempt_root\" 'external attempt root'",
         "reject_symlink_ancestry \"$diagnostic_root\" 'external diagnostic root'",
@@ -305,7 +308,13 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "preflight.log",
         "attempt_root_empty=PASS",
         "preflight_failure=$*",
-        "cp -a \"$sealed_root\" \"$copied_closure\"",
+        "cp -a --reflink=auto \"$sealed_root\" \"$copied_closure\"",
+        "write_batched_manifest",
+        "xargs -0 -r -n 128 -P \"$hash_jobs\"",
+        "stage-reuse-receipt",
+        "stage_cache_cold=PASS",
+        "stage_cache_reuse=PASS",
+        "leased stage cache root must be immutable before reuse",
         "chmod -R u+w \"$copied_closure\"",
         "copied_manifest=\"$copied_source/Cargo.toml\"",
         "copied_lock=\"$copied_source/Cargo.lock\"",
@@ -526,6 +535,312 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "runner must not write a status into the rejected attempt root"
     );
     fs::remove_dir_all(temp).expect("remove temporary harness root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_stage() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-stage-cache-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create temporary stage-cache root");
+    let sealed = staged_fixture(&temp);
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(
+        &staged_cargo,
+        "#!/bin/sh\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
+    );
+    fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+        .expect("make staged Cargo executable");
+    write_f05_manifest(&sealed);
+    let sealed_manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
+    let cache = temp.join("leased-cache");
+    fs::create_dir(&cache).expect("create leased stage cache root");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+
+    let run = |name: &str, cache_root: &Path| {
+        let attempt = temp.join(format!("{name}-attempt"));
+        let diagnostic = temp.join(format!("{name}-diagnostic"));
+        fs::create_dir(&attempt).expect("create fresh attempt root");
+        fs::create_dir(&diagnostic).expect("create fresh diagnostic root");
+        let status = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&sealed)
+            .args(["--attempt-root"])
+            .arg(&attempt)
+            .args(["--diagnostic-root"])
+            .arg(&diagnostic)
+            .args(["--stage-cache-root"])
+            .arg(cache_root)
+            .status()
+            .expect("run cached package-attempt fixture");
+        (attempt, diagnostic, status)
+    };
+
+    let (cold_attempt, cold_diagnostic, cold_status) = run("cold", &cache);
+    assert!(
+        !cold_status.success(),
+        "fixture Cargo must stop the cold attempt"
+    );
+    assert!(
+        fs::read_to_string(cold_diagnostic.join("preflight.log"))
+            .expect("read cold stage diagnostic")
+            .contains("stage_cache_cold=PASS"),
+        "cold attempt must record creation of the leased immutable stage"
+    );
+    let receipt =
+        fs::read_to_string(cache.join("stage-reuse-receipt")).expect("read leased stage receipt");
+    for field in [
+        "lease_key=",
+        "sealed_manifest_sha256=",
+        "runner_sha256=",
+        "copied_config_sha256=",
+    ] {
+        assert!(receipt.contains(field), "receipt must bind {field}");
+    }
+    assert!(
+        cache
+            .join("current/source/.cargo/f05-vendor-config.toml")
+            .is_file()
+            && fs::read_to_string(
+                cold_attempt.join("closure/source/.cargo/f05-vendor-config.toml")
+            )
+            .expect("read copied cache config")
+            .contains("/mnt/current/source/vendor"),
+        "cache reuse must bind the copied config to the fixed Bubblewrap cache path"
+    );
+    assert_eq!(
+        fs::metadata(&cache)
+            .expect("read immutable cache mode")
+            .permissions()
+            .mode()
+            & 0o222,
+        0,
+        "leased stage cache root must become immutable before reuse"
+    );
+    assert_eq!(
+        fs::read(sealed.join("f05-inputs.sha256")).expect("re-read sealed manifest"),
+        sealed_manifest,
+        "cold cache creation must not change the sealed source inputs"
+    );
+
+    let (warm_attempt, warm_diagnostic, warm_status) = run("warm", &cache);
+    assert!(
+        !warm_status.success(),
+        "fixture Cargo must stop the warm attempt"
+    );
+    assert!(
+        fs::read_to_string(warm_diagnostic.join("preflight.log"))
+            .expect("read warm stage diagnostic")
+            .contains("stage_cache_reuse=PASS"),
+        "warm attempt must reuse the fully revalidated leased stage"
+    );
+    assert!(
+        warm_attempt.join("cargo.log").is_file(),
+        "warm attempt must reach staged Cargo"
+    );
+
+    let writable_mode = temp.join("writable-mode-cache");
+    copy_tree(&cache, &writable_mode);
+    let writable_cached_input = writable_mode.join("current/source/vendor/fixture.crate");
+    fs::set_permissions(&writable_cached_input, fs::Permissions::from_mode(0o644))
+        .expect("make cached input unexpectedly writable");
+    let (_, writable_mode_diagnostic, writable_mode_status) = run("writable-mode", &writable_mode);
+    assert!(
+        !writable_mode_status.success(),
+        "a writable cached stage input must be rejected"
+    );
+    assert!(
+        fs::read_to_string(writable_mode_diagnostic.join("preflight.log"))
+            .expect("read writable-mode diagnostic")
+            .contains("leased stage cache must be immutable before reuse"),
+        "warm reuse must reject a cached stage with writable contents"
+    );
+
+    let tampered = temp.join("tampered-cache");
+    copy_tree(&cache, &tampered);
+    fs::set_permissions(&tampered, fs::Permissions::from_mode(0o755))
+        .expect("make tampered cache root writable");
+    let tampered_vendor = tampered.join("current/source/vendor/fixture.crate");
+    fs::set_permissions(
+        tampered_vendor.parent().expect("vendor parent"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make tampered vendor parent writable");
+    fs::set_permissions(&tampered_vendor, fs::Permissions::from_mode(0o644))
+        .expect("make tampered vendor input writable");
+    write(&tampered_vendor, "tampered cached input\n");
+    fs::set_permissions(&tampered_vendor, fs::Permissions::from_mode(0o444))
+        .expect("restore immutable tampered vendor input mode");
+    fs::set_permissions(
+        tampered_vendor.parent().expect("vendor parent"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .expect("restore immutable tampered vendor parent mode");
+    fs::set_permissions(&tampered, fs::Permissions::from_mode(0o555))
+        .expect("restore immutable tampered cache root");
+    let (_, tampered_diagnostic, tampered_status) = run("tampered", &tampered);
+    assert!(
+        !tampered_status.success(),
+        "tampered cache must be rejected"
+    );
+    assert!(
+        fs::read_to_string(tampered_diagnostic.join("preflight.log"))
+            .expect("read tampered diagnostic")
+            .contains("leased stage cache has a missing or altered input"),
+        "warm reuse must fully revalidate cached content"
+    );
+
+    let missing_receipt = temp.join("missing-receipt-cache");
+    copy_tree(&cache, &missing_receipt);
+    fs::set_permissions(&missing_receipt, fs::Permissions::from_mode(0o755))
+        .expect("make missing-receipt cache root writable");
+    fs::remove_file(missing_receipt.join("stage-reuse-receipt")).expect("remove cache receipt");
+    let (_, missing_diagnostic, missing_status) = run("missing-receipt", &missing_receipt);
+    assert!(
+        !missing_status.success(),
+        "cache missing its receipt must be rejected"
+    );
+    assert!(
+        fs::read_to_string(missing_diagnostic.join("preflight.log"))
+            .expect("read missing receipt diagnostic")
+            .contains("leased stage cache requires both a physical receipt and current stage"),
+        "cache reuse must fail closed when its receipt is absent"
+    );
+
+    let mismatched_receipt = temp.join("mismatched-receipt-cache");
+    copy_tree(&cache, &mismatched_receipt);
+    fs::set_permissions(&mismatched_receipt, fs::Permissions::from_mode(0o755))
+        .expect("make mismatched-receipt cache root writable");
+    fs::set_permissions(
+        mismatched_receipt.join("stage-reuse-receipt"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .expect("make mismatched cache receipt writable");
+    write(
+        mismatched_receipt.join("stage-reuse-receipt"),
+        "lease_key=wrong-runner-or-cache-key\n",
+    );
+    fs::set_permissions(
+        mismatched_receipt.join("stage-reuse-receipt"),
+        fs::Permissions::from_mode(0o444),
+    )
+    .expect("restore immutable mismatched cache receipt mode");
+    fs::set_permissions(&mismatched_receipt, fs::Permissions::from_mode(0o555))
+        .expect("restore immutable mismatched cache root");
+    let (_, mismatch_diagnostic, mismatch_status) = run("mismatched-receipt", &mismatched_receipt);
+    assert!(
+        !mismatch_status.success(),
+        "runner or cache-key mismatch must be rejected"
+    );
+    assert!(
+        fs::read_to_string(mismatch_diagnostic.join("preflight.log"))
+            .expect("read mismatch diagnostic")
+            .contains(
+                "leased stage cache receipt does not bind this manifest, runner, and copied config"
+            ),
+        "cache receipt must bind runner bytes and copied configuration"
+    );
+
+    let missing_config = temp.join("missing-config-cache");
+    copy_tree(&cache, &missing_config);
+    fs::set_permissions(&missing_config, fs::Permissions::from_mode(0o755))
+        .expect("make missing-config cache root writable");
+    let config = missing_config.join("current/source/.cargo/f05-vendor-config.toml");
+    fs::set_permissions(
+        config.parent().expect("config parent"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make config parent writable");
+    fs::remove_file(config).expect("remove cached config");
+    fs::set_permissions(
+        missing_config.join("current/source/.cargo"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .expect("restore immutable missing-config parent");
+    fs::set_permissions(&missing_config, fs::Permissions::from_mode(0o555))
+        .expect("restore immutable missing-config cache root");
+    let (_, config_diagnostic, config_status) = run("missing-config", &missing_config);
+    assert!(
+        !config_status.success(),
+        "cache missing copied config must be rejected"
+    );
+    assert!(
+        fs::read_to_string(config_diagnostic.join("preflight.log"))
+            .expect("read missing config diagnostic")
+            .contains("leased stage cache requires a physical copied vendor config"),
+        "cache reuse must reject a missing copied config"
+    );
+
+    let missing_manifest = temp.join("missing-manifest-cache");
+    copy_tree(&cache, &missing_manifest);
+    fs::set_permissions(&missing_manifest, fs::Permissions::from_mode(0o755))
+        .expect("make missing-manifest cache root writable");
+    fs::set_permissions(
+        missing_manifest.join("current"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make cached manifest parent writable");
+    let manifest = missing_manifest.join("current/f05-inputs.sha256");
+    fs::set_permissions(&manifest, fs::Permissions::from_mode(0o644))
+        .expect("make cached manifest writable");
+    fs::remove_file(manifest).expect("remove cached manifest");
+    fs::set_permissions(
+        missing_manifest.join("current"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .expect("restore immutable cached manifest parent");
+    fs::set_permissions(&missing_manifest, fs::Permissions::from_mode(0o555))
+        .expect("restore immutable missing-manifest cache root");
+    let (_, manifest_diagnostic, manifest_status) = run("missing-manifest", &missing_manifest);
+    assert!(
+        !manifest_status.success(),
+        "cache missing its manifest must be rejected"
+    );
+    assert!(
+        fs::read_to_string(manifest_diagnostic.join("preflight.log"))
+            .expect("read missing manifest diagnostic")
+            .contains("leased stage cache has a missing or altered input"),
+        "cache reuse must reject a missing cached manifest"
+    );
+
+    let cache_escape = temp.join("cache-escape");
+    let cache_link = temp.join("cache-link");
+    fs::create_dir(&cache_escape).expect("create cache escape target");
+    std::os::unix::fs::symlink(&cache_escape, &cache_link).expect("create cache symlink");
+    let (_, _escape_diagnostic, escape_status) = run("cache-symlink", &cache_link);
+    assert!(
+        !escape_status.success(),
+        "cache-root symlink must be rejected"
+    );
+    assert!(
+        fs::read_dir(&cache_escape)
+            .expect("read cache escape target")
+            .next()
+            .is_none(),
+        "cache-root escape must fail before a cache write"
+    );
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&temp)
+            .status()
+            .expect("make temporary stage-cache fixture writable")
+            .success(),
+        "temporary stage-cache fixture must be writable before cleanup"
+    );
+    fs::remove_dir_all(temp).expect("remove temporary stage-cache fixture root");
 }
 
 #[cfg(target_os = "linux")]
