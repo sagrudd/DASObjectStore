@@ -83,6 +83,14 @@ sha256_file() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
 
+sha256_tree() {
+  local root=$1
+  (
+    cd "$root"
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r shasum -a 256 | shasum -a 256 | awk '{print $1}'
+  )
+}
+
 write_batched_manifest() {
   local root=$1 manifest="$1/f05-inputs.sha256" temporary="$1/f05-inputs.sha256.next"
   (
@@ -146,14 +154,26 @@ tool_input_toml_value() {
   printf '%s\n' "$value"
 }
 
+tool_inventory_value() {
+  local file=$1 section=$2 key=$3 value
+  value=$(awk -v section="$section" -v key="$key" '
+    $0 == "[" section "]" { active=1; next }
+    /^\[/ { active=0 }
+    active && index($0, key "=") == 1 { print substr($0, length(key) + 2) }
+  ' "$file")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "toolchain input inventory requires exactly one ${section}.${key}"
+  printf '%s\n' "$value"
+}
+
 produce_closure_toolchain_inputs() {
-  local input_receipt input_manifest candidate source_tree witness staged_runner
+  local input_receipt input_manifest input_inventory candidate source_tree witness staged_runner
   local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha
   local input_revision input_image input_image_sha input_inventory_sha input_manifest_sha receipt temporary
-  local required
+  local required inventory_sha
 
   input_receipt="$toolchain_input_root/tool-inputs.toml"
   input_manifest="$toolchain_input_root/tool-inputs.sha256"
+  input_inventory="$toolchain_input_root/tool-input-inventory.txt"
   candidate="$sealed_root/inputs/component-candidate-input.toml"
   source_tree="$sealed_root/inputs/source-tree"
   witness="$sealed_root/inputs/compiled-dependency-witness.json"
@@ -162,10 +182,12 @@ produce_closure_toolchain_inputs() {
   [[ "$toolchain_input_root" = /* && -d "$toolchain_input_root" && ! -L "$toolchain_input_root" ]] || die 'toolchain input stage requires an absolute, physical input root'
   [[ -z "$(find "$toolchain_input_root" -type l -print -quit)" ]] || die 'toolchain input stage rejects symlinked inputs'
   [[ -z "$(find "$toolchain_input_root" -perm /0222 -print -quit)" ]] || die 'toolchain input stage requires an immutable input root'
-  for required in "$input_receipt" "$input_manifest" "$candidate" "$source_tree" "$witness" "$staged_runner"; do
+  for required in "$input_receipt" "$input_manifest" "$input_inventory" "$candidate" "$source_tree" "$witness" "$staged_runner"; do
     [[ -f "$required" && ! -L "$required" ]] || die 'toolchain input stage requires physical receipt, manifest, and identity witnesses'
   done
   [[ "$(sha256_file "$staged_runner")" = "$(sha256_file "$0")" ]] || die 'toolchain input stage must execute the runner bytes that it binds'
+  inventory_sha=$(sha256_file "$input_inventory")
+  [[ "$inventory_sha" = 'de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f' ]] || die 'toolchain input stage requires the reviewed physical inventory document'
   for required in \
     "$toolchain_input_root/toolchain/bin/cargo" \
     "$toolchain_input_root/toolchain/bin/rustc" \
@@ -179,6 +201,15 @@ produce_closure_toolchain_inputs() {
   [[ -n "$(find "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -print -quit)" ]] || die 'toolchain input stage requires a non-empty wasm32 target'
   [[ -d "$toolchain_input_root/network-denied-bin" && -d "$toolchain_input_root/staging-home" ]] || die 'toolchain input stage requires network denial and staging home inputs'
   (cd "$toolchain_input_root" && shasum -a 256 -c tool-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage rejects altered input bytes'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/cargo")" = "$(tool_inventory_value "$input_inventory" cargo sha256)" ]] || die 'toolchain input stage rejects a substituted cargo input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/rustc")" = "$(tool_inventory_value "$input_inventory" rustc sha256)" ]] || die 'toolchain input stage rejects a substituted rustc input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/trunk")" = "$(tool_inventory_value "$input_inventory" trunk sha256)" ]] || die 'toolchain input stage rejects a substituted trunk input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen")" = "$(tool_inventory_value "$input_inventory" wasm_bindgen sha256)" ]] || die 'toolchain input stage rejects a substituted wasm-bindgen input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/trunk-tools/wasm-opt-version_123/wasm-opt")" = "$(tool_inventory_value "$input_inventory" wasm_opt sha256)" ]] || die 'toolchain input stage rejects a substituted wasm-opt input'
+  [[ "$(sha256_tree "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown")" = "$(tool_inventory_value "$input_inventory" wasm_sysroot tree_sha256)" ]] || die 'toolchain input stage rejects a substituted wasm sysroot tree'
+  [[ "$(sha256_tree "$toolchain_input_root/toolchain")" = "$(tool_inventory_value "$input_inventory" prior_staged_toolchain tree_sha256)" ]] || die 'toolchain input stage rejects a substituted toolchain tree'
+  [[ "$(sha256_tree "$toolchain_input_root/network-denied-bin")" = "$(tool_inventory_value "$input_inventory" network_denial tree_sha256)" && "$(sha256_file "$toolchain_input_root/network-denied-bin/git")" = "$(tool_inventory_value "$input_inventory" network_denial sha256)" ]] || die 'toolchain input stage rejects a substituted network-denial input'
+  [[ "$(sha256_tree "$toolchain_input_root/staging-home")" = "$(tool_inventory_value "$input_inventory" staging_home tree_sha256)" ]] || die 'toolchain input stage rejects a substituted staging-home tree'
 
   candidate_revision=$(sed -n 's/^source_revision = "\([0-9a-f]\{40\}\)"$/\1/p' "$candidate")
   source_tree_revision=$(sed -n 's/^revision=\([0-9a-f]\{40\}\)$/\1/p' "$source_tree")
@@ -191,7 +222,7 @@ produce_closure_toolchain_inputs() {
   input_inventory_sha=$(tool_input_toml_value "$input_receipt" inventory_sha256)
   [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" && "$candidate_revision" = "$input_revision" ]] || die 'toolchain input stage requires matching candidate image and revision witnesses'
   [[ "$candidate_image" = "$input_image" && "$candidate_image_sha" = "$input_image_sha" && "$candidate_image" =~ @sha256:[0-9a-f]{64}$ && "$candidate_image_sha" =~ ^sha256:[0-9a-f]{64}$ && "sha256:${candidate_image##*@sha256:}" = "$candidate_image_sha" ]] || die 'toolchain input stage rejects a candidate image mismatch'
-  [[ "$input_inventory_sha" = 'de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f' ]] || die 'toolchain input stage rejects an unreviewed inventory receipt'
+  [[ "$input_inventory_sha" = "$inventory_sha" ]] || die 'toolchain input stage rejects an inventory receipt not bound to the reviewed document'
   [[ ! -e "$sealed_root/toolchain" && ! -e "$sealed_root/network-denied-bin" && ! -e "$sealed_root/staging-home" && ! -e "$sealed_root/inputs/toolchain-input-receipt.toml" ]] || die 'toolchain input stage refuses to overwrite closure inputs'
 
   cp -a "$toolchain_input_root/toolchain" "$sealed_root/toolchain"
@@ -201,8 +232,8 @@ produce_closure_toolchain_inputs() {
   input_manifest_sha=$(sha256_file "$input_manifest")
   receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
   temporary="$receipt.next"
-  printf 'source_revision = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\n' \
-    "$input_revision" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" > "$temporary"
+  printf 'source_revision = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\n' \
+    "$input_revision" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" > "$temporary"
   mv "$temporary" "$receipt"
   write_batched_manifest "$sealed_root"
   (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'

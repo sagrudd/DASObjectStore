@@ -1827,7 +1827,13 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         ));
     fs::create_dir(&temp).expect("create tool-input fixture root");
     let sealed = staged_fixture(&temp);
-    let input = immutable_tool_input_fixture(&temp, &sealed);
+    let reviewed_input =
+        std::env::var_os("DASOBJECTSTORE_REVIEWED_TOOL_INPUT_ROOT").map(PathBuf::from);
+    let input = if let Some(root) = &reviewed_input {
+        fs::canonicalize(root).expect("canonical reviewed tool-input root")
+    } else {
+        immutable_tool_input_fixture(&temp, &sealed)
+    };
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
 
@@ -1847,6 +1853,25 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         .arg(&input)
         .output()
         .expect("run source-owned tool-input stage");
+    if reviewed_input.is_none() {
+        assert!(
+            !staged.status.success()
+                && String::from_utf8_lossy(&staged.stderr)
+                    .contains("requires the reviewed physical inventory document"),
+            "a self-consistent fixture manifest must not replace the independently reviewed inventory"
+        );
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "u+w"])
+                .arg(&temp)
+                .status()
+                .expect("restore disposable tool-stage permissions")
+                .success(),
+            "test cleanup may only restore permissions on its disposable fixtures"
+        );
+        fs::remove_dir_all(temp).expect("remove disposable tool-input fixture");
+        return;
+    }
     assert!(
         staged.status.success(),
         "tool-input stage failed: {}",
@@ -1866,13 +1891,18 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         "toolchain/bin/trunk",
         "toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen",
         "toolchain/trunk-tools/wasm-opt-version_123/wasm-opt",
-        "toolchain/lib/rustlib/wasm32-unknown-unknown/libfixture.rlib",
         "network-denied-bin/git",
         "staging-home/README",
         "inputs/toolchain-input-receipt.toml",
     ] {
         assert!(manifest.contains(input), "manifest must bind {input}");
     }
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line.contains("  toolchain/lib/rustlib/wasm32-unknown-unknown/")),
+        "manifest must bind every copied wasm sysroot file"
+    );
     assert!(
         fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
             .expect("read copied tool-input receipt")
@@ -1916,6 +1946,10 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
             "rm toolchain/bin/cargo && ln -s ../../escape toolchain/bin/cargo",
         ),
         (
+            "inventory-replacement",
+            "printf replacement >> tool-input-inventory.txt",
+        ),
+        (
             "revision-mismatch",
             "sed -i 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
         ),
@@ -1944,7 +1978,11 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
             .status()
             .expect("mutate disposable negative input");
         assert!(mutation.success(), "prepare {name} negative input");
-        if name == "revision-mismatch" || name == "image-mismatch" {
+        if name == "altered-tool"
+            || name == "inventory-replacement"
+            || name == "revision-mismatch"
+            || name == "image-mismatch"
+        {
             write_tool_input_manifest(&negative_root);
         }
         assert!(
@@ -1990,8 +2028,9 @@ fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
         );
         let expected = match name {
             "missing-tool" => "requires complete executable tool inputs",
-            "altered-tool" => "rejects altered input bytes",
+            "altered-tool" => "rejects a substituted rustc input",
             "symlink-escape" => "rejects symlinked inputs",
+            "inventory-replacement" => "requires the reviewed physical inventory document",
             "revision-mismatch" => "requires matching candidate image and revision witnesses",
             "image-mismatch" => "rejects a candidate image mismatch",
             _ => unreachable!("known tool-input negative fixture"),
