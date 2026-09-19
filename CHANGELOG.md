@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.186.22 - Unreleased
+
+- Require each hash-bound staged Cargo, Rustc, Trunk and WebAssembly helper to
+  pass its declared `--version` probe under Bubblewrap network isolation before
+  a closure accepts it. ABI or loader failures retain their diagnostic and fail
+  before any Cargo or package work; this is source-only contract behavior.
+
 ## 0.186.21 - Unreleased
 
 - Use stable Cargo tree resolution in the offline plugin-process preflight,

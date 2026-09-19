@@ -214,6 +214,24 @@ workspace_package_version() {
   printf '%s\n' "$value"
 }
 
+probe_declared_staged_tool() {
+  local section=$1 tool=$2 expected_version expected_sha isolated_tool actual_output actual_status
+
+  expected_version=$(tool_inventory_value "$input_inventory" "$section" version)
+  expected_sha=$(tool_inventory_value "$input_inventory" "$section" sha256)
+  [[ "$(sha256_file "$tool")" = "$expected_sha" ]] || die "toolchain input stage rejects a substituted $section input"
+  [[ -x /usr/bin/bwrap ]] || die 'toolchain input stage requires Bubblewrap for isolated executable admission'
+  isolated_tool="/opt/${tool#"$toolchain_input_root"/}"
+  if actual_output=$(/usr/bin/bwrap --unshare-net --ro-bind / / --ro-bind "$toolchain_input_root" /opt --proc /proc --dev /dev -- "$isolated_tool" --version 2>&1); then
+    actual_status=0
+  else
+    actual_status=$?
+  fi
+  printf 'toolchain_probe tool=%s path=%s expected_version=%q expected_sha256=%s actual_exit=%s actual_output=%q\n' \
+    "$section" "$tool" "$expected_version" "$expected_sha" "$actual_status" "$actual_output"
+  [[ "$actual_status" -eq 0 && "$actual_output" = "$expected_version" ]] || die "toolchain input stage rejects an unlaunchable or version-mismatched $section input"
+}
+
 produce_closure_toolchain_inputs() {
   local input_receipt input_manifest input_inventory admission_receipt candidate source_tree witness staged_runner
   local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha candidate_version
@@ -261,6 +279,15 @@ produce_closure_toolchain_inputs() {
   [[ "$(sha256_tree "$toolchain_input_root/toolchain")" = "$(tool_inventory_value "$input_inventory" prior_staged_toolchain tree_sha256)" ]] || die 'toolchain input stage rejects a substituted toolchain tree'
   [[ "$(sha256_tree "$toolchain_input_root/network-denied-bin")" = "$(tool_inventory_value "$input_inventory" network_denial tree_sha256)" && "$(sha256_file "$toolchain_input_root/network-denied-bin/git")" = "$(tool_inventory_value "$input_inventory" network_denial sha256)" ]] || die 'toolchain input stage rejects a substituted network-denial input'
   [[ "$(sha256_tree "$toolchain_input_root/staging-home")" = "$(tool_inventory_value "$input_inventory" staging_home tree_sha256)" ]] || die 'toolchain input stage rejects a substituted staging-home tree'
+
+  # Hashes prove byte identity; these isolated probes additionally prove the
+  # exact staged executables can start on the intended Linux worker.  Do this
+  # before copying any tool into a closure or allowing Cargo/package work.
+  probe_declared_staged_tool cargo "$toolchain_input_root/toolchain/bin/cargo"
+  probe_declared_staged_tool rustc "$toolchain_input_root/toolchain/bin/rustc"
+  probe_declared_staged_tool trunk "$toolchain_input_root/toolchain/bin/trunk"
+  probe_declared_staged_tool wasm_bindgen "$toolchain_input_root/toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen"
+  probe_declared_staged_tool wasm_opt "$toolchain_input_root/toolchain/trunk-tools/wasm-opt-version_123/wasm-opt"
 
   candidate_revision=$(sed -n 's/^source_revision = "\([0-9a-f]\{40\}\)"$/\1/p' "$candidate")
   source_tree_revision=$(sed -n 's/^revision=\([0-9a-f]\{40\}\)$/\1/p' "$source_tree")
