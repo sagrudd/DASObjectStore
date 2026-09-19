@@ -2066,11 +2066,9 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(
-        sealed
-            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-            .is_dir()
-    );
+    assert!(sealed
+        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+        .is_dir());
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
@@ -2198,12 +2196,73 @@ fn immutable_tool_input_fixture(root: &Path, stage: &Path) -> PathBuf {
         "printf 'network denied\\n' >&2\nexit 1",
     );
     write(input.join("staging-home/README"), "isolated staging home\n");
+    let inventory = input.join("tool-input-inventory.txt");
+    write(
+        &inventory,
+        &format!(
+            "source_contract_target=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
+source_contract_version=0.186.17\n\
+[candidate_binding]\n\
+source_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
+workspace_version=0.186.17\n\
+[reusable_tool_provenance]\n\
+inventory_sha256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n\
+[cargo]\n\
+sha256={}\n\
+version=cargo fixture 1.0.0\n\
+[rustc]\n\
+sha256={}\n\
+version=rustc fixture 1.0.0\n\
+[trunk]\n\
+sha256={}\n\
+version=trunk fixture 1.0.0\n\
+[wasm_bindgen]\n\
+sha256={}\n\
+version=wasm-bindgen 0.2.128\n\
+[wasm_opt]\n\
+sha256={}\n\
+version=wasm-opt version_123\n\
+[wasm_sysroot]\n\
+tree_sha256={}\n\
+[prior_staged_toolchain]\n\
+tree_sha256={}\n\
+[network_denial]\n\
+tree_sha256={}\n\
+sha256={}\n\
+[staging_home]\n\
+tree_sha256={}\n",
+            sha256(&input.join("toolchain/bin/cargo")),
+            sha256(&input.join("toolchain/bin/rustc")),
+            sha256(&input.join("toolchain/bin/trunk")),
+            sha256(&input.join("toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen"),),
+            sha256(&input.join("toolchain/trunk-tools/wasm-opt-version_123/wasm-opt"),),
+            tree_sha256(&input.join("toolchain/lib/rustlib/wasm32-unknown-unknown")),
+            tree_sha256(&input.join("toolchain")),
+            tree_sha256(&input.join("network-denied-bin")),
+            sha256(&input.join("network-denied-bin/git")),
+            tree_sha256(&input.join("staging-home")),
+        ),
+    );
+    let inventory_sha = sha256(&inventory);
     write(
         input.join("tool-inputs.toml"),
-        "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+        &format!(
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
 toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
 toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-inventory_sha256 = \"de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f\"\n",
+inventory_sha256 = \"{inventory_sha}\"\n"
+        ),
+    );
+    write(
+        stage.join("inputs/toolchain-input-admission-receipt.toml"),
+        &format!(
+            "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+workspace_version = \"0.186.17\"\n\
+toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+inventory_sha256 = \"{inventory_sha}\"\n\
+reusable_tool_provenance_inventory_sha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"
+        ),
     );
     write_tool_input_manifest(&input);
     assert!(
@@ -2283,36 +2342,23 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .arg(&input)
         .output()
         .expect("run source-owned tool-input stage");
-    if reviewed_input.is_none() {
-        assert!(
-            !staged.status.success()
-                && String::from_utf8_lossy(&staged.stderr)
-                    .contains("requires physical receipt, manifest, and identity witnesses"),
-            "a fixture without an externally admitted inventory must fail closed"
-        );
-        assert!(
-            Command::new("chmod")
-                .args(["-R", "u+w"])
-                .arg(&temp)
-                .status()
-                .expect("restore disposable tool-stage permissions")
-                .success(),
-            "test cleanup may only restore permissions on its disposable fixtures"
-        );
-        fs::remove_dir_all(temp).expect("remove disposable tool-input fixture");
-        return;
-    }
     assert!(
         staged.status.success(),
         "tool-input stage failed: {}",
         String::from_utf8_lossy(&staged.stderr)
     );
+    let staged_stdout = String::from_utf8(staged.stdout).expect("tool-input stage stdout");
     assert!(
-        String::from_utf8(staged.stdout)
-            .expect("tool-input stage stdout")
-            .contains("closure_stage_toolchain_inputs=PASS"),
+        staged_stdout.contains("closure_stage_toolchain_inputs=PASS"),
         "source-owned stage must retain the immutable-input receipt"
     );
+    for tool in ["cargo", "rustc", "trunk", "wasm_bindgen", "wasm_opt"] {
+        assert!(
+            staged_stdout.contains(&format!("toolchain_probe tool={tool}"))
+                && staged_stdout.contains("actual_exit=0"),
+            "the real isolated tool admission must accept declared {tool} before closure copy"
+        );
+    }
     let manifest = fs::read_to_string(sealed.join("f05-inputs.sha256"))
         .expect("read staged tool-input manifest");
     for input in [
@@ -2333,10 +2379,17 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             .any(|line| line.contains("  toolchain/lib/rustlib/wasm32-unknown-unknown/")),
         "manifest must bind every copied wasm sysroot file"
     );
-    assert!(
+    let copied_tool_receipt =
         fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
-            .expect("read copied tool-input receipt")
-            .contains("inventory_sha256 = \"ec287428c379235f47fd42cdd7f208b0132ba6bbe132dd90f3040d34379b8eb9\""),
+            .expect("read copied tool-input receipt");
+    assert_eq!(
+        copied_tool_receipt
+            .lines()
+            .find_map(|line| line
+                .strip_prefix("inventory_sha256 = \"")
+                .and_then(|value| value.strip_suffix('"')))
+            .expect("read reviewed inventory binding"),
+        sha256(&input.join("tool-input-inventory.txt")),
         "stage must bind the reviewed tool-input inventory"
     );
     assert!(
@@ -2427,7 +2480,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         ),
         (
             "revision-mismatch",
-            "sed -i 's/c7b38a244a8a515f865058d09f67e4abe61978cc/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
+            "sed -i 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
         ),
         (
             "image-mismatch",
@@ -2519,6 +2572,117 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             "{name} must fail closed with its specific tool-input contract error"
         );
     }
+
+    let unlaunchable_input = temp.join("unlaunchable-tool");
+    copy_tree(&input, &unlaunchable_input);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&unlaunchable_input)
+            .status()
+            .expect("make unlaunchable input writable")
+            .success(),
+        "unlaunchable input is writable only in its disposable fixture"
+    );
+    let old_trunk_sha = sha256(&input.join("toolchain/bin/trunk"));
+    let old_toolchain_tree = tree_sha256(&input.join("toolchain"));
+    let unlaunchable_trunk = unlaunchable_input.join("toolchain/bin/trunk");
+    write(
+        &unlaunchable_trunk,
+        "#!/bin/sh\nprintf 'staged trunk loader rejected\\n' >&2\nexit 127\n",
+    );
+    fs::set_permissions(&unlaunchable_trunk, fs::Permissions::from_mode(0o755))
+        .expect("make unlaunchable staged trunk executable");
+    let new_trunk_sha = sha256(&unlaunchable_input.join("toolchain/bin/trunk"));
+    let new_toolchain_tree = tree_sha256(&unlaunchable_input.join("toolchain"));
+    let inventory = fs::read_to_string(unlaunchable_input.join("tool-input-inventory.txt"))
+        .expect("read unlaunchable tool inventory");
+    write(
+        unlaunchable_input.join("tool-input-inventory.txt"),
+        &inventory
+            .replace(
+                &format!("sha256={old_trunk_sha}"),
+                &format!("sha256={new_trunk_sha}"),
+            )
+            .replace(
+                &format!("tree_sha256={old_toolchain_tree}"),
+                &format!("tree_sha256={new_toolchain_tree}"),
+            ),
+    );
+    let original_inventory_sha = sha256(&input.join("tool-input-inventory.txt"));
+    let unlaunchable_inventory_sha = sha256(&unlaunchable_input.join("tool-input-inventory.txt"));
+    let input_receipt = fs::read_to_string(unlaunchable_input.join("tool-inputs.toml"))
+        .expect("read unlaunchable input receipt");
+    write(
+        unlaunchable_input.join("tool-inputs.toml"),
+        &input_receipt.replace(&original_inventory_sha, &unlaunchable_inventory_sha),
+    );
+    write_tool_input_manifest(&unlaunchable_input);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&unlaunchable_input)
+            .status()
+            .expect("reseal unlaunchable input")
+            .success(),
+        "unlaunchable input must be immutable at stage entry"
+    );
+    let unlaunchable_stage = temp.join("stage-unlaunchable-tool");
+    copy_tree(&sealed, &unlaunchable_stage);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&unlaunchable_stage)
+            .status()
+            .expect("make unlaunchable stage writable")
+            .success(),
+        "unlaunchable stage is writable only in its disposable fixture"
+    );
+    for path in [
+        "toolchain",
+        "network-denied-bin",
+        "staging-home",
+        "inputs/toolchain-input-receipt.toml",
+        "f05-inputs.sha256",
+    ] {
+        let path = unlaunchable_stage.join(path);
+        if path.is_dir() {
+            fs::remove_dir_all(path).expect("remove disposable staged directory");
+        } else {
+            fs::remove_file(path).expect("remove disposable staged file");
+        }
+    }
+    write(
+        unlaunchable_stage.join("inputs/toolchain-input-admission-receipt.toml"),
+        &copied_tool_receipt.replace(&original_inventory_sha, &unlaunchable_inventory_sha),
+    );
+    let unlaunchable = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&unlaunchable_stage)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&unlaunchable_input)
+        .output()
+        .expect("run unlaunchable staged-tool denial");
+    assert!(
+        !unlaunchable.status.success()
+            && String::from_utf8_lossy(&unlaunchable.stderr)
+                .contains("rejects an unlaunchable or version-mismatched trunk input"),
+        "an ABI or loader-unlaunchable tool must fail closed before closure copy; stdout={} stderr={}",
+        String::from_utf8_lossy(&unlaunchable.stdout),
+        String::from_utf8_lossy(&unlaunchable.stderr)
+    );
+    let unlaunchable_stdout = String::from_utf8_lossy(&unlaunchable.stdout);
+    assert!(
+        unlaunchable_stdout.contains("toolchain_probe tool=trunk")
+            && unlaunchable_stdout.contains("actual_exit=127")
+            && unlaunchable_stdout.contains("staged\\ trunk\\ loader\\ rejected"),
+        "the rejected tool probe must retain the staged path, exit, and loader diagnostic"
+    );
+    assert!(
+        !unlaunchable_stage.join("toolchain").exists(),
+        "an unlaunchable tool must deny before any toolchain is copied into a closure"
+    );
 
     assert!(
         Command::new("chmod")
