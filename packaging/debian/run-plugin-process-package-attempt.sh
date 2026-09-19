@@ -168,6 +168,7 @@ if [[ -n "$stage_cache_root" ]]; then
   if [[ -e "$cache_receipt" || -e "$cache_stage" ]]; then
     [[ -f "$cache_receipt" && -d "$cache_stage" && ! -L "$cache_receipt" && ! -L "$cache_stage" ]] || die 'leased stage cache requires both a physical receipt and current stage'
     [[ ! -w "$stage_cache_root" ]] || die 'leased stage cache root must be immutable before reuse'
+    [[ -z "$(find "$stage_cache_root" -perm /0222 -print -quit)" ]] || die 'leased stage cache must be immutable before reuse'
     [[ -z "$(find "$stage_cache_root" -type l -print -quit)" ]] || die 'leased stage cache must not contain symlinks'
     cmp -s <(printf '%s' "$expected_receipt") "$cache_receipt" || die 'leased stage cache receipt does not bind this manifest, runner, and copied config'
     [[ -f "$cache_config" && ! -L "$cache_config" ]] || die 'leased stage cache requires a physical copied vendor config'

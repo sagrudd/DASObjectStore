@@ -651,6 +651,23 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         "warm attempt must reach staged Cargo"
     );
 
+    let writable_mode = temp.join("writable-mode-cache");
+    copy_tree(&cache, &writable_mode);
+    let writable_cached_input = writable_mode.join("current/source/vendor/fixture.crate");
+    fs::set_permissions(&writable_cached_input, fs::Permissions::from_mode(0o644))
+        .expect("make cached input unexpectedly writable");
+    let (_, writable_mode_diagnostic, writable_mode_status) = run("writable-mode", &writable_mode);
+    assert!(
+        !writable_mode_status.success(),
+        "a writable cached stage input must be rejected"
+    );
+    assert!(
+        fs::read_to_string(writable_mode_diagnostic.join("preflight.log"))
+            .expect("read writable-mode diagnostic")
+            .contains("leased stage cache must be immutable before reuse"),
+        "warm reuse must reject a cached stage with writable contents"
+    );
+
     let tampered = temp.join("tampered-cache");
     copy_tree(&cache, &tampered);
     fs::set_permissions(&tampered, fs::Permissions::from_mode(0o755))
