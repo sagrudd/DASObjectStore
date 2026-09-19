@@ -2,22 +2,33 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY" >&2
+  echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY" >&2
   exit 2
 }
 
 sealed_root=''
 attempt_root=''
+diagnostic_root=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
     --attempt-root) attempt_root=${2-}; shift 2 ;;
+    --diagnostic-root) diagnostic_root=${2-}; shift 2 ;;
     *) usage ;;
   esac
 done
-[[ -n "$sealed_root" && -n "$attempt_root" ]] || usage
+[[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
+
+diagnostic_log=''
+diagnostic_status=''
+
+record_diagnostic() {
+  [[ -n "$diagnostic_log" ]] || return 0
+  printf '%s\n' "$1" >> "$diagnostic_log" 2>/dev/null || true
+}
 
 die() {
+  record_diagnostic "preflight_failure=$*"
   echo "F05 package attempt: $*" >&2
   exit 1
 }
@@ -42,23 +53,37 @@ canonical_directory() {
 
 reject_symlink_ancestry "$sealed_root" 'sealed closure root'
 reject_symlink_ancestry "$attempt_root" 'external attempt root'
+reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
 sealed_root=$(canonical_directory "$sealed_root" 'sealed closure root')
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')
+diagnostic_root=$(canonical_directory "$diagnostic_root" 'external diagnostic root')
 [[ "$attempt_root" != "$sealed_root" && "$attempt_root" != "$sealed_root"/* && "$sealed_root" != "$attempt_root"/* ]] || die 'sealed closure and external attempt root must not overlap'
+[[ "$diagnostic_root" != "$sealed_root" && "$diagnostic_root" != "$sealed_root"/* && "$sealed_root" != "$diagnostic_root"/* ]] || die 'sealed closure and external diagnostic root must not overlap'
+[[ "$diagnostic_root" != "$attempt_root" && "$diagnostic_root" != "$attempt_root"/* && "$attempt_root" != "$diagnostic_root"/* ]] || die 'external diagnostic root and external attempt root must not overlap'
+diagnostic_log="$diagnostic_root/preflight.log"
+diagnostic_status="$diagnostic_root/terminal-status"
+if [[ "${DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE:-}" != 1 ]]; then
+  [[ -z "$(find "$diagnostic_root" -mindepth 1 -maxdepth 1 -print -quit)" ]] || die 'external diagnostic root must be empty'
+else
+  [[ -f "$diagnostic_log" && ! -L "$diagnostic_log" ]] || die 'requires an outer preflight diagnostic log'
+  [[ "$(find "$diagnostic_root" -mindepth 1 -maxdepth 1 -type f -printf '%f\n')" == 'preflight.log' ]] || die 'external diagnostic root contains unexpected entries'
+fi
 [[ -z "$(find "$attempt_root" -mindepth 1 -maxdepth 1 -print -quit)" ]] || die 'external attempt root must be empty'
+record_diagnostic 'attempt_root_empty=PASS'
 [[ -f "$sealed_root/f05-inputs.sha256" && -d "$sealed_root/source" ]] || die 'sealed closure requires f05-inputs.sha256 and source'
 if find "$sealed_root" -type l -print -quit | grep -q .; then
   die 'sealed closure must not contain symlinks'
 fi
 if [[ "${DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE:-}" != 1 ]]; then
   [[ -x /usr/bin/bwrap ]] || die 'requires /usr/bin/bwrap network isolation'
-  exec /usr/bin/bwrap --unshare-net --ro-bind / / --bind "$attempt_root" "$attempt_root" --proc /proc --dev /dev \
-    --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- "$0" --sealed-root "$sealed_root" --attempt-root "$attempt_root"
+  record_diagnostic 'bwrap_launch=PASS'
+  exec /usr/bin/bwrap --unshare-net --ro-bind / / --bind "$attempt_root" "$attempt_root" --bind "$diagnostic_root" "$diagnostic_root" --proc /proc --dev /dev \
+    --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- "$0" --sealed-root "$sealed_root" --attempt-root "$attempt_root" --diagnostic-root "$diagnostic_root"
 fi
 [[ "$(/usr/sbin/ip -o link show | awk -F': ' '{print $2}' | sed 's/@.*//')" == lo ]] || die 'requires loopback-only network interfaces'
 [[ -z "$(/usr/sbin/ip -4 route show)" ]] || die 'requires empty IPv4 routes'
 
-status_file="$attempt_root/terminal-status"
+status_file="$diagnostic_status"
 sealed_status=0
 finish() {
   local status=$?
@@ -68,6 +93,7 @@ finish() {
     status=1
   fi
   printf 'exit_code=%s\n' "$status" > "$status_file"
+  record_diagnostic "terminal_exit_code=$status"
   exit "$status"
 }
 trap finish EXIT HUP INT TERM
