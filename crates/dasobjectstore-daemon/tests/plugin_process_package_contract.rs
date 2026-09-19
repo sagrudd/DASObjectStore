@@ -877,6 +877,14 @@ fn write_f05_manifest(stage: &Path) {
 fn staged_fixture(root: &Path) -> PathBuf {
     let stage = root.join("closure");
     let source = stage.join("source");
+    let staged_runner = source.join("packaging/debian/run-plugin-process-package-attempt.sh");
+    write(&staged_runner, ATTEMPT);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged_runner, fs::Permissions::from_mode(0o755))
+            .expect("make staged package-attempt runner executable");
+    }
     write(
         source.join("Cargo.toml"),
         "[workspace]\nresolver = \"2\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
