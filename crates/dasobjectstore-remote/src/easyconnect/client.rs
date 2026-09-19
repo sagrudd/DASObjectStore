@@ -62,24 +62,10 @@ where
     )?;
     let discovery =
         get_json::<RemoteEasyconnectDiscoveryResponse>(&transport.client, &discovery_url)?;
-    validate_server_url(
-        &contract.appliance_base_url,
-        &discovery.pairing_create_url,
-        "pairing_create_url",
-    )?;
-    validate_server_url(
-        &contract.appliance_base_url,
-        &discovery.pairing_exchange_url,
-        "pairing_exchange_url",
-    )?;
+    let pairing_create_url = pairing_create_url(&contract, &transport, &discovery)?;
     let pairing = post_json::<_, RemoteEasyconnectCreatePairingResponse>(
         &transport.client,
-        &transport_url(
-            &contract.appliance_base_url,
-            &transport.base_url,
-            &discovery.pairing_create_url,
-            "pairing_create_url",
-        )?,
+        &pairing_create_url,
         &RemoteEasyconnectCreatePairingRequest {
             client_name: "dasobjectstore-remote".to_string(),
             callback_url: (completion_mode
@@ -181,6 +167,31 @@ where
         pairing,
         exchange,
     })
+}
+
+fn pairing_create_url(
+    contract: &RemoteEasyconnectContract,
+    transport: &PinnedHttpsClient,
+    discovery: &RemoteEasyconnectDiscoveryResponse,
+) -> Result<String, RemoteEasyconnectPairingError> {
+    crate::authenticate::validate_appliance_descriptor(discovery)
+        .map_err(|error| RemoteEasyconnectPairingError::Protocol(error.to_string()))?;
+    validate_server_url(
+        &contract.appliance_base_url,
+        &discovery.pairing_create_url,
+        "pairing_create_url",
+    )?;
+    validate_server_url(
+        &contract.appliance_base_url,
+        &discovery.pairing_exchange_url,
+        "pairing_exchange_url",
+    )?;
+    transport_url(
+        &contract.appliance_base_url,
+        &transport.base_url,
+        &discovery.pairing_create_url,
+        "pairing_create_url",
+    )
 }
 
 fn wait_for_pairing_callback_or_poll(
@@ -546,11 +557,81 @@ pub(super) fn transport_url(
 
 #[cfg(test)]
 mod tests {
-    use super::{https_client, wait_for_pairing_poll, RemoteEasyconnectTlsTrust};
+    use super::{
+        https_client, pairing_create_url, wait_for_pairing_poll, PinnedHttpsClient,
+        RemoteEasyconnectTlsTrust,
+    };
+    use crate::easyconnect::{
+        define_easyconnect_contract, RemoteEasyconnectContractRequest, DEFAULT_MONAS_HTTPS_PORT,
+    };
+    use dasobjectstore_daemon::RemoteEasyconnectDiscoveryResponse;
+    use reqwest::blocking::Client;
     use rustls::pki_types::PrivatePkcs8KeyDer;
     use std::io::{Read, Write};
     use std::sync::Arc;
     use std::time::Duration;
+
+    fn discovery() -> RemoteEasyconnectDiscoveryResponse {
+        RemoteEasyconnectDiscoveryResponse {
+            appliance_id: "das-appliance-test".to_string(),
+            product_id: "dasobjectstore".to_string(),
+            display_name: "test appliance".to_string(),
+            pairing_create_url: format!(
+                "https://127.0.0.1:{DEFAULT_MONAS_HTTPS_PORT}/products/dasobjectstore/api/v1/remote/easyconnect/pairings"
+            ),
+            pairing_exchange_url: format!(
+                "https://127.0.0.1:{DEFAULT_MONAS_HTTPS_PORT}/products/dasobjectstore/api/v1/remote/easyconnect/pairings/exchange"
+            ),
+            session_revoke_url_template: String::new(),
+            session_renew_url_template: String::new(),
+            default_session_lifetime_seconds: 28_800,
+            session_policy: Default::default(),
+            auth_providers: Vec::new(),
+            descriptor_schema_version: "dasobjectstore.remote_descriptor.v1".to_string(),
+            server_version: "0.186.13".to_string(),
+            api_schema_versions: Vec::new(),
+            capabilities: Vec::new(),
+            remote_client_protocol_min: 1,
+            remote_client_protocol_max: 1,
+            component_builds: Default::default(),
+        }
+    }
+
+    fn pairing_request_inputs() -> (
+        crate::easyconnect::RemoteEasyconnectContract,
+        PinnedHttpsClient,
+    ) {
+        let contract = define_easyconnect_contract(RemoteEasyconnectContractRequest {
+            host_or_ip: "127.0.0.1".to_string(),
+            https_port: DEFAULT_MONAS_HTTPS_PORT,
+            callback_port: None,
+        })
+        .expect("contract");
+        let transport = PinnedHttpsClient {
+            client: Client::new(),
+            base_url: format!("https://127.0.0.1:{DEFAULT_MONAS_HTTPS_PORT}"),
+        };
+        (contract, transport)
+    }
+
+    #[test]
+    fn malformed_discovery_cannot_prepare_a_pairing_request() {
+        let (contract, transport) = pairing_request_inputs();
+
+        let mut wrong_product = discovery();
+        wrong_product.product_id = "another-product".to_string();
+        assert!(pairing_create_url(&contract, &transport, &wrong_product)
+            .expect_err("wrong product must be denied before pairing")
+            .to_string()
+            .contains("unexpected product identity"));
+
+        let mut wrong_schema = discovery();
+        wrong_schema.descriptor_schema_version = "dasobjectstore.remote_descriptor.v2".to_string();
+        assert!(pairing_create_url(&contract, &transport, &wrong_schema)
+            .expect_err("unsupported schema must be denied before pairing")
+            .to_string()
+            .contains("unsupported descriptor schema"));
+    }
 
     #[test]
     fn integrated_system_pki_transport_requires_no_enrollment_record() {
