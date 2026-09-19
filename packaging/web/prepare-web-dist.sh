@@ -44,6 +44,7 @@ validate_f05_staged_closure() {
   [[ "$attempt_root" = /* && -d "$attempt_root" && ! -L "$attempt_root" ]] || staged_closure_error 'requires an absolute, non-symlink F05 attempt root'
   attempt_root="$(cd "$attempt_root" && pwd -P)"
   [[ "$staged_closure_root" = "$attempt_root"/* && "$repo_root" = "$attempt_root"/* && "$web_root" = "$attempt_root"/* && "$dist" = "$attempt_root"/* ]] || staged_closure_error 'requires copied closure source and web output within the F05 attempt root'
+  [[ -d "$attempt_root/tmp" && ! -L "$attempt_root/tmp" && -w "$attempt_root/tmp" ]] || staged_closure_error 'requires a writable per-attempt temporary directory'
   [[ -f "$staged_closure_root/f05-inputs.sha256" ]] || staged_closure_error 'requires f05-inputs.sha256'
   [[ -d "$repo_root/vendor" && -f "$repo_root/.cargo/f05-vendor-config.toml" ]] || staged_closure_error 'requires a staged vendor tree and vendor config'
   [[ -d "$staged_closure_root/staging-home" && -d "$staged_closure_root/network-denied-bin" ]] || staged_closure_error 'requires isolated staged HOME and network denial inputs'
@@ -141,7 +142,7 @@ ERROR
       rm -rf "$isolated_cargo_home"
       install -d "$isolated_cargo_home" "$attempt_root/home" "$attempt_root/target"
       cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
-      env -i HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" TRUNK_TOOLS_DIR="$staged_trunk_tools" "$staged_trunk" build --release >&2
+      env -i HOME="$attempt_root/home" CARGO_HOME="$isolated_cargo_home" CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$attempt_root/target" TMPDIR="$attempt_root/tmp" TMP="$attempt_root/tmp" TEMP="$attempt_root/tmp" PATH="$staged_closure_root/network-denied-bin:$staged_closure_root/toolchain/bin:/usr/bin:/bin" RUSTC="$staged_rustc" TRUNK_TOOLS_DIR="$staged_trunk_tools" "$staged_trunk" build --release >&2
     else
       env -u NO_COLOR trunk build --release >&2
     fi

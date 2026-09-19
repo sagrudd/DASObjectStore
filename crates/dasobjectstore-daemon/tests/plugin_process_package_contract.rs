@@ -261,6 +261,23 @@ fn package_attempt_requires_real_network_namespace_isolation() {
             "missing network-isolation contract: {required}"
         );
     }
+    assert!(
+        !ATTEMPT.contains("--bind /tmp"),
+        "the Bubblewrap runner must not make host /tmp writable"
+    );
+}
+
+#[test]
+fn staged_web_build_binds_writable_attempt_tmp_to_rust_and_trunk() {
+    for required in [
+        "requires a writable per-attempt temporary directory",
+        "TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
+    ] {
+        assert!(
+            PREPARE_WEB_DIST.contains(required),
+            "missing staged Trunk temporary-storage contract: {required}"
+        );
+    }
 }
 
 #[test]
@@ -287,6 +304,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "copied closure requires a physical non-symlink",
         "build --manifest-path \"$copied_manifest\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
+        "export TMPDIR=\"$attempt_root/tmp\"",
         "diagnostic_status=\"$diagnostic_root/terminal-status\"",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
     ] {
@@ -315,7 +333,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
     );
     #[cfg(unix)]
     {
@@ -367,6 +385,11 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
             .find("argv=build --manifest-path")
             .is_some(),
         "Cargo must receive the build subcommand before its manifest argument"
+    );
+    assert!(
+        cargo_invocation.contains(&format!("tmpdir={}", attempt.join("tmp").display()))
+            && cargo_invocation.contains("tmp_writable=PASS"),
+        "the Bubblewrap-isolated staged Rust invocation must use writable per-attempt temporary storage"
     );
     assert_eq!(
         fs::read_to_string(diagnostic.join("terminal-status")).expect("read terminal status"),
