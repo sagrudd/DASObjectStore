@@ -540,6 +540,184 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
 
 #[cfg(target_os = "linux")]
 #[test]
+fn closure_stage_producer_binds_current_inputs_before_real_preflight() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-closure-stage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create closure-stage fixture root");
+    let sealed = staged_fixture(&temp);
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let config = sealed.join("source/.cargo/f05-vendor-config.toml");
+    fs::remove_file(&config).expect("remove externally supplied vendor config");
+
+    let staged = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .arg("--stage-closure-config")
+        .output()
+        .expect("run source-owned closure-stage producer");
+    assert!(
+        staged.status.success(),
+        "closure-stage producer failed: {}",
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    let staged_stdout = String::from_utf8(staged.stdout).expect("closure-stage output");
+    assert!(
+        staged_stdout.contains("closure_stage_vendor_config=PASS"),
+        "producer must retain its generator/config receipt"
+    );
+    assert_eq!(
+        fs::read_to_string(&config).expect("read generated vendor config"),
+        format!(
+            "[source.vendored-sources]\ndirectory = \"{}\"\n",
+            sealed.join("source/vendor").display()
+        ),
+        "producer must bind the physical staged vendor tree, not a fixture path"
+    );
+    let manifest = fs::read_to_string(sealed.join("f05-inputs.sha256"))
+        .expect("read generated staged manifest");
+    for input in [
+        "source/.cargo/f05-vendor-config.toml",
+        "source/packaging/debian/run-plugin-process-package-attempt.sh",
+        "inputs/component-candidate-input.toml",
+        "inputs/source-tree",
+        "inputs/compiled-dependency-witness.json",
+    ] {
+        assert!(manifest.contains(input), "manifest must bind {input}");
+    }
+
+    let cache = temp.join("leased-cache");
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    fs::create_dir(&cache).expect("create leased cache root");
+    fs::create_dir(&attempt).expect("create external attempt root");
+    fs::create_dir(&diagnostic).expect("create external diagnostic root");
+    let preflight = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .args(["--stage-cache-root"])
+        .arg(&cache)
+        .arg("--preflight-only")
+        .status()
+        .expect("run real preflight handoff");
+    assert!(
+        preflight.success(),
+        "generated source stage must hand off to the real preflight"
+    );
+    assert!(
+        fs::read_to_string(diagnostic.join("preflight.log"))
+            .expect("read preflight receipt")
+            .contains("preflight_only=PASS"),
+        "preflight must retain the source-stage handoff"
+    );
+    assert!(
+        !attempt.join("cargo.log").exists()
+            && !attempt.join("target").exists()
+            && !attempt.join("output").exists(),
+        "stage-to-preflight handoff must not build, prepare web assets, or package"
+    );
+
+    let missing_root = temp.join("missing-vendor");
+    copy_tree(&sealed, &missing_root);
+    let missing = missing_root;
+    fs::set_permissions(
+        missing.join("source/.cargo"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make copied config parent writable");
+    fs::remove_file(missing.join("source/.cargo/f05-vendor-config.toml"))
+        .expect("remove copied generated config");
+    fs::remove_dir_all(missing.join("source/vendor")).expect("remove copied vendor tree");
+    assert!(
+        !Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&missing)
+            .arg("--stage-closure-config")
+            .status()
+            .expect("run missing vendor denial")
+            .success(),
+        "producer must reject a missing physical vendor tree"
+    );
+
+    let mismatched_root = temp.join("mismatched-revision");
+    copy_tree(&sealed, &mismatched_root);
+    let mismatched = mismatched_root;
+    fs::set_permissions(mismatched.join("inputs"), fs::Permissions::from_mode(0o755))
+        .expect("make copied inputs writable");
+    write(
+        mismatched.join("inputs/component-candidate-input.toml"),
+        "source_revision = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
+    );
+    assert!(
+        !Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&mismatched)
+            .arg("--stage-closure-config")
+            .status()
+            .expect("run mismatched revision denial")
+            .success(),
+        "producer must reject a candidate/source-tree/witness revision mismatch"
+    );
+
+    let escaped_root = temp.join("escaped-vendor");
+    copy_tree(&sealed, &escaped_root);
+    let escaped = escaped_root;
+    fs::set_permissions(escaped.join("source"), fs::Permissions::from_mode(0o755))
+        .expect("make copied source writable");
+    fs::remove_dir_all(escaped.join("source/vendor"))
+        .expect("remove copied vendor for symlink denial");
+    let escape_target = temp.join("vendor-escape-target");
+    fs::create_dir(&escape_target).expect("create vendor escape target");
+    std::os::unix::fs::symlink(&escape_target, escaped.join("source/vendor"))
+        .expect("create vendor symlink escape");
+    assert!(
+        !Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&escaped)
+            .arg("--stage-closure-config")
+            .status()
+            .expect("run vendor symlink denial")
+            .success(),
+        "producer must reject a symlinked or escaped vendor path"
+    );
+    assert!(
+        !escape_target.join("f05-vendor-config.toml").exists(),
+        "producer must not write through a vendor symlink escape"
+    );
+
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&temp)
+            .status()
+            .expect("restore disposable fixture permissions")
+            .success(),
+        "test cleanup may only restore permissions on its disposable fixture"
+    );
+    fs::remove_dir_all(temp).expect("remove closure-stage fixture root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_stage() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1550,7 +1728,7 @@ fn staged_fixture(root: &Path) -> PathBuf {
     );
     write(
         stage.join("inputs/compiled-dependency-witness.json"),
-        "{\"dependencies\":[]}\n",
+        "{\"source_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"dependencies\":[]}\n",
     );
     write(
         stage.join("inputs/package-recipe.json"),
