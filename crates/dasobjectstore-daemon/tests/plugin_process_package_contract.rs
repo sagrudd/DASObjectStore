@@ -261,6 +261,23 @@ fn package_attempt_requires_real_network_namespace_isolation() {
             "missing network-isolation contract: {required}"
         );
     }
+    assert!(
+        !ATTEMPT.contains("--bind /tmp"),
+        "the Bubblewrap runner must not make host /tmp writable"
+    );
+}
+
+#[test]
+fn staged_web_build_binds_writable_attempt_tmp_to_rust_and_trunk() {
+    for required in [
+        "requires a writable per-attempt temporary directory",
+        "TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
+    ] {
+        assert!(
+            PREPARE_WEB_DIST.contains(required),
+            "missing staged Trunk temporary-storage contract: {required}"
+        );
+    }
 }
 
 #[test]
@@ -287,6 +304,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "copied closure requires a physical non-symlink",
         "build --manifest-path \"$copied_manifest\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
+        "export TMPDIR=\"$attempt_root/tmp\"",
         "diagnostic_status=\"$diagnostic_root/terminal-status\"",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
     ] {
@@ -315,7 +333,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
     );
     #[cfg(unix)]
     {
@@ -367,6 +385,11 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
             .find("argv=build --manifest-path")
             .is_some(),
         "Cargo must receive the build subcommand before its manifest argument"
+    );
+    assert!(
+        cargo_invocation.contains(&format!("tmpdir={}", attempt.join("tmp").display()))
+            && cargo_invocation.contains("tmp_writable=PASS"),
+        "the Bubblewrap-isolated staged Rust invocation must use writable per-attempt temporary storage"
     );
     assert_eq!(
         fs::read_to_string(diagnostic.join("terminal-status")).expect("read terminal status"),
@@ -487,6 +510,90 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     assert!(
         !nonempty_attempt.join("terminal-status").exists(),
         "runner must not write a status into the rejected attempt root"
+    );
+    fs::remove_dir_all(temp).expect("remove temporary harness root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-trunk-tmp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("temporary harness root");
+    let sealed = staged_fixture(&temp);
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    fs::create_dir(&attempt).expect("create external attempt root");
+    fs::create_dir(&diagnostic).expect("create external diagnostic root");
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(&staged_cargo, "#!/bin/sh\nexit 0\n");
+    fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+        .expect("make staged Cargo executable");
+
+    let staged_trunk = sealed.join("toolchain/bin/trunk");
+    write(
+        &staged_trunk,
+        &format!(
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
+            attempt.join("tmp").display()
+        ),
+    );
+    fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
+        .expect("make staged Trunk executable");
+    let staged_prepare = sealed.join("source/packaging/web/prepare-web-dist.sh");
+    write(&staged_prepare, PREPARE_WEB_DIST);
+    fs::set_permissions(&staged_prepare, fs::Permissions::from_mode(0o755))
+        .expect("make staged web preparer executable");
+    fs::create_dir_all(sealed.join("source/crates/dasobjectstore-gui-web"))
+        .expect("create staged web root");
+    write_f05_manifest(&sealed);
+    let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .status()
+        .expect("run staged Trunk temporary-storage fixture");
+    assert!(
+        !status.success(),
+        "fake Trunk must stop the fixture after its proof"
+    );
+
+    let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
+        .expect("read staged Trunk temporary-storage evidence");
+    let expected_tmp = attempt.join("tmp").display().to_string();
+    assert!(
+        trunk_environment.contains(&format!("tmpdir={expected_tmp}"))
+            && trunk_environment.contains(&format!("tmp={expected_tmp}"))
+            && trunk_environment.contains(&format!("temp={expected_tmp}"))
+            && trunk_environment.contains("host_tmp_writable=DENIED"),
+        "staged Trunk must receive only the writable external attempt tmp directory"
+    );
+    assert!(
+        attempt.join("tmp/trunk-temp-proof").is_file() && !sealed.join("tmp").exists(),
+        "temporary writes must remain under the external attempt root, never host or sealed tmp"
+    );
+    assert_eq!(
+        fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
+        manifest,
+        "fake Trunk fixture must not alter the sealed inputs"
     );
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
