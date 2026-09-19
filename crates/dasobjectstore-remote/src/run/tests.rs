@@ -187,6 +187,7 @@ fn upload_dry_run_does_not_invoke_credential_helper() {
         "reviewed-store",
         "--bucket",
         "reviewed-bucket",
+        "--submit-to-daemon",
         "--source",
         source.to_str().expect("utf8 source"),
         "--dry-run",
