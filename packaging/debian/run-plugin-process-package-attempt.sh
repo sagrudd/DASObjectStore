@@ -401,6 +401,7 @@ produce_closure_provenance_inputs() {
     inputs/toolchain-input-receipt.toml; do
     grep -F "  $bound" "$sealed_root/f05-inputs.sha256" >/dev/null || die "provenance input stage requires pre-producer manifest binding for $bound"
   done
+  grep -F '  source/' "$sealed_root/f05-inputs.sha256" >/dev/null || die 'provenance input stage requires a bound physical source tree'
   for generated in "$witness" "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json"; do
     [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
   done
