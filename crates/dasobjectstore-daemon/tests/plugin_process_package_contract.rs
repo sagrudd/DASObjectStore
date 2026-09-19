@@ -362,6 +362,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
 
     let status = Command::new("bash")
+        .args(["-c", "umask 077; exec \"$@\"", "fixture"])
         .arg(&script)
         .args(["--sealed-root"])
         .arg(&sealed)
@@ -396,7 +397,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         cargo_invocation.contains("tmpdir=/var/tmp/tmp")
             && cargo_invocation.contains("umask=0022")
             && cargo_invocation.contains("tmp_writable=PASS"),
-        "the Bubblewrap-isolated staged Rust invocation must use stable paths, a fixed umask, and writable temporary storage"
+        "the Bubblewrap-isolated staged Rust invocation must override a restrictive caller umask while using stable paths and writable temporary storage"
     );
     assert_eq!(
         fs::read_to_string(diagnostic.join("terminal-status")).expect("read terminal status"),
