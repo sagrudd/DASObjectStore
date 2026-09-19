@@ -226,7 +226,11 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "requires a staged wasm32-unknown-unknown target",
         "wasm-bindgen-0.2.128/wasm-bindgen",
         "wasm-opt-version_123/wasm-opt",
-        "TRUNK_TOOLS_DIR=\"$staged_trunk_tools\"",
+        "XDG_CACHE_HOME=\"$isolated_xdg_cache\"",
+        "wasm-bindgen-0.2.128/wasm-bindgen",
+        "wasm-opt-version_123/bin/wasm-opt",
+        "requires hash-verified staged wasm-bindgen cache input",
+        "requires hash-verified staged wasm-opt cache input",
         "requires f05-inputs.sha256 to bind",
         "requires a non-empty staged vendor tree",
         "requires a non-empty staged wasm32-unknown-unknown target",
@@ -271,7 +275,7 @@ fn package_attempt_requires_real_network_namespace_isolation() {
 fn staged_web_build_binds_writable_attempt_tmp_to_rust_and_trunk() {
     for required in [
         "requires a writable per-attempt temporary directory",
-        "TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
+        "XDG_CACHE_HOME=\"$isolated_xdg_cache\" TMPDIR=\"$attempt_root/tmp\" TMP=\"$attempt_root/tmp\" TEMP=\"$attempt_root/tmp\"",
     ] {
         assert!(
             PREPARE_WEB_DIST.contains(required),
@@ -540,12 +544,25 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
 
+    let network_download = attempt.join("network-download");
+    let staged_curl = sealed.join("network-denied-bin/curl");
+    write(
+        &staged_curl,
+        &format!(
+            "#!/bin/sh\nprintf 'network_request=UNEXPECTED\\n' > \"{}\"\nexit 75\n",
+            network_download.display()
+        ),
+    );
+    fs::set_permissions(&staged_curl, fs::Permissions::from_mode(0o755))
+        .expect("make staged downloader denial executable");
+
     let staged_trunk = sealed.join("toolchain/bin/trunk");
     write(
         &staged_trunk,
         &format!(
-            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
-            attempt.join("tmp").display()
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"{}\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
+            attempt.join("tmp").display(),
+            attempt.join("xdg-cache").display()
         ),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
@@ -579,16 +596,33 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
         .expect("read staged Trunk temporary-storage evidence");
     let expected_tmp = attempt.join("tmp").display().to_string();
+    let expected_xdg_cache = attempt.join("xdg-cache").display().to_string();
     assert!(
         trunk_environment.contains(&format!("tmpdir={expected_tmp}"))
             && trunk_environment.contains(&format!("tmp={expected_tmp}"))
             && trunk_environment.contains(&format!("temp={expected_tmp}"))
+            && trunk_environment.contains(&format!("xdg_cache={expected_xdg_cache}"))
+            && trunk_environment.contains(&format!(
+                "cached_wasm_bindgen={expected_xdg_cache}/trunk/wasm-bindgen-0.2.128/wasm-bindgen"
+            ))
+            && trunk_environment.contains(&format!(
+                "cached_wasm_opt={expected_xdg_cache}/trunk/wasm-opt-version_123/bin/wasm-opt"
+            ))
+            && trunk_environment.contains("downloader=NOT_INVOKED")
             && trunk_environment.contains("host_tmp_writable=DENIED"),
-        "staged Trunk must receive only the writable external attempt tmp directory"
+        "staged Trunk must receive only the external temporary and hash-verified tool cache directories"
     );
     assert!(
-        attempt.join("tmp/trunk-temp-proof").is_file() && !sealed.join("tmp").exists(),
-        "temporary writes must remain under the external attempt root, never host or sealed tmp"
+        attempt.join("tmp/trunk-temp-proof").is_file()
+            && attempt
+                .join("xdg-cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen")
+                .is_file()
+            && attempt
+                .join("xdg-cache/trunk/wasm-opt-version_123/bin/wasm-opt")
+                .is_file()
+            && !network_download.exists()
+            && !sealed.join("tmp").exists(),
+        "temporary and Trunk-cache writes must remain under the external attempt root without downloader fallback"
     );
     assert_eq!(
         fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
@@ -596,6 +630,164 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         "fake Trunk fixture must not alter the sealed inputs"
     );
     fs::remove_dir_all(temp).expect("remove temporary harness root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires DASOBJECTSTORE_F05_REAL_STAGED_CLOSURE and performs a real staged Trunk build"]
+fn real_staged_trunk_uses_hydrated_xdg_cache_without_a_downloader() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let source_closure = PathBuf::from(
+        std::env::var("DASOBJECTSTORE_F05_REAL_STAGED_CLOSURE")
+            .expect("real Trunk regression requires DASOBJECTSTORE_F05_REAL_STAGED_CLOSURE"),
+    );
+    assert!(
+        source_closure.is_absolute()
+            && source_closure.is_dir()
+            && !fs::symlink_metadata(&source_closure)
+                .expect("inspect real staged closure")
+                .file_type()
+                .is_symlink(),
+        "real Trunk regression requires an absolute physical staged closure"
+    );
+    assert!(
+        Command::new("shasum")
+            .args(["-a", "256", "-c", "f05-inputs.sha256"])
+            .current_dir(&source_closure)
+            .status()
+            .expect("verify real staged closure before fixture")
+            .success(),
+        "real staged closure must be intact before the Bubblewrap fixture"
+    );
+
+    let real_trunk = source_closure.join("toolchain/bin/trunk");
+    let real_trunk_version = Command::new(&real_trunk)
+        .arg("--version")
+        .output()
+        .expect("run staged Trunk version check");
+    assert!(
+        real_trunk_version.status.success()
+            && String::from_utf8_lossy(&real_trunk_version.stdout).contains("trunk 0.21.14"),
+        "fixture requires the declared real staged Trunk 0.21.14"
+    );
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-real-staged-trunk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create real Trunk fixture root");
+    let attempt = temp.join("attempt");
+    fs::create_dir(&attempt).expect("create real Trunk external attempt root");
+    let copied_closure = attempt.join("closure");
+    let copy_status = Command::new("cp")
+        .args(["-a"])
+        .arg(&source_closure)
+        .arg(&copied_closure)
+        .status()
+        .expect("copy real staged closure into the external attempt root");
+    assert!(copy_status.success(), "copy real staged closure");
+    let writable_copy = Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&copied_closure)
+        .status()
+        .expect("make only the copied closure writable");
+    assert!(writable_copy.success(), "make copied closure writable");
+
+    let copied_prepare = copied_closure.join("source/packaging/web/prepare-web-dist.sh");
+    fs::write(&copied_prepare, PREPARE_WEB_DIST)
+        .expect("install tested web preparer in copied closure");
+    fs::set_permissions(&copied_prepare, fs::Permissions::from_mode(0o755))
+        .expect("make copied web preparer executable");
+    let copied_vendor_config = copied_closure.join("source/.cargo/f05-vendor-config.toml");
+    let copied_vendor_path = copied_closure.join("source/vendor");
+    let vendor_config =
+        fs::read_to_string(&copied_vendor_config).expect("read copied vendor config");
+    let rewritten_vendor_config = vendor_config
+        .lines()
+        .map(|line| {
+            if line.starts_with("directory = ") {
+                format!("directory = \"{}\"", copied_vendor_path.display())
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(
+        &copied_vendor_config,
+        format!("{rewritten_vendor_config}\n"),
+    )
+    .expect("bind copied vendor config to copied source");
+    let copied_manifest = Command::new("bash")
+        .arg("-ceu")
+        .arg(
+            "cd \"$1\"\nfind . -type f ! -name f05-inputs.sha256 -print | LC_ALL=C sort | while IFS= read -r input; do\n  printf '%s  %s\\n' \"$(shasum -a 256 \"$input\" | awk '{print $1}')\" \"${input#./}\"\ndone > f05-inputs.sha256",
+        )
+        .arg("fixture")
+        .arg(&copied_closure)
+        .status()
+        .expect("rebind copied closure manifest to the tested preparer");
+    assert!(copied_manifest.success(), "rebind copied closure manifest");
+    fs::create_dir_all(attempt.join("tmp")).expect("create external temporary directory");
+
+    let bwrap_script = "test ! -w /tmp\ntest -d \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -w \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\"\nexec bash \"$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT/source/packaging/web/prepare-web-dist.sh\"";
+    let bwrap_output = Command::new("/usr/bin/bwrap")
+        .args(["--unshare-net", "--ro-bind", "/", "/", "--bind"])
+        .arg(&attempt)
+        .arg(&attempt)
+        .args(["--proc", "/proc", "--dev", "/dev"])
+        .args(["--setenv", "DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT"])
+        .arg(&copied_closure)
+        .args(["--setenv", "DASOBJECTSTORE_F05_ATTEMPT_ROOT"])
+        .arg(&attempt)
+        .args(["--", "/usr/bin/bash", "-ceu", bwrap_script])
+        .output()
+        .expect("run real staged Trunk under Bubblewrap");
+    let bwrap_log = temp.join("real-staged-trunk-bwrap.log");
+    let mut combined_log = bwrap_output.stdout;
+    combined_log.extend_from_slice(&bwrap_output.stderr);
+    fs::write(&bwrap_log, &combined_log).expect("retain Bubblewrap fixture log");
+    assert!(
+        bwrap_output.status.success(),
+        "real staged Trunk must build from the hydrated cache under network-denied Bubblewrap: {}",
+        String::from_utf8_lossy(&combined_log)
+    );
+    let bwrap_log_text = String::from_utf8_lossy(&combined_log);
+    assert!(
+        !bwrap_log_text
+            .to_ascii_lowercase()
+            .contains("downloading wasm-bindgen"),
+        "hydrated staged wasm-bindgen cache must avoid a downloader request"
+    );
+    assert!(
+        attempt
+            .join("xdg-cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen")
+            .is_file()
+            && attempt
+                .join("xdg-cache/trunk/wasm-opt-version_123/bin/wasm-opt")
+                .is_file()
+            && attempt
+                .join("closure/source/crates/dasobjectstore-gui-web/dist/index.html")
+                .is_file(),
+        "real staged Trunk must use hydrated external cache and write web output only in the copied closure"
+    );
+    assert!(
+        Command::new("shasum")
+            .args(["-a", "256", "-c", "f05-inputs.sha256"])
+            .current_dir(&source_closure)
+            .status()
+            .expect("reverify real staged closure after fixture")
+            .success(),
+        "real staged Trunk fixture must leave the sealed source closure immutable"
+    );
+    fs::remove_dir_all(temp).expect("remove external real Trunk fixture root");
 }
 
 fn write(path: impl AsRef<Path>, contents: &str) {
