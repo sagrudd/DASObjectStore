@@ -1704,7 +1704,7 @@ fn staged_fixture(root: &Path) -> PathBuf {
     }
     write(
         source.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
+        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.17\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
     );
     write(
         source.join("Cargo.lock"),
@@ -1729,6 +1729,10 @@ fn staged_fixture(root: &Path) -> PathBuf {
     write(
         stage.join("inputs/compiled-dependency-witness.json"),
         "{\"source_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"dependencies\":[]}\n",
+    );
+    write(
+        stage.join("inputs/toolchain-input-admission-receipt.toml"),
+        "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nworkspace_version = \"0.186.17\"\ntoolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ninventory_sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nreusable_tool_provenance_inventory_sha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
     );
     write(
         stage.join("inputs/package-recipe.json"),
@@ -1850,8 +1854,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             "{\"source_revision\": \"c7b38a244a8a515f865058d09f67e4abe61978cc\", \"dependencies\":[]}\n",
         );
         write(
-            sealed.join("source/Cargo.toml"),
-            "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.18\"\n",
+            sealed.join("inputs/toolchain-input-admission-receipt.toml"),
+            "source_revision = \"c7b38a244a8a515f865058d09f67e4abe61978cc\"\nworkspace_version = \"0.186.17\"\ntoolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ninventory_sha256 = \"ec287428c379235f47fd42cdd7f208b0132ba6bbe132dd90f3040d34379b8eb9\"\nreusable_tool_provenance_inventory_sha256 = \"de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f\"\n",
         );
     }
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1877,8 +1881,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         assert!(
             !staged.status.success()
                 && String::from_utf8_lossy(&staged.stderr)
-                    .contains("requires the reviewed physical inventory document"),
-            "a self-consistent fixture manifest must not replace the independently reviewed inventory"
+                    .contains("requires physical receipt, manifest, and identity witnesses"),
+            "a fixture without an externally admitted inventory must fail closed"
         );
         assert!(
             Command::new("chmod")
@@ -1926,13 +1930,13 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     assert!(
         fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
             .expect("read copied tool-input receipt")
-            .contains("inventory_sha256 = \"9e28c1ef0c4f86ade290cec25f25f132cba5f239b277299177ef5fa56bf11188\""),
+            .contains("inventory_sha256 = \"ec287428c379235f47fd42cdd7f208b0132ba6bbe132dd90f3040d34379b8eb9\""),
         "stage must bind the reviewed tool-input inventory"
     );
     assert!(
         fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
             .expect("read copied tool-input receipt")
-            .contains("workspace_version = \"0.186.18\""),
+            .contains("workspace_version = \"0.186.17\""),
         "stage must bind the candidate workspace version"
     );
 
@@ -1987,7 +1991,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .expect("remove version-mismatch stage manifest");
     write(
         version_mismatch_stage.join("source/Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.19\"\n",
+        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.18\"\n",
     );
     let version_mismatch = Command::new("bash")
         .arg(&script)
@@ -2096,7 +2100,9 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             "missing-tool" => "requires complete executable tool inputs",
             "altered-tool" => "rejects a substituted rustc input",
             "symlink-escape" => "rejects symlinked inputs",
-            "inventory-replacement" => "requires the reviewed physical inventory document",
+            "inventory-replacement" => {
+                "rejects an admission receipt not bound to this candidate and inventory"
+            }
             "revision-mismatch" => "requires matching candidate image and revision witnesses",
             "image-mismatch" => "rejects a candidate image mismatch",
             _ => unreachable!("known tool-input negative fixture"),
