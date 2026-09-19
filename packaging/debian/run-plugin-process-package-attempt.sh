@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY [--stage-cache-root LEASED_STAGE_CACHE_DIRECTORY]" >&2
+  echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY [--stage-cache-root LEASED_STAGE_CACHE_DIRECTORY] [--preflight-only]" >&2
   exit 2
 }
 
@@ -10,16 +10,22 @@ sealed_root=''
 attempt_root=''
 diagnostic_root=''
 stage_cache_root=''
+preflight_only=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
     --attempt-root) attempt_root=${2-}; shift 2 ;;
     --diagnostic-root) diagnostic_root=${2-}; shift 2 ;;
     --stage-cache-root) stage_cache_root=${2-}; shift 2 ;;
+    --preflight-only) preflight_only=1; shift ;;
     *) usage ;;
   esac
 done
 [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
+[[ "$preflight_only" -eq 0 || -n "$stage_cache_root" ]] || {
+  echo 'F05 package attempt: preflight-only requires a leased stage cache root' >&2
+  exit 2
+}
 
 # Keep copied-source and generated-artifact modes independent of the caller.
 umask 022
@@ -99,6 +105,9 @@ if [[ "${DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE:-}" != 1 ]]; then
   if [[ -n "$stage_cache_root" ]]; then
     bwrap_args+=(--bind "$stage_cache_root" /mnt)
     inner_args+=(--stage-cache-root /mnt)
+  fi
+  if [[ "$preflight_only" -eq 1 ]]; then
+    inner_args+=(--preflight-only)
   fi
   exec /usr/bin/bwrap "${bwrap_args[@]}" --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- /usr/bin/bash /opt/source/packaging/debian/run-plugin-process-package-attempt.sh "${inner_args[@]}"
 fi
@@ -217,6 +226,18 @@ done
 sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
 mv "$copied_config.next" "$copied_config"
 write_batched_manifest "$copied_closure"
+
+if [[ "$preflight_only" -eq 1 ]]; then
+  # This is the identical copied-vendor binding required by
+  # prepare-web-dist.sh before it can invoke Trunk.  Keep it on the
+  # preflight side of every build, web-preparation, and package command.
+  grep -Fx "directory = \"$copied_source/vendor\"" "$copied_config" >/dev/null || die 'preflight requires a vendor config bound to the copied staged source'
+  (cd "$copied_closure" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'preflight copied closure has a missing or altered input'
+  [[ -z "$(find "$stage_cache_root" -perm /0222 -print -quit)" ]] || die 'preflight leased stage cache must remain immutable'
+  record_diagnostic "preflight_only=PASS copied_vendor=$copied_source/vendor"
+  exit 0
+fi
+
 server="$attempt_root/target/release/dasobjectstore-server"
 web_dist="$copied_source/crates/dasobjectstore-gui-web/dist"
 output_dir="$attempt_root/output"

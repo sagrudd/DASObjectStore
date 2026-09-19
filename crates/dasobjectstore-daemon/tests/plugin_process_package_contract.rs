@@ -589,6 +589,91 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         (attempt, diagnostic, status)
     };
 
+    let run_preflight = |name: &str, cache_root: &Path| {
+        let attempt = temp.join(format!("{name}-attempt"));
+        let diagnostic = temp.join(format!("{name}-diagnostic"));
+        fs::create_dir(&attempt).expect("create fresh preflight attempt root");
+        fs::create_dir(&diagnostic).expect("create fresh preflight diagnostic root");
+        let status = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&sealed)
+            .args(["--attempt-root"])
+            .arg(&attempt)
+            .args(["--diagnostic-root"])
+            .arg(&diagnostic)
+            .args(["--stage-cache-root"])
+            .arg(cache_root)
+            .arg("--preflight-only")
+            .status()
+            .expect("run cached preflight-only fixture");
+        (attempt, diagnostic, status)
+    };
+
+    let preflight_cache = temp.join("preflight-leased-cache");
+    fs::create_dir(&preflight_cache).expect("create preflight leased stage cache root");
+    let (preflight_cold_attempt, preflight_cold_diagnostic, preflight_cold_status) =
+        run_preflight("preflight-cold", &preflight_cache);
+    assert!(
+        preflight_cold_status.success(),
+        "preflight-only must accept a freshly admitted cold leased stage"
+    );
+    let preflight_cold_log = fs::read_to_string(preflight_cold_diagnostic.join("preflight.log"))
+        .expect("read cold preflight diagnostic");
+    assert!(
+        preflight_cold_log.contains("stage_cache_cold=PASS")
+            && preflight_cold_log.contains("preflight_only=PASS"),
+        "cold preflight must retain cache admission and copied-vendor binding"
+    );
+    assert!(
+        fs::read_to_string(
+            preflight_cold_attempt.join("closure/source/.cargo/f05-vendor-config.toml"),
+        )
+        .expect("read cold preflight copied config")
+        .contains("directory = \"/var/tmp/closure/source/vendor\""),
+        "cold preflight must use the web preparer's copied vendor path"
+    );
+    assert!(
+        !preflight_cold_attempt.join("cargo.log").exists()
+            && !preflight_cold_attempt.join("target").exists()
+            && !preflight_cold_attempt.join("output").exists(),
+        "preflight-only must not invoke Cargo, web preparation, or package output"
+    );
+    assert!(
+        !preflight_cold_diagnostic
+            .join("package-success-receipt")
+            .exists(),
+        "preflight-only must not emit a package-success receipt"
+    );
+
+    let (preflight_warm_attempt, preflight_warm_diagnostic, preflight_warm_status) =
+        run_preflight("preflight-warm", &preflight_cache);
+    assert!(
+        preflight_warm_status.success(),
+        "preflight-only must accept the fully revalidated warm leased stage"
+    );
+    let preflight_warm_log = fs::read_to_string(preflight_warm_diagnostic.join("preflight.log"))
+        .expect("read warm preflight diagnostic");
+    assert!(
+        preflight_warm_log.contains("stage_cache_reuse=PASS")
+            && preflight_warm_log.contains("preflight_only=PASS"),
+        "warm preflight must retain cache reuse and copied-vendor binding"
+    );
+    assert!(
+        fs::read_to_string(
+            preflight_warm_attempt.join("closure/source/.cargo/f05-vendor-config.toml"),
+        )
+        .expect("read warm preflight copied config")
+        .contains("directory = \"/var/tmp/closure/source/vendor\""),
+        "warm preflight must use its copied vendor path without mutating the cache"
+    );
+    assert!(
+        !preflight_warm_attempt.join("cargo.log").exists()
+            && !preflight_warm_attempt.join("target").exists()
+            && !preflight_warm_attempt.join("output").exists(),
+        "warm preflight-only must not invoke Cargo, web preparation, or package output"
+    );
+
     let (cold_attempt, cold_diagnostic, cold_status) = run("cold", &cache);
     assert!(
         !cold_status.success(),
@@ -701,7 +786,7 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     .expect("restore immutable tampered vendor parent mode");
     fs::set_permissions(&tampered, fs::Permissions::from_mode(0o555))
         .expect("restore immutable tampered cache root");
-    let (_, tampered_diagnostic, tampered_status) = run("tampered", &tampered);
+    let (_, tampered_diagnostic, tampered_status) = run_preflight("tampered", &tampered);
     assert!(
         !tampered_status.success(),
         "tampered cache must be rejected"
@@ -718,7 +803,8 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     fs::set_permissions(&missing_receipt, fs::Permissions::from_mode(0o755))
         .expect("make missing-receipt cache root writable");
     fs::remove_file(missing_receipt.join("stage-reuse-receipt")).expect("remove cache receipt");
-    let (_, missing_diagnostic, missing_status) = run("missing-receipt", &missing_receipt);
+    let (_, missing_diagnostic, missing_status) =
+        run_preflight("missing-receipt", &missing_receipt);
     assert!(
         !missing_status.success(),
         "cache missing its receipt must be rejected"
@@ -782,7 +868,7 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     .expect("restore immutable missing-config parent");
     fs::set_permissions(&missing_config, fs::Permissions::from_mode(0o555))
         .expect("restore immutable missing-config cache root");
-    let (_, config_diagnostic, config_status) = run("missing-config", &missing_config);
+    let (_, config_diagnostic, config_status) = run_preflight("missing-config", &missing_config);
     assert!(
         !config_status.success(),
         "cache missing copied config must be rejected"
@@ -814,7 +900,8 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     .expect("restore immutable cached manifest parent");
     fs::set_permissions(&missing_manifest, fs::Permissions::from_mode(0o555))
         .expect("restore immutable missing-manifest cache root");
-    let (_, manifest_diagnostic, manifest_status) = run("missing-manifest", &missing_manifest);
+    let (_, manifest_diagnostic, manifest_status) =
+        run_preflight("missing-manifest", &missing_manifest);
     assert!(
         !manifest_status.success(),
         "cache missing its manifest must be rejected"
