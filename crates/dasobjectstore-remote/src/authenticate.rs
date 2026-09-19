@@ -10,6 +10,12 @@ use std::path::Path;
 use std::time::Duration;
 
 pub const DEFAULT_APPLIANCE_HTTPS_PORT: u16 = 8448;
+const EXPECTED_DESCRIPTOR_SCHEMA_VERSION: &str = "dasobjectstore.remote_descriptor.v1";
+const EXPECTED_PRODUCT_ID: &str = "dasobjectstore";
+const UNEXPECTED_DESCRIPTOR_PRODUCT: &str =
+    "appliance discovery returned an unexpected product identity";
+const UNSUPPORTED_DESCRIPTOR_SCHEMA: &str =
+    "appliance discovery returned an unsupported descriptor schema";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RemoteConnectionContext {
@@ -251,14 +257,16 @@ where
                     .to_string(),
             )
         })?;
-    let appliance_id = discover_appliance_descriptor(
+    let appliance_id = match discover_appliance_descriptor(
         &host,
         https_port,
         presented.certificate_pem.as_bytes(),
         &tls_server_name,
-    )
-    .ok()
-    .map(|descriptor| descriptor.appliance_id);
+    ) {
+        Ok(descriptor) => Some(descriptor.appliance_id),
+        Err(error) if descriptor_identity_was_rejected(&error) => return Err(error),
+        Err(_) => None,
+    };
     let mut record =
         crate::trust::new_trust_record(&host, https_port, appliance_id.as_deref(), &presented)
             .map_err(|error| RemoteAuthenticateError::Http(error.to_string()))?;
@@ -317,12 +325,37 @@ pub fn discover_appliance_descriptor(
         .map_err(|error| {
             RemoteAuthenticateError::Http(format!("decode appliance identity: {error}"))
         })?;
+    validate_appliance_descriptor(&discovery)?;
+    Ok(discovery)
+}
+
+pub(crate) fn validate_appliance_descriptor(
+    discovery: &RemoteEasyconnectDiscoveryResponse,
+) -> Result<(), RemoteAuthenticateError> {
     if discovery.appliance_id.trim().is_empty() {
         return Err(RemoteAuthenticateError::Http(
             "appliance discovery returned a blank identity".to_string(),
         ));
     }
-    Ok(discovery)
+    if discovery.product_id != EXPECTED_PRODUCT_ID {
+        return Err(RemoteAuthenticateError::Http(
+            UNEXPECTED_DESCRIPTOR_PRODUCT.to_string(),
+        ));
+    }
+    if discovery.descriptor_schema_version != EXPECTED_DESCRIPTOR_SCHEMA_VERSION {
+        return Err(RemoteAuthenticateError::Http(
+            UNSUPPORTED_DESCRIPTOR_SCHEMA.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn descriptor_identity_was_rejected(error: &RemoteAuthenticateError) -> bool {
+    matches!(
+        error,
+        RemoteAuthenticateError::Http(message)
+            if message == UNEXPECTED_DESCRIPTOR_PRODUCT || message == UNSUPPORTED_DESCRIPTOR_SCHEMA
+    )
 }
 
 fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
@@ -338,6 +371,70 @@ fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
         ));
     }
     Ok(host.to_string())
+}
+
+#[cfg(test)]
+mod discovery_descriptor_tests {
+    use super::*;
+
+    fn descriptor() -> RemoteEasyconnectDiscoveryResponse {
+        RemoteEasyconnectDiscoveryResponse {
+            appliance_id: "das-appliance-test".to_string(),
+            product_id: EXPECTED_PRODUCT_ID.to_string(),
+            display_name: "test appliance".to_string(),
+            pairing_create_url: String::new(),
+            pairing_exchange_url: String::new(),
+            session_revoke_url_template: String::new(),
+            session_renew_url_template: String::new(),
+            default_session_lifetime_seconds: 28_800,
+            session_policy: Default::default(),
+            auth_providers: Vec::new(),
+            descriptor_schema_version: EXPECTED_DESCRIPTOR_SCHEMA_VERSION.to_string(),
+            server_version: "0.186.13".to_string(),
+            api_schema_versions: Vec::new(),
+            capabilities: Vec::new(),
+            remote_client_protocol_min: 1,
+            remote_client_protocol_max: 1,
+            component_builds: Default::default(),
+        }
+    }
+
+    #[test]
+    fn accepts_the_current_das_discovery_descriptor() {
+        assert!(validate_appliance_descriptor(&descriptor()).is_ok());
+    }
+
+    #[test]
+    fn rejects_wrong_product_or_descriptor_schema_before_authentication() {
+        let mut wrong_product = descriptor();
+        wrong_product.product_id = "another-product".to_string();
+        assert!(validate_appliance_descriptor(&wrong_product)
+            .expect_err("wrong product must be denied")
+            .to_string()
+            .contains("unexpected product identity"));
+
+        let mut wrong_schema = descriptor();
+        wrong_schema.descriptor_schema_version = "dasobjectstore.remote_descriptor.v2".to_string();
+        assert!(validate_appliance_descriptor(&wrong_schema)
+            .expect_err("unsupported schema must be denied")
+            .to_string()
+            .contains("unsupported descriptor schema"));
+    }
+
+    #[test]
+    fn preserves_descriptor_identity_rejection_during_first_trust_enrollment() {
+        assert!(descriptor_identity_was_rejected(
+            &RemoteAuthenticateError::Http(UNEXPECTED_DESCRIPTOR_PRODUCT.to_string(),)
+        ));
+        assert!(descriptor_identity_was_rejected(
+            &RemoteAuthenticateError::Http(UNSUPPORTED_DESCRIPTOR_SCHEMA.to_string(),)
+        ));
+        assert!(!descriptor_identity_was_rejected(
+            &RemoteAuthenticateError::Http(
+                "discover appliance identity returned HTTP 503".to_string(),
+            )
+        ));
+    }
 }
 
 fn validate_public_certificate(certificate: &[u8]) -> Result<(), RemoteAuthenticateError> {
