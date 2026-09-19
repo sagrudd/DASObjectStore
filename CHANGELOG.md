@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.186.19 - Unreleased
+
+- Make ``dasobjectstore-remote upload --dry-run`` render its validated plan
+  without invoking a configured credential helper, contacting S3, submitting a
+  daemon job or transferring data. Paired grant and session validation remain
+  fail-closed before rendering. This is source-only remote-client behavior; it
+  does not qualify a package, deployment, Pistis session, Site Trust or S3
+  runtime.
+
 ## 0.186.17 - Unreleased
 
 - Reject `dasobjectstore-remote upload --daemon-socket` unless

@@ -808,6 +808,12 @@ For folders, ``dasobjectstore-remote`` uses ``aws s3 sync``. For files, it uses
      --prefix experiments/run-001 \
      --dry-run
 
+Dry-run validates the selected route and renders the reviewed AWS command, but
+does not invoke a configured credential helper, contact S3, submit a daemon
+job, or transfer data. Paired ObjectStore grants and session validity remain
+validated before the plan is shown; repair an expired or missing paired session
+before relying on a rendered plan.
+
 When the local agent is running on the DAS appliance, or on a host where the
 source path is readable by ``dasobjectstored``, submit the upload through the
 daemon instead of executing the AWS CLI directly:

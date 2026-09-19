@@ -7,10 +7,6 @@ pub(super) fn run_upload(
 ) -> Result<(), RemoteRunError> {
     let config = resolved_valid_config(cli)?;
     let route = resolve_upload_route(&config, args.store(), args.bucket())?;
-    let credentials = match route.credentials.clone() {
-        Some(credentials) => Some(credentials),
-        None => resolve_credentials(cli, &config)?,
-    };
     let plan = plan_upload_with_credentials(
         &config,
         &route.bucket,
@@ -21,9 +17,6 @@ pub(super) fn run_upload(
         args.dry_run(),
         args.progress(),
         route.credential_source,
-    )?;
-    let ca_bundle_path = super::control_commands::provisioned_ca_bundle_path(
-        config.session_binding(&route.object_store)?,
     )?;
     if args.dry_run() {
         writeln!(
@@ -44,6 +37,13 @@ pub(super) fn run_upload(
         writeln!(writer, "{}", plan.display_command())?;
         return Ok(());
     }
+    let credentials = match route.credentials.clone() {
+        Some(credentials) => Some(credentials),
+        None => resolve_credentials(cli, &config)?,
+    };
+    let ca_bundle_path = super::control_commands::provisioned_ca_bundle_path(
+        config.session_binding(&route.object_store)?,
+    )?;
     if args.submit_to_daemon() {
         let source_inventory = source_inventory(args.source())?;
         let socket_path = args
