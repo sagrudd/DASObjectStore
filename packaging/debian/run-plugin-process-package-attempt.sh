@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY [--stage-cache-root LEASED_STAGE_CACHE_DIRECTORY] [--preflight-only]" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-toolchain-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   exit 2
 }
 
@@ -13,6 +14,8 @@ diagnostic_root=''
 stage_cache_root=''
 preflight_only=0
 stage_closure_config=0
+stage_closure_toolchain_inputs=0
+toolchain_input_root=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -21,11 +24,15 @@ while [[ $# -gt 0 ]]; do
     --stage-cache-root) stage_cache_root=${2-}; shift 2 ;;
     --preflight-only) preflight_only=1; shift ;;
     --stage-closure-config) stage_closure_config=1; shift ;;
+    --stage-closure-toolchain-inputs) stage_closure_toolchain_inputs=1; toolchain_input_root=${2-}; shift 2 ;;
     *) usage ;;
   esac
 done
+(( stage_closure_config + stage_closure_toolchain_inputs <= 1 )) || usage
 if [[ "$stage_closure_config" -eq 1 ]]; then
   [[ -n "$sealed_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
+elif [[ "$stage_closure_toolchain_inputs" -eq 1 ]]; then
+  [[ -n "$sealed_root" && -n "$toolchain_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 else
   [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 fi
@@ -74,6 +81,14 @@ hash_jobs=${DASOBJECTSTORE_F05_HASH_JOBS:-4}
 
 sha256_file() {
   shasum -a 256 "$1" | awk '{print $1}'
+}
+
+sha256_tree() {
+  local root=$1
+  (
+    cd "$root"
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r shasum -a 256 | shasum -a 256 | awk '{print $1}'
+  )
 }
 
 write_batched_manifest() {
@@ -132,8 +147,135 @@ produce_closure_vendor_config() {
   printf 'closure_stage_vendor_config=PASS generator_runner_sha256=%s config_sha256=%s vendor=%s\n' "$generator_sha" "$(sha256_file "$config")" "$vendor"
 }
 
+tool_input_toml_value() {
+  local file=$1 key=$2 value
+  value=$(sed -n "s/^${key} = \"\([^\"]*\)\"$/\1/p" "$file")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "toolchain input receipt requires exactly one ${key}"
+  printf '%s\n' "$value"
+}
+
+tool_inventory_value() {
+  local file=$1 section=$2 key=$3 value
+  value=$(awk -v section="$section" -v key="$key" '
+    $0 == "[" section "]" { active=1; next }
+    /^\[/ { active=0 }
+    active && index($0, key "=") == 1 { print substr($0, length(key) + 2) }
+  ' "$file")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "toolchain input inventory requires exactly one ${section}.${key}"
+  printf '%s\n' "$value"
+}
+
+tool_inventory_root_value() {
+  local file=$1 key=$2 value
+  value=$(sed -n "s/^${key}=\(.*\)$/\1/p" "$file")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "toolchain input inventory requires exactly one ${key}"
+  printf '%s\n' "$value"
+}
+
+workspace_package_version() {
+  local manifest=$1 value
+  value=$(awk '
+    $0 == "[workspace.package]" { active=1; next }
+    /^\[/ { active=0 }
+    active && /^version = "[0-9]+\.[0-9]+\.[0-9]+"$/ { print substr($0, 12, length($0) - 12) }
+  ' "$manifest")
+  [[ "$(printf '%s\n' "$value" | sed '/^$/d' | wc -l)" -eq 1 && "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'toolchain input stage requires one strict candidate workspace version'
+  printf '%s\n' "$value"
+}
+
+produce_closure_toolchain_inputs() {
+  local input_receipt input_manifest input_inventory admission_receipt candidate source_tree witness staged_runner
+  local candidate_revision source_tree_revision witness_revision candidate_image candidate_image_sha candidate_version
+  local input_revision input_image input_image_sha input_inventory_sha input_manifest_sha receipt temporary
+  local inventory_target inventory_version inventory_binding_revision inventory_binding_version prior_inventory_sha
+  local admitted_revision admitted_version admitted_inventory_sha admitted_image admitted_image_sha admitted_prior_inventory_sha
+  local required inventory_sha
+
+  input_receipt="$toolchain_input_root/tool-inputs.toml"
+  input_manifest="$toolchain_input_root/tool-inputs.sha256"
+  input_inventory="$toolchain_input_root/tool-input-inventory.txt"
+  admission_receipt="$sealed_root/inputs/toolchain-input-admission-receipt.toml"
+  candidate="$sealed_root/inputs/component-candidate-input.toml"
+  source_tree="$sealed_root/inputs/source-tree"
+  witness="$sealed_root/inputs/compiled-dependency-witness.json"
+  staged_runner="$sealed_root/source/packaging/debian/run-plugin-process-package-attempt.sh"
+
+  [[ "$toolchain_input_root" = /* && -d "$toolchain_input_root" && ! -L "$toolchain_input_root" ]] || die 'toolchain input stage requires an absolute, physical input root'
+  [[ -z "$(find "$toolchain_input_root" -type l -print -quit)" ]] || die 'toolchain input stage rejects symlinked inputs'
+  [[ -z "$(find "$toolchain_input_root" -perm /0222 -print -quit)" ]] || die 'toolchain input stage requires an immutable input root'
+  for required in "$input_receipt" "$input_manifest" "$input_inventory" "$admission_receipt" "$candidate" "$source_tree" "$witness" "$staged_runner"; do
+    [[ -f "$required" && ! -L "$required" ]] || die 'toolchain input stage requires physical receipt, manifest, and identity witnesses'
+  done
+  [[ "$(sha256_file "$staged_runner")" = "$(sha256_file "$0")" ]] || die 'toolchain input stage must execute the runner bytes that it binds'
+  inventory_sha=$(sha256_file "$input_inventory")
+  for required in \
+    "$toolchain_input_root/toolchain/bin/cargo" \
+    "$toolchain_input_root/toolchain/bin/rustc" \
+    "$toolchain_input_root/toolchain/bin/trunk" \
+    "$toolchain_input_root/toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen" \
+    "$toolchain_input_root/toolchain/trunk-tools/wasm-opt-version_123/wasm-opt" \
+    "$toolchain_input_root/network-denied-bin/git"; do
+    [[ -f "$required" && -x "$required" && ! -L "$required" ]] || die 'toolchain input stage requires complete executable tool inputs'
+  done
+  [[ -d "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown" ]] || die 'toolchain input stage requires the wasm32 target'
+  [[ -n "$(find "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -print -quit)" ]] || die 'toolchain input stage requires a non-empty wasm32 target'
+  [[ -d "$toolchain_input_root/network-denied-bin" && -d "$toolchain_input_root/staging-home" ]] || die 'toolchain input stage requires network denial and staging home inputs'
+  (cd "$toolchain_input_root" && shasum -a 256 -c tool-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage rejects altered input bytes'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/cargo")" = "$(tool_inventory_value "$input_inventory" cargo sha256)" ]] || die 'toolchain input stage rejects a substituted cargo input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/rustc")" = "$(tool_inventory_value "$input_inventory" rustc sha256)" ]] || die 'toolchain input stage rejects a substituted rustc input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/bin/trunk")" = "$(tool_inventory_value "$input_inventory" trunk sha256)" ]] || die 'toolchain input stage rejects a substituted trunk input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen")" = "$(tool_inventory_value "$input_inventory" wasm_bindgen sha256)" ]] || die 'toolchain input stage rejects a substituted wasm-bindgen input'
+  [[ "$(sha256_file "$toolchain_input_root/toolchain/trunk-tools/wasm-opt-version_123/wasm-opt")" = "$(tool_inventory_value "$input_inventory" wasm_opt sha256)" ]] || die 'toolchain input stage rejects a substituted wasm-opt input'
+  [[ "$(sha256_tree "$toolchain_input_root/toolchain/lib/rustlib/wasm32-unknown-unknown")" = "$(tool_inventory_value "$input_inventory" wasm_sysroot tree_sha256)" ]] || die 'toolchain input stage rejects a substituted wasm sysroot tree'
+  [[ "$(sha256_tree "$toolchain_input_root/toolchain")" = "$(tool_inventory_value "$input_inventory" prior_staged_toolchain tree_sha256)" ]] || die 'toolchain input stage rejects a substituted toolchain tree'
+  [[ "$(sha256_tree "$toolchain_input_root/network-denied-bin")" = "$(tool_inventory_value "$input_inventory" network_denial tree_sha256)" && "$(sha256_file "$toolchain_input_root/network-denied-bin/git")" = "$(tool_inventory_value "$input_inventory" network_denial sha256)" ]] || die 'toolchain input stage rejects a substituted network-denial input'
+  [[ "$(sha256_tree "$toolchain_input_root/staging-home")" = "$(tool_inventory_value "$input_inventory" staging_home tree_sha256)" ]] || die 'toolchain input stage rejects a substituted staging-home tree'
+
+  candidate_revision=$(sed -n 's/^source_revision = "\([0-9a-f]\{40\}\)"$/\1/p' "$candidate")
+  source_tree_revision=$(sed -n 's/^revision=\([0-9a-f]\{40\}\)$/\1/p' "$source_tree")
+  witness_revision=$(sed -n 's/.*"source_revision": "\([0-9a-f]\{40\}\)".*/\1/p' "$witness")
+  candidate_image=$(tool_input_toml_value "$candidate" toolchain_image)
+  candidate_image_sha=$(tool_input_toml_value "$candidate" toolchain_image_sha256)
+  candidate_version=$(workspace_package_version "$sealed_root/source/Cargo.toml")
+  inventory_target=$(tool_inventory_root_value "$input_inventory" source_contract_target)
+  inventory_version=$(tool_inventory_root_value "$input_inventory" source_contract_version)
+  inventory_binding_revision=$(tool_inventory_value "$input_inventory" candidate_binding source_revision)
+  inventory_binding_version=$(tool_inventory_value "$input_inventory" candidate_binding workspace_version)
+  prior_inventory_sha=$(tool_inventory_value "$input_inventory" reusable_tool_provenance inventory_sha256)
+  admitted_revision=$(tool_input_toml_value "$admission_receipt" source_revision)
+  admitted_version=$(tool_input_toml_value "$admission_receipt" workspace_version)
+  admitted_inventory_sha=$(tool_input_toml_value "$admission_receipt" inventory_sha256)
+  admitted_image=$(tool_input_toml_value "$admission_receipt" toolchain_image)
+  admitted_image_sha=$(tool_input_toml_value "$admission_receipt" toolchain_image_sha256)
+  admitted_prior_inventory_sha=$(tool_input_toml_value "$admission_receipt" reusable_tool_provenance_inventory_sha256)
+  input_revision=$(tool_input_toml_value "$input_receipt" source_revision)
+  input_image=$(tool_input_toml_value "$input_receipt" toolchain_image)
+  input_image_sha=$(tool_input_toml_value "$input_receipt" toolchain_image_sha256)
+  input_inventory_sha=$(tool_input_toml_value "$input_receipt" inventory_sha256)
+  [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" && "$candidate_revision" = "$input_revision" ]] || die 'toolchain input stage requires matching candidate image and revision witnesses'
+  [[ "$inventory_target" = "$candidate_revision" && "$inventory_binding_revision" = "$candidate_revision" && "$inventory_version" = "$candidate_version" && "$inventory_binding_version" = "$candidate_version" ]] || die 'toolchain input stage rejects inventory not bound to this candidate source and version'
+  [[ "$admitted_revision" = "$candidate_revision" && "$admitted_version" = "$candidate_version" && "$admitted_inventory_sha" = "$inventory_sha" && "$admitted_image" = "$candidate_image" && "$admitted_image_sha" = "$candidate_image_sha" && "$admitted_prior_inventory_sha" = "$prior_inventory_sha" ]] || die 'toolchain input stage rejects an admission receipt not bound to this candidate and inventory'
+  [[ "$candidate_image" = "$input_image" && "$candidate_image_sha" = "$input_image_sha" && "$candidate_image" =~ @sha256:[0-9a-f]{64}$ && "$candidate_image_sha" =~ ^sha256:[0-9a-f]{64}$ && "sha256:${candidate_image##*@sha256:}" = "$candidate_image_sha" ]] || die 'toolchain input stage rejects a candidate image mismatch'
+  [[ "$input_inventory_sha" = "$inventory_sha" ]] || die 'toolchain input stage rejects an inventory receipt not bound to the reviewed document'
+  [[ ! -e "$sealed_root/toolchain" && ! -e "$sealed_root/network-denied-bin" && ! -e "$sealed_root/staging-home" && ! -e "$sealed_root/inputs/toolchain-input-receipt.toml" ]] || die 'toolchain input stage refuses to overwrite closure inputs'
+
+  cp -a "$toolchain_input_root/toolchain" "$sealed_root/toolchain"
+  cp -a "$toolchain_input_root/network-denied-bin" "$sealed_root/network-denied-bin"
+  cp -a "$toolchain_input_root/staging-home" "$sealed_root/staging-home"
+  [[ -z "$(find "$sealed_root/toolchain" "$sealed_root/network-denied-bin" "$sealed_root/staging-home" -type l -print -quit)" ]] || die 'toolchain input stage copied a symlinked input'
+  input_manifest_sha=$(sha256_file "$input_manifest")
+  receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
+  temporary="$receipt.next"
+  printf 'source_revision = "%s"\nworkspace_version = "%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ninventory_sha256 = "%s"\ntool_input_manifest_sha256 = "%s"\nreviewed_inventory_document_sha256 = "%s"\nreusable_tool_provenance_inventory_sha256 = "%s"\n' \
+    "$input_revision" "$candidate_version" "$input_image" "$input_image_sha" "$input_inventory_sha" "$input_manifest_sha" "$inventory_sha" "$prior_inventory_sha" > "$temporary"
+  mv "$temporary" "$receipt"
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'toolchain input stage manifest does not bind copied inputs'
+  printf 'closure_stage_toolchain_inputs=PASS inventory_sha256=%s tool_input_manifest_sha256=%s\n' "$input_inventory_sha" "$input_manifest_sha"
+}
+
 reject_symlink_ancestry "$sealed_root" 'sealed closure root'
-if [[ "$stage_closure_config" -eq 0 ]]; then
+if [[ "$stage_closure_config" -eq 0 && "$stage_closure_toolchain_inputs" -eq 0 ]]; then
   reject_symlink_ancestry "$attempt_root" 'external attempt root'
   reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
 fi
@@ -143,6 +285,12 @@ fi
 sealed_root=$(canonical_directory "$sealed_root" 'sealed closure root')
 if [[ "$stage_closure_config" -eq 1 ]]; then
   produce_closure_vendor_config
+  exit 0
+fi
+if [[ "$stage_closure_toolchain_inputs" -eq 1 ]]; then
+  reject_symlink_ancestry "$toolchain_input_root" 'toolchain input root'
+  toolchain_input_root=$(canonical_directory "$toolchain_input_root" 'toolchain input root')
+  produce_closure_toolchain_inputs
   exit 0
 fi
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')

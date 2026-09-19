@@ -1704,7 +1704,7 @@ fn staged_fixture(root: &Path) -> PathBuf {
     }
     write(
         source.join("Cargo.toml"),
-        "[workspace]\nresolver = \"2\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
+        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.17\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
     );
     write(
         source.join("Cargo.lock"),
@@ -1729,6 +1729,10 @@ fn staged_fixture(root: &Path) -> PathBuf {
     write(
         stage.join("inputs/compiled-dependency-witness.json"),
         "{\"source_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"dependencies\":[]}\n",
+    );
+    write(
+        stage.join("inputs/toolchain-input-admission-receipt.toml"),
+        "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nworkspace_version = \"0.186.17\"\ntoolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ninventory_sha256 = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\nreusable_tool_provenance_inventory_sha256 = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
     );
     write(
         stage.join("inputs/package-recipe.json"),
@@ -1760,6 +1764,365 @@ fn staged_fixture(root: &Path) -> PathBuf {
     );
     write_f05_manifest(&stage);
     stage
+}
+
+fn write_tool_input_manifest(input: &Path) {
+    let manifest = input.join("tool-inputs.sha256");
+    if manifest.exists() {
+        fs::remove_file(&manifest).expect("replace disposable tool-input manifest");
+    }
+    write_f05_manifest(input);
+    fs::rename(input.join("f05-inputs.sha256"), manifest)
+        .expect("name disposable tool-input manifest");
+}
+
+fn immutable_tool_input_fixture(root: &Path, stage: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let input = root.join("tool-inputs");
+    fs::create_dir(&input).expect("create disposable tool-input root");
+    copy_tree(&stage.join("toolchain"), &input.join("toolchain"));
+    copy_tree(
+        &stage.join("network-denied-bin"),
+        &input.join("network-denied-bin"),
+    );
+    copy_tree(&stage.join("staging-home"), &input.join("staging-home"));
+    executable(
+        input.join("network-denied-bin/git"),
+        "printf 'network denied\\n' >&2\nexit 1",
+    );
+    write(input.join("staging-home/README"), "isolated staging home\n");
+    write(
+        input.join("tool-inputs.toml"),
+        "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+inventory_sha256 = \"de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f\"\n",
+    );
+    write_tool_input_manifest(&input);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&input)
+            .status()
+            .expect("make disposable tool input immutable")
+            .success(),
+        "tool-input fixture must become immutable before staging"
+    );
+    fs::set_permissions(&input, fs::Permissions::from_mode(0o555))
+        .expect("make disposable tool-input root immutable");
+    input
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn tool_input_stage_binds_immutable_inventory_before_real_preflight() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-tool-input-stage-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create tool-input fixture root");
+    let sealed = staged_fixture(&temp);
+    let reviewed_input =
+        std::env::var_os("DASOBJECTSTORE_REVIEWED_TOOL_INPUT_ROOT").map(PathBuf::from);
+    let input = if let Some(root) = &reviewed_input {
+        fs::canonicalize(root).expect("canonical reviewed tool-input root")
+    } else {
+        immutable_tool_input_fixture(&temp, &sealed)
+    };
+    if reviewed_input.is_some() {
+        write(
+            sealed.join("inputs/component-candidate-input.toml"),
+            "source_revision = \"c7b38a244a8a515f865058d09f67e4abe61978cc\"\n\
+toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
+        );
+        write(
+            sealed.join("inputs/source-tree"),
+            "revision=c7b38a244a8a515f865058d09f67e4abe61978cc\n",
+        );
+        write(
+            sealed.join("inputs/compiled-dependency-witness.json"),
+            "{\"source_revision\": \"c7b38a244a8a515f865058d09f67e4abe61978cc\", \"dependencies\":[]}\n",
+        );
+        write(
+            sealed.join("inputs/toolchain-input-admission-receipt.toml"),
+            "source_revision = \"c7b38a244a8a515f865058d09f67e4abe61978cc\"\nworkspace_version = \"0.186.17\"\ntoolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ninventory_sha256 = \"ec287428c379235f47fd42cdd7f208b0132ba6bbe132dd90f3040d34379b8eb9\"\nreusable_tool_provenance_inventory_sha256 = \"de2fa3ef73e6df2253295488c24833aa8fb4ceb1d9313a27b51dd3fdf309fe4f\"\n",
+        );
+    }
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+
+    fs::set_permissions(&sealed, fs::Permissions::from_mode(0o755))
+        .expect("make disposable stage writable");
+    fs::remove_dir_all(sealed.join("toolchain")).expect("remove pre-stage toolchain fixture");
+    fs::remove_dir_all(sealed.join("network-denied-bin"))
+        .expect("remove pre-stage network fixture");
+    fs::remove_dir_all(sealed.join("staging-home")).expect("remove pre-stage home fixture");
+    fs::remove_file(sealed.join("f05-inputs.sha256")).expect("remove pre-stage manifest");
+
+    let staged = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&input)
+        .output()
+        .expect("run source-owned tool-input stage");
+    if reviewed_input.is_none() {
+        assert!(
+            !staged.status.success()
+                && String::from_utf8_lossy(&staged.stderr)
+                    .contains("requires physical receipt, manifest, and identity witnesses"),
+            "a fixture without an externally admitted inventory must fail closed"
+        );
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "u+w"])
+                .arg(&temp)
+                .status()
+                .expect("restore disposable tool-stage permissions")
+                .success(),
+            "test cleanup may only restore permissions on its disposable fixtures"
+        );
+        fs::remove_dir_all(temp).expect("remove disposable tool-input fixture");
+        return;
+    }
+    assert!(
+        staged.status.success(),
+        "tool-input stage failed: {}",
+        String::from_utf8_lossy(&staged.stderr)
+    );
+    assert!(
+        String::from_utf8(staged.stdout)
+            .expect("tool-input stage stdout")
+            .contains("closure_stage_toolchain_inputs=PASS"),
+        "source-owned stage must retain the immutable-input receipt"
+    );
+    let manifest = fs::read_to_string(sealed.join("f05-inputs.sha256"))
+        .expect("read staged tool-input manifest");
+    for input in [
+        "toolchain/bin/cargo",
+        "toolchain/bin/rustc",
+        "toolchain/bin/trunk",
+        "toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen",
+        "toolchain/trunk-tools/wasm-opt-version_123/wasm-opt",
+        "network-denied-bin/git",
+        "staging-home/README",
+        "inputs/toolchain-input-receipt.toml",
+    ] {
+        assert!(manifest.contains(input), "manifest must bind {input}");
+    }
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line.contains("  toolchain/lib/rustlib/wasm32-unknown-unknown/")),
+        "manifest must bind every copied wasm sysroot file"
+    );
+    assert!(
+        fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
+            .expect("read copied tool-input receipt")
+            .contains("inventory_sha256 = \"ec287428c379235f47fd42cdd7f208b0132ba6bbe132dd90f3040d34379b8eb9\""),
+        "stage must bind the reviewed tool-input inventory"
+    );
+    assert!(
+        fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
+            .expect("read copied tool-input receipt")
+            .contains("workspace_version = \"0.186.17\""),
+        "stage must bind the candidate workspace version"
+    );
+
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    let cache = temp.join("cache");
+    fs::create_dir(&attempt).expect("create tool-stage attempt root");
+    fs::create_dir(&diagnostic).expect("create tool-stage diagnostic root");
+    fs::create_dir(&cache).expect("create tool-stage cache root");
+    assert!(
+        Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&sealed)
+            .args(["--attempt-root"])
+            .arg(&attempt)
+            .args(["--diagnostic-root"])
+            .arg(&diagnostic)
+            .args(["--stage-cache-root"])
+            .arg(&cache)
+            .arg("--preflight-only")
+            .status()
+            .expect("run tool-input preflight handoff")
+            .success(),
+        "tool-input stage must hand off to real preflight without tool execution"
+    );
+    assert!(
+        !attempt.join("target").exists() && !attempt.join("output").exists(),
+        "tool-input handoff must not compile or package"
+    );
+
+    let version_mismatch_stage = temp.join("stage-version-mismatch");
+    copy_tree(&sealed, &version_mismatch_stage);
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&version_mismatch_stage)
+            .status()
+            .expect("make disposable version-mismatch stage writable")
+            .success(),
+        "version-mismatch stage must be writable only in its disposable fixture"
+    );
+    fs::remove_dir_all(version_mismatch_stage.join("toolchain"))
+        .expect("remove version-mismatch stage toolchain");
+    fs::remove_dir_all(version_mismatch_stage.join("network-denied-bin"))
+        .expect("remove version-mismatch stage network input");
+    fs::remove_dir_all(version_mismatch_stage.join("staging-home"))
+        .expect("remove version-mismatch stage home input");
+    fs::remove_file(version_mismatch_stage.join("inputs/toolchain-input-receipt.toml"))
+        .expect("remove version-mismatch stage receipt");
+    fs::remove_file(version_mismatch_stage.join("f05-inputs.sha256"))
+        .expect("remove version-mismatch stage manifest");
+    write(
+        version_mismatch_stage.join("source/Cargo.toml"),
+        "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.186.18\"\n",
+    );
+    let version_mismatch = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&version_mismatch_stage)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&input)
+        .output()
+        .expect("run candidate-version mismatch tool-input stage");
+    assert!(
+        !version_mismatch.status.success()
+            && String::from_utf8_lossy(&version_mismatch.stderr)
+                .contains("rejects inventory not bound to this candidate source and version"),
+        "a reviewed inventory must reject a mismatched candidate workspace version"
+    );
+
+    for (name, mutate) in [
+        ("missing-tool", "rm toolchain/bin/trunk"),
+        ("altered-tool", "printf altered >> toolchain/bin/rustc"),
+        (
+            "symlink-escape",
+            "rm toolchain/bin/cargo && ln -s ../../escape toolchain/bin/cargo",
+        ),
+        (
+            "inventory-replacement",
+            "printf replacement >> tool-input-inventory.txt",
+        ),
+        (
+            "revision-mismatch",
+            "sed -i 's/c7b38a244a8a515f865058d09f67e4abe61978cc/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
+        ),
+        (
+            "image-mismatch",
+            "sed -i 's/sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' tool-inputs.toml",
+        ),
+    ] {
+        let negative_root = temp.join(name);
+        copy_tree(&input, &negative_root);
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "u+w"])
+                .arg(&negative_root)
+                .status()
+                .expect("make disposable negative input writable")
+                .success(),
+            "negative input must be writable only in its disposable fixture"
+        );
+        if name == "symlink-escape" {
+            write(temp.join("escape"), "decoy tool\n");
+        }
+        let mutation = Command::new("sh")
+            .args(["-c", mutate])
+            .current_dir(&negative_root)
+            .status()
+            .expect("mutate disposable negative input");
+        assert!(mutation.success(), "prepare {name} negative input");
+        if name == "altered-tool"
+            || name == "inventory-replacement"
+            || name == "revision-mismatch"
+            || name == "image-mismatch"
+        {
+            write_tool_input_manifest(&negative_root);
+        }
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "a-w"])
+                .arg(&negative_root)
+                .status()
+                .expect("reseal disposable negative input")
+                .success(),
+            "negative input must be immutable at stage entry"
+        );
+        let negative_stage = temp.join(format!("stage-{name}"));
+        copy_tree(&sealed, &negative_stage);
+        assert!(
+            Command::new("chmod")
+                .args(["-R", "u+w"])
+                .arg(&negative_stage)
+                .status()
+                .expect("make disposable negative stage writable")
+                .success(),
+            "negative stage must be writable"
+        );
+        fs::remove_dir_all(negative_stage.join("toolchain")).expect("remove negative stage toolchain");
+        fs::remove_dir_all(negative_stage.join("network-denied-bin"))
+            .expect("remove negative stage network input");
+        fs::remove_dir_all(negative_stage.join("staging-home"))
+            .expect("remove negative stage home input");
+        fs::remove_file(negative_stage.join("inputs/toolchain-input-receipt.toml"))
+            .expect("remove negative stage receipt");
+        fs::remove_file(negative_stage.join("f05-inputs.sha256"))
+            .expect("remove negative stage manifest");
+        let denied = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&negative_stage)
+            .args(["--stage-closure-toolchain-inputs"])
+            .arg(&negative_root)
+            .output()
+            .expect("run denied tool-input stage");
+        assert!(
+            !denied.status.success(),
+            "tool-input stage must reject {name}"
+        );
+        let expected = match name {
+            "missing-tool" => "requires complete executable tool inputs",
+            "altered-tool" => "rejects a substituted rustc input",
+            "symlink-escape" => "rejects symlinked inputs",
+            "inventory-replacement" => {
+                "rejects an admission receipt not bound to this candidate and inventory"
+            }
+            "revision-mismatch" => "requires matching candidate image and revision witnesses",
+            "image-mismatch" => "rejects a candidate image mismatch",
+            _ => unreachable!("known tool-input negative fixture"),
+        };
+        assert!(
+            String::from_utf8_lossy(&denied.stderr).contains(expected),
+            "{name} must fail closed with its specific tool-input contract error"
+        );
+    }
+
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&temp)
+            .status()
+            .expect("restore disposable tool-stage permissions")
+            .success(),
+        "test cleanup may only restore permissions on its disposable fixtures"
+    );
+    fs::remove_dir_all(temp).expect("remove disposable tool-input fixture");
 }
 
 fn staged_provenance(stage: &Path) -> std::process::ExitStatus {
