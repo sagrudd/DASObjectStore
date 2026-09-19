@@ -108,7 +108,7 @@ export PATH="$copied_closure/network-denied-bin:$copied_closure/toolchain/bin:/u
 cp "$copied_source/.cargo/f05-vendor-config.toml" "$CARGO_HOME/config.toml"
 (
   cd "$copied_source"
-  "$copied_closure/toolchain/bin/cargo" --manifest-path "$copied_manifest" --offline --config "$copied_config" build --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
+  "$copied_closure/toolchain/bin/cargo" build --manifest-path "$copied_manifest" --offline --config "$copied_config" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
 )
 "$copied_source/packaging/web/prepare-web-dist.sh"
 "$copied_source/packaging/debian/build-plugin-process-deb.sh" --server "$server" --web-dist "$web_dist" --output-dir "$output_dir"

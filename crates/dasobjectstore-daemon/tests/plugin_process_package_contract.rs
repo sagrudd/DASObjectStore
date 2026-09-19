@@ -140,7 +140,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "copied_manifest=\"$copied_source/Cargo.toml\"",
         "copied_lock=\"$copied_source/Cargo.lock\"",
         "copied closure requires a physical non-symlink",
-        "--manifest-path \"$copied_manifest\"",
+        "build --manifest-path \"$copied_manifest\"",
         "DASOBJECTSTORE_F05_ATTEMPT_ROOT=\"$attempt_root\"",
         "terminal-status",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
@@ -211,6 +211,12 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
             attempt.join("closure/source/Cargo.toml").display()
         )),
         "Cargo must receive the explicit copied manifest path"
+    );
+    assert!(
+        cargo_invocation
+            .find("argv=build --manifest-path")
+            .is_some(),
+        "Cargo must receive the build subcommand before its manifest argument"
     );
     assert_eq!(
         fs::read_to_string(attempt.join("terminal-status")).expect("read terminal status"),
