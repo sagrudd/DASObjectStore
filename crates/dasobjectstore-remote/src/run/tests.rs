@@ -167,6 +167,43 @@ fn upload_dry_run_routes_object_store_through_paired_bucket_and_session() {
 }
 
 #[test]
+fn upload_dry_run_does_not_invoke_credential_helper() {
+    let path = temp_config_path("upload-dry-run-no-helper");
+    let root = temp_source_root("upload-dry-run-no-helper-source");
+    std::fs::create_dir_all(&root).expect("create source");
+    let source = root.join("reads.fastq.gz");
+    std::fs::write(&source, b"ACGT").expect("write source");
+    let mut config = paired_config();
+    config.default_appliance_id = None;
+    config.paired_appliances.clear();
+    config.session_bindings.clear();
+    config.credential_helper = Some("definitely-not-a-helper".to_string());
+    write_config(&path, &config).expect("write config");
+    let cli = RemoteCli::try_parse_from([
+        "dasobjectstore-remote",
+        "--config",
+        path.to_str().expect("utf8 path"),
+        "upload",
+        "reviewed-store",
+        "--bucket",
+        "reviewed-bucket",
+        "--source",
+        source.to_str().expect("utf8 source"),
+        "--dry-run",
+    ])
+    .expect("cli parses");
+    let mut output = Vec::new();
+
+    run(&cli, &mut output).expect("dry run does not need credentials");
+
+    let rendered = String::from_utf8(output).expect("utf8 output");
+    assert!(rendered.contains("ObjectStore: reviewed-store -> bucket reviewed-bucket"));
+    assert!(rendered.contains("s3://reviewed-bucket/reads.fastq.gz"));
+    std::fs::remove_dir_all(root).expect("cleanup source");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn unpaired_daemon_route_keeps_logical_store_and_reviewed_bucket_distinct() {
     let mut config = paired_config();
     config.paired_appliances.clear();
