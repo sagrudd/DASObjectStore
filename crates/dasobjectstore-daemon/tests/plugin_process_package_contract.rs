@@ -514,6 +514,99 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-trunk-tmp-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("temporary harness root");
+    let sealed = staged_fixture(&temp);
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    fs::create_dir(&attempt).expect("create external attempt root");
+    fs::create_dir(&diagnostic).expect("create external diagnostic root");
+    let host_tmp_probe = format!("/tmp/dasobjectstore-f05-bwrap-{}", std::process::id());
+    assert!(
+        !Path::new(&host_tmp_probe).exists(),
+        "host tmp probe path must begin absent"
+    );
+
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(&staged_cargo, "#!/bin/sh\nexit 0\n");
+    fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+        .expect("make staged Cargo executable");
+
+    let staged_trunk = sealed.join("toolchain/bin/trunk");
+    write(
+        &staged_trunk,
+        &format!(
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif : > \"{}\"; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
+            attempt.join("tmp").display(),
+            host_tmp_probe
+        ),
+    );
+    fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
+        .expect("make staged Trunk executable");
+    let staged_prepare = sealed.join("source/packaging/web/prepare-web-dist.sh");
+    write(&staged_prepare, PREPARE_WEB_DIST);
+    fs::set_permissions(&staged_prepare, fs::Permissions::from_mode(0o755))
+        .expect("make staged web preparer executable");
+    fs::create_dir_all(sealed.join("source/crates/dasobjectstore-gui-web"))
+        .expect("create staged web root");
+    write_f05_manifest(&sealed);
+    let manifest = fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest");
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .status()
+        .expect("run staged Trunk temporary-storage fixture");
+    assert!(
+        !status.success(),
+        "fake Trunk must stop the fixture after its proof"
+    );
+
+    let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
+        .expect("read staged Trunk temporary-storage evidence");
+    let expected_tmp = attempt.join("tmp").display().to_string();
+    assert!(
+        trunk_environment.contains(&format!("tmpdir={expected_tmp}"))
+            && trunk_environment.contains(&format!("tmp={expected_tmp}"))
+            && trunk_environment.contains(&format!("temp={expected_tmp}"))
+            && trunk_environment.contains("host_tmp_writable=DENIED"),
+        "staged Trunk must receive only the writable external attempt tmp directory"
+    );
+    assert!(
+        attempt.join("tmp/trunk-temp-proof").is_file()
+            && !Path::new(&host_tmp_probe).exists()
+            && !sealed.join("tmp").exists(),
+        "temporary writes must remain under the external attempt root, never host or sealed tmp"
+    );
+    assert_eq!(
+        fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
+        manifest,
+        "fake Trunk fixture must not alter the sealed inputs"
+    );
+    fs::remove_dir_all(temp).expect("remove temporary harness root");
+}
+
 fn write(path: impl AsRef<Path>, contents: &str) {
     let path = path.as_ref();
     fs::create_dir_all(path.parent().expect("fixture parent")).expect("create fixture parent");
