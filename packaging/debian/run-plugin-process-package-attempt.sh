@@ -498,6 +498,7 @@ copied_source="$copied_closure/source"
 copied_manifest="$copied_source/Cargo.toml"
 copied_lock="$copied_source/Cargo.lock"
 copied_config="$copied_source/.cargo/f05-vendor-config.toml"
+copied_preflight_config="$copied_closure/preflight-cargo-config.toml"
 copied_cargo_home="$copied_closure/cargo-home"
 for copied_input in "$copied_manifest" "$copied_lock" "$copied_config"; do
   [[ -f "$copied_input" && ! -L "$copied_input" ]] || die "copied closure requires a physical non-symlink $(basename "$copied_input")"
@@ -509,6 +510,18 @@ grep -Fx '[net]' "$copied_cargo_home/config.toml" >/dev/null && grep -Fx 'offlin
 # attempt copy before the preparer sees it; never rewrite the cached bytes.
 sed -E "s|^directory = \".*\"$|directory = \"$copied_source/vendor\"|" "$copied_config" > "$copied_config.next"
 mv "$copied_config.next" "$copied_config"
+cat > "$copied_preflight_config" <<EOF
+[net]
+offline = true
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "$copied_source/vendor"
+EOF
+[[ -f "$copied_preflight_config" && ! -L "$copied_preflight_config" ]] || die 'preflight requires a physical copied Cargo source configuration'
+grep -Fx "directory = \"$copied_source/vendor\"" "$copied_preflight_config" >/dev/null || die 'preflight requires a copied vendor configuration'
 if [[ ! -x "$copied_closure/network-denied-bin/shasum" ]]; then
   cat > "$copied_closure/network-denied-bin/shasum" <<'SHASUM'
 #!/bin/sh
@@ -542,8 +555,8 @@ if [[ "$preflight_only" -eq 1 ]]; then
   grep -Fx "directory = \"$copied_source/vendor\"" "$copied_config" >/dev/null || die 'preflight requires a vendor config bound to the copied staged source'
   (cd "$copied_closure" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'preflight copied closure has a missing or altered input'
   [[ -z "$(find "$stage_cache_root" -perm /0222 -print -quit)" ]] || die 'preflight leased stage cache must remain immutable'
-  (cd "$copied_source" && "$copied_closure/toolchain/bin/cargo" build --dry-run --manifest-path "$copied_manifest" --offline --config "$copied_config" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server)
-  record_diagnostic "preflight_only=PASS offline_locked_resolution=PASS copied_vendor=$copied_source/vendor"
+  (cd "$copied_source" && "$copied_closure/toolchain/bin/cargo" tree --manifest-path "$copied_manifest" --offline --config "$copied_preflight_config" --locked --target x86_64-unknown-linux-gnu -p dasobjectstore-cli --edges normal,build)
+  record_diagnostic "preflight_only=PASS offline_locked_resolution=PASS copied_vendor=$copied_source/vendor copied_preflight_config=$copied_preflight_config"
   exit 0
 fi
 install -d -m 0755 "$attempt_root/target" "$output_dir"

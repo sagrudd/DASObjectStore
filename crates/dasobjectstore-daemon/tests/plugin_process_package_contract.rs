@@ -736,7 +736,7 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nif [ \"${1-}\" = build ] && [ \"${2-}\" = --dry-run ]; then\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-resolution.log\"\n  exit 0\nfi\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
+        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  test -d \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\" || exit 72\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-resolution.log\"\n  exit 0\nfi\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
     );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
@@ -1123,6 +1123,104 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         "temporary stage-cache fixture must be writable before cleanup"
     );
     fs::remove_dir_all(temp).expect("remove temporary stage-cache fixture root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn preflight_cargo_tree_denies_a_separately_copied_missing_git_input_before_compilation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-missing-git-input-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create missing Git-input fixture root");
+
+    let sealed = staged_fixture(&temp);
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(
+        &staged_cargo,
+        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  checkout=\"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\"\n  if [ ! -d \"$checkout\" ]; then\n    printf 'missing_git_input=prosopikon\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n    exit 72\n  fi\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n  exit 0\nfi\nprintf 'unexpected_cargo_subcommand=%s\\n' \"${1-}\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\nexit 71\n",
+    );
+    fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+        .expect("make staged Cargo executable");
+    write_f05_manifest(&sealed);
+
+    let missing = temp.join("missing-git-input-closure");
+    copy_tree(&sealed, &missing);
+    fs::set_permissions(
+        missing.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make copied checkout parent writable");
+    fs::remove_dir_all(
+        missing.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492"),
+    )
+    .expect("remove separately copied Prosopikon checkout");
+    write_f05_manifest(&missing);
+
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    let cache = temp.join("leased-cache");
+    fs::create_dir(&attempt).expect("create fresh external attempt root");
+    fs::create_dir(&diagnostic).expect("create fresh external diagnostic root");
+    fs::create_dir(&cache).expect("create fresh leased cache root");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&missing)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .args(["--stage-cache-root"])
+        .arg(&cache)
+        .arg("--preflight-only")
+        .status()
+        .expect("run missing Git-input preflight");
+
+    assert_eq!(
+        status.code(),
+        Some(72),
+        "the same locked offline cargo-tree preflight must expose the missing staged Git input"
+    );
+    assert!(
+        fs::read_to_string(attempt.join("cargo-tree.log"))
+            .expect("read Cargo-tree denial receipt")
+            .contains("missing_git_input=prosopikon"),
+        "the denial must occur in cargo tree, after the copied cache is selected and before compilation"
+    );
+    assert!(
+        !attempt.join("target").exists()
+            && !attempt.join("output").exists()
+            && !diagnostic.join("package-success-receipt").exists(),
+        "a missing staged Git input must deny before compiler or package output exists"
+    );
+    assert!(
+        fs::read_to_string(diagnostic.join("preflight.log"))
+            .expect("read missing Git-input terminal receipt")
+            .contains("terminal_exit_code=72"),
+        "the preflight terminal receipt must retain Cargo-tree's real denial status"
+    );
+
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&temp)
+            .status()
+            .expect("restore disposable missing Git-input fixture permissions")
+            .success(),
+        "test cleanup may only restore permissions on its disposable fixture"
+    );
+    fs::remove_dir_all(temp).expect("remove missing Git-input fixture root");
 }
 
 #[cfg(target_os = "linux")]
@@ -1645,10 +1743,15 @@ fn executable(path: impl AsRef<Path>, version: &str) {
 }
 
 fn sha256(path: &Path) -> String {
-    let output = Command::new("shasum")
-        .args(["-a", "256"])
+    let output = Command::new("sha256sum")
         .arg(path)
         .output()
+        .or_else(|_| {
+            Command::new("shasum")
+                .args(["-a", "256"])
+                .arg(path)
+                .output()
+        })
         .expect("hash fixture input");
     assert!(output.status.success(), "hash fixture input");
     String::from_utf8(output.stdout)
@@ -1765,6 +1868,20 @@ fn staged_fixture(root: &Path) -> PathBuf {
         stage.join("cargo-home/config.toml"),
         "[net]\noffline = true\ngit-fetch-with-cli = false\n",
     );
+    for checkout in [
+        "pistis-13d5c72a63ff6278/14e4814",
+        "prosopikon-739f7520363f0e4d/f097492",
+        "proxenos-10a0a1d74c5551fd/d4c3054",
+        "thesaurophylax-08d7bd2129966817/0bfb168",
+    ] {
+        write(
+            stage
+                .join("cargo-home/git/checkouts")
+                .join(checkout)
+                .join("fixture"),
+            "immutable Git checkout fixture\n",
+        );
+    }
     fs::create_dir_all(stage.join("network-denied-bin")).expect("create network denial path");
     write(stage.join("web/index.html"), "<html></html>\n");
     write(stage.join("server"), "server fixture\n");
@@ -1795,7 +1912,9 @@ fn offline_git_cache_contract_binds_every_locked_source_before_resolution() {
         "prosopikon|https://github.com/sagrudd/prosopikon.git|f09749273ef382c1b42bf04a77d96189dd7361b3",
         "proxenos|https://github.com/sagrudd/proxenos.git|d4c3054fb7d88c9f718d2987ec19bf7bc444d391",
         "thesaurophylax|https://github.com/sagrudd/thesaurophylax.git|0bfb16857d135d2830de2cf53d245b68ed2d051f",
-        "build --dry-run --manifest-path \"$copied_manifest\" --offline --config \"$copied_config\" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server",
+        "copied_preflight_config",
+        "[source.crates-io]",
+        "cargo\" tree --manifest-path \"$copied_manifest\" --offline --config \"$copied_preflight_config\" --locked --target x86_64-unknown-linux-gnu -p dasobjectstore-cli --edges normal,build",
         "offline_locked_resolution=PASS",
     ] {
         assert!(

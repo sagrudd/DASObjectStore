@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.186.21 - Unreleased
+
+- Use stable Cargo tree resolution in the offline plugin-process preflight,
+  keeping registry crates vendor-bound while requiring the staged exact Git
+  checkouts. This source-only contract does not establish package,
+  installation or deployment acceptance.
+
 ## 0.186.20 - Unreleased
 
 - Stage, bind and use all four exact locked Git dependency checkouts in the
