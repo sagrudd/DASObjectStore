@@ -251,10 +251,10 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
 #[test]
 fn package_attempt_requires_real_network_namespace_isolation() {
     for required in [
-        "/usr/bin/unshare -n -- true",
-        "requires usable unshare -n network isolation",
-        "exec /usr/bin/unshare -n -- env DASOBJECTSTORE_F05_NETWORK_NAMESPACE=1",
-        "requires a non-host network namespace",
+        "/usr/bin/bwrap --unshare-net --ro-bind / / --bind \"$attempt_root\" \"$attempt_root\" --proc /proc --dev /dev",
+        "requires /usr/bin/bwrap network isolation",
+        "requires loopback-only network interfaces",
+        "requires empty IPv4 routes",
     ] {
         assert!(
             ATTEMPT.contains(required),
@@ -290,15 +290,9 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status() {
-    if !Command::new("/usr/bin/unshare")
-        .args(["-n", "--", "true"])
-        .status()
-        .is_ok_and(|status| status.success())
-    {
-        return;
-    }
     let temp = fs::canonicalize(std::env::temp_dir())
         .expect("canonical temporary directory")
         .join(format!(
