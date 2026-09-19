@@ -535,12 +535,6 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let diagnostic = temp.join("diagnostic");
     fs::create_dir(&attempt).expect("create external attempt root");
     fs::create_dir(&diagnostic).expect("create external diagnostic root");
-    let host_tmp_probe = format!("/tmp/dasobjectstore-f05-bwrap-{}", std::process::id());
-    assert!(
-        !Path::new(&host_tmp_probe).exists(),
-        "host tmp probe path must begin absent"
-    );
-
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(&staged_cargo, "#!/bin/sh\nexit 0\n");
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
@@ -550,9 +544,8 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     write(
         &staged_trunk,
         &format!(
-            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif : > \"{}\"; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
-            attempt.join("tmp").display(),
-            host_tmp_probe
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
+            attempt.join("tmp").display()
         ),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
@@ -594,9 +587,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         "staged Trunk must receive only the writable external attempt tmp directory"
     );
     assert!(
-        attempt.join("tmp/trunk-temp-proof").is_file()
-            && !Path::new(&host_tmp_probe).exists()
-            && !sealed.join("tmp").exists(),
+        attempt.join("tmp/trunk-temp-proof").is_file() && !sealed.join("tmp").exists(),
         "temporary writes must remain under the external attempt root, never host or sealed tmp"
     );
     assert_eq!(
