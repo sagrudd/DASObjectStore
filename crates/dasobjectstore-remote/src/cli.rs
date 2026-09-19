@@ -878,7 +878,7 @@ pub struct UploadArgs {
     #[arg(long)]
     submit_to_daemon: bool,
     /// Local daemon socket used with --submit-to-daemon.
-    #[arg(long)]
+    #[arg(long, requires = "submit_to_daemon")]
     daemon_socket: Option<PathBuf>,
 }
 
@@ -932,6 +932,40 @@ mod tests {
     };
     use crate::auth::RemoteAuthAuthority;
     use clap::Parser;
+
+    #[test]
+    fn daemon_socket_requires_daemon_submission() {
+        assert!(RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "upload",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/tmp/reads.fastq.gz",
+            "--daemon-socket",
+            "/run/dasobjectstored.sock",
+        ])
+        .is_err());
+
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "upload",
+            "zymo_fecal_2025.05",
+            "--source",
+            "/tmp/reads.fastq.gz",
+            "--submit-to-daemon",
+            "--daemon-socket",
+            "/run/dasobjectstored.sock",
+        ])
+        .expect("daemon upload parses");
+        let RemoteCommand::Upload(args) = cli.command() else {
+            panic!("expected upload command");
+        };
+        assert!(args.submit_to_daemon());
+        assert_eq!(
+            args.daemon_socket().and_then(|path| path.to_str()),
+            Some("/run/dasobjectstored.sock")
+        );
+    }
 
     #[test]
     fn parses_easyconnect_contract_command() {
