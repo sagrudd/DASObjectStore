@@ -736,7 +736,7 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
+        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  test -d \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\" || exit 72\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-resolution.log\"\n  exit 0\nfi\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
     );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
@@ -812,10 +812,13 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         "cold preflight must use the web preparer's copied vendor path"
     );
     assert!(
-        !preflight_cold_attempt.join("cargo.log").exists()
+        preflight_cold_attempt
+            .join("cargo-resolution.log")
+            .is_file()
+            && !preflight_cold_attempt.join("cargo.log").exists()
             && !preflight_cold_attempt.join("target").exists()
             && !preflight_cold_attempt.join("output").exists(),
-        "preflight-only must not invoke Cargo, web preparation, or package output"
+        "preflight-only must resolve the exact locked Cargo build without compiling, preparing web assets, or creating package output"
     );
     assert!(
         !preflight_cold_diagnostic
@@ -846,7 +849,10 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         "warm preflight must use its copied vendor path without mutating the cache"
     );
     assert!(
-        !preflight_warm_attempt.join("cargo.log").exists()
+        preflight_warm_attempt
+            .join("cargo-resolution.log")
+            .is_file()
+            && !preflight_warm_attempt.join("cargo.log").exists()
             && !preflight_warm_attempt.join("target").exists()
             && !preflight_warm_attempt.join("output").exists(),
         "warm preflight-only must not invoke Cargo, web preparation, or package output"
@@ -1121,6 +1127,104 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
 
 #[cfg(target_os = "linux")]
 #[test]
+fn preflight_cargo_tree_denies_a_separately_copied_missing_git_input_before_compilation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-plugin-process-missing-git-input-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+    fs::create_dir(&temp).expect("create missing Git-input fixture root");
+
+    let sealed = staged_fixture(&temp);
+    let staged_cargo = sealed.join("toolchain/bin/cargo");
+    write(
+        &staged_cargo,
+        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  checkout=\"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\"\n  if [ ! -d \"$checkout\" ]; then\n    printf 'missing_git_input=prosopikon\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n    exit 72\n  fi\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n  exit 0\nfi\nprintf 'unexpected_cargo_subcommand=%s\\n' \"${1-}\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\nexit 71\n",
+    );
+    fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
+        .expect("make staged Cargo executable");
+    write_f05_manifest(&sealed);
+
+    let missing = temp.join("missing-git-input-closure");
+    copy_tree(&sealed, &missing);
+    fs::set_permissions(
+        missing.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .expect("make copied checkout parent writable");
+    fs::remove_dir_all(
+        missing.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492"),
+    )
+    .expect("remove separately copied Prosopikon checkout");
+    write_f05_manifest(&missing);
+
+    let attempt = temp.join("attempt");
+    let diagnostic = temp.join("diagnostic");
+    let cache = temp.join("leased-cache");
+    fs::create_dir(&attempt).expect("create fresh external attempt root");
+    fs::create_dir(&diagnostic).expect("create fresh external diagnostic root");
+    fs::create_dir(&cache).expect("create fresh leased cache root");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let status = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&missing)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .args(["--stage-cache-root"])
+        .arg(&cache)
+        .arg("--preflight-only")
+        .status()
+        .expect("run missing Git-input preflight");
+
+    assert_eq!(
+        status.code(),
+        Some(72),
+        "the same locked offline cargo-tree preflight must expose the missing staged Git input"
+    );
+    assert!(
+        fs::read_to_string(attempt.join("cargo-tree.log"))
+            .expect("read Cargo-tree denial receipt")
+            .contains("missing_git_input=prosopikon"),
+        "the denial must occur in cargo tree, after the copied cache is selected and before compilation"
+    );
+    assert!(
+        !attempt.join("target").exists()
+            && !attempt.join("output").exists()
+            && !diagnostic.join("package-success-receipt").exists(),
+        "a missing staged Git input must deny before compiler or package output exists"
+    );
+    assert!(
+        fs::read_to_string(diagnostic.join("preflight.log"))
+            .expect("read missing Git-input terminal receipt")
+            .contains("terminal_exit_code=72"),
+        "the preflight terminal receipt must retain Cargo-tree's real denial status"
+    );
+
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&temp)
+            .status()
+            .expect("restore disposable missing Git-input fixture permissions")
+            .success(),
+        "test cleanup may only restore permissions on its disposable fixture"
+    );
+    fs::remove_dir_all(temp).expect("remove missing Git-input fixture root");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1177,7 +1281,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
 
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
-    let status = Command::new("bash")
+    let result = Command::new("bash")
         .arg(&script)
         .args(["--sealed-root"])
         .arg(&sealed)
@@ -1185,11 +1289,12 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         .arg(&attempt)
         .args(["--diagnostic-root"])
         .arg(&diagnostic)
-        .status()
+        .output()
         .expect("run staged Trunk temporary-storage fixture");
     assert!(
-        !status.success(),
-        "fake Trunk must stop the fixture after its proof"
+        !result.status.success(),
+        "fake Trunk must stop the fixture after its proof: {}",
+        String::from_utf8_lossy(&result.stderr)
     );
 
     let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
@@ -1626,7 +1731,7 @@ fn executable(path: impl AsRef<Path>, version: &str) {
     write(
         path,
         &format!(
-            "#!/bin/sh\n[ \"${{1-}}\" = --version ] && {{ echo {version}; exit 0; }}\nexit 1\n"
+            "#!/bin/sh\n[ \"${{1-}}\" = --version ] && {{ echo {version}; exit 0; }}\nexit 0\n"
         ),
     );
     #[cfg(unix)]
@@ -1638,10 +1743,15 @@ fn executable(path: impl AsRef<Path>, version: &str) {
 }
 
 fn sha256(path: &Path) -> String {
-    let output = Command::new("shasum")
-        .args(["-a", "256"])
+    let output = Command::new("sha256sum")
         .arg(path)
         .output()
+        .or_else(|_| {
+            Command::new("shasum")
+                .args(["-a", "256"])
+                .arg(path)
+                .output()
+        })
         .expect("hash fixture input");
     assert!(output.status.success(), "hash fixture input");
     String::from_utf8(output.stdout)
@@ -1708,7 +1818,7 @@ fn staged_fixture(root: &Path) -> PathBuf {
     );
     write(
         source.join("Cargo.lock"),
-        "version = 4\nsource = \"git+https://github.com/sagrudd/prosopikon.git?rev=f09749273ef382c1b42bf04a77d96189dd7361b3#f09749273ef382c1b42bf04a77d96189dd7361b3\"\n",
+        "version = 4\nsource = \"git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f\"\nsource = \"git+https://github.com/sagrudd/prosopikon.git?rev=f09749273ef382c1b42bf04a77d96189dd7361b3#f09749273ef382c1b42bf04a77d96189dd7361b3\"\nsource = \"git+https://github.com/sagrudd/proxenos.git?rev=d4c3054fb7d88c9f718d2987ec19bf7bc444d391#d4c3054fb7d88c9f718d2987ec19bf7bc444d391\"\nsource = \"git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f\"\n",
     );
     write(
         source.join(".cargo/f05-vendor-config.toml"),
@@ -1754,6 +1864,24 @@ fn staged_fixture(root: &Path) -> PathBuf {
         "wasm target\n",
     );
     fs::create_dir_all(stage.join("staging-home")).expect("create staged home");
+    write(
+        stage.join("cargo-home/config.toml"),
+        "[net]\noffline = true\ngit-fetch-with-cli = false\n",
+    );
+    for checkout in [
+        "pistis-13d5c72a63ff6278/14e4814",
+        "prosopikon-739f7520363f0e4d/f097492",
+        "proxenos-10a0a1d74c5551fd/d4c3054",
+        "thesaurophylax-08d7bd2129966817/0bfb168",
+    ] {
+        write(
+            stage
+                .join("cargo-home/git/checkouts")
+                .join(checkout)
+                .join("fixture"),
+            "immutable Git checkout fixture\n",
+        );
+    }
     fs::create_dir_all(stage.join("network-denied-bin")).expect("create network denial path");
     write(stage.join("web/index.html"), "<html></html>\n");
     write(stage.join("server"), "server fixture\n");
@@ -1764,6 +1892,284 @@ fn staged_fixture(root: &Path) -> PathBuf {
     );
     write_f05_manifest(&stage);
     stage
+}
+
+#[test]
+fn offline_git_cache_contract_binds_every_locked_source_before_resolution() {
+    for required in [
+        "--stage-closure-git-inputs",
+        "git-inputs.sha256",
+        "git-input-admission-receipt.toml",
+        "git input stage rejects altered input bytes",
+        "git input stage requires immutable physical non-symlink inputs",
+        "git input stage rejects a mismatched $name revision",
+        "git input stage rejects a substituted $name checkout",
+        "git input stage rejects an inventory not bound by the admission receipt",
+        "command -v sha256sum",
+        "verify_sha256_manifest",
+        "network-denied-bin/shasum",
+        "pistis|https://github.com/sagrudd/pistis.git|14e481497d3838d3310df3b0a21232f5d01d6f9f",
+        "prosopikon|https://github.com/sagrudd/prosopikon.git|f09749273ef382c1b42bf04a77d96189dd7361b3",
+        "proxenos|https://github.com/sagrudd/proxenos.git|d4c3054fb7d88c9f718d2987ec19bf7bc444d391",
+        "thesaurophylax|https://github.com/sagrudd/thesaurophylax.git|0bfb16857d135d2830de2cf53d245b68ed2d051f",
+        "copied_preflight_config",
+        "[source.crates-io]",
+        "cargo\" tree --manifest-path \"$copied_manifest\" --offline --config \"$copied_preflight_config\" --locked --target x86_64-unknown-linux-gnu -p dasobjectstore-cli --edges normal,build",
+        "offline_locked_resolution=PASS",
+    ] {
+        assert!(
+            ATTEMPT.contains(required),
+            "missing offline Git-cache contract: {required}"
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn tree_sha256(path: &Path) -> String {
+    let output = Command::new("bash")
+        .args([
+            "-c",
+            "cd \"$1\" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r shasum -a 256 | shasum -a 256 | awk '{print $1}'",
+            "fixture",
+        ])
+        .arg(path)
+        .output()
+        .expect("hash fixture tree");
+    assert!(output.status.success(), "hash fixture tree");
+    String::from_utf8(output.stdout)
+        .expect("fixture tree hash output")
+        .trim()
+        .to_owned()
+}
+
+#[cfg(target_os = "linux")]
+fn write_git_input_manifest(input: &Path) {
+    write_f05_manifest(input);
+    fs::rename(
+        input.join("f05-inputs.sha256"),
+        input.join("git-inputs.sha256"),
+    )
+    .expect("name disposable Git-input manifest");
+}
+
+#[cfg(target_os = "linux")]
+fn immutable_git_input_fixture(root: &Path, sealed: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let input = root.join("git-inputs");
+    fs::create_dir(&input).expect("create disposable Git-input root");
+    write(
+        input.join("cargo-home/config.toml"),
+        "[net]\noffline = true\ngit-fetch-with-cli = false\n",
+    );
+    let sources = [
+        (
+            "pistis",
+            "14e481497d3838d3310df3b0a21232f5d01d6f9f",
+            "pistis-13d5c72a63ff6278",
+            "14e4814",
+        ),
+        (
+            "prosopikon",
+            "f09749273ef382c1b42bf04a77d96189dd7361b3",
+            "prosopikon-739f7520363f0e4d",
+            "f097492",
+        ),
+        (
+            "proxenos",
+            "d4c3054fb7d88c9f718d2987ec19bf7bc444d391",
+            "proxenos-10a0a1d74c5551fd",
+            "d4c3054",
+        ),
+        (
+            "thesaurophylax",
+            "0bfb16857d135d2830de2cf53d245b68ed2d051f",
+            "thesaurophylax-08d7bd2129966817",
+            "0bfb168",
+        ),
+    ];
+    let mut inventory = String::new();
+    for (name, revision, cache_name, short) in sources {
+        let checkout = input.join(format!("cargo-home/git/checkouts/{cache_name}/{short}"));
+        let database = input.join(format!("cargo-home/git/db/{cache_name}"));
+        write(checkout.join("fixture-content"), name);
+        write(checkout.join(".fixture-head"), revision);
+        write(database.join("fixture-cache"), name);
+        inventory.push_str(&format!(
+            "{name}_url = \"https://github.com/sagrudd/{name}.git\"\n{name}_revision = \"{revision}\"\n{name}_checkout_tree_sha256 = \"{}\"\n{name}_db_tree_sha256 = \"{}\"\n",
+            tree_sha256(&checkout),
+            tree_sha256(&database),
+        ));
+    }
+    write(input.join("git-inputs.toml"), &inventory);
+    write_git_input_manifest(&input);
+    write(
+        sealed.join("inputs/git-input-admission-receipt.toml"),
+        &format!(
+            "git_input_inventory_sha256 = \"{}\"\n",
+            sha256(&input.join("git-inputs.toml"))
+        ),
+    );
+    assert!(
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&input)
+            .status()
+            .expect("make disposable Git inputs immutable")
+            .success(),
+        "Git-input fixture must become immutable before staging"
+    );
+    fs::set_permissions(&input, fs::Permissions::from_mode(0o555))
+        .expect("make disposable Git-input root immutable");
+    input
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substituted_inputs() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = fs::canonicalize(std::env::temp_dir())
+        .expect("canonical temporary directory")
+        .join(format!(
+            "dasobjectstore-git-input-stage-{}",
+            std::process::id()
+        ));
+    let _ = fs::remove_dir_all(&temp);
+    fs::create_dir(&temp).expect("create Git-input fixture root");
+    let sealed = staged_fixture(&temp);
+    let input = immutable_git_input_fixture(&temp, &sealed);
+    fs::remove_dir_all(sealed.join("cargo-home"))
+        .expect("remove fixture-only cache before the Git-input stage");
+    let fake_bin = temp.join("fake-bin");
+    let fake_git = fake_bin.join("git");
+    write(
+        &fake_git,
+        "#!/bin/sh\nif [ \"${1-}\" = -c ]; then shift 2; fi\nif [ \"${1-}\" = -C ]; then head=$2/.fixture-head; shift 2; fi\n[ \"${1-}\" = rev-parse ] && cat \"$head\"\n",
+    );
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755))
+        .expect("make fake Git executable");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let run_stage = |stage: &Path, inputs: &Path| {
+        Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(stage)
+            .args(["--stage-closure-git-inputs"])
+            .arg(inputs)
+            .env("PATH", format!("{}:/usr/bin:/bin", fake_bin.display()))
+            .status()
+            .expect("run Git-input stage")
+    };
+    assert!(
+        run_stage(&sealed, &input).success(),
+        "complete reviewed Git cache must stage"
+    );
+    assert!(
+        sealed
+            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+            .is_dir()
+    );
+
+    let missing = temp.join("missing-input");
+    copy_tree(&input, &missing);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&missing)
+        .status()
+        .expect("make missing fixture writable");
+    fs::remove_dir_all(missing.join("cargo-home/git/db/proxenos-10a0a1d74c5551fd"))
+        .expect("remove required cache");
+    write_git_input_manifest(&missing);
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&missing)
+        .status()
+        .expect("make missing fixture immutable");
+    let missing_stage = staged_fixture(&temp.join("missing-stage"));
+    write(
+        missing_stage.join("inputs/git-input-admission-receipt.toml"),
+        &format!(
+            "git_input_inventory_sha256 = \"{}\"\n",
+            sha256(&missing.join("git-inputs.toml"))
+        ),
+    );
+    assert!(
+        !run_stage(&missing_stage, &missing).success(),
+        "missing Git cache must deny before Cargo"
+    );
+
+    let substituted = temp.join("substituted-input");
+    copy_tree(&input, &substituted);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&substituted)
+        .status()
+        .expect("make substituted fixture writable");
+    write(
+        substituted
+            .join("cargo-home/git/checkouts/pistis-13d5c72a63ff6278/14e4814/fixture-content"),
+        "substituted",
+    );
+    let inventory =
+        fs::read_to_string(substituted.join("git-inputs.toml")).expect("read inventory");
+    let old = tree_sha256(&input.join("cargo-home/git/checkouts/pistis-13d5c72a63ff6278/14e4814"));
+    let new =
+        tree_sha256(&substituted.join("cargo-home/git/checkouts/pistis-13d5c72a63ff6278/14e4814"));
+    write(
+        substituted.join("git-inputs.toml"),
+        &inventory.replace(&old, &new),
+    );
+    write_git_input_manifest(&substituted);
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&substituted)
+        .status()
+        .expect("make substituted fixture immutable");
+    let substituted_stage = staged_fixture(&temp.join("substituted-stage"));
+    write(
+        substituted_stage.join("inputs/git-input-admission-receipt.toml"),
+        &format!(
+            "git_input_inventory_sha256 = \"{}\"\n",
+            sha256(&input.join("git-inputs.toml"))
+        ),
+    );
+    assert!(
+        !run_stage(&substituted_stage, &substituted).success(),
+        "self-consistent substituted cache must fail the independently bound inventory digest"
+    );
+
+    let symlinked = temp.join("symlinked-input");
+    copy_tree(&input, &symlinked);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&symlinked)
+        .status()
+        .expect("make symlink fixture writable");
+    fs::remove_file(symlinked.join("cargo-home/config.toml"))
+        .expect("remove disposable cache config");
+    std::os::unix::fs::symlink("/etc/passwd", symlinked.join("cargo-home/config.toml"))
+        .expect("create disposable input symlink");
+    let symlinked_stage = staged_fixture(&temp.join("symlinked-stage"));
+    write(
+        symlinked_stage.join("inputs/git-input-admission-receipt.toml"),
+        &format!(
+            "git_input_inventory_sha256 = \"{}\"\n",
+            sha256(&input.join("git-inputs.toml"))
+        ),
+    );
+    assert!(
+        !run_stage(&symlinked_stage, &symlinked).success(),
+        "symlinked Git input must deny before any Cargo operation"
+    );
+
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("make disposable Git fixtures removable");
+    fs::remove_dir_all(temp).expect("remove Git-input fixture root");
 }
 
 fn write_tool_input_manifest(input: &Path) {
@@ -2075,7 +2481,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 .success(),
             "negative stage must be writable"
         );
-        fs::remove_dir_all(negative_stage.join("toolchain")).expect("remove negative stage toolchain");
+        fs::remove_dir_all(negative_stage.join("toolchain"))
+            .expect("remove negative stage toolchain");
         fs::remove_dir_all(negative_stage.join("network-denied-bin"))
             .expect("remove negative stage network input");
         fs::remove_dir_all(negative_stage.join("staging-home"))
@@ -2171,24 +2578,44 @@ fn staged_provenance_is_json_and_denies_tampered_closure_inputs() {
 
     for (name, path, replacement) in [
         ("missing-cargo", "toolchain/bin/cargo", None),
-        ("altered-rustc", "toolchain/bin/rustc", Some("altered rustc\n")),
-        ("decoy-trunk", "toolchain/bin/trunk", Some("#!/bin/sh\necho decoy\n")),
+        (
+            "altered-rustc",
+            "toolchain/bin/rustc",
+            Some("altered rustc\n"),
+        ),
+        (
+            "decoy-trunk",
+            "toolchain/bin/trunk",
+            Some("#!/bin/sh\necho decoy\n"),
+        ),
         (
             "missing-wasm",
             "toolchain/lib/rustlib/wasm32-unknown-unknown/libfixture.rlib",
             None,
         ),
-        ("altered-vendor", "source/vendor/fixture.crate", Some("altered vendor\n")),
-        ("missing-config", "source/.cargo/f05-vendor-config.toml", None),
+        (
+            "altered-vendor",
+            "source/vendor/fixture.crate",
+            Some("altered vendor\n"),
+        ),
+        (
+            "missing-config",
+            "source/.cargo/f05-vendor-config.toml",
+            None,
+        ),
         (
             "altered-candidate",
             "inputs/component-candidate-input.toml",
-            Some("toolchain_image = \"docker.io/library/rust@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\ntoolchain_image_sha256 = \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n"),
+            Some(
+                "toolchain_image = \"docker.io/library/rust@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\ntoolchain_image_sha256 = \"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\n",
+            ),
         ),
         (
             "altered-image",
             "inputs/component-candidate-input.toml",
-            Some("toolchain_image = \"docker.io/library/rust@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\ntoolchain_image_sha256 = \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n"),
+            Some(
+                "toolchain_image = \"docker.io/library/rust@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\ntoolchain_image_sha256 = \"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"\n",
+            ),
         ),
     ] {
         let variant_root = temp.join(name);
