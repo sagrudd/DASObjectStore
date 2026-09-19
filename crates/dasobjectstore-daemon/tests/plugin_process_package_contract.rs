@@ -732,6 +732,11 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
         mismatched_receipt.join("stage-reuse-receipt"),
         "lease_key=wrong-runner-or-cache-key\n",
     );
+    fs::set_permissions(
+        mismatched_receipt.join("stage-reuse-receipt"),
+        fs::Permissions::from_mode(0o444),
+    )
+    .expect("restore immutable mismatched cache receipt mode");
     fs::set_permissions(&mismatched_receipt, fs::Permissions::from_mode(0o555))
         .expect("restore immutable mismatched cache root");
     let (_, mismatch_diagnostic, mismatch_status) = run("mismatched-receipt", &mismatched_receipt);
@@ -759,6 +764,11 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     )
     .expect("make config parent writable");
     fs::remove_file(config).expect("remove cached config");
+    fs::set_permissions(
+        missing_config.join("current/source/.cargo"),
+        fs::Permissions::from_mode(0o555),
+    )
+    .expect("restore immutable missing-config parent");
     fs::set_permissions(&missing_config, fs::Permissions::from_mode(0o555))
         .expect("restore immutable missing-config cache root");
     let (_, config_diagnostic, config_status) = run("missing-config", &missing_config);
