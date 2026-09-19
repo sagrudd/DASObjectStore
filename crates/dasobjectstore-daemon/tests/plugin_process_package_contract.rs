@@ -16,7 +16,10 @@ fn plugin_process_recipe_is_a_linux_amd64_component_only_fixture() {
     for required in [
         "Package: $package_name",
         "Architecture: amd64",
+        "umask 022",
         "install -m 0755 \"$server\" \"$root/usr/bin/dasobjectstore-server\"",
+        "find \"$root/opt/dasobjectstore/web\" -type d -exec chmod 0755 {} +",
+        "find \"$root/opt/dasobjectstore/web\" -type f -exec chmod 0644 {} +",
         "plugin-process-descriptor.json",
         "\"$root/opt/dasobjectstore/web/\"",
         "das_plugin_process_write_provenance",
@@ -255,7 +258,8 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
 #[test]
 fn package_attempt_requires_real_network_namespace_isolation() {
     for required in [
-        "/usr/bin/bwrap --unshare-net --ro-bind / / --bind \"$attempt_root\" \"$attempt_root\" --bind \"$diagnostic_root\" \"$diagnostic_root\" --proc /proc --dev /dev",
+        "/usr/bin/bwrap --unshare-net --ro-bind / / --ro-bind \"$sealed_root\" /opt --bind \"$attempt_root\" /var/tmp --bind \"$diagnostic_root\" /var/cache --proc /proc --dev /dev",
+        "--sealed-root /opt --attempt-root /var/tmp --diagnostic-root /var/cache",
         "requires /usr/bin/bwrap network isolation",
         "requires loopback-only network interfaces",
         "requires empty IPv4 routes",
@@ -311,6 +315,7 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "export TMPDIR=\"$attempt_root/tmp\"",
         "diagnostic_status=\"$diagnostic_root/terminal-status\"",
         "printf 'exit_code=%s\\n' \"$status\" > \"$status_file\"",
+        "umask 022",
     ] {
         assert!(
             ATTEMPT.contains(required),
@@ -337,7 +342,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'umask=%s\\n' \"$(umask)\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
     );
     #[cfg(unix)]
     {
@@ -357,6 +362,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
 
     let status = Command::new("bash")
+        .args(["-c", "umask 077; exec \"$@\"", "fixture"])
         .arg(&script)
         .args(["--sealed-root"])
         .arg(&sealed)
@@ -374,14 +380,11 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let cargo_invocation = fs::read_to_string(attempt.join("cargo-invocation.log"))
         .expect("captured staged Cargo invocation");
     assert!(
-        cargo_invocation.contains(&format!("cwd={}", attempt.join("closure/source").display())),
-        "Cargo must run from the copied source rather than the caller cwd"
+        cargo_invocation.contains("cwd=/var/tmp/closure/source"),
+        "Cargo must run from the stable copied-source path rather than the caller cwd"
     );
     assert!(
-        cargo_invocation.contains(&format!(
-            "--manifest-path {}",
-            attempt.join("closure/source/Cargo.toml").display()
-        )),
+        cargo_invocation.contains("--manifest-path /var/tmp/closure/source/Cargo.toml"),
         "Cargo must receive the explicit copied manifest path"
     );
     assert!(
@@ -391,9 +394,10 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "Cargo must receive the build subcommand before its manifest argument"
     );
     assert!(
-        cargo_invocation.contains(&format!("tmpdir={}", attempt.join("tmp").display()))
+        cargo_invocation.contains("tmpdir=/var/tmp/tmp")
+            && cargo_invocation.contains("umask=0022")
             && cargo_invocation.contains("tmp_writable=PASS"),
-        "the Bubblewrap-isolated staged Rust invocation must use writable per-attempt temporary storage"
+        "the Bubblewrap-isolated staged Rust invocation must override a restrictive caller umask while using stable paths and writable temporary storage"
     );
     assert_eq!(
         fs::read_to_string(diagnostic.join("terminal-status")).expect("read terminal status"),
@@ -408,6 +412,12 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     assert!(
         attempt.join("closure/source").is_dir(),
         "attempt has a work copy"
+    );
+    assert!(
+        fs::read_to_string(attempt.join("closure/source/.cargo/f05-vendor-config.toml"))
+            .expect("read copied vendor config")
+            .contains("directory = \"/var/tmp/closure/source/vendor\""),
+        "the copied Cargo vendor path must use the stable Bubblewrap mount"
     );
     assert!(
         fs::read_to_string(diagnostic.join("preflight.log"))
@@ -560,9 +570,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     write(
         &staged_trunk,
         &format!(
-            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"{}\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"{}\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
-            attempt.join("tmp").display(),
-            attempt.join("xdg-cache").display()
+            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
         ),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
@@ -595,8 +603,8 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
 
     let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
         .expect("read staged Trunk temporary-storage evidence");
-    let expected_tmp = attempt.join("tmp").display().to_string();
-    let expected_xdg_cache = attempt.join("xdg-cache").display().to_string();
+    let expected_tmp = "/var/tmp/tmp";
+    let expected_xdg_cache = "/var/tmp/xdg-cache";
     assert!(
         trunk_environment.contains(&format!("tmpdir={expected_tmp}"))
             && trunk_environment.contains(&format!("tmp={expected_tmp}"))
@@ -869,6 +877,14 @@ fn write_f05_manifest(stage: &Path) {
 fn staged_fixture(root: &Path) -> PathBuf {
     let stage = root.join("closure");
     let source = stage.join("source");
+    let staged_runner = source.join("packaging/debian/run-plugin-process-package-attempt.sh");
+    write(&staged_runner, ATTEMPT);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged_runner, fs::Permissions::from_mode(0o755))
+            .expect("make staged package-attempt runner executable");
+    }
     write(
         source.join("Cargo.toml"),
         "[workspace]\nresolver = \"2\"\n\n[workspace.dependencies]\nprosopikon-core = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\nprosopikon-yew = { git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"f09749273ef382c1b42bf04a77d96189dd7361b3\" }\n",
