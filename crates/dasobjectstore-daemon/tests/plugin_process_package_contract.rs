@@ -13,6 +13,191 @@ use std::{
 };
 
 #[test]
+fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
+    for required in [
+        "--stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT",
+        "produce_closure_provenance_inputs",
+        "requires immutable non-symlink inputs",
+        "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
+        "rejects an unpinned Kanon validator",
+        "component-candidate-input validate",
+        "Kanon validator rejected emitted inputs",
+        "compiled-dependency-witness.json",
+        "component-candidate-input.validation.json",
+    ] {
+        assert!(
+            ATTEMPT.contains(required),
+            "missing provenance-stage contract: {required}"
+        );
+    }
+    let producer = &ATTEMPT[ATTEMPT
+        .find("produce_closure_provenance_inputs")
+        .expect("producer")
+        ..ATTEMPT
+            .find("reject_symlink_ancestry \"$sealed_root\"")
+            .expect("producer dispatch")];
+    for forbidden in ["cargo build", "build-plugin-process-deb.sh"] {
+        assert!(
+            !producer.contains(forbidden),
+            "provenance stage must not perform {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_mismatch() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-provenance-stage-{}",
+        std::process::id()
+    ));
+    let sealed = staged_fixture(&temp);
+    for name in [
+        "component-candidate-input.toml",
+        "source-tree",
+        "compiled-dependency-witness.json",
+    ] {
+        fs::remove_file(sealed.join("inputs").join(name)).expect("clear producer output fixture");
+    }
+    fs::remove_file(sealed.join("f05-inputs.sha256")).expect("clear producer manifest fixture");
+    fs::copy(
+        sealed.join("inputs/toolchain-input-admission-receipt.toml"),
+        sealed.join("inputs/toolchain-input-receipt.toml"),
+    )
+    .expect("bind externally admitted expected tuple receipt");
+    write_f05_manifest(&sealed);
+    let input = temp.join("provenance-inputs");
+    fs::create_dir(&input).expect("create provenance inputs");
+    let archive = input.join("source-archive.tar");
+    write(&archive, "immutable source archive fixture\n");
+    let revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    write(
+        input.join("source-identity.toml"),
+        &format!(
+            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\ngit_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\n",
+            sha256(&archive),
+            tree_sha256(&sealed.join("source")),
+        ),
+    );
+    write(
+        input.join("registry.toml"),
+        "[products.dasobjectstore]\nbinaries = [\"dasobjectstore\"]\n",
+    );
+    fs::copy(
+        sealed.join("inputs/package-recipe.json"),
+        input.join("package-recipe.json"),
+    )
+    .expect("copy immutable recipe");
+    let validator = input.join("kanon-component-candidate-input");
+    executable(&validator, "{\"valid\":true}");
+    write(&validator, "#!/bin/sh\nprintf '%s\\n' '{\"valid\":true}'\n");
+    fs::set_permissions(&validator, fs::Permissions::from_mode(0o755))
+        .expect("make pinned validator executable");
+    write(
+        input.join("kanon-component-candidate-input.receipt"),
+        &format!(
+            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nsha256 = \"{}\"\n",
+            sha256(&validator)
+        ),
+    );
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&input)
+        .status()
+        .expect("seal provenance inputs");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/debian/run-plugin-process-package-attempt.sh");
+    let run = |stage: &Path, inputs: &Path| {
+        Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(inputs)
+            .output()
+            .expect("run provenance stage")
+    };
+    let accepted = run(&sealed, &input);
+    assert!(
+        accepted.status.success(),
+        "producer stderr: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.toml")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/compiled-dependency-witness.json")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.validation.json")
+            .is_file()
+    );
+    let mismatch = temp.join("mismatch-inputs");
+    copy_tree(&input, &mismatch);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&mismatch)
+        .status()
+        .expect("unseal mismatch");
+    let identity =
+        fs::read_to_string(mismatch.join("source-identity.toml")).expect("read identity");
+    write(
+        mismatch.join("source-identity.toml"),
+        &identity.replace(revision, "cccccccccccccccccccccccccccccccccccccccc"),
+    );
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&mismatch)
+        .status()
+        .expect("reseal mismatch");
+    let fresh = staged_fixture(&temp.join("mismatch-stage"));
+    for name in [
+        "component-candidate-input.toml",
+        "source-tree",
+        "compiled-dependency-witness.json",
+    ] {
+        fs::remove_file(fresh.join("inputs").join(name)).expect("clear mismatch output");
+    }
+    fs::remove_file(fresh.join("f05-inputs.sha256")).expect("clear mismatch manifest");
+    fs::copy(
+        fresh.join("inputs/toolchain-input-admission-receipt.toml"),
+        fresh.join("inputs/toolchain-input-receipt.toml"),
+    )
+    .expect("bind mismatch expected tuple receipt");
+    write_f05_manifest(&fresh);
+    let pre_producer_manifest = sha256(&fresh.join("f05-inputs.sha256"));
+    let denied = run(&fresh, &mismatch);
+    assert!(
+        !denied.status.success()
+            && String::from_utf8_lossy(&denied.stderr).contains("expected-candidate-mismatched")
+    );
+    assert!(
+        !fresh.join("inputs/component-candidate-input.toml").exists()
+            && !fresh
+                .join("inputs/compiled-dependency-witness.json")
+                .exists()
+            && !fresh
+                .join("inputs/component-candidate-input.validation.json")
+                .exists()
+            && sha256(&fresh.join("f05-inputs.sha256")) == pre_producer_manifest,
+        "a rejected tuple must not emit outputs or rewrite its pre-producer manifest"
+    );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal fixture");
+    fs::remove_dir_all(temp).expect("remove fixture");
+}
+
+#[test]
 fn plugin_process_recipe_is_a_linux_amd64_component_only_fixture() {
     for required in [
         "Package: $package_name",
@@ -2066,9 +2251,11 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(sealed
-        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-        .is_dir());
+    assert!(
+        sealed
+            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+            .is_dir()
+    );
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
