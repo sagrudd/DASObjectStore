@@ -6,6 +6,7 @@ usage() {
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-toolchain-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-git-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT" >&2
   exit 2
 }
 
@@ -19,6 +20,8 @@ stage_closure_toolchain_inputs=0
 toolchain_input_root=''
 stage_closure_git_inputs=0
 git_input_root=''
+stage_closure_provenance_inputs=0
+provenance_input_root=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -29,16 +32,19 @@ while [[ $# -gt 0 ]]; do
     --stage-closure-config) stage_closure_config=1; shift ;;
     --stage-closure-toolchain-inputs) stage_closure_toolchain_inputs=1; toolchain_input_root=${2-}; shift 2 ;;
     --stage-closure-git-inputs) stage_closure_git_inputs=1; git_input_root=${2-}; shift 2 ;;
+    --stage-closure-provenance-inputs) stage_closure_provenance_inputs=1; provenance_input_root=${2-}; shift 2 ;;
     *) usage ;;
   esac
 done
-(( stage_closure_config + stage_closure_toolchain_inputs + stage_closure_git_inputs <= 1 )) || usage
+(( stage_closure_config + stage_closure_toolchain_inputs + stage_closure_git_inputs + stage_closure_provenance_inputs <= 1 )) || usage
 if [[ "$stage_closure_config" -eq 1 ]]; then
   [[ -n "$sealed_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 elif [[ "$stage_closure_toolchain_inputs" -eq 1 ]]; then
   [[ -n "$sealed_root" && -n "$toolchain_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 elif [[ "$stage_closure_git_inputs" -eq 1 ]]; then
   [[ -n "$sealed_root" && -n "$git_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
+elif [[ "$stage_closure_provenance_inputs" -eq 1 ]]; then
+  [[ -n "$sealed_root" && -n "$provenance_input_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
 else
   [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 fi
@@ -373,8 +379,51 @@ SOURCES
   printf 'closure_stage_git_inputs=PASS git_input_manifest_sha256=%s\n' "$input_manifest_sha"
 }
 
+produce_closure_provenance_inputs() {
+  local input registry identity archive recipe validator validator_receipt source revision tree archive_sha source_content_sha lock_sha witness candidate tool_receipt image image_sha report
+  input=$provenance_input_root
+  registry="$input/registry.toml"
+  identity="$input/source-identity.toml"
+  archive="$input/source-archive.tar"
+  recipe="$input/package-recipe.json"
+  validator="$input/kanon-component-candidate-input"
+  validator_receipt="$input/kanon-component-candidate-input.receipt"
+  source="$sealed_root/source"
+  witness="$sealed_root/inputs/compiled-dependency-witness.json"
+  candidate="$sealed_root/inputs/component-candidate-input.toml"
+  tool_receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
+
+  [[ "$input" = /* && -d "$input" && ! -L "$input" ]] || die 'provenance input stage requires an absolute physical input root'
+  [[ -z "$(find "$input" -type l -print -quit)" && -z "$(find "$input" -perm /0222 -print -quit)" ]] || die 'provenance input stage requires immutable non-symlink inputs'
+  for required in "$registry" "$identity" "$archive" "$recipe" "$validator" "$validator_receipt" "$tool_receipt"; do
+    [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical registry, identity, recipe, validator, and tool receipt inputs'
+  done
+  [[ -x "$validator" && "$(sha256_file "$validator")" = "$(tool_input_toml_value "$validator_receipt" sha256)" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
+  revision=$(tool_input_toml_value "$identity" source_revision)
+  tree=$(tool_input_toml_value "$identity" git_tree)
+  archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
+  source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
+  [[ "$revision" =~ ^[0-9a-f]{40}$ && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty, wrong, or historical source archive'
+  lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
+  image=$(tool_input_toml_value "$tool_receipt" toolchain_image)
+  image_sha=$(tool_input_toml_value "$tool_receipt" toolchain_image_sha256)
+  [[ "$image" =~ @sha256:[0-9a-f]{64}$ && "$image_sha" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'provenance input stage requires an immutable toolchain image receipt'
+  [[ ! -e "$witness" && ! -e "$candidate" ]] || die 'provenance input stage refuses to overwrite provenance inputs'
+  mkdir -p "$sealed_root/inputs"
+  printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
+  printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "sha256:%s"\n}\n' "$revision" "$lock_sha" "$(sha256_tree "$sealed_root/cargo-home")" > "$witness"
+  printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
+    "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
+  report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'
+  grep -F '"valid":true' <<<"$report" >/dev/null || die 'provenance input stage Kanon validator rejected emitted inputs'
+  printf '%s\n' "$report" > "$sealed_root/inputs/component-candidate-input.validation.json"
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind emitted inputs'
+  printf 'closure_stage_provenance_inputs=PASS source_revision=%s validator_sha256=%s\n' "$revision" "$(sha256_file "$validator")"
+}
+
 reject_symlink_ancestry "$sealed_root" 'sealed closure root'
-if [[ "$stage_closure_config" -eq 0 && "$stage_closure_toolchain_inputs" -eq 0 && "$stage_closure_git_inputs" -eq 0 ]]; then
+if [[ "$stage_closure_config" -eq 0 && "$stage_closure_toolchain_inputs" -eq 0 && "$stage_closure_git_inputs" -eq 0 && "$stage_closure_provenance_inputs" -eq 0 ]]; then
   reject_symlink_ancestry "$attempt_root" 'external attempt root'
   reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
 fi
@@ -396,6 +445,12 @@ if [[ "$stage_closure_git_inputs" -eq 1 ]]; then
   reject_symlink_ancestry "$git_input_root" 'git input root'
   git_input_root=$(canonical_directory "$git_input_root" 'git input root')
   produce_closure_git_inputs
+  exit 0
+fi
+if [[ "$stage_closure_provenance_inputs" -eq 1 ]]; then
+  reject_symlink_ancestry "$provenance_input_root" 'provenance input root'
+  provenance_input_root=$(canonical_directory "$provenance_input_root" 'provenance input root')
+  produce_closure_provenance_inputs
   exit 0
 fi
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')

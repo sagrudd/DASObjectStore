@@ -13,6 +13,38 @@ use std::{
 };
 
 #[test]
+fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
+    for required in [
+        "--stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT",
+        "produce_closure_provenance_inputs",
+        "requires immutable non-symlink inputs",
+        "rejects a dirty, wrong, or historical source archive",
+        "rejects an unpinned Kanon validator",
+        "component-candidate-input validate",
+        "Kanon validator rejected emitted inputs",
+        "compiled-dependency-witness.json",
+        "component-candidate-input.validation.json",
+    ] {
+        assert!(
+            ATTEMPT.contains(required),
+            "missing provenance-stage contract: {required}"
+        );
+    }
+    let producer = &ATTEMPT[ATTEMPT
+        .find("produce_closure_provenance_inputs")
+        .expect("producer")
+        ..ATTEMPT
+            .find("reject_symlink_ancestry \"$sealed_root\"")
+            .expect("producer dispatch")];
+    for forbidden in ["cargo build", "build-plugin-process-deb.sh"] {
+        assert!(
+            !producer.contains(forbidden),
+            "provenance stage must not perform {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn plugin_process_recipe_is_a_linux_amd64_component_only_fixture() {
     for required in [
         "Package: $package_name",
