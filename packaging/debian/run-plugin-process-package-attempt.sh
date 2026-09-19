@@ -393,6 +393,17 @@ produce_closure_provenance_inputs() {
   candidate="$sealed_root/inputs/component-candidate-input.toml"
   tool_receipt="$sealed_root/inputs/toolchain-input-receipt.toml"
 
+  [[ -f "$sealed_root/f05-inputs.sha256" && ! -L "$sealed_root/f05-inputs.sha256" ]] || die 'provenance input stage requires a pre-producer sealed manifest'
+  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage rejects an altered pre-producer sealed manifest'
+  for bound in \
+    source/Cargo.toml \
+    source/Cargo.lock \
+    inputs/toolchain-input-receipt.toml; do
+    grep -F "  $bound" "$sealed_root/f05-inputs.sha256" >/dev/null || die "provenance input stage requires pre-producer manifest binding for $bound"
+  done
+  for generated in "$witness" "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json"; do
+    [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
+  done
   [[ "$input" = /* && -d "$input" && ! -L "$input" ]] || die 'provenance input stage requires an absolute physical input root'
   [[ -z "$(find "$input" -type l -print -quit)" && -z "$(find "$input" -perm /0222 -print -quit)" ]] || die 'provenance input stage requires immutable non-symlink inputs'
   for required in "$registry" "$identity" "$archive" "$recipe" "$validator" "$validator_receipt"; do
@@ -415,7 +426,6 @@ produce_closure_provenance_inputs() {
   image=$(tool_input_toml_value "$tool_receipt" toolchain_image)
   image_sha=$(tool_input_toml_value "$tool_receipt" toolchain_image_sha256)
   [[ "$image" =~ @sha256:[0-9a-f]{64}$ && "$image_sha" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'provenance input stage requires an immutable toolchain image receipt'
-  [[ ! -e "$witness" && ! -e "$candidate" ]] || die 'provenance input stage refuses to overwrite provenance inputs'
   mkdir -p "$sealed_root/inputs"
   printf 'repository=sagrudd/DASObjectStore\nrevision=%s\ngit_tree=%s\nsource_archive_sha256=%s\n' "$revision" "$tree" "${archive_sha#sha256:}" > "$sealed_root/inputs/source-tree"
   printf '{\n  "schema_version": "mnemosyne.f05.compiled-dependency-witness.v1",\n  "source_revision": "%s",\n  "cargo_lock_sha256": "%s",\n  "registry_lock_closure_sha256": "sha256:%s"\n}\n' "$revision" "$lock_sha" "$(sha256_tree "$sealed_root/cargo-home")" > "$witness"

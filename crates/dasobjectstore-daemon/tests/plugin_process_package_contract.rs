@@ -66,6 +66,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         sealed.join("inputs/toolchain-input-receipt.toml"),
     )
     .expect("bind externally admitted expected tuple receipt");
+    write_f05_manifest(&sealed);
     let input = temp.join("provenance-inputs");
     fs::create_dir(&input).expect("create provenance inputs");
     let archive = input.join("source-archive.tar");
@@ -123,15 +124,21 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "producer stderr: {}",
         String::from_utf8_lossy(&accepted.stderr)
     );
-    assert!(sealed
-        .join("inputs/component-candidate-input.toml")
-        .is_file());
-    assert!(sealed
-        .join("inputs/compiled-dependency-witness.json")
-        .is_file());
-    assert!(sealed
-        .join("inputs/component-candidate-input.validation.json")
-        .is_file());
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.toml")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/compiled-dependency-witness.json")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.validation.json")
+            .is_file()
+    );
     let mismatch = temp.join("mismatch-inputs");
     copy_tree(&input, &mismatch);
     Command::new("chmod")
@@ -164,6 +171,8 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         fresh.join("inputs/toolchain-input-receipt.toml"),
     )
     .expect("bind mismatch expected tuple receipt");
+    write_f05_manifest(&fresh);
+    let pre_producer_manifest = sha256(&fresh.join("f05-inputs.sha256"));
     let denied = run(&fresh, &mismatch);
     assert!(
         !denied.status.success()
@@ -171,8 +180,14 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     );
     assert!(
         !fresh.join("inputs/component-candidate-input.toml").exists()
-            && !fresh.join("f05-inputs.sha256").exists(),
-        "a rejected tuple must not emit new provenance inputs or a manifest"
+            && !fresh
+                .join("inputs/compiled-dependency-witness.json")
+                .exists()
+            && !fresh
+                .join("inputs/component-candidate-input.validation.json")
+                .exists()
+            && sha256(&fresh.join("f05-inputs.sha256")) == pre_producer_manifest,
+        "a rejected tuple must not emit outputs or rewrite its pre-producer manifest"
     );
     Command::new("chmod")
         .args(["-R", "u+w"])
@@ -2236,9 +2251,11 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(sealed
-        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-        .is_dir());
+    assert!(
+        sealed
+            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+            .is_dir()
+    );
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
