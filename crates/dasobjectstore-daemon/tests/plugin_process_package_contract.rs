@@ -42,6 +42,126 @@ fn plugin_process_recipe_is_a_linux_amd64_component_only_fixture() {
 }
 
 #[test]
+fn plugin_package_version_is_derived_from_copied_cargo_metadata() {
+    for required in [
+        "metadata --locked --no-deps --format-version 1 --manifest-path \"$repo_root/Cargo.toml\"",
+        "select(.name == \"dasobjectstore-cli\") | .version",
+        "das_plugin_process_strict_semver \"$version\"",
+        "strict DASObjectStore SemVer from copied sealed Cargo metadata",
+    ] {
+        assert!(
+            BUILD.contains(required),
+            "missing copied-Cargo version contract: {required}"
+        );
+    }
+    assert!(
+        !BUILD.contains("DASObjectStore 0.186.3"),
+        "package validation must not retain a fixed stale version gate"
+    );
+}
+
+#[test]
+fn copied_metadata_semver_accepts_the_patch_and_rejects_malformed_values() {
+    let source_script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/plugin-process-package-provenance.sh");
+    for version in ["0.186.6", "1.0.0"] {
+        let status = Command::new("bash")
+            .args([
+                "-c",
+                "source \"$1\"; das_plugin_process_strict_semver \"$2\"",
+                "fixture",
+            ])
+            .arg(&source_script)
+            .arg(version)
+            .status()
+            .expect("run accepted SemVer regression");
+        assert!(status.success(), "strict SemVer {version} must be accepted");
+    }
+    for version in ["", "01.186.6", "0.186", "0.186.6-beta"] {
+        let status = Command::new("bash")
+            .args([
+                "-c",
+                "source \"$1\"; das_plugin_process_strict_semver \"$2\"",
+                "fixture",
+            ])
+            .arg(&source_script)
+            .arg(version)
+            .status()
+            .expect("run malformed SemVer regression");
+        assert!(
+            !status.success(),
+            "malformed SemVer {version:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn plugin_package_candidate_source_binding_rejects_genuine_mismatch() {
+    for required in [
+        "candidate source revision to match the source-tree witness",
+        "candidate_revision=\"$(sed -n 's/^source_revision",
+        "source_tree_revision=\"$(sed -n 's/^revision=",
+    ] {
+        assert!(
+            BUILD.contains(required) || PROVENANCE.contains(required),
+            "missing candidate source rejection: {required}"
+        );
+    }
+}
+
+#[test]
+fn candidate_source_binding_accepts_the_patch_and_rejects_genuine_mismatch() {
+    let temp = std::env::temp_dir().join(format!(
+        "dasobjectstore-plugin-process-candidate-source-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos()
+    ));
+    fs::create_dir(&temp).expect("temporary candidate-source root");
+    let stage = staged_fixture(&temp);
+    let source_script = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packaging/plugin-process-package-provenance.sh");
+    let accepted = Command::new("bash")
+        .args([
+            "-c",
+            "source \"$1\"; das_plugin_process_f05_require_staged_closure \"$2/source\"",
+            "fixture",
+        ])
+        .arg(&source_script)
+        .arg(&stage)
+        .env("DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT", &stage)
+        .status()
+        .expect("read staged candidate source binding");
+    assert!(
+        accepted.success(),
+        "accept matching candidate source binding"
+    );
+    write(
+        stage.join("inputs/source-tree"),
+        "revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+    );
+    write_f05_manifest(&stage);
+    let mismatched = Command::new("bash")
+        .args([
+            "-c",
+            "source \"$1\"; das_plugin_process_f05_require_staged_closure \"$2/source\"",
+            "fixture",
+        ])
+        .arg(&source_script)
+        .arg(&stage)
+        .env("DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT", &stage)
+        .status()
+        .expect("run candidate source mismatch rejection");
+    assert!(
+        !mismatched.success(),
+        "candidate source revision mismatch must be rejected"
+    );
+    fs::remove_dir_all(temp).expect("remove temporary candidate-source root");
+}
+
+#[test]
 fn package_validation_rejects_appliance_content_and_requires_descriptor_contract() {
     for required in [
         "dasobjectstore-plugin-process",
@@ -104,6 +224,9 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "requires a staged vendor tree and vendor config",
         "requires absolute, non-symlink staged cargo, rustc, and trunk tools",
         "requires a staged wasm32-unknown-unknown target",
+        "wasm-bindgen-0.2.128/wasm-bindgen",
+        "wasm-opt-version_123/wasm-opt",
+        "TRUNK_TOOLS_DIR=\"$staged_trunk_tools\"",
         "requires f05-inputs.sha256 to bind",
         "requires a non-empty staged vendor tree",
         "requires a non-empty staged wasm32-unknown-unknown target",
@@ -121,6 +244,21 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         assert!(
             PREPARE_WEB_DIST.contains(required),
             "missing staged closure contract: {required}"
+        );
+    }
+}
+
+#[test]
+fn package_attempt_requires_real_network_namespace_isolation() {
+    for required in [
+        "/usr/bin/unshare -n -- true",
+        "requires usable unshare -n network isolation",
+        "exec /usr/bin/unshare -n -- env DASOBJECTSTORE_F05_NETWORK_NAMESPACE=1",
+        "requires a non-host network namespace",
+    ] {
+        assert!(
+            ATTEMPT.contains(required),
+            "missing network-isolation contract: {required}"
         );
     }
 }
@@ -154,6 +292,13 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
 
 #[test]
 fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status() {
+    if !Command::new("/usr/bin/unshare")
+        .args(["-n", "--", "true"])
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return;
+    }
     let temp = fs::canonicalize(std::env::temp_dir())
         .expect("canonical temporary directory")
         .join(format!(
@@ -387,9 +532,12 @@ fn staged_fixture(root: &Path) -> PathBuf {
     write(source.join("vendor/fixture.crate"), "vendored dependency\n");
     write(
         stage.join("inputs/component-candidate-input.toml"),
-        "toolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
+        "source_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image = \"docker.io/library/rust@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\ntoolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
     );
-    write(stage.join("inputs/source-tree"), "source tree witness\n");
+    write(
+        stage.join("inputs/source-tree"),
+        "revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    );
     write(
         stage.join("inputs/compiled-dependency-witness.json"),
         "{\"dependencies\":[]}\n",
@@ -401,6 +549,14 @@ fn staged_fixture(root: &Path) -> PathBuf {
     executable(stage.join("toolchain/bin/cargo"), "cargo fixture 1.0.0");
     executable(stage.join("toolchain/bin/rustc"), "rustc fixture 1.0.0");
     executable(stage.join("toolchain/bin/trunk"), "trunk fixture 1.0.0");
+    executable(
+        stage.join("toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen"),
+        "wasm-bindgen 0.2.128",
+    );
+    executable(
+        stage.join("toolchain/trunk-tools/wasm-opt-version_123/wasm-opt"),
+        "wasm-opt version_123",
+    );
     write(
         stage.join("toolchain/lib/rustlib/wasm32-unknown-unknown/libfixture.rlib"),
         "wasm target\n",
@@ -422,7 +578,7 @@ fn staged_provenance(stage: &Path) -> std::process::ExitStatus {
     let source_script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/plugin-process-package-provenance.sh");
     Command::new("bash")
-        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.3 amd64 \"$2/web\" \"$2/server\"", "fixture"])
+        .args(["-c", "source \"$1\"; das_plugin_process_write_provenance \"$2/artifact.deb\" \"$2/source\" 0.186.6 amd64 \"$2/web\" \"$2/server\"", "fixture"])
         .arg(source_script)
         .arg(stage)
         .env("DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT", stage)

@@ -25,8 +25,12 @@ das_plugin_process_f05_manifest_requires() {
   grep -Fq "  $required" "$staged_root/f05-inputs.sha256" || das_plugin_process_f05_staged_closure_error "requires f05-inputs.sha256 to bind $required"
 }
 
+das_plugin_process_strict_semver() {
+  [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
 das_plugin_process_f05_require_staged_closure() {
-  local repo_root=$1 staged_root tool
+  local repo_root=$1 staged_root tool candidate_revision source_tree_revision
   das_plugin_process_f05_staged_closure_enabled || return 0
   staged_root=$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT
   [[ "$staged_root" = /* && -d "$staged_root" && ! -L "$staged_root" ]] || das_plugin_process_f05_staged_closure_error 'requires an absolute closure root'
@@ -45,6 +49,12 @@ das_plugin_process_f05_require_staged_closure() {
   for required in source/.cargo/f05-vendor-config.toml inputs/component-candidate-input.toml inputs/source-tree inputs/compiled-dependency-witness.json inputs/package-recipe.json toolchain/bin/cargo toolchain/bin/rustc toolchain/bin/trunk; do
     das_plugin_process_f05_manifest_requires "$staged_root" "$required"
   done
+  for required in toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen toolchain/trunk-tools/wasm-opt-version_123/wasm-opt; do
+    das_plugin_process_f05_manifest_requires "$staged_root" "$required"
+  done
+  for tool in "$staged_root/toolchain/trunk-tools/wasm-bindgen-0.2.128/wasm-bindgen" "$staged_root/toolchain/trunk-tools/wasm-opt-version_123/wasm-opt"; do
+    [[ -x "$tool" && ! -L "$tool" ]] || das_plugin_process_f05_staged_closure_error 'requires hash-bound staged wasm-bindgen and wasm-opt tools'
+  done
   find "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f -print -quit | grep -q . || das_plugin_process_f05_staged_closure_error 'requires a non-empty staged wasm32-unknown-unknown target'
   find "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" -type f | while IFS= read -r wasm_path; do
     wasm_input=${wasm_path#"$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown/"}
@@ -57,17 +67,21 @@ das_plugin_process_f05_require_staged_closure() {
   done
   grep -Eq '^toolchain_image = ".+@sha256:[0-9a-f]{64}"$' "$staged_root/inputs/component-candidate-input.toml" || das_plugin_process_f05_staged_closure_error 'requires an immutable staged toolchain image'
   grep -Eq '^toolchain_image_sha256 = "sha256:[0-9a-f]{64}"$' "$staged_root/inputs/component-candidate-input.toml" || das_plugin_process_f05_staged_closure_error 'requires an immutable staged toolchain image digest'
+  candidate_revision="$(sed -n 's/^source_revision = "\([0-9a-f]*\)"$/\1/p' "$staged_root/inputs/component-candidate-input.toml")"
+  source_tree_revision="$(sed -n 's/^revision=\([0-9a-f]*\)$/\1/p' "$staged_root/inputs/source-tree")"
+  [[ "$candidate_revision" =~ ^[0-9a-f]{40}$ && "$candidate_revision" == "$source_tree_revision" ]] || das_plugin_process_f05_staged_closure_error 'requires candidate source revision to match the source-tree witness'
   DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT=$staged_root
   DASOBJECTSTORE_F05_STAGED_CARGO="$staged_root/toolchain/bin/cargo"
   DASOBJECTSTORE_F05_STAGED_RUSTC="$staged_root/toolchain/bin/rustc"
   DASOBJECTSTORE_F05_STAGED_TRUNK="$staged_root/toolchain/bin/trunk"
+  DASOBJECTSTORE_F05_STAGED_TRUNK_TOOLS="$staged_root/toolchain/trunk-tools"
   DASOBJECTSTORE_F05_STAGED_WASM_TARGET="$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown"
-  export DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT DASOBJECTSTORE_F05_STAGED_CARGO DASOBJECTSTORE_F05_STAGED_RUSTC DASOBJECTSTORE_F05_STAGED_TRUNK DASOBJECTSTORE_F05_STAGED_WASM_TARGET
+  export DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT DASOBJECTSTORE_F05_STAGED_CARGO DASOBJECTSTORE_F05_STAGED_RUSTC DASOBJECTSTORE_F05_STAGED_TRUNK DASOBJECTSTORE_F05_STAGED_TRUNK_TOOLS DASOBJECTSTORE_F05_STAGED_WASM_TARGET
 }
 
 das_plugin_process_f05_staged_provenance() {
   local staged_root=$DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT
-  printf '"f05_staged_inputs_manifest_sha256":"%s","f05_component_candidate_input_sha256":"%s","f05_source_tree_sha256":"%s","f05_dependency_witness_sha256":"%s","f05_package_recipe_sha256":"%s","f05_vendor_tree_sha256":"%s","f05_vendor_config_sha256":"%s","f05_cargo_sha256":"%s","f05_rustc_sha256":"%s","f05_trunk_sha256":"%s","f05_wasm_target_sha256":"%s","f05_toolchain_image":"%s","f05_toolchain_image_sha256":"%s","f05_cargo_version":"%s","f05_rustc_version":"%s","f05_trunk_version":"%s"' \
+  printf '"f05_staged_inputs_manifest_sha256":"%s","f05_component_candidate_input_sha256":"%s","f05_source_tree_sha256":"%s","f05_dependency_witness_sha256":"%s","f05_package_recipe_sha256":"%s","f05_vendor_tree_sha256":"%s","f05_vendor_config_sha256":"%s","f05_cargo_sha256":"%s","f05_rustc_sha256":"%s","f05_trunk_sha256":"%s","f05_wasm_bindgen_0_2_128_sha256":"%s","f05_wasm_opt_version_123_sha256":"%s","f05_wasm_target_sha256":"%s","f05_toolchain_image":"%s","f05_toolchain_image_sha256":"%s","f05_cargo_version":"%s","f05_rustc_version":"%s","f05_trunk_version":"%s"' \
     "$(das_plugin_process_sha256 "$staged_root/f05-inputs.sha256")" \
     "$(das_plugin_process_sha256 "$staged_root/inputs/component-candidate-input.toml")" \
     "$(das_plugin_process_sha256 "$staged_root/inputs/source-tree")" \
@@ -78,6 +92,8 @@ das_plugin_process_f05_staged_provenance() {
     "$(das_plugin_process_sha256 "$DASOBJECTSTORE_F05_STAGED_CARGO")" \
     "$(das_plugin_process_sha256 "$DASOBJECTSTORE_F05_STAGED_RUSTC")" \
     "$(das_plugin_process_sha256 "$DASOBJECTSTORE_F05_STAGED_TRUNK")" \
+    "$(das_plugin_process_sha256 "$DASOBJECTSTORE_F05_STAGED_TRUNK_TOOLS/wasm-bindgen-0.2.128/wasm-bindgen")" \
+    "$(das_plugin_process_sha256 "$DASOBJECTSTORE_F05_STAGED_TRUNK_TOOLS/wasm-opt-version_123/wasm-opt")" \
     "$(das_plugin_process_tree_sha256 "$DASOBJECTSTORE_F05_STAGED_WASM_TARGET")" \
     "$(sed -n 's/^toolchain_image = "\(.*\)"$/\1/p' "$staged_root/inputs/component-candidate-input.toml")" \
     "$(sed -n 's/^toolchain_image_sha256 = "\(.*\)"$/\1/p' "$staged_root/inputs/component-candidate-input.toml")" \

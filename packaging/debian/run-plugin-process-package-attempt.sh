@@ -17,6 +17,14 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$sealed_root" && -n "$attempt_root" ]] || usage
 
+if [[ "${DASOBJECTSTORE_F05_NETWORK_NAMESPACE:-}" != 1 ]]; then
+  [[ -x /usr/bin/unshare ]] || { echo 'F05 package attempt: requires /usr/bin/unshare -n network isolation' >&2; exit 1; }
+  /usr/bin/unshare -n -- true >/dev/null 2>&1 || { echo 'F05 package attempt: requires usable unshare -n network isolation' >&2; exit 1; }
+  exec /usr/bin/unshare -n -- env DASOBJECTSTORE_F05_NETWORK_NAMESPACE=1 "$0" --sealed-root "$sealed_root" --attempt-root "$attempt_root"
+fi
+[[ -r /proc/self/ns/net && -r /proc/1/ns/net ]] || { echo 'F05 package attempt: requires a Linux network namespace' >&2; exit 1; }
+[[ "$(readlink /proc/self/ns/net)" != "$(readlink /proc/1/ns/net)" ]] || { echo 'F05 package attempt: requires a non-host network namespace' >&2; exit 1; }
+
 die() {
   echo "F05 package attempt: $*" >&2
   exit 1
