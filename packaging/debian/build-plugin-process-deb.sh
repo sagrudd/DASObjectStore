@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Package payload modes must not inherit a caller-specific umask.
+umask 022
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$repo_root/packaging/plugin-process-package-provenance.sh"
 
@@ -55,10 +58,13 @@ package_name=dasobjectstore-plugin-process
 package_path="$output_dir/${package_name}_${version}_amd64.deb"
 root="$output_dir/root"
 rm -rf "$root"
-install -d "$root/DEBIAN" "$root/usr/bin" "$root/opt/dasobjectstore/web"
+install -d -m 0755 "$root/DEBIAN" "$root/usr/bin" "$root/opt/dasobjectstore/web"
 install -m 0755 "$server" "$root/usr/bin/dasobjectstore-server"
 jq --arg version "$version" '.version = $version' "$repo_root/packaging/linux/opt/dasobjectstore/plugin-process-descriptor.json" > "$root/opt/dasobjectstore/plugin-process-descriptor.json"
 cp -a "$web_dist/." "$root/opt/dasobjectstore/web/"
+find "$root/opt/dasobjectstore/web" -type d -exec chmod 0755 {} +
+find "$root/opt/dasobjectstore/web" -type f -exec chmod 0644 {} +
+chmod 0644 "$root/opt/dasobjectstore/plugin-process-descriptor.json"
 cat > "$root/DEBIAN/control" <<CONTROL
 Package: $package_name
 Version: $version
@@ -70,6 +76,7 @@ Description: DASObjectStore plugin-process UI and API fixture
  Plugin-only process fixture; it contains no daemon, service, control socket,
  installation hook, credential, target, or deployment authority.
 CONTROL
+chmod 0644 "$root/DEBIAN/control"
 if date -u -d "@$source_epoch" +%Y%m%d%H%M.%S >/dev/null 2>&1; then
   timestamp=$(date -u -d "@$source_epoch" +%Y%m%d%H%M.%S)
 else

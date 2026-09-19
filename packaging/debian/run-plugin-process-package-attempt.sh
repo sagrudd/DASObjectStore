@@ -19,6 +19,9 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
 
+# Keep copied-source and generated-artifact modes independent of the caller.
+umask 022
+
 diagnostic_log=''
 diagnostic_status=''
 
@@ -77,8 +80,8 @@ fi
 if [[ "${DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE:-}" != 1 ]]; then
   [[ -x /usr/bin/bwrap ]] || die 'requires /usr/bin/bwrap network isolation'
   record_diagnostic 'bwrap_launch=PASS'
-  exec /usr/bin/bwrap --unshare-net --ro-bind / / --bind "$attempt_root" "$attempt_root" --bind "$diagnostic_root" "$diagnostic_root" --proc /proc --dev /dev \
-    --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- "$0" --sealed-root "$sealed_root" --attempt-root "$attempt_root" --diagnostic-root "$diagnostic_root"
+  exec /usr/bin/bwrap --unshare-net --ro-bind / / --ro-bind "$sealed_root" /opt --bind "$attempt_root" /var/tmp --bind "$diagnostic_root" /var/cache --proc /proc --dev /dev \
+    --setenv DASOBJECTSTORE_F05_BWRAP_NETWORK_NAMESPACE 1 -- /usr/bin/bash /opt/source/packaging/debian/run-plugin-process-package-attempt.sh --sealed-root /opt --attempt-root /var/tmp --diagnostic-root /var/cache
 fi
 [[ "$(/usr/sbin/ip -o link show | awk -F': ' '{print $2}' | sed 's/@.*//')" == lo ]] || die 'requires loopback-only network interfaces'
 [[ -z "$(/usr/sbin/ip -4 route show)" ]] || die 'requires empty IPv4 routes'
@@ -126,7 +129,7 @@ mv "$copied_config.next" "$copied_config"
 server="$attempt_root/target/release/dasobjectstore-server"
 web_dist="$copied_source/crates/dasobjectstore-gui-web/dist"
 output_dir="$attempt_root/output"
-install -d "$attempt_root/home" "$attempt_root/cargo-home/server" "$attempt_root/target" "$attempt_root/tmp" "$output_dir"
+install -d -m 0755 "$attempt_root/home" "$attempt_root/cargo-home/server" "$attempt_root/target" "$attempt_root/tmp" "$output_dir"
 
 export DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT="$copied_closure"
 export DASOBJECTSTORE_F05_ATTEMPT_ROOT="$attempt_root"
