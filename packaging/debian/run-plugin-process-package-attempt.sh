@@ -3,6 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "usage: $0 --sealed-root SEALED_CLOSURE --attempt-root EXTERNAL_EMPTY_DIRECTORY --diagnostic-root EXTERNAL_EMPTY_DIRECTORY [--stage-cache-root LEASED_STAGE_CACHE_DIRECTORY] [--preflight-only]" >&2
+  echo "       $0 --sealed-root WRITABLE_CLOSURE_STAGE --stage-closure-config" >&2
   exit 2
 }
 
@@ -11,6 +12,7 @@ attempt_root=''
 diagnostic_root=''
 stage_cache_root=''
 preflight_only=0
+stage_closure_config=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --sealed-root) sealed_root=${2-}; shift 2 ;;
@@ -18,10 +20,15 @@ while [[ $# -gt 0 ]]; do
     --diagnostic-root) diagnostic_root=${2-}; shift 2 ;;
     --stage-cache-root) stage_cache_root=${2-}; shift 2 ;;
     --preflight-only) preflight_only=1; shift ;;
+    --stage-closure-config) stage_closure_config=1; shift ;;
     *) usage ;;
   esac
 done
-[[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
+if [[ "$stage_closure_config" -eq 1 ]]; then
+  [[ -n "$sealed_root" && -z "$attempt_root" && -z "$diagnostic_root" && -z "$stage_cache_root" && "$preflight_only" -eq 0 ]] || usage
+else
+  [[ -n "$sealed_root" && -n "$attempt_root" && -n "$diagnostic_root" ]] || usage
+fi
 [[ "$preflight_only" -eq 0 || -n "$stage_cache_root" ]] || {
   echo 'F05 package attempt: preflight-only requires a leased stage cache root' >&2
   exit 2
@@ -62,13 +69,82 @@ canonical_directory() {
   (cd "$path" && pwd -P)
 }
 
+hash_jobs=${DASOBJECTSTORE_F05_HASH_JOBS:-4}
+[[ "$hash_jobs" =~ ^[1-9][0-9]*$ && "$hash_jobs" -le 16 ]] || die 'requires DASOBJECTSTORE_F05_HASH_JOBS between 1 and 16'
+
+sha256_file() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+write_batched_manifest() {
+  local root=$1 manifest="$1/f05-inputs.sha256" temporary="$1/f05-inputs.sha256.next"
+  (
+    cd "$root"
+    find . -type f ! -name f05-inputs.sha256 ! -name f05-inputs.sha256.next -print0 | LC_ALL=C sort -z |
+      xargs -0 -r -n 128 -P "$hash_jobs" /usr/bin/bash -c '
+        for input; do
+          printf "%s  %s\\n" "$(shasum -a 256 "$input" | cut -d " " -f1)" "${input#./}"
+        done
+      ' bash | LC_ALL=C sort -k2 > "$temporary"
+  )
+  mv "$temporary" "$manifest"
+}
+
+produce_closure_vendor_config() {
+  local source cargo_dir vendor config temporary staged_runner candidate source_tree witness
+  local candidate_revision source_tree_revision witness_revision generator_sha
+
+  source="$sealed_root/source"
+  cargo_dir="$source/.cargo"
+  vendor="$source/vendor"
+  config="$cargo_dir/f05-vendor-config.toml"
+  staged_runner="$source/packaging/debian/run-plugin-process-package-attempt.sh"
+  candidate="$sealed_root/inputs/component-candidate-input.toml"
+  source_tree="$sealed_root/inputs/source-tree"
+  witness="$sealed_root/inputs/compiled-dependency-witness.json"
+
+  [[ -d "$source" && ! -L "$source" ]] || die 'closure stage requires a physical source root'
+  source=$(canonical_directory "$source" 'closure-stage source root')
+  [[ "$source" = "$sealed_root/source" ]] || die 'closure-stage source root must remain under the closure root'
+  [[ -d "$cargo_dir" && ! -L "$cargo_dir" ]] || die 'closure stage requires a physical source .cargo directory'
+  cargo_dir=$(canonical_directory "$cargo_dir" 'closure-stage source .cargo directory')
+  [[ "$cargo_dir" = "$source/.cargo" ]] || die 'closure-stage source .cargo directory must remain under the source root'
+  [[ -d "$vendor" && ! -L "$vendor" ]] || die 'closure stage requires a physical staged vendor tree'
+  vendor=$(canonical_directory "$vendor" 'closure-stage staged vendor tree')
+  [[ "$vendor" = "$source/vendor" ]] || die 'closure-stage staged vendor tree must remain under the source root'
+  [[ -n "$(find "$vendor" -mindepth 1 -print -quit)" ]] || die 'closure stage requires a non-empty staged vendor tree'
+  [[ -f "$staged_runner" && ! -L "$staged_runner" ]] || die 'closure stage requires a physical staged runner'
+  [[ -f "$candidate" && ! -L "$candidate" && -f "$source_tree" && ! -L "$source_tree" && -f "$witness" && ! -L "$witness" ]] || die 'closure stage requires physical candidate, source-tree, and dependency-witness inputs'
+  candidate_revision=$(sed -n 's/^source_revision = "\([0-9a-f]\{40\}\)"$/\1/p' "$candidate")
+  source_tree_revision=$(sed -n 's/^revision=\([0-9a-f]\{40\}\)$/\1/p' "$source_tree")
+  witness_revision=$(sed -n 's/.*"source_revision": "\([0-9a-f]\{40\}\)".*/\1/p' "$witness")
+  [[ -n "$candidate_revision" && "$candidate_revision" = "$source_tree_revision" && "$candidate_revision" = "$witness_revision" ]] || die 'closure stage requires matching candidate, source-tree, and dependency-witness revisions'
+  [[ ! -L "$config" && ! -e "$config.next" ]] || die 'closure stage vendor config path must be absent or a physical file without a pending replacement'
+  generator_sha=$(sha256_file "$staged_runner")
+  [[ "$generator_sha" = "$(sha256_file "$0")" ]] || die 'closure stage must execute the same runner bytes that it binds into the staged manifest'
+  temporary="$config.next"
+  printf '[source.vendored-sources]\ndirectory = "%s"\n' "$vendor" > "$temporary"
+  mv "$temporary" "$config"
+  [[ -f "$config" && ! -L "$config" ]] || die 'closure stage failed to create a physical vendor config'
+  grep -Fx "directory = \"$vendor\"" "$config" >/dev/null || die 'closure stage generated vendor config does not bind the physical staged vendor tree'
+  write_batched_manifest "$sealed_root"
+  (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'closure stage manifest does not bind generated inputs'
+  printf 'closure_stage_vendor_config=PASS generator_runner_sha256=%s config_sha256=%s vendor=%s\n' "$generator_sha" "$(sha256_file "$config")" "$vendor"
+}
+
 reject_symlink_ancestry "$sealed_root" 'sealed closure root'
-reject_symlink_ancestry "$attempt_root" 'external attempt root'
-reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
+if [[ "$stage_closure_config" -eq 0 ]]; then
+  reject_symlink_ancestry "$attempt_root" 'external attempt root'
+  reject_symlink_ancestry "$diagnostic_root" 'external diagnostic root'
+fi
 if [[ -n "$stage_cache_root" ]]; then
   reject_symlink_ancestry "$stage_cache_root" 'leased stage cache root'
 fi
 sealed_root=$(canonical_directory "$sealed_root" 'sealed closure root')
+if [[ "$stage_closure_config" -eq 1 ]]; then
+  produce_closure_vendor_config
+  exit 0
+fi
 attempt_root=$(canonical_directory "$attempt_root" 'external attempt root')
 diagnostic_root=$(canonical_directory "$diagnostic_root" 'external diagnostic root')
 if [[ -n "$stage_cache_root" ]]; then
@@ -130,27 +206,6 @@ finish() {
 trap finish EXIT HUP INT TERM
 
 (cd "$sealed_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || die 'sealed closure has a missing or altered input'
-
-hash_jobs=${DASOBJECTSTORE_F05_HASH_JOBS:-4}
-[[ "$hash_jobs" =~ ^[1-9][0-9]*$ && "$hash_jobs" -le 16 ]] || die 'requires DASOBJECTSTORE_F05_HASH_JOBS between 1 and 16'
-
-sha256_file() {
-  shasum -a 256 "$1" | awk '{print $1}'
-}
-
-write_batched_manifest() {
-  local root=$1 manifest="$1/f05-inputs.sha256" temporary="$1/f05-inputs.sha256.next"
-  (
-    cd "$root"
-    find . -type f ! -name f05-inputs.sha256 ! -name f05-inputs.sha256.next -print0 | LC_ALL=C sort -z |
-      xargs -0 -r -n 128 -P "$hash_jobs" /usr/bin/bash -c '
-        for input; do
-          printf "%s  %s\n" "$(shasum -a 256 "$input" | cut -d " " -f1)" "${input#./}"
-        done
-      ' bash | LC_ALL=C sort -k2 > "$temporary"
-  )
-  mv "$temporary" "$manifest"
-}
 
 copy_stage_to_attempt() {
   local stage=$1
