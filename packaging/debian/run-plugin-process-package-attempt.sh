@@ -411,7 +411,9 @@ produce_closure_provenance_inputs() {
     [[ -f "$required" && ! -L "$required" ]] || die 'provenance input stage requires physical registry, identity, recipe, validator, and tool receipt inputs'
   done
   [[ -f "$tool_receipt" && ! -L "$tool_receipt" ]] || die 'provenance input stage requires a sealed, externally admitted tool receipt'
-  [[ -x "$validator" && "$(sha256_file "$validator")" = "$(tool_input_toml_value "$validator_receipt" sha256)" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
+  local validator_sha
+  validator_sha=$(tool_input_toml_value "$validator_receipt" binary_sha256)
+  [[ "$validator_sha" =~ ^[0-9a-f]{64}$ && -x "$validator" && "$(sha256_file "$validator")" = "$validator_sha" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
   revision=$(tool_input_toml_value "$identity" source_revision)
   # The expected tuple is already bound by the independently admitted tool
   # receipt.  The provenance input may describe an archive, but cannot select

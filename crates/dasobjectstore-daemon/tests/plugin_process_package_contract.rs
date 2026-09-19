@@ -20,6 +20,8 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "requires immutable non-symlink inputs",
         "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
         "rejects an unpinned Kanon validator",
+        "binary_sha256",
+        "validator_sha=$(tool_input_toml_value \"$validator_receipt\" binary_sha256)",
         "component-candidate-input validate",
         "Kanon validator rejected emitted inputs",
         "compiled-dependency-witness.json",
@@ -97,7 +99,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     write(
         input.join("kanon-component-candidate-input.receipt"),
         &format!(
-            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nsha256 = \"{}\"\n",
+            "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nbinary_sha256 = \"{}\"\n",
             sha256(&validator)
         ),
     );
