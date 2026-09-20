@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.186.31 - Unreleased
+
+- Preserve the reviewed, attempt-local Git cache for Trunk's isolated offline
+  Cargo metadata resolution during the sealed plugin package build.
+
 ## 0.186.30 - Unreleased
 
 - Keep the manifest-bound copied Cargo cache immutable during the plugin-only
