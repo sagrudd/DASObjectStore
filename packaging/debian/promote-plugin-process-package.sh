@@ -47,7 +47,13 @@ reject_symlink_ancestry() {
 }
 
 sha256() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    die 'requires a SHA-256 command (sha256sum or shasum)'
+  fi
 }
 
 [[ "$expected_sha256" =~ ^[0-9a-f]{64}$ ]] || die 'requires a lowercase SHA-256 digest'

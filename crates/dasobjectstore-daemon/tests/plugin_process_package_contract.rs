@@ -18,7 +18,7 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "--stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT",
         "produce_closure_provenance_inputs",
         "requires immutable non-symlink inputs",
-        "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
+        "rejects a dirty or source-identity-mismatched archive",
         "rejects an unpinned Kanon validator",
         "binary_sha256",
         "validator_sha=$(canonical_sha256_file \"$validator_receipt\" binary_sha256)",
@@ -1055,12 +1055,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "diagnostics must remain outside the supplied attempt root"
     );
     assert!(
-        Command::new("shasum")
-            .args(["-a", "256", "-c", "f05-inputs.sha256"])
-            .current_dir(attempt.join("closure"))
-            .status()
-            .expect("verify copied manifest")
-            .success(),
+        verify_f05_manifest(&attempt.join("closure")),
         "copied closure manifest must bind the copied vendor configuration"
     );
 
@@ -2178,6 +2173,24 @@ fn plugin_process_promotion_is_same_artifact_fail_closed_and_never_builds() {
         }
     }
 
+    // Alma Linux supplies sha256sum but not shasum.  A successful promotion
+    // must therefore use the portable primary without falling through to this
+    // deliberately failing compatibility marker.
+    #[cfg(target_os = "linux")]
+    write(
+        markers.join("shasum"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' shasum >> \"{}\"\nexit 97\n",
+            marker_log.display()
+        ),
+    );
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(markers.join("shasum"), fs::Permissions::from_mode(0o755))
+            .expect("make forbidden shasum marker executable");
+    }
+
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/promote-plugin-process-package.sh");
     let run = |deb: &Path, sidecar: &Path, expected: &str, destination: &Path| {
@@ -2375,6 +2388,18 @@ fn sha256(path: &Path) -> String {
         .next()
         .expect("hash value")
         .to_owned()
+}
+
+fn verify_f05_manifest(root: &Path) -> bool {
+    Command::new("bash")
+        .args([
+            "-ceu",
+            "if command -v sha256sum >/dev/null 2>&1; then sha256sum -c f05-inputs.sha256; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 -c f05-inputs.sha256; else exit 127; fi",
+        ])
+        .current_dir(root)
+        .status()
+        .expect("verify fixture manifest")
+        .success()
 }
 
 fn copy_tree(from: &Path, to: &Path) {
