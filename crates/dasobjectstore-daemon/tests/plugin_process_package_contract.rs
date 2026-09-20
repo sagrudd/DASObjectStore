@@ -470,21 +470,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "producer stderr: {}",
         String::from_utf8_lossy(&accepted.stderr)
     );
-    assert!(
-        sealed
-            .join("inputs/component-candidate-input.toml")
-            .is_file()
-    );
-    assert!(
-        sealed
-            .join("inputs/compiled-dependency-witness.json")
-            .is_file()
-    );
-    assert!(
-        sealed
-            .join("inputs/component-candidate-input.validation.json")
-            .is_file()
-    );
+    assert!(sealed
+        .join("inputs/component-candidate-input.toml")
+        .is_file());
+    assert!(sealed
+        .join("inputs/compiled-dependency-witness.json")
+        .is_file());
+    assert!(sealed
+        .join("inputs/component-candidate-input.validation.json")
+        .is_file());
     let candidate = fs::read_to_string(sealed.join("inputs/component-candidate-input.toml"))
         .expect("read emitted candidate");
     assert!(
@@ -2792,11 +2786,9 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(
-        sealed
-            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-            .is_dir()
-    );
+    assert!(sealed
+        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+        .is_dir());
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
