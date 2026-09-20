@@ -149,6 +149,12 @@ ERROR
         "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128" \
         "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin"
       cp "$repo_root/.cargo/f05-vendor-config.toml" "$isolated_cargo_home/config.toml"
+      # Trunk launches its own Cargo metadata resolution.  Keep that mutable
+      # invocation isolated, but give it the reviewed, attempt-local Cargo
+      # resolver inputs selected by the release runner so offline resolution
+      # cannot fall back to the network.
+      cp -a "$attempt_root/cargo-home/git" "$isolated_cargo_home/git"
+      cp -a "$attempt_root/cargo-home/registry" "$isolated_cargo_home/registry"
       cp -p "$staged_wasm_bindgen" "$isolated_xdg_cache/trunk/wasm-bindgen-0.2.128/wasm-bindgen"
       cp -p "$staged_wasm_opt" "$isolated_xdg_cache/trunk/wasm-opt-version_123/bin/wasm-opt"
       for staged_cache_tool in \

@@ -461,7 +461,7 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha scratch publish candidate_scratch tuple_scratch report_scratch manifest_scratch validation_status publication_active
+  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate staged_recipe image image_sha report expected_mode inventory_sha vendor_sha scratch publish candidate_scratch recipe_scratch tuple_scratch report_scratch manifest_scratch validation_status publication_active
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
@@ -474,6 +474,7 @@ produce_closure_provenance_inputs() {
   witness="$sealed_root/inputs/compiled-dependency-witness.json"
   witness_receipt="$sealed_root/inputs/dependency-witness-receipt.toml"
   candidate="$sealed_root/inputs/component-candidate-input.toml"
+  staged_recipe="$sealed_root/inputs/package-recipe.json"
 
   [[ -f "$sealed_root/f05-inputs.sha256" && ! -L "$sealed_root/f05-inputs.sha256" ]] || die 'provenance input stage requires a pre-producer sealed manifest'
   (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage rejects an altered pre-producer sealed manifest'
@@ -485,7 +486,7 @@ produce_closure_provenance_inputs() {
     [[ ! -w "$sealed_root/$bound" ]] || die 'provenance input stage requires immutable sealed source inputs while leaving fresh output roots writable'
   done
   grep -F '  source/' "$sealed_root/f05-inputs.sha256" >/dev/null || die 'provenance input stage requires a bound physical source tree'
-  for generated in "$candidate" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
+  for generated in "$candidate" "$staged_recipe" "$sealed_root/inputs/component-candidate-input.validation.json" "$sealed_root/inputs/provenance-tuple.toml"; do
     [[ ! -e "$generated" ]] || die 'provenance input stage refuses pre-existing generated provenance outputs'
   done
   if [[ "$dependency_witness_only" -eq 1 ]]; then
@@ -548,6 +549,7 @@ produce_closure_provenance_inputs() {
   scratch=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-provenance-inputs.XXXXXX") || die 'provenance input stage could not create owned validation scratch'
   chmod 0700 "$scratch"
   candidate_scratch="$scratch/component-candidate-input.toml"
+  recipe_scratch="$scratch/package-recipe.json"
   tuple_scratch="$scratch/provenance-tuple.toml"
   report_scratch="$scratch/component-candidate-input.validation.json"
   manifest_scratch="$scratch/pre-producer-f05-inputs.sha256"
@@ -568,11 +570,13 @@ produce_closure_provenance_inputs() {
     die 'provenance input stage Kanon validator rejected emitted inputs'
   fi
   printf '%s\n' "$report" > "$report_scratch"
+  cp -p "$recipe" "$recipe_scratch"
+  [[ "$(sha256_file "$recipe_scratch")" = "$(sha256_file "$recipe")" ]] || { rm -rf "$scratch"; die 'provenance input stage could not retain the validated package recipe'; }
   publish=$(mktemp -d "$sealed_root/inputs/.provenance-publish.XXXXXX") || { rm -rf "$scratch"; die 'provenance input stage could not create validated output publication'; }
   publication_active=1
   rollback_provenance_publication() {
     [[ "${publication_active:-0}" -eq 1 ]] || return 0
-    rm -f "$candidate" "$sealed_root/inputs/provenance-tuple.toml" "$sealed_root/inputs/component-candidate-input.validation.json"
+    rm -f "$candidate" "$staged_recipe" "$sealed_root/inputs/provenance-tuple.toml" "$sealed_root/inputs/component-candidate-input.validation.json"
     if [[ -f "${manifest_scratch:-}" ]]; then
       cp -p "$manifest_scratch" "$sealed_root/f05-inputs.sha256.restore"
       mv "$sealed_root/f05-inputs.sha256.restore" "$sealed_root/f05-inputs.sha256"
@@ -582,11 +586,13 @@ produce_closure_provenance_inputs() {
   }
   trap 'rollback_provenance_publication; exit 1' HUP INT TERM
   cp -p "$candidate_scratch" "$publish/component-candidate-input.toml"
+  cp -p "$recipe_scratch" "$publish/package-recipe.json"
   cp -p "$tuple_scratch" "$publish/provenance-tuple.toml"
   cp -p "$report_scratch" "$publish/component-candidate-input.validation.json"
   chmod a-w "$publish"/*
   for publication in \
     "candidate:$publish/component-candidate-input.toml:$candidate" \
+    "recipe:$publish/package-recipe.json:$staged_recipe" \
     "tuple:$publish/provenance-tuple.toml:$sealed_root/inputs/provenance-tuple.toml" \
     "report:$publish/component-candidate-input.validation.json:$sealed_root/inputs/component-candidate-input.validation.json"; do
     IFS=: read -r publication_name publication_source publication_destination <<< "$publication"
@@ -790,6 +796,7 @@ copied_lock="$copied_source/Cargo.lock"
 copied_config="$copied_source/.cargo/f05-vendor-config.toml"
 copied_preflight_config="$copied_closure/preflight-cargo-config.toml"
 copied_cargo_home="$copied_closure/cargo-home"
+attempt_cargo_home="$attempt_root/cargo-home"
 for copied_input in "$copied_manifest" "$copied_lock" "$copied_config"; do
   [[ -f "$copied_input" && ! -L "$copied_input" ]] || die "copied closure requires a physical non-symlink $(basename "$copied_input")"
 done
@@ -823,6 +830,17 @@ SHASUM
 fi
 [[ -f "$copied_closure/network-denied-bin/shasum" && ! -L "$copied_closure/network-denied-bin/shasum" ]] || die 'copied closure requires a physical SHA-256 compatibility command'
 write_batched_manifest "$copied_closure"
+(cd "$copied_closure" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'copied closure has a missing or altered input before the release build'
+# Cargo writes .global-cache while compiling. Keep the copied closure's
+# reviewed cache immutable and give the build a separate per-attempt copy so
+# the web preparer can still verify the copied closure after the server build.
+chmod -R a-w "$copied_cargo_home"
+[[ -z "$(find "$copied_cargo_home" -perm /0222 -print -quit)" ]] || die 'copied closure Cargo cache must remain immutable'
+[[ ! -e "$attempt_cargo_home" ]] || die 'attempt root already contains a mutable Cargo cache'
+cp -a --reflink=auto "$copied_cargo_home" "$attempt_cargo_home"
+[[ -d "$attempt_cargo_home" && ! -L "$attempt_cargo_home" ]] || die 'release build requires a physical per-attempt Cargo cache copy'
+[[ -z "$(find "$attempt_cargo_home" -type l -print -quit)" ]] || die 'release build rejects a symlinked per-attempt Cargo cache copy'
+chmod -R u+w "$attempt_cargo_home"
 
 server="$attempt_root/target/release/dasobjectstore-server"
 web_dist="$copied_source/crates/dasobjectstore-gui-web/dist"
@@ -831,7 +849,7 @@ install -d -m 0755 "$attempt_root/home" "$attempt_root/tmp"
 export DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT="$copied_closure"
 export DASOBJECTSTORE_F05_ATTEMPT_ROOT="$attempt_root"
 export HOME="$attempt_root/home"
-export CARGO_HOME="$copied_cargo_home"
+export CARGO_HOME="$attempt_cargo_home"
 export CARGO_NET_OFFLINE=true
 export CARGO_TARGET_DIR="$attempt_root/target"
 export TMPDIR="$attempt_root/tmp"
@@ -854,5 +872,6 @@ install -d -m 0755 "$attempt_root/target" "$output_dir"
   cd "$copied_source"
   "$copied_closure/toolchain/bin/cargo" build --manifest-path "$copied_manifest" --offline --config "$copied_config" --locked --release -p dasobjectstore-cli --bin dasobjectstore-server
 )
+(cd "$copied_closure" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'release build altered the copied closure instead of its per-attempt Cargo cache'
 "$copied_source/packaging/web/prepare-web-dist.sh"
 "$copied_source/packaging/debian/build-plugin-process-deb.sh" --server "$server" --web-dist "$web_dist" --output-dir "$output_dir"
