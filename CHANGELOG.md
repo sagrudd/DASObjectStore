@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.186.33 - Unreleased
+
+- Align the product manifest with the workspace and remote package version so
+  the formal native-package provenance guard can admit the release inputs.
+
 ## 0.186.31 - Unreleased
 
 - Preserve the reviewed, attempt-local Git cache for Trunk's isolated offline
