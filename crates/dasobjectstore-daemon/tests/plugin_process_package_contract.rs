@@ -291,6 +291,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 && !stage
                     .join("inputs/component-candidate-input.validation.json")
                     .exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
                 && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
             "{name} must not emit candidate outputs or rewrite its sealed manifest"
         );
@@ -379,10 +380,47 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 String::from_utf8_lossy(&result.stderr)
                     .contains("Kanon validator rejected emitted inputs")
                     && !stage.join("inputs/component-candidate-input.toml").exists()
+                    && !stage.join("inputs/provenance-tuple.toml").exists()
+                    && !stage
+                        .join("inputs/component-candidate-input.validation.json")
+                        .exists()
                     && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
                 "{name} must fail before candidate output or manifest mutation"
             );
         }
+    }
+
+    // Each checked move is a normal-process failure boundary.  The producer
+    // must roll back only its new outputs, retaining the source-owned witness
+    // and the pre-producer manifest so a consumer cannot accept a partial set.
+    for publication in ["candidate", "tuple", "report"] {
+        let stage = unseeded_stage(&format!("publish-{publication}-failure"));
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let failed = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(&input)
+            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE", publication)
+            .output()
+            .expect("inject provenance publication failure");
+        assert!(
+            !failed.status.success()
+                && String::from_utf8_lossy(&failed.stderr)
+                    .contains("could not publish validated"),
+            "{publication} publication fault must fail closed: {}",
+            String::from_utf8_lossy(&failed.stderr)
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+            "{publication} publication fault must leave no generated partial state"
+        );
     }
     let accepted = run(&sealed, &input);
     assert!(

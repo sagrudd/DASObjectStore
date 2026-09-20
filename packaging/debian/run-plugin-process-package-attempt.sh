@@ -461,7 +461,7 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha scratch publish candidate_scratch tuple_scratch report_scratch validation_status
+  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha scratch publish candidate_scratch tuple_scratch report_scratch validation_status publication_active
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
@@ -567,17 +567,39 @@ produce_closure_provenance_inputs() {
   fi
   printf '%s\n' "$report" > "$report_scratch"
   publish=$(mktemp -d "$sealed_root/inputs/.provenance-publish.XXXXXX") || { rm -rf "$scratch"; die 'provenance input stage could not create validated output publication'; }
+  publication_active=1
+  rollback_provenance_publication() {
+    [[ "${publication_active:-0}" -eq 1 ]] || return 0
+    rm -f "$candidate" "$sealed_root/inputs/provenance-tuple.toml" "$sealed_root/inputs/component-candidate-input.validation.json"
+    [[ -n "${publish:-}" && -d "$publish" ]] && rm -rf "$publish"
+    publication_active=0
+  }
+  trap 'rollback_provenance_publication; exit 1' HUP INT TERM
   cp -p "$candidate_scratch" "$publish/component-candidate-input.toml"
   cp -p "$tuple_scratch" "$publish/provenance-tuple.toml"
   cp -p "$report_scratch" "$publish/component-candidate-input.validation.json"
   chmod a-w "$publish"/*
-  mv "$publish/component-candidate-input.toml" "$candidate"
-  mv "$publish/provenance-tuple.toml" "$sealed_root/inputs/provenance-tuple.toml"
-  mv "$publish/component-candidate-input.validation.json" "$sealed_root/inputs/component-candidate-input.validation.json"
+  for publication in \
+    "candidate:$publish/component-candidate-input.toml:$candidate" \
+    "tuple:$publish/provenance-tuple.toml:$sealed_root/inputs/provenance-tuple.toml" \
+    "report:$publish/component-candidate-input.validation.json:$sealed_root/inputs/component-candidate-input.validation.json"; do
+    IFS=: read -r publication_name publication_source publication_destination <<< "$publication"
+    if [[ "${DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE:-}" = "$publication_name" ]] || ! mv "$publication_source" "$publication_destination"; then
+      rollback_provenance_publication
+      trap - HUP INT TERM
+      rm -rf "$scratch"
+      die "provenance input stage could not publish validated $publication_name output"
+    fi
+  done
   rmdir "$publish"
   rm -rf "$scratch"
-  write_batched_manifest "$sealed_root"
-  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind emitted inputs'
+  if ! write_batched_manifest "$sealed_root" || ! (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1; then
+    rollback_provenance_publication
+    trap - HUP INT TERM
+    die 'provenance input stage manifest does not bind emitted inputs'
+  fi
+  publication_active=0
+  trap - HUP INT TERM
   printf 'closure_stage_provenance_inputs=PASS source_revision=%s validator_sha256=%s\n' "$revision" "$(sha256_file "$validator")"
 }
 
