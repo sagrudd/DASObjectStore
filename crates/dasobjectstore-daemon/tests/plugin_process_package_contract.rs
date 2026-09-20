@@ -1251,6 +1251,11 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         !nonempty_attempt.join("terminal-status").exists(),
         "runner must not write a status into the rejected attempt root"
     );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal temporary harness root before cleanup");
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
 
@@ -2049,6 +2054,11 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         manifest,
         "fake Trunk fixture must not alter the sealed inputs"
     );
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&temp)
+        .status()
+        .expect("unseal temporary harness root before cleanup");
     fs::remove_dir_all(temp).expect("remove temporary harness root");
 }
 
