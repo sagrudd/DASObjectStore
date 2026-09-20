@@ -21,7 +21,10 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
         "rejects an unpinned Kanon validator",
         "binary_sha256",
-        "validator_sha=$(tool_input_toml_value \"$validator_receipt\" binary_sha256)",
+        "validator_sha=$(canonical_sha256_file \"$validator_receipt\" binary_sha256)",
+        "canonical_sha256_digest",
+        "requires the sha256 algorithm",
+        "requires exactly 64 lower-case SHA-256 hex characters",
         "toolchain_mode_from_receipt",
         "native-tool-bundle@sha256:$inventory_sha",
         "rejects mixed native and container modes",
@@ -59,12 +62,26 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         std::process::id()
     ));
     let sealed = staged_fixture(&temp);
+    // Start the complete handoff with no generated provenance or native-stage
+    // outputs.  The reviewed tool bundle is an independently immutable input;
+    // it is deliberately not copied into the closure until the source-owned
+    // witness and normal provenance stages have emitted their own documents.
+    let tool_input = immutable_tool_input_fixture(&temp, &sealed, true);
+    for path in ["toolchain", "network-denied-bin", "staging-home"] {
+        fs::remove_dir_all(sealed.join(path)).expect("clear pre-stage tool output fixture");
+    }
     for name in [
         "component-candidate-input.toml",
         "source-tree",
         "compiled-dependency-witness.json",
+        "dependency-witness-receipt.toml",
+        "component-candidate-input.validation.json",
+        "provenance-tuple.toml",
     ] {
-        fs::remove_file(sealed.join("inputs").join(name)).expect("clear producer output fixture");
+        let path = sealed.join("inputs").join(name);
+        if path.exists() {
+            fs::remove_file(path).expect("clear producer output fixture");
+        }
     }
     fs::remove_file(sealed.join("f05-inputs.sha256")).expect("clear producer manifest fixture");
     Command::new("chmod")
@@ -110,12 +127,12 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     write(
         input.join("expected-tuple.toml"),
         &format!(
-            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\nrecipe_sha256 = \"{}\"\nvalidator_revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nvalidator_binary_sha256 = \"{}\"\ntoolchain_kind = \"native-tool-bundle\"\ntool_inventory_sha256 = \"{}\"\n",
+            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\nrecipe_sha256 = \"sha256:{}\"\nvalidator_revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nvalidator_binary_sha256 = \"sha256:{}\"\ntoolchain_kind = \"native-tool-bundle\"\ntool_inventory_sha256 = \"{}\"\n",
             sha256(&archive),
             tree_sha256(&sealed.join("source")),
             sha256(&input.join("package-recipe.json")),
             sha256(&validator),
-            "a".repeat(64),
+            sha256(&tool_input.join("tool-input-inventory.txt")),
         ),
     );
     Command::new("chmod")
@@ -135,6 +152,142 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             .output()
             .expect("run provenance stage")
     };
+    let unseeded_stage = |name: &str| {
+        let stage = temp.join(name);
+        copy_tree(&sealed, &stage);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&stage)
+            .status()
+            .expect("make denial stage writable");
+        for name in [
+            "component-candidate-input.toml",
+            "component-candidate-input.validation.json",
+            "provenance-tuple.toml",
+        ] {
+            let path = stage.join("inputs").join(name);
+            if path.exists() {
+                fs::remove_file(path).expect("clear unseeded producer output");
+            }
+        }
+        fs::remove_file(stage.join("f05-inputs.sha256")).expect("clear unseeded producer manifest");
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(stage.join("source"))
+            .status()
+            .expect("seal unseeded source inputs before provenance staging");
+        Command::new("chmod")
+            .args(["a-w"])
+            .args([
+                stage
+                    .join("inputs/source-tree")
+                    .to_str()
+                    .expect("source-tree path"),
+                stage
+                    .join("inputs/compiled-dependency-witness.json")
+                    .to_str()
+                    .expect("witness path"),
+                stage
+                    .join("inputs/dependency-witness-receipt.toml")
+                    .to_str()
+                    .expect("witness receipt path"),
+            ])
+            .status()
+            .expect("seal copied dependency-witness inputs before tuple denial");
+        write_f05_manifest(&stage);
+        stage
+    };
+    let witness = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-provenance-inputs"])
+        .arg(&input)
+        .arg("--dependency-witness-only")
+        .output()
+        .expect("run source-owned dependency-witness stage");
+    assert!(
+        witness.status.success(),
+        "dependency-witness stage stderr: {}",
+        String::from_utf8_lossy(&witness.stderr)
+    );
+
+    // Jenkins #348 emits canonical tuple digests while the admitted Kanon
+    // receipt uses its schema's bare `binary_sha256` field.  The consumer must
+    // normalize that one trusted legacy spelling, then reject every malformed,
+    // unsupported, or byte-mismatched tuple digest before it emits a candidate.
+    for (name, replacement, expected_error) in [
+        (
+            "unsupported-recipe-algorithm",
+            ("recipe_sha256 = \"sha256:", "recipe_sha256 = \"sha512:"),
+            "recipe_sha256 requires the sha256 algorithm",
+        ),
+        (
+            "duplicate-validator-prefix",
+            (
+                "validator_binary_sha256 = \"sha256:",
+                "validator_binary_sha256 = \"sha256:sha256:",
+            ),
+            "validator_binary_sha256 requires exactly 64 lower-case SHA-256 hex characters",
+        ),
+        (
+            "tampered-recipe-digest",
+            (
+                "recipe_sha256 = \"sha256:",
+                "recipe_sha256 = \"sha256:ffffffff",
+            ),
+            "rejects an expected tuple not bound to the generated dependency witness",
+        ),
+    ] {
+        let variant = temp.join(format!("{name}-inputs"));
+        copy_tree(&input, &variant);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&variant)
+            .status()
+            .expect("make tuple variant writable");
+        let tuple = variant.join("expected-tuple.toml");
+        let original = fs::read_to_string(&tuple).expect("read canonical expected tuple");
+        let mutated = if name == "tampered-recipe-digest" {
+            original
+                .lines()
+                .map(|line| {
+                    if line.starts_with("recipe_sha256 = ") {
+                        "recipe_sha256 = \"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\""
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        } else {
+            original.replacen(replacement.0, replacement.1, 1)
+        };
+        write(&tuple, &mutated);
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&variant)
+            .status()
+            .expect("reseal tuple variant");
+        let stage = unseeded_stage(name);
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let denied = run(&stage, &variant);
+        assert!(
+            !denied.status.success()
+                && String::from_utf8_lossy(&denied.stderr).contains(expected_error),
+            "{name} must deny through the canonical digest boundary: {}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+            "{name} must not emit candidate outputs or rewrite its sealed manifest"
+        );
+    }
     let accepted = run(&sealed, &input);
     assert!(
         accepted.status.success(),
@@ -164,12 +317,71 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     let witness = sealed.join("inputs/compiled-dependency-witness.json");
     assert!(
         witness.is_file()
-            && sealed.join("inputs/dependency-witness-receipt.toml").is_file()
+            && sealed
+                .join("inputs/dependency-witness-receipt.toml")
+                .is_file()
             && fs::metadata(&witness)
                 .expect("read generated witness mode")
                 .permissions()
                 .readonly(),
         "the provenance stage must generate and freeze an archive/lock-bound witness before candidate emission"
+    );
+
+    // This is intentionally one unseeded, real script sequence rather than
+    // independent producer and native-tool fixtures: witness-only -> normal
+    // provenance -> native toolchain stage -> normal preflight-only.
+    seal_tool_stage_identity_inputs(&sealed);
+    let native_stage = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--stage-closure-toolchain-inputs"])
+        .arg(&tool_input)
+        .output()
+        .expect("run native toolchain stage after provenance");
+    assert!(
+        native_stage.status.success(),
+        "native stage after provenance failed: {}",
+        String::from_utf8_lossy(&native_stage.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&native_stage.stdout)
+            .contains("closure_stage_toolchain_inputs=PASS"),
+        "native stage must retain its receipt after normal provenance"
+    );
+    let cache = temp.join("sequence-cache");
+    let attempt = temp.join("sequence-attempt");
+    let diagnostic = temp.join("sequence-diagnostic");
+    fs::create_dir(&cache).expect("create sequence stage cache");
+    fs::create_dir(&attempt).expect("create sequence attempt root");
+    fs::create_dir(&diagnostic).expect("create sequence diagnostic root");
+    let preflight = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&sealed)
+        .args(["--attempt-root"])
+        .arg(&attempt)
+        .args(["--diagnostic-root"])
+        .arg(&diagnostic)
+        .args(["--stage-cache-root"])
+        .arg(&cache)
+        .arg("--preflight-only")
+        .output()
+        .expect("run normal preflight after native stage");
+    assert!(
+        preflight.status.success(),
+        "unseeded sequence preflight failed: {}",
+        String::from_utf8_lossy(&preflight.stderr)
+    );
+    assert!(
+        fs::read_to_string(diagnostic.join("preflight.log"))
+            .expect("read unseeded preflight log")
+            .contains("preflight_only=PASS"),
+        "unseeded sequence must retain the final normal preflight marker"
+    );
+    assert!(
+        !attempt.join("target").exists() && !attempt.join("output").exists(),
+        "the source-only sequence may not compile or emit a package"
     );
     let mismatch = temp.join("mismatch-inputs");
     copy_tree(&input, &mismatch);
@@ -205,7 +417,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         .expect("seal mismatch source inputs before provenance staging");
     write_f05_manifest(&fresh);
     let pre_producer_manifest = sha256(&fresh.join("f05-inputs.sha256"));
-    let denied = run(&fresh, &mismatch);
+    let denied = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&fresh)
+        .args(["--stage-closure-provenance-inputs"])
+        .arg(&mismatch)
+        .arg("--dependency-witness-only")
+        .output()
+        .expect("run denied dependency-witness stage");
     assert!(
         !denied.status.success()
             && String::from_utf8_lossy(&denied.stderr)
@@ -221,6 +441,87 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 .exists()
             && sha256(&fresh.join("f05-inputs.sha256")) == pre_producer_manifest,
         "a rejected tuple must not emit outputs or rewrite its pre-producer manifest"
+    );
+
+    // The real archive-only handoff must stop at the same causal boundary: a
+    // source archive without its independently staged physical vendor closure
+    // cannot manufacture the witness, candidate, or a later preflight input.
+    let missing_vendor = staged_fixture(&temp.join("missing-vendor-stage"));
+    for name in [
+        "component-candidate-input.toml",
+        "source-tree",
+        "compiled-dependency-witness.json",
+        "dependency-witness-receipt.toml",
+        "component-candidate-input.validation.json",
+        "provenance-tuple.toml",
+    ] {
+        let path = missing_vendor.join("inputs").join(name);
+        if path.exists() {
+            fs::remove_file(path).expect("clear missing-vendor generated fixture");
+        }
+    }
+    fs::remove_file(missing_vendor.join("f05-inputs.sha256"))
+        .expect("clear missing-vendor manifest");
+    fs::remove_dir_all(missing_vendor.join("source/vendor"))
+        .expect("remove physical dependency closure");
+    let missing_input = temp.join("missing-vendor-inputs");
+    copy_tree(&input, &missing_input);
+    Command::new("chmod")
+        .args(["-R", "u+w"])
+        .arg(&missing_input)
+        .status()
+        .expect("make missing-vendor identity input writable");
+    let missing_identity = fs::read_to_string(missing_input.join("source-identity.toml"))
+        .expect("read missing-vendor identity");
+    write(
+        missing_input.join("source-identity.toml"),
+        &missing_identity.replace(
+            &format!(
+                "source_content_sha256 = \"sha256:{}\"",
+                tree_sha256(&sealed.join("source"))
+            ),
+            &format!(
+                "source_content_sha256 = \"sha256:{}\"",
+                tree_sha256(&missing_vendor.join("source"))
+            ),
+        ),
+    );
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(&missing_input)
+        .status()
+        .expect("reseal missing-vendor identity inputs");
+    Command::new("chmod")
+        .args(["-R", "a-w"])
+        .arg(missing_vendor.join("source"))
+        .status()
+        .expect("seal missing-vendor source");
+    write_f05_manifest(&missing_vendor);
+    let missing_manifest = sha256(&missing_vendor.join("f05-inputs.sha256"));
+    let missing_result = Command::new("bash")
+        .arg(&script)
+        .args(["--sealed-root"])
+        .arg(&missing_vendor)
+        .args(["--stage-closure-provenance-inputs"])
+        .arg(&missing_input)
+        .arg("--dependency-witness-only")
+        .output()
+        .expect("run missing physical dependency closure denial");
+    assert!(
+        !missing_result.status.success()
+            && String::from_utf8_lossy(&missing_result.stderr)
+                .contains("requires a physical dependency closure"),
+        "witness-only must stop before provenance when the physical vendor closure is absent"
+    );
+    assert!(
+        !missing_vendor
+            .join("inputs/compiled-dependency-witness.json")
+            .exists()
+            && !missing_vendor
+                .join("inputs/component-candidate-input.toml")
+                .exists()
+            && sha256(&missing_vendor.join("f05-inputs.sha256")) == missing_manifest,
+        "the missing-vendor boundary must not emit generated inputs or rewrite its manifest"
     );
     Command::new("chmod")
         .args(["-R", "u+w"])
@@ -2868,8 +3169,12 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
             "missing-tool" => "requires complete executable tool inputs",
             "altered-tool" => "rejects a substituted rustc input",
             "symlink-escape" => "rejects symlinked inputs",
-            "inventory-replacement" => "rejects an inventory receipt not bound to the reviewed document",
-            "revision-mismatch" => "requires matching candidate and expected-tuple revision witnesses",
+            "inventory-replacement" => {
+                "rejects an inventory receipt not bound to the reviewed document"
+            }
+            "revision-mismatch" => {
+                "requires matching candidate and expected-tuple revision witnesses"
+            }
             "image-mismatch" => "rejects a container image not bound to the expected tuple",
             _ => unreachable!("known tool-input negative fixture"),
         };
