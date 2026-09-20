@@ -58,7 +58,15 @@ pub fn run(cli: &RemoteCli, writer: &mut impl Write) -> Result<(), RemoteRunErro
         ));
     }
     match cli.command() {
-        RemoteCommand::Login(args) => run_login(cli, args, writer),
+        RemoteCommand::Login(args) => {
+            if cli.username().is_some() {
+                return Err(RemoteRunError::UploadRouting(
+                    "login derives its opaque subject from the signed Pistis approval; --username is not permitted"
+                        .to_string(),
+                ));
+            }
+            run_login(cli, args, writer)
+        }
         RemoteCommand::Authenticate(args) => run_authenticate(cli, args, writer),
         RemoteCommand::Resync(args) => resync::run_resync(cli, args, writer),
         RemoteCommand::Trust(args) => match args.command() {

@@ -119,9 +119,6 @@ pub struct LoginArgs {
     host_or_ip: String,
     /// Exact ObjectStore requested for this session.
     object_store: String,
-    /// Pistis username that must match the approved actor returned by Monas.
-    #[arg(long)]
-    username: String,
     /// Authority boundary used for discovery and completion.
     #[arg(long, value_enum, default_value_t = LoginAuthorityProfile::IntegratedMonas)]
     authority_profile: LoginAuthorityProfile,
@@ -154,9 +151,6 @@ impl LoginArgs {
     }
     pub fn object_store(&self) -> &str {
         &self.object_store
-    }
-    pub fn username(&self) -> &str {
-        &self.username
     }
     pub fn https_port(&self) -> u16 {
         self.https_port.unwrap_or(match self.authority_profile {
@@ -1036,8 +1030,6 @@ mod tests {
             "login",
             "192.168.1.48",
             "allele-anchor",
-            "--username",
-            "stephen@mnemosyne.co.uk",
             "--set-s3-config",
         ])
         .expect("login parses");
@@ -1046,10 +1038,26 @@ mod tests {
         };
         assert_eq!(args.host_or_ip(), "192.168.1.48");
         assert_eq!(args.object_store(), "allele-anchor");
-        assert_eq!(args.username(), "stephen@mnemosyne.co.uk");
         assert_eq!(args.https_port(), 8443);
         assert!(args.set_s3_config());
         assert!(args.s3_profile().is_none());
+    }
+
+    #[test]
+    fn login_derives_its_subject_from_pistis_and_rejects_username_input() {
+        let error = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "login",
+            "192.168.1.48",
+            "allele-anchor",
+            "--username",
+            "operator",
+        ])
+        .expect_err("login must not accept an operator-supplied identity");
+
+        assert!(error
+            .to_string()
+            .contains("unexpected argument '--username'"));
     }
 
     #[test]
@@ -1059,8 +1067,6 @@ mod tests {
             "login",
             "legacy.example",
             "archive",
-            "--username",
-            "operator",
             "--authority-profile",
             "legacy-standalone",
         ])
@@ -1072,15 +1078,15 @@ mod tests {
     }
 
     #[test]
-    fn canonical_login_requires_a_pistis_username() {
-        assert!(RemoteCli::try_parse_from([
+    fn canonical_login_requires_no_operator_identity() {
+        RemoteCli::try_parse_from([
             "dasobjectstore-remote",
             "login",
             "192.168.1.48",
             "allele-anchor",
             "--set-s3-config",
         ])
-        .is_err());
+        .expect("Pistis pairing derives the subject from the signed approval");
     }
 
     #[test]
@@ -1459,8 +1465,6 @@ mod tests {
             "login",
             "192.168.1.192",
             "epic_collection",
-            "--username",
-            "stephen",
         ])
         .expect("integrated login parses");
         let RemoteCommand::Login(integrated) = integrated.command() else {
@@ -1477,8 +1481,6 @@ mod tests {
             "login",
             "192.168.1.192",
             "epic_collection",
-            "--username",
-            "stephen",
             "--authority-profile",
             "legacy-standalone",
         ])

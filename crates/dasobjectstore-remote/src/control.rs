@@ -480,7 +480,7 @@ fn reject_expired_session(session: &RemoteUploadSession) -> Result<(), RemoteCon
     let now = unix_now()?;
     if expiry <= now {
         return Err(RemoteControlError::Authentication(
-            "session_expired_reauthentication_required: the committed session has expired; run `dasobjectstore-remote login HOST OBJECTSTORE --username USER --set-s3-config`"
+            "session_expired_reauthentication_required: the committed session has expired; run `dasobjectstore-remote login HOST OBJECTSTORE --set-s3-config`"
                 .to_string(),
         ));
     }
