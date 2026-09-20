@@ -30,6 +30,10 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "rejects mixed native and container modes",
         "requires immutable sealed identity inputs while leaving fresh output roots writable",
         "component-candidate-input validate",
+        "require_valid_component_candidate_report",
+        "requires jq for Kanon validator report validation",
+        ".stage == \"component-candidate-input\"",
+        "(.issues | type == \"array\")",
         "Kanon validator rejected emitted inputs",
         "compiled-dependency-witness.json",
         "component-candidate-input.validation.json",
@@ -114,7 +118,10 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     .expect("copy immutable recipe");
     let validator = input.join("kanon-component-candidate-input");
     executable(&validator, "{\"valid\":true}");
-    write(&validator, "#!/bin/sh\nprintf '%s\\n' '{\"valid\":true}'\n");
+    write(
+        &validator,
+        "#!/bin/sh\nprintf '%s\\n' '{\n  \"valid\": true,\n  \"stage\": \"component-candidate-input\",\n  \"issues\": []\n}'\n",
+    );
     fs::set_permissions(&validator, fs::Permissions::from_mode(0o755))
         .expect("make pinned validator executable");
     write(
@@ -287,6 +294,95 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
             "{name} must not emit candidate outputs or rewrite its sealed manifest"
         );
+    }
+
+    // The pinned validator's JSON is intentionally pretty-printed in the
+    // primary positive path.  Exercise the same runner boundary with compact
+    // JSON and with semantically invalid or misleading reports; a substring
+    // scan must never promote those reports to an accepted candidate.
+    for (name, report, accepted) in [
+        (
+            "compact-validator-report",
+            "{\"valid\":true,\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            true,
+        ),
+        (
+            "false-validator-report",
+            "{\"valid\":false,\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            false,
+        ),
+        (
+            "string-validator-report",
+            "{\"valid\":\"true\",\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            false,
+        ),
+        (
+            "nested-validator-report",
+            "{\"valid\":false,\"stage\":\"component-candidate-input\",\"issues\":[\"{\\\"valid\\\":true}\"]}",
+            false,
+        ),
+        ("malformed-validator-report", "{\"valid\":true", false),
+    ] {
+        let variant = temp.join(format!("{name}-inputs"));
+        copy_tree(&input, &variant);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&variant)
+            .status()
+            .expect("make validator-report variant writable");
+        let variant_validator = variant.join("kanon-component-candidate-input");
+        write(
+            &variant_validator,
+            &format!("#!/bin/sh\nprintf '%s\\n' '{report}'\n"),
+        );
+        fs::set_permissions(&variant_validator, fs::Permissions::from_mode(0o755))
+            .expect("make report validator executable");
+        let receipt = variant.join("kanon-component-candidate-input.receipt");
+        write(
+            &receipt,
+            &format!(
+                "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nbinary_sha256 = \"{}\"\n",
+                sha256(&variant_validator)
+            ),
+        );
+        let tuple = variant.join("expected-tuple.toml");
+        let original = fs::read_to_string(&tuple).expect("read validator-report tuple");
+        write(
+            &tuple,
+            &original.replacen(
+                &format!("validator_binary_sha256 = \"sha256:{}\"", sha256(&validator)),
+                &format!(
+                    "validator_binary_sha256 = \"sha256:{}\"",
+                    sha256(&variant_validator)
+                ),
+                1,
+            ),
+        );
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&variant)
+            .status()
+            .expect("reseal validator-report variant");
+        let stage = unseeded_stage(name);
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let result = run(&stage, &variant);
+        assert_eq!(
+            result.status.success(),
+            accepted,
+            "{name} produced unexpected stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        if accepted {
+            assert!(stage.join("inputs/component-candidate-input.toml").is_file());
+        } else {
+            assert!(
+                String::from_utf8_lossy(&result.stderr)
+                    .contains("Kanon validator rejected emitted inputs")
+                    && !stage.join("inputs/component-candidate-input.toml").exists()
+                    && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+                "{name} must fail before candidate output or manifest mutation"
+            );
+        }
     }
     let accepted = run(&sealed, &input);
     assert!(

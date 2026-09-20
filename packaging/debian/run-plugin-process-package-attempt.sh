@@ -118,6 +118,18 @@ verify_sha256_manifest() {
   fi
 }
 
+require_valid_component_candidate_report() {
+  local report=$1
+  command -v jq >/dev/null 2>&1 || die 'provenance input stage requires jq for Kanon validator report validation'
+  printf '%s' "$report" | jq -e '
+    type == "object" and
+    (.valid | type == "boolean") and
+    .valid == true and
+    .stage == "component-candidate-input" and
+    (.issues | type == "array")
+  ' >/dev/null || die 'provenance input stage Kanon validator rejected emitted inputs'
+}
+
 sha256_tree() {
   local root=$1
   (
@@ -537,7 +549,7 @@ produce_closure_provenance_inputs() {
   printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
     "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
   report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'
-  grep -F '"valid":true' <<<"$report" >/dev/null || die 'provenance input stage Kanon validator rejected emitted inputs'
+  require_valid_component_candidate_report "$report"
   printf '%s\n' "$report" > "$sealed_root/inputs/component-candidate-input.validation.json"
   write_batched_manifest "$sealed_root"
   (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind emitted inputs'
