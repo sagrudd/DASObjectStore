@@ -3,12 +3,38 @@
 set -euo pipefail
 
 das_plugin_process_sha256() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    das_plugin_process_f05_staged_closure_error 'requires a SHA-256 command (sha256sum or shasum)'
+  fi
+}
+
+das_plugin_process_sha256_stream() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    das_plugin_process_f05_staged_closure_error 'requires a SHA-256 command (sha256sum or shasum)'
+  fi
+}
+
+das_plugin_process_verify_sha256_manifest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "$1"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "$1"
+  else
+    das_plugin_process_f05_staged_closure_error 'requires a SHA-256 command (sha256sum or shasum)'
+  fi
 }
 
 das_plugin_process_tree_sha256() {
   local tree=$1
-  (cd "$tree" && find . -type f -exec shasum -a 256 {} \; | LC_ALL=C sort | shasum -a 256 | awk '{print $1}')
+  (cd "$tree" && find . -type f -print0 | LC_ALL=C sort -z | while IFS= read -r -d '' input; do das_plugin_process_sha256 "$input"; done | das_plugin_process_sha256_stream)
 }
 
 das_plugin_process_f05_staged_closure_enabled() {
@@ -45,7 +71,7 @@ das_plugin_process_f05_require_staged_closure() {
   done
   [[ -d "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" && ! -L "$staged_root/toolchain/lib/rustlib/wasm32-unknown-unknown" ]] || das_plugin_process_f05_staged_closure_error 'requires a staged wasm32-unknown-unknown target'
   [[ ! -e "$repo_root/../prosopikon" ]] || das_plugin_process_f05_staged_closure_error 'rejects an ambient Prosopikon sibling'
-  (cd "$staged_root" && shasum -a 256 -c f05-inputs.sha256) >/dev/null 2>&1 || das_plugin_process_f05_staged_closure_error 'has a missing or altered staged input'
+  (cd "$staged_root" && das_plugin_process_verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || das_plugin_process_f05_staged_closure_error 'has a missing or altered staged input'
   for required in source/.cargo/f05-vendor-config.toml inputs/component-candidate-input.toml inputs/source-tree inputs/compiled-dependency-witness.json inputs/package-recipe.json toolchain/bin/cargo toolchain/bin/rustc toolchain/bin/trunk; do
     das_plugin_process_f05_manifest_requires "$staged_root" "$required"
   done

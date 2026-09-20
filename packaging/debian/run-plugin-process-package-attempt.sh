@@ -118,6 +118,18 @@ verify_sha256_manifest() {
   fi
 }
 
+require_valid_component_candidate_report() {
+  local report=$1
+  command -v jq >/dev/null 2>&1 || return 2
+  printf '%s' "$report" | jq -e '
+    type == "object" and
+    (.valid | type == "boolean") and
+    .valid == true and
+    .stage == "component-candidate-input" and
+    (.issues | type == "array")
+  ' >/dev/null
+}
+
 sha256_tree() {
   local root=$1
   (
@@ -449,7 +461,7 @@ SOURCES
 }
 
 produce_closure_provenance_inputs() {
-  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha
+  local input registry identity expected archive recipe validator validator_receipt source revision expected_revision version expected_version tree expected_tree archive_sha source_content_sha lock_sha witness witness_receipt candidate image image_sha report expected_mode inventory_sha vendor_sha scratch publish candidate_scratch tuple_scratch report_scratch manifest_scratch validation_status publication_active
   input=$provenance_input_root
   registry="$input/registry.toml"
   identity="$input/source-identity.toml"
@@ -533,14 +545,88 @@ produce_closure_provenance_inputs() {
     image=$(tool_input_toml_value "$expected" toolchain_image)
     image_sha=$(tool_input_toml_value "$expected" toolchain_image_sha256)
   fi
-  cp -a "$expected" "$sealed_root/inputs/provenance-tuple.toml"
+  scratch=$(mktemp -d "${TMPDIR:-/tmp}/dasobjectstore-provenance-inputs.XXXXXX") || die 'provenance input stage could not create owned validation scratch'
+  chmod 0700 "$scratch"
+  candidate_scratch="$scratch/component-candidate-input.toml"
+  tuple_scratch="$scratch/provenance-tuple.toml"
+  report_scratch="$scratch/component-candidate-input.validation.json"
+  manifest_scratch="$scratch/pre-producer-f05-inputs.sha256"
+  cp -p "$sealed_root/f05-inputs.sha256" "$manifest_scratch"
+  cp -p "$expected" "$tuple_scratch"
   printf 'schema_version = "mnemosyne.kanon.component-candidate-input.v1"\ncomponent_binary = "dasobjectstore"\nsource_tree_sha256 = "sha256:%s"\n[candidate_build]\nschema_version = "mnemosyne.kanon.candidate-build-admission.v1"\nadmission_id = "das-component-package-f05-%s"\nexecution = "disposable_ci_bootstrap"\nproduct_id = "dasobjectstore"\nrepository = "sagrudd/DASObjectStore"\nsource_revision = "%s"\nregistry_snapshot_sha256 = "sha256:%s"\ncargo_lock_sha256 = "%s"\ncompiled_dependency_witness_sha256 = "sha256:%s"\ntoolchain_image = "%s"\ntoolchain_image_sha256 = "%s"\ntarget_os = "linux"\ntarget_architecture = "amd64"\nfeatures = []\nrecipe_sha256 = "sha256:%s"\njenkins_task_id = "candidate-build-admission"\n' \
-    "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate"
-  report=$("$validator" component-candidate-input validate --input "$candidate" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe") || die 'provenance input stage Kanon validator execution failed'
-  grep -F '"valid":true' <<<"$report" >/dev/null || die 'provenance input stage Kanon validator rejected emitted inputs'
-  printf '%s\n' "$report" > "$sealed_root/inputs/component-candidate-input.validation.json"
-  write_batched_manifest "$sealed_root"
-  (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1 || die 'provenance input stage manifest does not bind emitted inputs'
+    "$(sha256_file "$sealed_root/inputs/source-tree")" "$revision" "$revision" "$(sha256_file "$registry")" "$lock_sha" "$(sha256_file "$witness")" "$image" "$image_sha" "$(sha256_file "$recipe")" > "$candidate_scratch"
+  if ! report=$("$validator" component-candidate-input validate --input "$candidate_scratch" --registry "$registry" --source-tree "$sealed_root/inputs/source-tree" --cargo-lock "$source/Cargo.lock" --compiled-dependency-witness "$witness" --recipe "$recipe"); then
+    rm -rf "$scratch"
+    die 'provenance input stage Kanon validator execution failed'
+  fi
+  if require_valid_component_candidate_report "$report"; then
+    :
+  else
+    validation_status=$?
+    rm -rf "$scratch"
+    [[ "$validation_status" -eq 2 ]] && die 'provenance input stage requires jq for Kanon validator report validation'
+    die 'provenance input stage Kanon validator rejected emitted inputs'
+  fi
+  printf '%s\n' "$report" > "$report_scratch"
+  publish=$(mktemp -d "$sealed_root/inputs/.provenance-publish.XXXXXX") || { rm -rf "$scratch"; die 'provenance input stage could not create validated output publication'; }
+  publication_active=1
+  rollback_provenance_publication() {
+    [[ "${publication_active:-0}" -eq 1 ]] || return 0
+    rm -f "$candidate" "$sealed_root/inputs/provenance-tuple.toml" "$sealed_root/inputs/component-candidate-input.validation.json"
+    if [[ -f "${manifest_scratch:-}" ]]; then
+      cp -p "$manifest_scratch" "$sealed_root/f05-inputs.sha256.restore"
+      mv "$sealed_root/f05-inputs.sha256.restore" "$sealed_root/f05-inputs.sha256"
+    fi
+    [[ -n "${publish:-}" && -d "$publish" ]] && rm -rf "$publish"
+    publication_active=0
+  }
+  trap 'rollback_provenance_publication; exit 1' HUP INT TERM
+  cp -p "$candidate_scratch" "$publish/component-candidate-input.toml"
+  cp -p "$tuple_scratch" "$publish/provenance-tuple.toml"
+  cp -p "$report_scratch" "$publish/component-candidate-input.validation.json"
+  chmod a-w "$publish"/*
+  for publication in \
+    "candidate:$publish/component-candidate-input.toml:$candidate" \
+    "tuple:$publish/provenance-tuple.toml:$sealed_root/inputs/provenance-tuple.toml" \
+    "report:$publish/component-candidate-input.validation.json:$sealed_root/inputs/component-candidate-input.validation.json"; do
+    IFS=: read -r publication_name publication_source publication_destination <<< "$publication"
+    if [[ "${DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE:-}" = "$publication_name" ]] || ! mv "$publication_source" "$publication_destination"; then
+      rollback_provenance_publication
+      trap - HUP INT TERM
+      rm -rf "$scratch"
+      die "provenance input stage could not publish validated $publication_name output"
+    fi
+  done
+  rmdir "$publish"
+  if ! write_batched_manifest "$sealed_root"; then
+    rollback_provenance_publication
+    trap - HUP INT TERM
+    die 'provenance input stage manifest does not bind emitted inputs'
+  fi
+  case "${DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST:-}" in
+    '') ;;
+    fault)
+      rollback_provenance_publication
+      trap - HUP INT TERM
+      die 'provenance input stage injected post-manifest publication failure'
+      ;;
+    signal)
+      kill -INT "$$"
+      ;;
+    *)
+      rollback_provenance_publication
+      trap - HUP INT TERM
+      die 'provenance input stage has an unsupported post-manifest publication fault'
+      ;;
+  esac
+  if ! (cd "$sealed_root" && verify_sha256_manifest f05-inputs.sha256) >/dev/null 2>&1; then
+    rollback_provenance_publication
+    trap - HUP INT TERM
+    die 'provenance input stage manifest does not bind emitted inputs'
+  fi
+  publication_active=0
+  trap - HUP INT TERM
+  rm -rf "$scratch"
   printf 'closure_stage_provenance_inputs=PASS source_revision=%s validator_sha256=%s\n' "$revision" "$(sha256_file "$validator")"
 }
 

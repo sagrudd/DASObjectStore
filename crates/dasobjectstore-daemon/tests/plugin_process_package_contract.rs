@@ -18,7 +18,7 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "--stage-closure-provenance-inputs ABSOLUTE_IMMUTABLE_INPUT_ROOT",
         "produce_closure_provenance_inputs",
         "requires immutable non-symlink inputs",
-        "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
+        "rejects a dirty or source-identity-mismatched archive",
         "rejects an unpinned Kanon validator",
         "binary_sha256",
         "validator_sha=$(canonical_sha256_file \"$validator_receipt\" binary_sha256)",
@@ -30,6 +30,10 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "rejects mixed native and container modes",
         "requires immutable sealed identity inputs while leaving fresh output roots writable",
         "component-candidate-input validate",
+        "require_valid_component_candidate_report",
+        "requires jq for Kanon validator report validation",
+        ".stage == \"component-candidate-input\"",
+        "(.issues | type == \"array\")",
         "Kanon validator rejected emitted inputs",
         "compiled-dependency-witness.json",
         "component-candidate-input.validation.json",
@@ -114,7 +118,10 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     .expect("copy immutable recipe");
     let validator = input.join("kanon-component-candidate-input");
     executable(&validator, "{\"valid\":true}");
-    write(&validator, "#!/bin/sh\nprintf '%s\\n' '{\"valid\":true}'\n");
+    write(
+        &validator,
+        "#!/bin/sh\nprintf '%s\\n' '{\n  \"valid\": true,\n  \"stage\": \"component-candidate-input\",\n  \"issues\": []\n}'\n",
+    );
     fs::set_permissions(&validator, fs::Permissions::from_mode(0o755))
         .expect("make pinned validator executable");
     write(
@@ -284,8 +291,177 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 && !stage
                     .join("inputs/component-candidate-input.validation.json")
                     .exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
                 && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
             "{name} must not emit candidate outputs or rewrite its sealed manifest"
+        );
+    }
+
+    // The pinned validator's JSON is intentionally pretty-printed in the
+    // primary positive path.  Exercise the same runner boundary with compact
+    // JSON and with semantically invalid or misleading reports; a substring
+    // scan must never promote those reports to an accepted candidate.
+    for (name, report, accepted) in [
+        (
+            "compact-validator-report",
+            "{\"valid\":true,\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            true,
+        ),
+        (
+            "false-validator-report",
+            "{\"valid\":false,\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            false,
+        ),
+        (
+            "string-validator-report",
+            "{\"valid\":\"true\",\"stage\":\"component-candidate-input\",\"issues\":[]}",
+            false,
+        ),
+        (
+            "nested-validator-report",
+            "{\"valid\":false,\"stage\":\"component-candidate-input\",\"issues\":[\"{\\\"valid\\\":true}\"]}",
+            false,
+        ),
+        ("malformed-validator-report", "{\"valid\":true", false),
+    ] {
+        let variant = temp.join(format!("{name}-inputs"));
+        copy_tree(&input, &variant);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&variant)
+            .status()
+            .expect("make validator-report variant writable");
+        let variant_validator = variant.join("kanon-component-candidate-input");
+        write(
+            &variant_validator,
+            &format!("#!/bin/sh\nprintf '%s\\n' '{report}'\n"),
+        );
+        fs::set_permissions(&variant_validator, fs::Permissions::from_mode(0o755))
+            .expect("make report validator executable");
+        let receipt = variant.join("kanon-component-candidate-input.receipt");
+        write(
+            &receipt,
+            &format!(
+                "revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nbinary_sha256 = \"{}\"\n",
+                sha256(&variant_validator)
+            ),
+        );
+        let tuple = variant.join("expected-tuple.toml");
+        let original = fs::read_to_string(&tuple).expect("read validator-report tuple");
+        write(
+            &tuple,
+            &original.replacen(
+                &format!(
+                    "validator_binary_sha256 = \"sha256:{}\"",
+                    sha256(&validator)
+                ),
+                &format!(
+                    "validator_binary_sha256 = \"sha256:{}\"",
+                    sha256(&variant_validator)
+                ),
+                1,
+            ),
+        );
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&variant)
+            .status()
+            .expect("reseal validator-report variant");
+        let stage = unseeded_stage(name);
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let result = run(&stage, &variant);
+        assert_eq!(
+            result.status.success(),
+            accepted,
+            "{name} produced unexpected stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        if accepted {
+            assert!(
+                stage
+                    .join("inputs/component-candidate-input.toml")
+                    .is_file()
+            );
+        } else {
+            assert!(
+                String::from_utf8_lossy(&result.stderr)
+                    .contains("Kanon validator rejected emitted inputs")
+                    && !stage.join("inputs/component-candidate-input.toml").exists()
+                    && !stage.join("inputs/provenance-tuple.toml").exists()
+                    && !stage
+                        .join("inputs/component-candidate-input.validation.json")
+                        .exists()
+                    && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+                "{name} must fail before candidate output or manifest mutation"
+            );
+        }
+    }
+
+    // Each checked move is a normal-process failure boundary.  The producer
+    // must roll back only its new outputs, retaining the source-owned witness
+    // and the pre-producer manifest so a consumer cannot accept a partial set.
+    for publication in ["candidate", "tuple", "report"] {
+        let stage = unseeded_stage(&format!("publish-{publication}-failure"));
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let failed = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(&input)
+            .env(
+                "DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE",
+                publication,
+            )
+            .output()
+            .expect("inject provenance publication failure");
+        assert!(
+            !failed.status.success()
+                && String::from_utf8_lossy(&failed.stderr).contains("could not publish validated"),
+            "{publication} publication fault must fail closed: {}",
+            String::from_utf8_lossy(&failed.stderr)
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+            "{publication} publication fault must leave no generated partial state"
+        );
+    }
+
+    // The manifest is the completion boundary consumed by later stages.  A
+    // failure or ordinary interrupt after its replacement must restore the
+    // exact pre-producer bytes and remove every generated document.
+    for fault in ["fault", "signal"] {
+        let stage = unseeded_stage(&format!("post-manifest-{fault}-failure"));
+        let manifest_before =
+            fs::read(stage.join("f05-inputs.sha256")).expect("read pre-producer manifest bytes");
+        let failed = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(&input)
+            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault)
+            .output()
+            .expect("inject post-manifest publication failure");
+        assert!(
+            !failed.status.success(),
+            "{fault} post-manifest fault must fail closed"
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && fs::read(stage.join("f05-inputs.sha256"))
+                    .expect("read restored pre-producer manifest")
+                    == manifest_before,
+            "{fault} post-manifest fault must restore the original manifest and leave no generated state"
         );
     }
     let accepted = run(&sealed, &input);
@@ -959,12 +1135,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "diagnostics must remain outside the supplied attempt root"
     );
     assert!(
-        Command::new("shasum")
-            .args(["-a", "256", "-c", "f05-inputs.sha256"])
-            .current_dir(attempt.join("closure"))
-            .status()
-            .expect("verify copied manifest")
-            .success(),
+        verify_f05_manifest(&attempt.join("closure")),
         "copied closure manifest must bind the copied vendor configuration"
     );
 
@@ -2082,6 +2253,24 @@ fn plugin_process_promotion_is_same_artifact_fail_closed_and_never_builds() {
         }
     }
 
+    // Alma Linux supplies sha256sum but not shasum.  A successful promotion
+    // must therefore use the portable primary without falling through to this
+    // deliberately failing compatibility marker.
+    #[cfg(target_os = "linux")]
+    write(
+        markers.join("shasum"),
+        &format!(
+            "#!/bin/sh\nprintf '%s\\n' shasum >> \"{}\"\nexit 97\n",
+            marker_log.display()
+        ),
+    );
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(markers.join("shasum"), fs::Permissions::from_mode(0o755))
+            .expect("make forbidden shasum marker executable");
+    }
+
     let script = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../packaging/debian/promote-plugin-process-package.sh");
     let run = |deb: &Path, sidecar: &Path, expected: &str, destination: &Path| {
@@ -2279,6 +2468,18 @@ fn sha256(path: &Path) -> String {
         .next()
         .expect("hash value")
         .to_owned()
+}
+
+fn verify_f05_manifest(root: &Path) -> bool {
+    Command::new("bash")
+        .args([
+            "-ceu",
+            "if command -v sha256sum >/dev/null 2>&1; then sha256sum -c f05-inputs.sha256; elif command -v shasum >/dev/null 2>&1; then shasum -a 256 -c f05-inputs.sha256; else exit 127; fi",
+        ])
+        .current_dir(root)
+        .status()
+        .expect("verify fixture manifest")
+        .success()
 }
 
 fn copy_tree(from: &Path, to: &Path) {

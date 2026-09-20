@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.186.28 - Unreleased
+
+- Parse the pinned Kanon component-candidate validator report as structured
+  JSON. A top-level boolean success result, its expected stage, and an issues
+  array are required before the source-only provenance stage can emit a
+  candidate; formatted valid JSON is accepted while misleading or malformed
+  reports fail closed before package work.
+
 ## 0.186.22 - Unreleased
 
 - Require each hash-bound staged Cargo, Rustc, Trunk and WebAssembly helper to
