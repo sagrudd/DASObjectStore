@@ -80,6 +80,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "compiled-dependency-witness.json",
         "dependency-witness-receipt.toml",
         "component-candidate-input.validation.json",
+        "package-recipe.json",
         "provenance-tuple.toml",
     ] {
         let path = sealed.join("inputs").join(name);
@@ -111,11 +112,10 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         input.join("registry.toml"),
         "[products.dasobjectstore]\nbinaries = [\"dasobjectstore\"]\n",
     );
-    fs::copy(
-        sealed.join("inputs/package-recipe.json"),
+    write(
         input.join("package-recipe.json"),
-    )
-    .expect("copy immutable recipe");
+        "{\"package\":\"fixture\"}\n",
+    );
     let validator = input.join("kanon-component-candidate-input");
     executable(&validator, "{\"valid\":true}");
     write(
@@ -170,6 +170,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         for name in [
             "component-candidate-input.toml",
             "component-candidate-input.validation.json",
+            "package-recipe.json",
             "provenance-tuple.toml",
         ] {
             let path = stage.join("inputs").join(name);
@@ -291,6 +292,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 && !stage
                     .join("inputs/component-candidate-input.validation.json")
                     .exists()
+                && !stage.join("inputs/package-recipe.json").exists()
                 && !stage.join("inputs/provenance-tuple.toml").exists()
                 && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
             "{name} must not emit candidate outputs or rewrite its sealed manifest"
@@ -387,6 +389,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
                 String::from_utf8_lossy(&result.stderr)
                     .contains("Kanon validator rejected emitted inputs")
                     && !stage.join("inputs/component-candidate-input.toml").exists()
+                    && !stage.join("inputs/package-recipe.json").exists()
                     && !stage.join("inputs/provenance-tuple.toml").exists()
                     && !stage
                         .join("inputs/component-candidate-input.validation.json")
@@ -400,7 +403,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     // Each checked move is a normal-process failure boundary.  The producer
     // must roll back only its new outputs, retaining the source-owned witness
     // and the pre-producer manifest so a consumer cannot accept a partial set.
-    for publication in ["candidate", "tuple", "report"] {
+    for publication in ["candidate", "recipe", "tuple", "report"] {
         let stage = unseeded_stage(&format!("publish-{publication}-failure"));
         let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
         let failed = Command::new("bash")
@@ -423,6 +426,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         );
         assert!(
             !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/package-recipe.json").exists()
                 && !stage.join("inputs/provenance-tuple.toml").exists()
                 && !stage
                     .join("inputs/component-candidate-input.validation.json")
@@ -454,6 +458,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         );
         assert!(
             !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/package-recipe.json").exists()
                 && !stage.join("inputs/provenance-tuple.toml").exists()
                 && !stage
                     .join("inputs/component-candidate-input.validation.json")
@@ -479,6 +484,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     assert!(sealed
         .join("inputs/component-candidate-input.validation.json")
         .is_file());
+    assert_eq!(
+        fs::read(sealed.join("inputs/package-recipe.json")).expect("read staged package recipe"),
+        fs::read(input.join("package-recipe.json")).expect("read validated package recipe"),
+        "normal provenance must publish the exact validated package recipe into the sealed closure"
+    );
+    assert!(
+        verify_f05_manifest(&sealed),
+        "the closure manifest must bind the staged package recipe"
+    );
     let candidate = fs::read_to_string(sealed.join("inputs/component-candidate-input.toml"))
         .expect("read emitted candidate");
     assert!(
@@ -582,6 +596,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "component-candidate-input.toml",
         "source-tree",
         "compiled-dependency-witness.json",
+        "package-recipe.json",
     ] {
         fs::remove_file(fresh.join("inputs").join(name)).expect("clear mismatch output");
     }
@@ -629,6 +644,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "compiled-dependency-witness.json",
         "dependency-witness-receipt.toml",
         "component-candidate-input.validation.json",
+        "package-recipe.json",
         "provenance-tuple.toml",
     ] {
         let path = missing_vendor.join("inputs").join(name);
@@ -1012,6 +1028,10 @@ fn external_attempt_harness_confines_writes_to_a_copied_closure() {
         "stage_cache_reuse=PASS",
         "leased stage cache root must be immutable before reuse",
         "chmod -R u+w \"$copied_closure\"",
+        "attempt_cargo_home=\"$attempt_root/cargo-home\"",
+        "copied closure Cargo cache must remain immutable",
+        "release build requires a physical per-attempt Cargo cache copy",
+        "release build altered the copied closure instead of its per-attempt Cargo cache",
         "copied_manifest=\"$copied_source/Cargo.toml\"",
         "copied_lock=\"$copied_source/Cargo.lock\"",
         "copied closure requires a physical non-symlink",
@@ -1047,7 +1067,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'umask=%s\\n' \"$(umask)\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'cargo_home=%s\\n' \"$CARGO_HOME\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'umask=%s\\n' \"$(umask)\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'mutable Cargo cache\\n' > \"$CARGO_HOME/.global-cache/fixture\"\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
     );
     #[cfg(unix)]
     {
@@ -1136,7 +1156,13 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     );
     assert!(
         verify_f05_manifest(&attempt.join("closure")),
-        "copied closure manifest must bind the copied vendor configuration"
+        "a mutable Cargo global cache must not invalidate the copied closure manifest"
+    );
+    assert!(
+        cargo_invocation.contains("cargo_home=/var/tmp/cargo-home")
+            && attempt.join("cargo-home/.global-cache/fixture").is_file()
+            && !attempt.join("closure/cargo-home/.global-cache/fixture").exists(),
+        "the release build must receive a separate mutable Cargo cache outside the manifest-bound copied closure"
     );
 
     let escape = temp.join("escape");

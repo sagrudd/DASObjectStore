@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.186.30 - Unreleased
+
+- Keep the manifest-bound copied Cargo cache immutable during the plugin-only
+  release build by using a separate writable per-attempt cache. The validated
+  package recipe is now published and hash-bound in the sealed provenance
+  inputs required by the staged web preparer. This is a source-contract repair;
+  it does not establish package, installation, activation, or deployment
+  acceptance.
+
 ## 0.186.28 - Unreleased
 
 - Parse the pinned Kanon component-candidate validator report as structured
