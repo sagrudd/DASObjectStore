@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.186.34 - Unreleased
+
+- Make ``dasobjectstore-remote config repair`` migrate a persisted retired
+  ``local-password`` top-level authority to Pistis without changing scoped
+  sessions, trust, profile associations, or other configuration metadata. An
+  apply creates a private diagnostic backup and commits a new generation;
+  dry-run remains non-mutating.
+
 ## 0.186.33 - Unreleased
 
 - Align the product manifest with the workspace and remote package version so
