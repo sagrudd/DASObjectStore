@@ -21,7 +21,10 @@ fn provenance_stage_is_source_owned_and_fails_closed_before_package_work() {
         "rejects a dirty, wrong, or expected-candidate-mismatched source archive",
         "rejects an unpinned Kanon validator",
         "binary_sha256",
-        "validator_sha=$(tool_input_toml_value \"$validator_receipt\" binary_sha256)",
+        "validator_sha=$(canonical_sha256_file \"$validator_receipt\" binary_sha256)",
+        "canonical_sha256_digest",
+        "requires the sha256 algorithm",
+        "requires exactly 64 lower-case SHA-256 hex characters",
         "toolchain_mode_from_receipt",
         "native-tool-bundle@sha256:$inventory_sha",
         "rejects mixed native and container modes",
@@ -124,7 +127,7 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
     write(
         input.join("expected-tuple.toml"),
         &format!(
-            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\nrecipe_sha256 = \"{}\"\nvalidator_revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nvalidator_binary_sha256 = \"{}\"\ntoolchain_kind = \"native-tool-bundle\"\ntool_inventory_sha256 = \"{}\"\n",
+            "source_revision = \"{revision}\"\nworkspace_version = \"0.186.17\"\nsource_git_tree = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"\nsource_archive_sha256 = \"sha256:{}\"\nsource_content_sha256 = \"sha256:{}\"\nrecipe_sha256 = \"sha256:{}\"\nvalidator_revision = \"4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7\"\nvalidator_binary_sha256 = \"sha256:{}\"\ntoolchain_kind = \"native-tool-bundle\"\ntool_inventory_sha256 = \"{}\"\n",
             sha256(&archive),
             tree_sha256(&sealed.join("source")),
             sha256(&input.join("package-recipe.json")),
@@ -149,6 +152,51 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             .output()
             .expect("run provenance stage")
     };
+    let unseeded_stage = |name: &str| {
+        let stage = temp.join(name);
+        copy_tree(&sealed, &stage);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&stage)
+            .status()
+            .expect("make denial stage writable");
+        for name in [
+            "component-candidate-input.toml",
+            "component-candidate-input.validation.json",
+            "provenance-tuple.toml",
+        ] {
+            let path = stage.join("inputs").join(name);
+            if path.exists() {
+                fs::remove_file(path).expect("clear unseeded producer output");
+            }
+        }
+        fs::remove_file(stage.join("f05-inputs.sha256")).expect("clear unseeded producer manifest");
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(stage.join("source"))
+            .status()
+            .expect("seal unseeded source inputs before provenance staging");
+        Command::new("chmod")
+            .args(["a-w"])
+            .args([
+                stage
+                    .join("inputs/source-tree")
+                    .to_str()
+                    .expect("source-tree path"),
+                stage
+                    .join("inputs/compiled-dependency-witness.json")
+                    .to_str()
+                    .expect("witness path"),
+                stage
+                    .join("inputs/dependency-witness-receipt.toml")
+                    .to_str()
+                    .expect("witness receipt path"),
+            ])
+            .status()
+            .expect("seal copied dependency-witness inputs before tuple denial");
+        write_f05_manifest(&stage);
+        stage
+    };
     let witness = Command::new("bash")
         .arg(&script)
         .args(["--sealed-root"])
@@ -163,27 +211,98 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         "dependency-witness stage stderr: {}",
         String::from_utf8_lossy(&witness.stderr)
     );
+
+    // Jenkins #348 emits canonical tuple digests while the admitted Kanon
+    // receipt uses its schema's bare `binary_sha256` field.  The consumer must
+    // normalize that one trusted legacy spelling, then reject every malformed,
+    // unsupported, or byte-mismatched tuple digest before it emits a candidate.
+    for (name, replacement, expected_error) in [
+        (
+            "unsupported-recipe-algorithm",
+            ("recipe_sha256 = \"sha256:", "recipe_sha256 = \"sha512:"),
+            "recipe_sha256 requires the sha256 algorithm",
+        ),
+        (
+            "duplicate-validator-prefix",
+            (
+                "validator_binary_sha256 = \"sha256:",
+                "validator_binary_sha256 = \"sha256:sha256:",
+            ),
+            "validator_binary_sha256 requires exactly 64 lower-case SHA-256 hex characters",
+        ),
+        (
+            "tampered-recipe-digest",
+            (
+                "recipe_sha256 = \"sha256:",
+                "recipe_sha256 = \"sha256:ffffffff",
+            ),
+            "rejects an expected tuple not bound to the generated dependency witness",
+        ),
+    ] {
+        let variant = temp.join(format!("{name}-inputs"));
+        copy_tree(&input, &variant);
+        Command::new("chmod")
+            .args(["-R", "u+w"])
+            .arg(&variant)
+            .status()
+            .expect("make tuple variant writable");
+        let tuple = variant.join("expected-tuple.toml");
+        let original = fs::read_to_string(&tuple).expect("read canonical expected tuple");
+        let mutated = if name == "tampered-recipe-digest" {
+            original
+                .lines()
+                .map(|line| {
+                    if line.starts_with("recipe_sha256 = ") {
+                        "recipe_sha256 = \"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\""
+                    } else {
+                        line
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        } else {
+            original.replacen(replacement.0, replacement.1, 1)
+        };
+        write(&tuple, &mutated);
+        Command::new("chmod")
+            .args(["-R", "a-w"])
+            .arg(&variant)
+            .status()
+            .expect("reseal tuple variant");
+        let stage = unseeded_stage(name);
+        let manifest_before = sha256(&stage.join("f05-inputs.sha256"));
+        let denied = run(&stage, &variant);
+        assert!(
+            !denied.status.success()
+                && String::from_utf8_lossy(&denied.stderr).contains(expected_error),
+            "{name} must deny through the canonical digest boundary: {}",
+            String::from_utf8_lossy(&denied.stderr)
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && sha256(&stage.join("f05-inputs.sha256")) == manifest_before,
+            "{name} must not emit candidate outputs or rewrite its sealed manifest"
+        );
+    }
     let accepted = run(&sealed, &input);
     assert!(
         accepted.status.success(),
         "producer stderr: {}",
         String::from_utf8_lossy(&accepted.stderr)
     );
-    assert!(
-        sealed
-            .join("inputs/component-candidate-input.toml")
-            .is_file()
-    );
-    assert!(
-        sealed
-            .join("inputs/compiled-dependency-witness.json")
-            .is_file()
-    );
-    assert!(
-        sealed
-            .join("inputs/component-candidate-input.validation.json")
-            .is_file()
-    );
+    assert!(sealed
+        .join("inputs/component-candidate-input.toml")
+        .is_file());
+    assert!(sealed
+        .join("inputs/compiled-dependency-witness.json")
+        .is_file());
+    assert!(sealed
+        .join("inputs/component-candidate-input.validation.json")
+        .is_file());
     let candidate = fs::read_to_string(sealed.join("inputs/component-candidate-input.toml"))
         .expect("read emitted candidate");
     assert!(
@@ -2466,11 +2585,9 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(
-        sealed
-            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-            .is_dir()
-    );
+    assert!(sealed
+        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+        .is_dir());
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);

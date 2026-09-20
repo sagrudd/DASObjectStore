@@ -202,6 +202,36 @@ tool_input_toml_optional_value() {
   [[ "$count" -eq 0 ]] || printf '%s\n' "$value"
 }
 
+# Digest-bearing schema fields are accepted only as lower-case SHA-256
+# digests.  Older receipts identify their algorithm in the field name and
+# therefore contain the bare hexadecimal value; tuples serialize the same
+# value explicitly as `sha256:<hex>`.  Normalize both representations at the
+# boundary, then compare only the explicit canonical form.  This prevents a
+# prefix spelling difference from weakening a byte-identity comparison while
+# still rejecting an unsupported algorithm, malformed digest, or duplicate
+# prefix.
+canonical_sha256_digest() {
+  local value=$1 label=$2 digest
+  case "$value" in
+    sha256:*)
+      digest=${value#sha256:}
+      ;;
+    *:*)
+      die "$label requires the sha256 algorithm"
+      ;;
+    *)
+      digest=$value
+      ;;
+  esac
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "$label requires exactly 64 lower-case SHA-256 hex characters"
+  printf 'sha256:%s\n' "$digest"
+}
+
+canonical_sha256_file() {
+  local file=$1 label=$2
+  canonical_sha256_digest "$(tool_input_toml_value "$file" "$label")" "$label"
+}
+
 toolchain_mode_from_receipt() {
   local receipt=$1 kind image image_sha inventory_sha
   kind=$(tool_input_toml_value "$receipt" toolchain_kind)
@@ -464,8 +494,8 @@ produce_closure_provenance_inputs() {
   revision=$(tool_input_toml_value "$identity" source_revision)
   version=$(tool_input_toml_value "$identity" workspace_version)
   tree=$(tool_input_toml_value "$identity" git_tree)
-  archive_sha=$(tool_input_toml_value "$identity" source_archive_sha256)
-  source_content_sha=$(tool_input_toml_value "$identity" source_content_sha256)
+  archive_sha=$(canonical_sha256_file "$identity" source_archive_sha256)
+  source_content_sha=$(canonical_sha256_file "$identity" source_content_sha256)
   [[ "$revision" =~ ^[0-9a-f]{40}$ && "$version" = "$(workspace_package_version "$source/Cargo.toml")" && "$tree" =~ ^[0-9a-f]{40}$ && "$archive_sha" = "sha256:$(sha256_file "$archive")" && "$source_content_sha" = "sha256:$(sha256_tree "$source")" ]] || die 'provenance input stage rejects a dirty or source-identity-mismatched archive'
   lock_sha="sha256:$(sha256_file "$source/Cargo.lock")"
   [[ -d "$source/vendor" && ! -L "$source/vendor" ]] || die 'provenance input stage requires a physical dependency closure'
@@ -480,13 +510,17 @@ produce_closure_provenance_inputs() {
     printf 'closure_stage_dependency_witness=PASS source_revision=%s cargo_lock_sha256=%s\n' "$revision" "$lock_sha"
     return 0
   fi
-  local validator_sha
-  validator_sha=$(tool_input_toml_value "$validator_receipt" binary_sha256)
-  [[ "$validator_sha" =~ ^[0-9a-f]{64}$ && -x "$validator" && "$(sha256_file "$validator")" = "$validator_sha" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
+  local validator_sha expected_archive_sha expected_source_content_sha expected_recipe_sha expected_validator_sha
+  validator_sha=$(canonical_sha256_file "$validator_receipt" binary_sha256)
+  [[ -x "$validator" && "sha256:$(sha256_file "$validator")" = "$validator_sha" && "$(tool_input_toml_value "$validator_receipt" revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an unpinned Kanon validator'
   expected_revision=$(tool_input_toml_value "$expected" source_revision)
   expected_version=$(tool_input_toml_value "$expected" workspace_version)
   expected_tree=$(tool_input_toml_value "$expected" source_git_tree)
-  [[ "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$tree" = "$expected_tree" && "$archive_sha" = "$(tool_input_toml_value "$expected" source_archive_sha256)" && "$source_content_sha" = "$(tool_input_toml_value "$expected" source_content_sha256)" && "$(sha256_file "$recipe")" = "$(tool_input_toml_value "$expected" recipe_sha256)" && "$validator_sha" = "$(tool_input_toml_value "$expected" validator_binary_sha256)" && "$(tool_input_toml_value "$expected" validator_revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an expected tuple not bound to the generated dependency witness'
+  expected_archive_sha=$(canonical_sha256_file "$expected" source_archive_sha256)
+  expected_source_content_sha=$(canonical_sha256_file "$expected" source_content_sha256)
+  expected_recipe_sha=$(canonical_sha256_file "$expected" recipe_sha256)
+  expected_validator_sha=$(canonical_sha256_file "$expected" validator_binary_sha256)
+  [[ "$revision" = "$expected_revision" && "$version" = "$expected_version" && "$tree" = "$expected_tree" && "$archive_sha" = "$expected_archive_sha" && "$source_content_sha" = "$expected_source_content_sha" && "sha256:$(sha256_file "$recipe")" = "$expected_recipe_sha" && "$validator_sha" = "$expected_validator_sha" && "$(tool_input_toml_value "$expected" validator_revision)" = '4a7b1a16c9864c3eb0b66b60b4bffbe752052cc7' ]] || die 'provenance input stage rejects an expected tuple not bound to the generated dependency witness'
   expected_mode=$(toolchain_mode_from_receipt "$expected")
   if [[ "$expected_mode" = native-tool-bundle ]]; then
     inventory_sha=$(tool_input_toml_value "$expected" tool_inventory_sha256)
