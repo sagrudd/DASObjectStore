@@ -161,10 +161,7 @@ pub fn doctor_config(path: &Path) -> Result<RemoteConfigDoctorReport, RemoteConf
         if duplicate_session_count > 0 || !profile_associations_consistent {
             Some("dasobjectstore-remote config repair --dry-run --json".to_string())
         } else if stale_session_count > 0 {
-            Some(
-                "dasobjectstore-remote login HOST OBJECTSTORE --username USER --set-s3-config"
-                    .to_string(),
-            )
+            Some("dasobjectstore-remote login HOST OBJECTSTORE --set-s3-config".to_string())
         } else {
             None
         };
@@ -431,7 +428,7 @@ fn repair_config_with(
         read_config_for_diagnostics(path)?.ok_or_else(|| RemoteConfigError::Integrity {
             code: "configuration_migration_required",
             message: "no remote authentication state exists".to_string(),
-            remediation: "dasobjectstore-remote login HOST OBJECTSTORE --username USER".to_string(),
+            remediation: "dasobjectstore-remote login HOST OBJECTSTORE".to_string(),
         })?;
     let plan = reconcile_session_bindings_with(&config, enrolled_identity);
     let state = read_state_pointer(parent)?;

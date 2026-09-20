@@ -23,7 +23,9 @@ pub(super) fn run_login(
         host_or_ip: args.host_or_ip().to_string(),
         https_port: args.https_port(),
         requested_object_store: Some(args.object_store().to_string()),
-        client_request_id: Some(format!("login:{}:{}", args.username(), args.object_store())),
+        // The approved subject is supplied only by the signed Pistis exchange.
+        // It must never be requested from, or synthesized by, the remote client.
+        client_request_id: None,
         callback_port: args.callback_port(),
         timeout: Duration::from_secs(args.timeout_seconds()),
         open_browser: !args.no_browser(),
@@ -39,14 +41,9 @@ pub(super) fn run_login(
             Ok(())
         },
     )?;
-    if outcome.exchange.exchange.approved_actor != args.username() {
-        return Err(RemoteRunError::UploadRouting(
-            "approved Pistis actor did not match the requested --username; no session or AWS profile was committed".to_string(),
-        ));
-    }
     install_easyconnect_result(cli, &outcome)?;
     if args.set_s3_config() {
-        install_login_profile(cli, args, &outcome)?;
+        install_login_profile(cli, args)?;
     }
     write_easyconnect_pairing(&outcome, writer)?;
     if args.set_s3_config() {
@@ -58,11 +55,7 @@ pub(super) fn run_login(
     Ok(())
 }
 
-fn install_login_profile(
-    cli: &RemoteCli,
-    args: &LoginArgs,
-    outcome: &crate::easyconnect::RemoteEasyconnectCompletedPairing,
-) -> Result<(), RemoteRunError> {
+fn install_login_profile(cli: &RemoteCli, args: &LoginArgs) -> Result<(), RemoteRunError> {
     let path = config_path(cli)?;
     let transaction_lock = acquire_config_transaction(&path)?;
     let mut config = read_optional_config(&path)?.ok_or_else(|| {
@@ -102,7 +95,10 @@ fn install_login_profile(
         })?;
     session_binding.s3_profile = Some(profile.clone());
     config.profile = profile;
-    config.username = Some(outcome.exchange.exchange.approved_actor.clone());
+    // A pairing subject is an opaque, signed authority result, not a local
+    // username. Do not retain a stale or human-readable username from an
+    // earlier client generation.
+    config.username = None;
     write_config_locked(&path, &config, &transaction_lock)?;
     Ok(())
 }
@@ -340,8 +336,31 @@ fn install_easyconnect_result(
     config.endpoint_url = outcome.exchange.s3.endpoint_url.clone();
     config.region = outcome.exchange.s3.region.clone();
     config.auth_authority = auth_authority;
+    clear_legacy_username_for_pistis_pairing(&mut config);
     write_config(&path, &config)?;
     Ok(())
+}
+
+fn clear_legacy_username_for_pistis_pairing(config: &mut RemoteConfig) {
+    // Never carry a local human-readable identity into a Pistis pairing. The
+    // paired actor is supplied by the verified exchange and is the only
+    // authority subject recorded for this appliance.
+    config.username = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pistis_pairing_clears_a_legacy_local_username() {
+        let mut config = empty_config();
+        config.username = Some("obsolete-local-user".to_string());
+
+        clear_legacy_username_for_pistis_pairing(&mut config);
+
+        assert!(config.username.is_none());
+    }
 }
 
 pub(super) fn write_easyconnect_contract(

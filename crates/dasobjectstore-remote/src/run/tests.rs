@@ -60,6 +60,24 @@ fn retired_password_options_fail_before_any_remote_work() {
 }
 
 #[test]
+fn login_rejects_a_global_username_before_any_pairing_work() {
+    let cli = RemoteCli::try_parse_from([
+        "dasobjectstore-remote",
+        "--username",
+        "operator",
+        "login",
+        "192.168.1.48",
+        "allele-anchor",
+    ])
+    .expect("legacy global spelling remains parseable so login can reject it safely");
+
+    let error = run(&cli, &mut Vec::new()).expect_err("login must not accept an operator identity");
+    assert!(error
+        .to_string()
+        .contains("opaque subject from the signed Pistis approval"));
+}
+
+#[test]
 fn completion_object_version_preserves_sqlite_integer_range() {
     assert_eq!(completion_object_version(&format!("{:016x}", 42)), 42);
     assert_eq!(
