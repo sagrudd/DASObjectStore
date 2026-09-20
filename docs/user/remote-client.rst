@@ -998,6 +998,15 @@ Apply a reported safe migration with::
 
    dasobjectstore-remote config repair --apply --json
 
+If the report identifies a persisted retired ``local-password`` authority,
+this repair changes only the top-level authority to ``pistis``. It preserves
+the appliance-bound session, trust, profile association, and other metadata,
+creates a private diagnostic backup, then commits a new generation atomically.
+It never requests a password, opens a browser, renews a session, or contacts
+an appliance. Review the dry-run report first; if the session itself is expired
+or otherwise invalid, complete the normal Pistis EasyConnect workflow after the
+configuration migration.
+
 Doctor, repair, and normal session lookup all apply the same rule: there may
 be exactly one authoritative session and one S3 profile association for an
 ObjectStore, even when an appliance identity has changed. A dry run lists the

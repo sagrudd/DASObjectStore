@@ -69,15 +69,23 @@ pub fn read_optional_config(path: &Path) -> Result<Option<RemoteConfig>, RemoteC
     }
 }
 
-fn archive_legacy_config(parent: &Path, raw: &[u8]) -> Result<(), RemoteConfigError> {
+fn archive_config_diagnostic(
+    parent: &Path,
+    label: &str,
+    raw: &[u8],
+) -> Result<(), RemoteConfigError> {
     let diagnostics = parent.join("diagnostics");
     fs::create_dir_all(&diagnostics)?;
     let archive = diagnostics.join(format!(
-        "legacy-remote-{}-{}.json",
+        "{label}-remote-{}-{}.json",
         std::process::id(),
         GENERATION_SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     write_private_file(&archive, raw)
+}
+
+fn archive_legacy_config(parent: &Path, raw: &[u8]) -> Result<(), RemoteConfigError> {
+    archive_config_diagnostic(parent, "legacy", raw)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -203,6 +211,18 @@ struct SessionReconciliationPlan {
     config: RemoteConfig,
     retain_bindings: Vec<RemoteConfigRepairBinding>,
     retire_bindings: Vec<RemoteConfigRepairBinding>,
+}
+
+fn migrate_retired_authority_to_pistis(config: &mut RemoteConfig) -> bool {
+    if !config.auth_authority.is_retired() {
+        return false;
+    }
+    // The top-level authority selects the remote client's authenticated
+    // integration. Scoped sessions, trust records, appliance associations,
+    // and their credential metadata are already bound data and must not be
+    // reconstructed from a retired local-password setting.
+    config.auth_authority = RemoteAuthAuthority::Pistis;
+    true
 }
 
 fn read_config_for_diagnostics(path: &Path) -> Result<Option<RemoteConfig>, RemoteConfigError> {
@@ -430,12 +450,30 @@ fn repair_config_with(
             message: "no remote authentication state exists".to_string(),
             remediation: "dasobjectstore-remote login HOST OBJECTSTORE".to_string(),
         })?;
-    let plan = reconcile_session_bindings_with(&config, enrolled_identity);
     let state = read_state_pointer(parent)?;
+    let mut plan = reconcile_session_bindings_with(&config, enrolled_identity);
+    let retired_authority_migrated = migrate_retired_authority_to_pistis(&mut plan.config);
     let changed = plan.config != config;
     let write_required = changed || had_legacy;
-    if apply && had_legacy {
-        archive_legacy_config(parent, &fs::read(path)?)?;
+    if apply && (had_legacy || retired_authority_migrated) {
+        let current_raw = match state.as_ref() {
+            Some(pointer) => fs::read(
+                parent
+                    .join("generations")
+                    .join(&pointer.current_generation)
+                    .join("remote.json"),
+            )?,
+            None => fs::read(path)?,
+        };
+        archive_config_diagnostic(
+            parent,
+            if had_legacy {
+                "legacy"
+            } else {
+                "retired-local-password"
+            },
+            &current_raw,
+        )?;
     }
     let next_generation = if apply && write_required {
         write_config_locked(
@@ -450,9 +488,11 @@ fn repair_config_with(
     Ok(RemoteConfigRepairReport {
         schema_version: "dasobjectstore.remote_config_repair.v2",
         applied: apply && write_required,
-        backup_created: apply && had_legacy,
+        backup_created: apply && (had_legacy || retired_authority_migrated),
         current_generation: next_generation,
-        action: if !apply && had_legacy && changed {
+        action: if !apply && retired_authority_migrated && changed {
+            "migrate_retired_authority_to_pistis".to_string()
+        } else if !apply && had_legacy && changed {
             "migrate_and_reconcile_legacy_configuration".to_string()
         } else if !apply && had_legacy {
             "migrate_legacy_configuration".to_string()
@@ -460,6 +500,8 @@ fn repair_config_with(
             "reconcile_authoritative_store_bindings".to_string()
         } else if !apply {
             "validate_current_generation".to_string()
+        } else if retired_authority_migrated && changed {
+            "retired_authority_migrated_to_pistis".to_string()
         } else if had_legacy && changed {
             "legacy_configuration_migrated_and_reconciled".to_string()
         } else if had_legacy {
@@ -735,9 +777,12 @@ pub(super) fn redact_identifier(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::auth::RemoteAuthAuthority;
+    use crate::cli::RemoteCli;
     use crate::config::{
         RemoteSessionCredentials, RemoteSessionRenewalMetadata, RemoteUploadSession,
     };
+    use crate::run::run;
+    use clap::Parser;
     use uuid::Uuid;
 
     const OLD_APPLIANCE: &str = "standalone-dasobjectstore@2cb548dc079ab9f55d918bcc";
@@ -838,6 +883,103 @@ mod tests {
         assert!(plan.retain_bindings.is_empty());
     }
 
+    #[test]
+    fn repair_migrates_retired_authority_without_losing_scoped_state() {
+        let root = std::env::temp_dir().join(format!(
+            "das-remote-config-retired-authority-{}",
+            Uuid::new_v4()
+        ));
+        let path = root.join("remote.json");
+        let binding = binding(NEW_APPLIANCE, "PERSISTEDSESSION", "2099-01-02T00:00:00Z");
+        let config = RemoteConfig {
+            schema_version: REMOTE_CONFIG_SCHEMA_VERSION.to_string(),
+            generation: 7,
+            endpoint_url: "http://192.168.1.48:3900".to_string(),
+            region: "garage".to_string(),
+            profile: "dasobjectstore-epic_collection".to_string(),
+            auth_authority: RemoteAuthAuthority::LocalPassword,
+            username: Some("legacy-display-name".to_string()),
+            credential_helper: None,
+            default_appliance_id: Some(NEW_APPLIANCE.to_string()),
+            paired_appliances: Vec::new(),
+            s3_profiles: vec![profile_association_from_binding(&binding).expect("profile")],
+            session_bindings: vec![binding],
+        };
+        write_config(&path, &config).expect("write persisted generation");
+        let before = read_optional_config(&path)
+            .expect("read persisted generation")
+            .expect("configuration");
+
+        let dry_run = repair_config_with(&path, false, |_| None).expect("dry-run");
+        assert!(!dry_run.applied);
+        assert!(!dry_run.backup_created);
+        assert_eq!(dry_run.action, "migrate_retired_authority_to_pistis");
+        assert_eq!(dry_run.current_generation, before.generation);
+        assert_eq!(
+            read_optional_config(&path)
+                .expect("dry-run does not write")
+                .expect("configuration")
+                .auth_authority,
+            RemoteAuthAuthority::LocalPassword
+        );
+
+        let applied = repair_config_with(&path, true, |_| None).expect("apply");
+        assert!(applied.applied);
+        assert!(applied.backup_created);
+        assert_eq!(applied.action, "retired_authority_migrated_to_pistis");
+        assert_eq!(applied.current_generation, before.generation + 1);
+        assert!(applied.archived_generation.is_some());
+
+        let repaired = read_optional_config(&path)
+            .expect("read repaired configuration")
+            .expect("configuration");
+        assert_eq!(repaired.auth_authority, RemoteAuthAuthority::Pistis);
+        assert_eq!(repaired.endpoint_url, before.endpoint_url);
+        assert_eq!(repaired.region, before.region);
+        assert_eq!(repaired.profile, before.profile);
+        assert_eq!(repaired.username, before.username);
+        assert_eq!(repaired.credential_helper, before.credential_helper);
+        assert_eq!(repaired.default_appliance_id, before.default_appliance_id);
+        assert_eq!(repaired.paired_appliances, before.paired_appliances);
+        assert_eq!(repaired.s3_profiles, before.s3_profiles);
+        assert_eq!(repaired.session_bindings, before.session_bindings);
+        repaired
+            .validate_for_command()
+            .expect("Pistis authority makes configuration usable");
+
+        let backup = fs::read_dir(root.join("diagnostics"))
+            .expect("private diagnostics")
+            .map(|entry| entry.expect("diagnostic entry").path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("retired-local-password-remote-"))
+            })
+            .expect("retired authority diagnostic backup");
+        #[cfg(unix)]
+        assert_eq!(
+            std::os::unix::fs::MetadataExt::mode(&fs::metadata(&backup).expect("backup metadata"))
+                & 0o777,
+            0o600
+        );
+
+        let cli = RemoteCli::try_parse_from([
+            "dasobjectstore-remote",
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "config",
+            "show",
+            "--json",
+        ])
+        .expect("config show parses");
+        let mut output = Vec::new();
+        run(&cli, &mut output).expect("post-repair config show succeeds");
+        let rendered = String::from_utf8(output).expect("UTF-8 config show");
+        assert!(rendered.contains("\"auth_authority\": \"pistis\""));
+        assert!(!rendered.contains("local-password"));
+        let _ = fs::remove_dir_all(root);
+    }
+
     fn replacement_config() -> RemoteConfig {
         let old = binding(OLD_APPLIANCE, "OLDSESSION", "2099-01-01T00:00:00Z");
         let new = binding(NEW_APPLIANCE, "NEWSESSION", "2099-01-02T00:00:00Z");
@@ -847,7 +989,7 @@ mod tests {
             endpoint_url: "http://192.168.1.192:3900".to_string(),
             region: "garage".to_string(),
             profile: "dasobjectstore-epic_collection".to_string(),
-            auth_authority: RemoteAuthAuthority::LocalPassword,
+            auth_authority: RemoteAuthAuthority::Pistis,
             username: Some("stephen".to_string()),
             credential_helper: None,
             default_appliance_id: Some(OLD_APPLIANCE.to_string()),
