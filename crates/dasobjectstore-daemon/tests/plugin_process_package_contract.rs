@@ -1966,7 +1966,10 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     fs::create_dir(&attempt).expect("create external attempt root");
     fs::create_dir(&diagnostic).expect("create external diagnostic root");
     let staged_cargo = sealed.join("toolchain/bin/cargo");
-    write(&staged_cargo, "#!/bin/sh\nexit 0\n");
+    write(
+        &staged_cargo,
+        "#!/bin/sh\nset -eu\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'attempt-only-cargo-cache\\n' > \"$CARGO_HOME/.global-cache/cargo-sentinel\"\nexit 0\n",
+    );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
 
@@ -2048,6 +2051,19 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
             && !network_download.exists()
             && !sealed.join("tmp").exists(),
         "temporary and Trunk-cache writes must remain under the external attempt root without downloader fallback"
+    );
+    assert!(
+        attempt
+            .join("cargo-home/.global-cache/cargo-sentinel")
+            .is_file()
+            && !attempt
+                .join("closure/cargo-home/.global-cache/cargo-sentinel")
+                .exists(),
+        "fake Cargo must write only to the mutable attempt-local Cargo home"
+    );
+    assert!(
+        verify_f05_manifest(&attempt.join("closure")),
+        "the copied closure manifest must remain valid after fake Cargo and Trunk run"
     );
     assert_eq!(
         fs::read(sealed.join("f05-inputs.sha256")).expect("read sealed manifest after attempt"),
