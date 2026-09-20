@@ -351,7 +351,10 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         write(
             &tuple,
             &original.replacen(
-                &format!("validator_binary_sha256 = \"sha256:{}\"", sha256(&validator)),
+                &format!(
+                    "validator_binary_sha256 = \"sha256:{}\"",
+                    sha256(&validator)
+                ),
                 &format!(
                     "validator_binary_sha256 = \"sha256:{}\"",
                     sha256(&variant_validator)
@@ -374,7 +377,11 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             String::from_utf8_lossy(&result.stderr)
         );
         if accepted {
-            assert!(stage.join("inputs/component-candidate-input.toml").is_file());
+            assert!(
+                stage
+                    .join("inputs/component-candidate-input.toml")
+                    .is_file()
+            );
         } else {
             assert!(
                 String::from_utf8_lossy(&result.stderr)
@@ -402,13 +409,15 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             .arg(&stage)
             .args(["--stage-closure-provenance-inputs"])
             .arg(&input)
-            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE", publication)
+            .env(
+                "DASOBJECTSTORE_F05_FAIL_PROVENANCE_PUBLISH_MOVE",
+                publication,
+            )
             .output()
             .expect("inject provenance publication failure");
         assert!(
             !failed.status.success()
-                && String::from_utf8_lossy(&failed.stderr)
-                    .contains("could not publish validated"),
+                && String::from_utf8_lossy(&failed.stderr).contains("could not publish validated"),
             "{publication} publication fault must fail closed: {}",
             String::from_utf8_lossy(&failed.stderr)
         );
@@ -422,21 +431,60 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
             "{publication} publication fault must leave no generated partial state"
         );
     }
+
+    // The manifest is the completion boundary consumed by later stages.  A
+    // failure or ordinary interrupt after its replacement must restore the
+    // exact pre-producer bytes and remove every generated document.
+    for fault in ["fault", "signal"] {
+        let stage = unseeded_stage(&format!("post-manifest-{fault}-failure"));
+        let manifest_before =
+            fs::read(stage.join("f05-inputs.sha256")).expect("read pre-producer manifest bytes");
+        let failed = Command::new("bash")
+            .arg(&script)
+            .args(["--sealed-root"])
+            .arg(&stage)
+            .args(["--stage-closure-provenance-inputs"])
+            .arg(&input)
+            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault)
+            .output()
+            .expect("inject post-manifest publication failure");
+        assert!(
+            !failed.status.success(),
+            "{fault} post-manifest fault must fail closed"
+        );
+        assert!(
+            !stage.join("inputs/component-candidate-input.toml").exists()
+                && !stage.join("inputs/provenance-tuple.toml").exists()
+                && !stage
+                    .join("inputs/component-candidate-input.validation.json")
+                    .exists()
+                && fs::read(stage.join("f05-inputs.sha256"))
+                    .expect("read restored pre-producer manifest")
+                    == manifest_before,
+            "{fault} post-manifest fault must restore the original manifest and leave no generated state"
+        );
+    }
     let accepted = run(&sealed, &input);
     assert!(
         accepted.status.success(),
         "producer stderr: {}",
         String::from_utf8_lossy(&accepted.stderr)
     );
-    assert!(sealed
-        .join("inputs/component-candidate-input.toml")
-        .is_file());
-    assert!(sealed
-        .join("inputs/compiled-dependency-witness.json")
-        .is_file());
-    assert!(sealed
-        .join("inputs/component-candidate-input.validation.json")
-        .is_file());
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.toml")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/compiled-dependency-witness.json")
+            .is_file()
+    );
+    assert!(
+        sealed
+            .join("inputs/component-candidate-input.validation.json")
+            .is_file()
+    );
     let candidate = fs::read_to_string(sealed.join("inputs/component-candidate-input.toml"))
         .expect("read emitted candidate");
     assert!(
@@ -2744,9 +2792,11 @@ fn git_input_stage_admits_complete_bound_cache_and_rejects_missing_or_substitute
         run_stage(&sealed, &input).success(),
         "complete reviewed Git cache must stage"
     );
-    assert!(sealed
-        .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
-        .is_dir());
+    assert!(
+        sealed
+            .join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d/f097492")
+            .is_dir()
+    );
 
     let missing = temp.join("missing-input");
     copy_tree(&input, &missing);
