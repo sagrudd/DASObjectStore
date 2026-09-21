@@ -247,8 +247,10 @@ pub use profile_migration::{
     PROFILE_MIGRATION_CONFIRMATION,
 };
 pub use profile_readiness::{
-    validate_phoreus_limited_profile_binding_contract, ProfileLifecycleState,
-    ProfileReadinessRequest, ProfileReadinessResponse, PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
+    is_monas_profile_readiness_store, validate_phoreus_limited_profile_binding_contract,
+    ProfileLifecycleState, ProfileReadinessRequest, ProfileReadinessResponse,
+    MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS, MONAS_PROFILE_READINESS_OBSERVER_CONTRACT,
+    MONAS_PROFILE_READINESS_OBSERVER_VERSION, PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT,
     PHOREUS_LIMITED_PROFILE_BINDING_VERSION, PROFILE_READINESS_ROUTE,
     PROFILE_READINESS_SCHEMA_VERSION,
 };

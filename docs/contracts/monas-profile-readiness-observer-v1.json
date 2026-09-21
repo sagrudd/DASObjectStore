@@ -1,0 +1,33 @@
+{
+  "schema_version": "dasobjectstore.monas-profile-readiness-observer.v1",
+  "contract_version": "1.0.0",
+  "producer": {
+    "product_id": "dasobjectstore",
+    "compatible_package_range": ">=0.186.35,<0.187.0"
+  },
+  "readiness_evidence": {
+    "schema_version": "dasobjectstore.profile_readiness.v1",
+    "route": "/api/v1/profile-readiness/stores/{store_id}",
+    "allowed_store_ids": ["phoreus", "ergasterion"],
+    "allowed_preverified_host_subject": "mnemosyne-monas",
+    "response_is_path_free": true,
+    "response_contains_provider_credentials": false
+  },
+  "semantics": {
+    "kind": "read_only_point_in_time_readiness",
+    "freshness_owner": "monas_signed_host_context"
+  },
+  "excluded_surfaces": [
+    "backend_path_disclosure",
+    "credential_delivery",
+    "store_read_authorization",
+    "human_authority",
+    "application_capability",
+    "provisioning",
+    "mutation",
+    "package_qualification",
+    "runtime_readiness_claim"
+  ],
+  "refusal": "a non-Monas peer, unlisted or neighbouring store identifier, missing proof, or unready lifecycle is not usable as readiness evidence",
+  "source_provenance": "resolved only by Kanon from immutable merged-main source revisions and manifest digests"
+}
