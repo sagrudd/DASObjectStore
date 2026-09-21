@@ -127,6 +127,9 @@
     "host_product_ui_adapter",
     "monas_product_ui_adapter"
   ],
+  "contract_coordinates": [
+    "dasobjectstore.monas-profile-readiness-observer.v1"
+  ],
   "platform_dependencies": [
     {
       "id": "limen",
