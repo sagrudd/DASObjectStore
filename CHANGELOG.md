@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.186.35 - Unreleased
+
+- Publish the daemon-owned, read-only Monas readiness-observer contract for
+  the exact ``phoreus`` and ``ergasterion`` profiles. The preverified peer
+  remains unable to observe neighbouring or unlisted profiles, read data, or
+  exercise any human, application, provisioning, or mutation authority.
+
 ## 0.186.34 - Unreleased
 
 - Make ``dasobjectstore-remote config repair`` migrate a persisted retired

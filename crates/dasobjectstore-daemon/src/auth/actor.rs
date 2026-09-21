@@ -44,7 +44,7 @@ impl DaemonLocalActor {
     pub(crate) fn is_monas_host_profile_observer(&self, store_id: &str) -> bool {
         self.uid != 0
             && self.username.as_deref() == Some("mnemosyne-monas")
-            && matches!(store_id, "phoreus" | "ergasterion")
+            && crate::api::is_monas_profile_readiness_store(store_id)
     }
 
     pub fn display_name(&self) -> String {
@@ -74,5 +74,12 @@ mod tests {
         assert!(!DaemonLocalActor::new(1000)
             .with_groups(["bioinformatics"])
             .is_administrator());
+    }
+
+    #[test]
+    fn monas_readiness_observer_allowlist_is_exact() {
+        let actor = DaemonLocalActor::new(993).with_username("mnemosyne-monas");
+        assert!(actor.is_monas_host_profile_observer("ergasterion"));
+        assert!(!actor.is_monas_host_profile_observer("ergasterion-extra"));
     }
 }

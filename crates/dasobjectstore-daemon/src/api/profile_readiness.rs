@@ -13,6 +13,17 @@ pub const PROFILE_READINESS_ROUTE: &str = "/api/v1/profile-readiness/stores/{sto
 pub const PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT: &str =
     "dasobjectstore.phoreus-limited-profile-binding.v1";
 pub const PHOREUS_LIMITED_PROFILE_BINDING_VERSION: &str = "1.0.0";
+/// The single daemon-owned declaration for the preverified Monas peer's
+/// read-only readiness observation. It is deliberately narrower than store
+/// read authorization, human authority, or any application capability.
+pub const MONAS_PROFILE_READINESS_OBSERVER_CONTRACT: &str =
+    "dasobjectstore.monas-profile-readiness-observer.v1";
+pub const MONAS_PROFILE_READINESS_OBSERVER_VERSION: &str = "1.0.0";
+pub const MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS: [&str; 2] = ["phoreus", "ergasterion"];
+
+pub fn is_monas_profile_readiness_store(store_id: &str) -> bool {
+    MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS.contains(&store_id)
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -222,5 +233,27 @@ mod tests {
             .expect("excluded surfaces")
             .iter()
             .any(|value| value == "full_phoreus_monolith"));
+    }
+
+    #[test]
+    fn monas_profile_readiness_observer_contract_allows_only_listed_profiles() {
+        let declaration: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/contracts/monas-profile-readiness-observer-v1.json"
+        ))
+        .expect("Monas readiness observer declaration parses");
+        assert_eq!(
+            declaration["schema_version"],
+            MONAS_PROFILE_READINESS_OBSERVER_CONTRACT
+        );
+        assert_eq!(
+            declaration["contract_version"],
+            MONAS_PROFILE_READINESS_OBSERVER_VERSION
+        );
+        assert_eq!(
+            declaration["readiness_evidence"]["allowed_store_ids"],
+            serde_json::json!(MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS)
+        );
+        assert!(is_monas_profile_readiness_store("ergasterion"));
+        assert!(!is_monas_profile_readiness_store("ergasterion-extra"));
     }
 }

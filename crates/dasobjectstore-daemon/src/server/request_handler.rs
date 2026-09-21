@@ -7159,7 +7159,7 @@ mod tests {
     }
 
     #[test]
-    fn monas_peer_reads_only_the_phoreus_profile_readiness_gate() {
+    fn monas_peer_reads_only_the_approved_profile_readiness_gates() {
         let root = temp_root("profile-readiness-monas-phoreus");
         cleanup(&root);
         let (store_registry, subobject_registry) =
@@ -7173,36 +7173,38 @@ mod tests {
         .with_live_sqlite_path(root.join("live.sqlite"));
         let actor = DaemonLocalActor::new(996).with_username("mnemosyne-monas");
 
-        let allowed = handler
-            .handle_with_progress_for_actor(
-                DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
-                    store_id: StoreId::new("phoreus").expect("store id"),
-                }),
-                Some(&actor),
-                |_| Ok(()),
-            )
-            .expect("Monas readiness request handled");
-        assert!(matches!(
-            allowed,
-            DaemonApiResponse::Error(error) if error.code == "profile_binding_not_found"
-        ));
+        for store_id in ["phoreus", "ergasterion"] {
+            let allowed = handler
+                .handle_with_progress_for_actor(
+                    DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
+                        store_id: StoreId::new(store_id).expect("store id"),
+                    }),
+                    Some(&actor),
+                    |_| Ok(()),
+                )
+                .expect("Monas readiness request handled");
+            assert!(matches!(
+                allowed,
+                DaemonApiResponse::Error(error) if error.code == "profile_binding_not_found"
+            ));
+        }
 
         let denied = handler
             .handle_with_progress_for_actor(
                 DaemonApiRequest::ProfileReadiness(ProfileReadinessRequest {
-                    store_id: StoreId::new("other").expect("store id"),
+                    store_id: StoreId::new("ergasterion-extra").expect("store id"),
                 }),
                 Some(&actor),
                 |_| Ok(()),
             )
-            .expect("non-Phoreus readiness request handled");
+            .expect("unlisted readiness request handled");
         assert!(
             matches!(
                 denied,
                 DaemonApiResponse::Error(ref error)
                     if error.code == "profile_readiness_authorization_required"
             ),
-            "unexpected non-Phoreus readiness response: {denied:?}"
+            "unexpected unlisted readiness response: {denied:?}"
         );
         cleanup(&root);
     }

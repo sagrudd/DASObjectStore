@@ -91,13 +91,14 @@ mod monas_profile_peer_tests {
             for store in [
                 "phoreus",
                 "ergasterion",
+                "ergasterion-extra",
                 "other",
                 "Phoreus",
                 "phoreus-extra",
             ] {
                 assert_eq!(
                     actor.is_monas_host_profile_observer(store),
-                    uid == 993 && matches!(store, "phoreus" | "ergasterion")
+                    uid == 993 && crate::api::is_monas_profile_readiness_store(store)
                 );
             }
         }
