@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.186.36 - Unreleased
+
+- Bound the producer-owned Phoreus limited-profile readiness contract to the
+  exact 0.186.36 source candidate and bumped its compatible contract version to
+  1.0.1. Existing source/API coverage allows only the preverified Monas peer to
+  observe the exact ``phoreus`` store and keeps readiness path-free; this does
+  not qualify a package, runtime, data path, or combined product tuple.
+
 ## 0.186.35 - Unreleased
 
 - Publish the daemon-owned, read-only Monas readiness-observer contract for
