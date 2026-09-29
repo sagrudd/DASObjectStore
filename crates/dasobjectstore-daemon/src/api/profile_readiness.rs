@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_limited_phoreus_declaration_excludes_the_custody_overlay() {
+    fn phoreus_limited_declaration_matches_only_the_exact_source_candidate() {
         let declaration: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../docs/contracts/phoreus-limited-profile-binding-v1.json"
         ))
@@ -213,17 +213,17 @@ mod tests {
         );
         assert_eq!(
             declaration["producer"]["compatible_package_range"],
-            ">=0.177.1,<0.179.0"
+            ">=0.186.36,<0.186.37"
         );
-        // The retained readiness declaration is intentionally not widened for
-        // the custody-retention line or its subsequent source fixes. Assert
-        // exclusion, not an exact current version that breaks the next bump.
         let current = (
             env!("CARGO_PKG_VERSION_MAJOR").parse::<u64>().unwrap(),
             env!("CARGO_PKG_VERSION_MINOR").parse::<u64>().unwrap(),
             env!("CARGO_PKG_VERSION_PATCH").parse::<u64>().unwrap(),
         );
-        assert!(!((0, 177, 1)..(0, 179, 0)).contains(&current));
+        assert_eq!(current, (0, 186, 36));
+        assert!(!((0, 186, 36)..(0, 186, 37)).contains(&(0, 186, 35)));
+        assert!(((0, 186, 36)..(0, 186, 37)).contains(&current));
+        assert!(!((0, 186, 36)..(0, 186, 37)).contains(&(0, 186, 37)));
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
             PROFILE_READINESS_SCHEMA_VERSION
@@ -254,6 +254,31 @@ mod tests {
             serde_json::json!(MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS)
         );
         assert!(is_monas_profile_readiness_store("ergasterion"));
+        assert!(is_monas_profile_readiness_store("phoreus"));
         assert!(!is_monas_profile_readiness_store("ergasterion-extra"));
+        assert!(!is_monas_profile_readiness_store("phoreus-extra"));
+        assert!(!is_monas_profile_readiness_store("xphoreus"));
+    }
+
+    #[test]
+    fn phoreus_limited_binding_names_only_the_exact_bumped_patch_candidate() {
+        let declaration: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../docs/contracts/phoreus-limited-profile-binding-v1.json"
+        ))
+        .expect("Phoreus declaration parses");
+        assert_eq!(
+            declaration["producer"]["compatible_package_range"],
+            ">=0.186.36,<0.186.37"
+        );
+
+        let current = (
+            env!("CARGO_PKG_VERSION_MAJOR").parse::<u64>().unwrap(),
+            env!("CARGO_PKG_VERSION_MINOR").parse::<u64>().unwrap(),
+            env!("CARGO_PKG_VERSION_PATCH").parse::<u64>().unwrap(),
+        );
+        assert_eq!(current, (0, 186, 36));
+        assert!(!((0, 186, 36)..(0, 186, 37)).contains(&(0, 186, 35)));
+        assert!(((0, 186, 36)..(0, 186, 37)).contains(&current));
+        assert!(!((0, 186, 36)..(0, 186, 37)).contains(&(0, 186, 37)));
     }
 }
