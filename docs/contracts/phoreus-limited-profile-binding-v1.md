@@ -8,7 +8,8 @@ runtime qualification, governed-work admission, or compute-submission route.
 
 The normative declaration is `phoreus-limited-profile-binding-v1.json`. Its
 contract identifier is `dasobjectstore.phoreus-limited-profile-binding.v1` and
-compatible consumers accept `>=1.0.0,<2.0.0`. This source-only preparation
+the current compatible contract revision is `1.0.1` (consumers accept
+`>=1.0.0,<2.0.0`). This source-only preparation
 bounds its DASObjectStore producer candidate to `>=0.186.36,<0.186.37`, the
 single patch produced by this contract update. The existing public readiness
 schema remains `dasobjectstore.profile_readiness.v1` on
