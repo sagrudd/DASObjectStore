@@ -22,3 +22,4 @@ sha2.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+jsonschema = { version = "0.18.3", default-features = false, features = ["draft202012"] }

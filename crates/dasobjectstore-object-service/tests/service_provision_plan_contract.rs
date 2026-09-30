@@ -1,3 +1,4 @@
+use jsonschema::{Draft, JSONSchema};
 use serde_json::Value;
 
 const SCHEMA: &str =
@@ -9,6 +10,10 @@ const FIXTURE: &str =
 fn proposal_schema_and_fixture_fail_closed_on_provider_visibility() {
     let schema: Value = serde_json::from_str(SCHEMA).expect("plan schema is JSON");
     let fixture: Value = serde_json::from_str(FIXTURE).expect("plan fixture is JSON");
+    let validator = JSONSchema::options()
+        .with_draft(Draft::Draft202012)
+        .compile(&schema)
+        .expect("plan schema compiles as Draft 2020-12");
 
     assert_eq!(
         schema["properties"]["schema_version"]["const"],
@@ -29,6 +34,19 @@ fn proposal_schema_and_fixture_fail_closed_on_provider_visibility() {
     assert!(fixture["provider_observation"].is_null());
     assert_eq!(fixture["execution_authorized"], false);
     assert_eq!(fixture["provenance"]["source_revision"], "0".repeat(40));
+    assert!(
+        validator.is_valid(&fixture),
+        "synthetic fixture validates against schema"
+    );
+
+    let mut observed = fixture.clone();
+    observed["provider_visibility"] = serde_json::json!("observed");
+    assert!(!validator.is_valid(&observed));
+
+    let mut wrong_grant_operand = fixture;
+    wrong_grant_operand["stores"][0]["actions"][2]["key_name"] =
+        serde_json::json!("dasobjectstore:synthetic-store-a");
+    assert!(!validator.is_valid(&wrong_grant_operand));
 }
 
 #[test]
@@ -61,9 +79,21 @@ fn fixture_rows_bind_a_complete_catalogue_snapshot_without_credentials() {
         let actions = store["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 3);
         assert_eq!(actions[0]["kind"], "import_key");
-        assert_eq!(actions[0]["secret_material_included"], false);
+        assert_eq!(actions[0]["key_name"], store["key_name"]);
+        assert_eq!(actions[0]["credential_binding"]["status"], "unresolved");
+        let expected_reference = format!("secret://dasobjectstore/stores/{store_id}/s3");
+        assert_eq!(
+            actions[0]["credential_binding"]["credential_reference"],
+            expected_reference
+        );
         assert_eq!(actions[1]["kind"], "create_bucket");
         assert_eq!(actions[2]["kind"], "allow_bucket");
+        assert!(actions[2].get("key_name").is_none());
+        assert_eq!(actions[2]["credential_binding"]["status"], "unresolved");
+        assert_eq!(
+            actions[2]["credential_binding"]["credential_reference"],
+            expected_reference
+        );
         assert_eq!(
             actions[2]["grants"],
             serde_json::json!(["read", "write", "owner"])
@@ -72,7 +102,53 @@ fn fixture_rows_bind_a_complete_catalogue_snapshot_without_credentials() {
     }
     assert_eq!(fixture["resource_action_count"], action_count);
 
-    let serialized = fixture.to_string();
-    assert!(!serialized.contains("access_key_id"));
-    assert!(!serialized.contains("secret_access_key"));
+    assert!(!has_credential_payload(&fixture));
+}
+
+#[test]
+fn reference_consumer_rejects_a_credential_binding_for_another_store() {
+    let schema: Value = serde_json::from_str(SCHEMA).expect("plan schema is JSON");
+    let fixture: Value = serde_json::from_str(FIXTURE).expect("plan fixture is JSON");
+    let validator = JSONSchema::options()
+        .with_draft(Draft::Draft202012)
+        .compile(&schema)
+        .expect("plan schema compiles as Draft 2020-12");
+
+    let mut mismatched = fixture;
+    mismatched["stores"][0]["actions"][2]["credential_binding"]["credential_reference"] =
+        serde_json::json!("secret://dasobjectstore/stores/synthetic-store-b/s3");
+
+    // JSON Schema checks the reference syntax; the consumer must also bind it
+    // to the enclosing catalogue row's store identity.
+    assert!(validator.is_valid(&mismatched));
+    assert!(!credential_bindings_match_stores(&mismatched));
+}
+
+fn credential_bindings_match_stores(plan: &Value) -> bool {
+    plan["stores"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .all(|store| {
+            let Some(store_id) = store["store_id"].as_str() else {
+                return false;
+            };
+            let expected = format!("secret://dasobjectstore/stores/{store_id}/s3");
+            [0, 2].iter().all(|action| {
+                store["actions"][*action]["credential_binding"]["credential_reference"] == expected
+            })
+        })
+}
+
+fn has_credential_payload(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => {
+            fields
+                .keys()
+                .any(|name| matches!(name.as_str(), "access_key_id" | "secret_access_key"))
+                || fields.values().any(has_credential_payload)
+        }
+        Value::Array(items) => items.iter().any(has_credential_payload),
+        _ => false,
+    }
 }

@@ -63,8 +63,8 @@
     },
     "import_key": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "key_name", "idempotent", "secret_material_included"],
-      "properties": {"kind": {"const": "import_key"}, "key_name": {"type": "string", "minLength": 1}, "idempotent": {"const": true}, "secret_material_included": {"const": false}}
+      "required": ["kind", "key_name", "idempotent", "credential_binding"],
+      "properties": {"kind": {"const": "import_key"}, "key_name": {"type": "string", "minLength": 1}, "idempotent": {"const": true}, "credential_binding": {"$ref": "#/$defs/unresolved_credential_binding"}}
     },
     "create_bucket": {
       "type": "object", "additionalProperties": false,
@@ -73,13 +73,23 @@
     },
     "allow_bucket": {
       "type": "object", "additionalProperties": false,
-      "required": ["kind", "bucket_name", "key_name", "grants", "idempotent"],
+      "required": ["kind", "bucket_name", "credential_binding", "grants", "idempotent"],
       "properties": {
         "kind": {"const": "allow_bucket"},
         "bucket_name": {"type": "string", "minLength": 1},
-        "key_name": {"type": "string", "minLength": 1},
+        "credential_binding": {"$ref": "#/$defs/unresolved_credential_binding"},
         "grants": {"const": ["read", "write", "owner"]},
         "idempotent": {"const": true}
+      }
+    },
+    "unresolved_credential_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "credential_reference", "access_key_id_included", "secret_access_key_included"],
+      "properties": {
+        "status": {"const": "unresolved"},
+        "credential_reference": {"type": "string", "pattern": "^secret://dasobjectstore/stores/[a-z0-9][a-z0-9._-]*/s3$"},
+        "access_key_id_included": {"const": false},
+        "secret_access_key_included": {"const": false}
       }
     }
   }

@@ -28,9 +28,9 @@
       "bucket_name": "synthetic-bucket-a",
       "key_name": "dasobjectstore:synthetic-store-a",
       "actions": [
-        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-a", "idempotent": true, "secret_material_included": false},
+        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-a", "idempotent": true, "credential_binding": {"status": "unresolved", "credential_reference": "secret://dasobjectstore/stores/synthetic-store-a/s3", "access_key_id_included": false, "secret_access_key_included": false}},
         {"kind": "create_bucket", "bucket_name": "synthetic-bucket-a", "idempotent": true},
-        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-a", "key_name": "dasobjectstore:synthetic-store-a", "grants": ["read", "write", "owner"], "idempotent": true}
+        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-a", "credential_binding": {"status": "unresolved", "credential_reference": "secret://dasobjectstore/stores/synthetic-store-a/s3", "access_key_id_included": false, "secret_access_key_included": false}, "grants": ["read", "write", "owner"], "idempotent": true}
       ]
     },
     {
@@ -38,9 +38,9 @@
       "bucket_name": "synthetic-bucket-b",
       "key_name": "dasobjectstore:synthetic-store-b",
       "actions": [
-        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-b", "idempotent": true, "secret_material_included": false},
+        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-b", "idempotent": true, "credential_binding": {"status": "unresolved", "credential_reference": "secret://dasobjectstore/stores/synthetic-store-b/s3", "access_key_id_included": false, "secret_access_key_included": false}},
         {"kind": "create_bucket", "bucket_name": "synthetic-bucket-b", "idempotent": true},
-        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-b", "key_name": "dasobjectstore:synthetic-store-b", "grants": ["read", "write", "owner"], "idempotent": true}
+        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-b", "credential_binding": {"status": "unresolved", "credential_reference": "secret://dasobjectstore/stores/synthetic-store-b/s3", "access_key_id_included": false, "secret_access_key_included": false}, "grants": ["read", "write", "owner"], "idempotent": true}
       ]
     }
   ]

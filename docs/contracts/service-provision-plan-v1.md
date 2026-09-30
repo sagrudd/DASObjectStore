@@ -36,6 +36,8 @@ records. Consumers must require:
 * ``record_count = eligible_store_count + excluded_store_count``;
 * ``stores.length = eligible_store_count``;
 * every eligible store ID and bucket name occurs exactly once;
+* every unresolved credential reference is the deterministic DAS slot for its
+  enclosing store ID;
 * ``resource_action_count`` equals the total number of actions in all store
   rows; and
 * each store has exactly the three ordered actions in the schema.
@@ -46,15 +48,23 @@ Garage availability, or provider state. A consumer must fail closed on missing
 or inconsistent provenance, incomplete snapshots, duplicate mappings,
 unsupported schema versions, or unknown fields. V1 is descriptive and
 non-executable: ``execution_authorized`` is always ``false`` and action rows
-contain neither access-key IDs nor secret material.
+contain neither access-key IDs nor secret material. The ``key_name`` is
+Garage's logical ``-n`` label for importing a key. It is not the ``--key``
+operand used by ``allow_bucket``; that command receives the credential's
+access-key ID. Because v1 reads only the store registry and does not resolve
+the credential registry, both key import credentials and the grant's
+access-key operand are represented by a credential binding whose status is
+``unresolved``. Its reference identifies the intended DAS credential slot; it
+does not assert that a record exists or reveal the Garage operand. Consumers
+must not turn this descriptive row into a Garage command.
 
 The logical actions preserve the current planner's ordering and intent:
-import the store key, ensure the bucket exists, then allow that key
-read/write/owner access to that bucket. ``ensure`` semantics describe an
-idempotent requested operation; they do not assert creation, absence, or
-success. The contract intentionally omits command argv because key import
-requires a secret and the current daemon API does not provide a secret-free
-provider diff.
+import the store key, ensure the bucket exists, then allow the credential
+identified by the unresolved binding read/write/owner access to that bucket.
+``ensure`` semantics describe an idempotent requested operation; they do not
+assert creation, absence, or success. The contract intentionally omits command
+argv because key import requires credentials and the grant command's actual
+``--key`` operand is unavailable without resolving the credential registry.
 
 ## Gates before implementation or AlleleAnchor use
 
