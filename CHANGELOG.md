@@ -10,7 +10,7 @@
   names are distinct from unresolved credential operands. The schema preserves
   bounded mixed-case store IDs, while unsupported path or Unicode IDs fail
   closed. Focused tests validate the fixture against Draft 2020-12 and reject
-  cross-store bindings.
+  cross-store credential and resource-action bindings.
 
 ## 0.186.36 - Unreleased
 

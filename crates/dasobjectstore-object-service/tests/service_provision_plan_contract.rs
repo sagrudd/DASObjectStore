@@ -66,7 +66,7 @@ fn schema_preserves_mixed_case_store_ids_and_rejects_unrepresentable_ids() {
     mixed_case["stores"][0]["actions"][2]["credential_binding"]["credential_reference"] =
         serde_json::json!(expected_reference);
     assert!(validator.is_valid(&mixed_case));
-    assert!(credential_bindings_match_stores(&mixed_case));
+    assert!(store_action_bindings_match_stores(&mixed_case));
 
     let mut mixed_case_period = fixture.clone();
     mixed_case_period["stores"][0]["store_id"] = serde_json::json!("Critical.Metadata");
@@ -148,8 +148,37 @@ fn fixture_rows_bind_a_complete_catalogue_snapshot_without_credentials() {
         action_count += actions.len();
     }
     assert_eq!(fixture["resource_action_count"], action_count);
+    assert!(store_action_bindings_match_stores(&fixture));
 
     assert!(!has_credential_payload(&fixture));
+}
+
+#[test]
+fn reference_consumer_rejects_action_operands_for_another_store() {
+    let schema: Value = serde_json::from_str(SCHEMA).expect("plan schema is JSON");
+    let fixture: Value = serde_json::from_str(FIXTURE).expect("plan fixture is JSON");
+    let validator = JSONSchema::options()
+        .with_draft(Draft::Draft202012)
+        .compile(&schema)
+        .expect("plan schema compiles as Draft 2020-12");
+
+    let mut wrong_key_name = fixture.clone();
+    wrong_key_name["stores"][0]["actions"][0]["key_name"] =
+        serde_json::json!("dasobjectstore:synthetic-store-b");
+    assert!(validator.is_valid(&wrong_key_name));
+    assert!(!store_action_bindings_match_stores(&wrong_key_name));
+
+    let mut wrong_create_bucket = fixture.clone();
+    wrong_create_bucket["stores"][0]["actions"][1]["bucket_name"] =
+        serde_json::json!("synthetic-bucket-b");
+    assert!(validator.is_valid(&wrong_create_bucket));
+    assert!(!store_action_bindings_match_stores(&wrong_create_bucket));
+
+    let mut wrong_allow_bucket = fixture;
+    wrong_allow_bucket["stores"][0]["actions"][2]["bucket_name"] =
+        serde_json::json!("synthetic-bucket-b");
+    assert!(validator.is_valid(&wrong_allow_bucket));
+    assert!(!store_action_bindings_match_stores(&wrong_allow_bucket));
 }
 
 #[test]
@@ -168,10 +197,10 @@ fn reference_consumer_rejects_a_credential_binding_for_another_store() {
     // JSON Schema checks the reference syntax; the consumer must also bind it
     // to the enclosing catalogue row's store identity.
     assert!(validator.is_valid(&mismatched));
-    assert!(!credential_bindings_match_stores(&mismatched));
+    assert!(!store_action_bindings_match_stores(&mismatched));
 }
 
-fn credential_bindings_match_stores(plan: &Value) -> bool {
+fn store_action_bindings_match_stores(plan: &Value) -> bool {
     plan["stores"]
         .as_array()
         .into_iter()
@@ -180,10 +209,21 @@ fn credential_bindings_match_stores(plan: &Value) -> bool {
             let Some(store_id) = store["store_id"].as_str() else {
                 return false;
             };
+            let Some(store_key_name) = store["key_name"].as_str() else {
+                return false;
+            };
+            let Some(store_bucket_name) = store["bucket_name"].as_str() else {
+                return false;
+            };
             let expected = format!("secret://dasobjectstore/stores/{store_id}/s3");
-            [0, 2].iter().all(|action| {
-                store["actions"][*action]["credential_binding"]["credential_reference"] == expected
-            })
+            store["actions"][0]["key_name"] == store_key_name
+                && [1, 2]
+                    .iter()
+                    .all(|action| store["actions"][*action]["bucket_name"] == store_bucket_name)
+                && [0, 2].iter().all(|action| {
+                    store["actions"][*action]["credential_binding"]["credential_reference"]
+                        == expected
+                })
         })
 }
 

@@ -43,6 +43,9 @@ records. Consumers must require:
 * ``record_count = eligible_store_count + excluded_store_count``;
 * ``stores.length = eligible_store_count``;
 * every eligible store ID and bucket name occurs exactly once;
+* each store's ``import_key.key_name`` equals its row's ``key_name``;
+* each store's ``create_bucket.bucket_name`` and
+  ``allow_bucket.bucket_name`` equal its row's ``bucket_name``;
 * every unresolved credential reference is the deterministic DAS slot for its
   enclosing store ID;
 * ``resource_action_count`` equals the total number of actions in all store
