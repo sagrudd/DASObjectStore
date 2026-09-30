@@ -1,0 +1,47 @@
+{
+  "schema_version": "dasobjectstore.service_provision_plan.v1",
+  "plan_id": "synthetic-plan-001",
+  "disposition": "catalogue_only",
+  "provider_id": "garage",
+  "provider_visibility": "unknown",
+  "provider_observation": null,
+  "execution_authorized": false,
+  "provenance": {
+    "producer_product": "dasobjectstore",
+    "producer_version": "0.186.37",
+    "source_repository": "https://github.com/sagrudd/DASObjectStore",
+    "source_revision": "0000000000000000000000000000000000000000",
+    "generated_at_utc": "2026-09-30T00:00:00Z"
+  },
+  "source_snapshot": {
+    "scope": "normal_s3_exported_store_registry",
+    "complete": true,
+    "registry_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "record_count": 2,
+    "eligible_store_count": 2,
+    "excluded_store_count": 0
+  },
+  "resource_action_count": 6,
+  "stores": [
+    {
+      "store_id": "synthetic-store-a",
+      "bucket_name": "synthetic-bucket-a",
+      "key_name": "dasobjectstore:synthetic-store-a",
+      "actions": [
+        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-a", "idempotent": true, "secret_material_included": false},
+        {"kind": "create_bucket", "bucket_name": "synthetic-bucket-a", "idempotent": true},
+        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-a", "key_name": "dasobjectstore:synthetic-store-a", "grants": ["read", "write", "owner"], "idempotent": true}
+      ]
+    },
+    {
+      "store_id": "synthetic-store-b",
+      "bucket_name": "synthetic-bucket-b",
+      "key_name": "dasobjectstore:synthetic-store-b",
+      "actions": [
+        {"kind": "import_key", "key_name": "dasobjectstore:synthetic-store-b", "idempotent": true, "secret_material_included": false},
+        {"kind": "create_bucket", "bucket_name": "synthetic-bucket-b", "idempotent": true},
+        {"kind": "allow_bucket", "bucket_name": "synthetic-bucket-b", "key_name": "dasobjectstore:synthetic-store-b", "grants": ["read", "write", "owner"], "idempotent": true}
+      ]
+    }
+  ]
+}

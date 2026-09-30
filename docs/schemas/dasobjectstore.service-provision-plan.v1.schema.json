@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnemosyne.example/schemas/dasobjectstore.service-provision-plan.v1.schema.json",
+  "title": "DASObjectStore service-provision plan v1 (proposal)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "plan_id", "disposition", "provider_id", "provider_visibility", "provider_observation", "execution_authorized", "provenance", "source_snapshot", "resource_action_count", "stores"],
+  "properties": {
+    "schema_version": {"const": "dasobjectstore.service_provision_plan.v1"},
+    "plan_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+    "disposition": {"const": "catalogue_only"},
+    "provider_id": {"const": "garage"},
+    "provider_visibility": {"const": "unknown"},
+    "provider_observation": {"type": "null"},
+    "execution_authorized": {"const": false},
+    "provenance": {"$ref": "#/$defs/provenance"},
+    "source_snapshot": {"$ref": "#/$defs/source_snapshot"},
+    "resource_action_count": {"type": "integer", "minimum": 0},
+    "stores": {"type": "array", "items": {"$ref": "#/$defs/store"}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": ["producer_product", "producer_version", "source_repository", "source_revision", "generated_at_utc"],
+      "properties": {
+        "producer_product": {"const": "dasobjectstore"},
+        "producer_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+        "source_repository": {"const": "https://github.com/sagrudd/DASObjectStore"},
+        "source_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "generated_at_utc": {"type": "string", "format": "date-time"}
+      }
+    },
+    "source_snapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["scope", "complete", "registry_snapshot_sha256", "record_count", "eligible_store_count", "excluded_store_count"],
+      "properties": {
+        "scope": {"const": "normal_s3_exported_store_registry"},
+        "complete": {"const": true},
+        "registry_snapshot_sha256": {"$ref": "#/$defs/sha256"},
+        "record_count": {"type": "integer", "minimum": 0},
+        "eligible_store_count": {"type": "integer", "minimum": 0},
+        "excluded_store_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "store": {
+      "type": "object", "additionalProperties": false,
+      "required": ["store_id", "bucket_name", "key_name", "actions"],
+      "properties": {
+        "store_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "bucket_name": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9][a-z0-9.-]*[a-z0-9]$"},
+        "key_name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "actions": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "prefixItems": [
+            {"$ref": "#/$defs/import_key"},
+            {"$ref": "#/$defs/create_bucket"},
+            {"$ref": "#/$defs/allow_bucket"}
+          ],
+          "items": false
+        }
+      }
+    },
+    "import_key": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "key_name", "idempotent", "secret_material_included"],
+      "properties": {"kind": {"const": "import_key"}, "key_name": {"type": "string", "minLength": 1}, "idempotent": {"const": true}, "secret_material_included": {"const": false}}
+    },
+    "create_bucket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "bucket_name", "idempotent"],
+      "properties": {"kind": {"const": "create_bucket"}, "bucket_name": {"type": "string", "minLength": 1}, "idempotent": {"const": true}}
+    },
+    "allow_bucket": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "bucket_name", "key_name", "grants", "idempotent"],
+      "properties": {
+        "kind": {"const": "allow_bucket"},
+        "bucket_name": {"type": "string", "minLength": 1},
+        "key_name": {"type": "string", "minLength": 1},
+        "grants": {"const": ["read", "write", "owner"]},
+        "idempotent": {"const": true}
+      }
+    }
+  }
+}

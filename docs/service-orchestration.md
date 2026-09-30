@@ -90,6 +90,14 @@ commands that would be applied. The daemon runs Garage admin commands inside
 the running Compose service, creating buckets and granting per-store keys
 without changing `/etc/dasobjectstore/garage.compose.yml`.
 
+The proposed [service-provision plan v1 contract](contracts/service-provision-plan-v1.md)
+describes a future source-only export with exact catalogue-derived action
+rows. It is not implemented: today's dry-run has aggregate counts only and
+does not observe Garage. A conforming v1 export must report
+`provider_visibility: "unknown"`, bind a complete local registry snapshot,
+and remain non-executable. The synthetic fixture is not an AlleleAnchor
+mapping or live provider observation.
+
 ### Native multi-HDD Garage storage
 
 For an appliance with several managed HDD mounts, do not bind Garage's data

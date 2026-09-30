@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.186.37 - Unreleased
+
+- Propose a source-only Garage service-provision plan export contract with a
+  synthetic per-store action fixture. Version 1 binds complete local catalogue
+  provenance but fixes provider visibility to ``unknown`` and carries no
+  provider observation. No daemon/API export, Garage observation, or
+  provisioning behavior is implemented by this proposal.
+
 ## 0.186.36 - Unreleased
 
 - Bound the producer-owned Phoreus limited-profile readiness contract to the
