@@ -28,7 +28,14 @@ observation fields.
 
 ``source_snapshot.complete`` means only that every record in the bound local
 store-registry byte snapshot was accounted for. The digest is SHA-256 over the
-exact bytes read, before parsing. ``record_count`` counts all validated normal
+exact bytes read, before parsing. Store IDs preserve their source spelling,
+including case, in both the row and the raw credential-reference path segment.
+The bounded v1 row grammar accepts 1–128 ASCII letters, digits, periods,
+underscores, or hyphens, beginning with a letter or digit. If an eligible
+source record has an ID outside that grammar, a producer must fail the whole
+export rather than omit the record or claim a complete snapshot. Bucket names
+follow the current planner’s 3–63 character lowercase letter, digit, and
+hyphen rules. ``record_count`` counts all validated normal
 registry records, ``eligible_store_count`` counts S3-exported records included
 in ``stores``, and ``excluded_store_count`` counts the remaining validated
 records. Consumers must require:

@@ -50,6 +50,53 @@ fn proposal_schema_and_fixture_fail_closed_on_provider_visibility() {
 }
 
 #[test]
+fn schema_preserves_mixed_case_store_ids_and_rejects_unrepresentable_ids() {
+    let schema: Value = serde_json::from_str(SCHEMA).expect("plan schema is JSON");
+    let fixture: Value = serde_json::from_str(FIXTURE).expect("plan fixture is JSON");
+    let validator = JSONSchema::options()
+        .with_draft(Draft::Draft202012)
+        .compile(&schema)
+        .expect("plan schema compiles as Draft 2020-12");
+
+    let mut mixed_case = fixture.clone();
+    mixed_case["stores"][0]["store_id"] = serde_json::json!("Generated_Data");
+    let expected_reference = "secret://dasobjectstore/stores/Generated_Data/s3";
+    mixed_case["stores"][0]["actions"][0]["credential_binding"]["credential_reference"] =
+        serde_json::json!(expected_reference);
+    mixed_case["stores"][0]["actions"][2]["credential_binding"]["credential_reference"] =
+        serde_json::json!(expected_reference);
+    assert!(validator.is_valid(&mixed_case));
+    assert!(credential_bindings_match_stores(&mixed_case));
+
+    let mut mixed_case_period = fixture.clone();
+    mixed_case_period["stores"][0]["store_id"] = serde_json::json!("Critical.Metadata");
+    let expected_reference = "secret://dasobjectstore/stores/Critical.Metadata/s3";
+    mixed_case_period["stores"][0]["actions"][0]["credential_binding"]["credential_reference"] =
+        serde_json::json!(expected_reference);
+    mixed_case_period["stores"][0]["actions"][2]["credential_binding"]["credential_reference"] =
+        serde_json::json!(expected_reference);
+    assert!(validator.is_valid(&mixed_case_period));
+
+    let mut path_separator = fixture.clone();
+    path_separator["stores"][0]["store_id"] = serde_json::json!("store/child");
+    assert!(!validator.is_valid(&path_separator));
+
+    let mut path_separator_reference = fixture.clone();
+    path_separator_reference["stores"][0]["actions"][0]["credential_binding"]
+        ["credential_reference"] =
+        serde_json::json!("secret://dasobjectstore/stores/store/child/s3");
+    assert!(!validator.is_valid(&path_separator_reference));
+
+    let mut unicode = fixture.clone();
+    unicode["stores"][0]["store_id"] = serde_json::json!("caf\u{00e9}");
+    assert!(!validator.is_valid(&unicode));
+
+    let mut too_long = fixture;
+    too_long["stores"][0]["store_id"] = serde_json::json!("s".repeat(129));
+    assert!(!validator.is_valid(&too_long));
+}
+
+#[test]
 fn fixture_rows_bind_a_complete_catalogue_snapshot_without_credentials() {
     let fixture: Value = serde_json::from_str(FIXTURE).expect("plan fixture is JSON");
     let snapshot = &fixture["source_snapshot"];
