@@ -99,6 +99,23 @@ fn workspace_pins_one_prosopikon_type_identity() {
 }
 
 #[test]
+fn workspace_pins_the_proposed_pistis_0161_source() {
+    const PISTIS_REVISION: &str = "e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85";
+    assert_contains(
+        WORKSPACE_MANIFEST,
+        &format!(
+            "pistis-canonical = {{ git = \"https://github.com/sagrudd/pistis.git\", rev = \"{PISTIS_REVISION}\" }}"
+        ),
+    );
+
+    let locked_canonical_crate = format!(
+        "name = \"pistis-canonical\"\nversion = \"0.1.0\"\nsource = \"git+https://github.com/sagrudd/pistis.git?rev={PISTIS_REVISION}#{PISTIS_REVISION}\""
+    );
+    assert_contains(WORKSPACE_LOCK, &locked_canonical_crate);
+    assert!(!WORKSPACE_MANIFEST.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
+}
+
+#[test]
 fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
     const PROXENOS_VERSION: &str = "0.62.0";
     const PROXENOS_REVISION: &str = "56d4853f57c59a3303124ae4f33800170ed9be44";

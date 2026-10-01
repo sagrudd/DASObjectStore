@@ -929,7 +929,7 @@ dependencies = [
  "dasobjectstore-object-service",
  "libc",
  "p256",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85)",
  "prosopikon-core",
  "serde",
  "serde_jcs",
@@ -2813,11 +2813,16 @@ version = "0.1.0"
 source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
 
 [[package]]
+name = "pistis-canonical"
+version = "0.1.0"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
+
+[[package]]
 name = "pistis-cose"
 version = "0.1.0"
 source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
 dependencies = [
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f)",
  "pistis-crypto",
  "pistis-domain",
  "serde",
@@ -2849,7 +2854,7 @@ version = "0.2.0"
 source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
 dependencies = [
  "getrandom 0.3.4",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f)",
  "pistis-cose",
  "pistis-crypto",
  "pistis-domain",
@@ -2987,7 +2992,7 @@ dependencies = [
  "nix 0.30.1",
  "p256",
  "parking_lot",
- "pistis-canonical",
+ "pistis-canonical 0.1.0 (git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f)",
  "pistis-cose",
  "pistis-crypto",
  "pistis-protocol",

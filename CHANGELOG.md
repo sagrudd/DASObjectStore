@@ -2,10 +2,12 @@
 
 ## 0.186.38 - Unreleased
 
-- Align the package source graph with Prosopikon 0.32.0 and Thesaurophylax
-  0.79.9, and adopt Proxenos 0.62.0's store-free Site Trust readiness
-  classifier. This is a source-level dependency update; it does not qualify a
-  package, runtime, or installation.
+- Align the package source graph with Prosopikon 0.32.0, Pistis #526's proposed
+  0.16.1 source, and Thesaurophylax 0.79.9; adopt Proxenos 0.62.0's store-free
+  Site Trust readiness classifier. The Pistis source and its Kanon compatibility
+  edge remain draft dependencies, with the required #526 check pending. This is
+  source preparation only; it does not qualify a package, runtime, installation,
+  or six-product lockset.
 
 - Propose a source-only Garage service-provision plan export contract with a
   synthetic per-store action fixture. Version 1 binds complete local catalogue
