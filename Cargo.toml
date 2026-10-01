@@ -52,7 +52,7 @@ getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"
 js-sys = "0.3.83"
 plist = "1"
 p256 = { version = "0.13.2", features = ["ecdsa"] }
-proxenos = { version = "=0.62.0", git = "https://github.com/sagrudd/proxenos.git", rev = "d228558b7c8603bf58ffcc33d85b5b66d35a5fd0" }
+proxenos = { version = "=0.62.0", git = "https://github.com/sagrudd/proxenos.git", rev = "2094a076089e18a99384f0258a32a0ecd2ae612f" }
 coset = "0.3.8"
 pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "14e481497d3838d3310df3b0a21232f5d01d6f9f" }
 prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e9d3dd75d79c63e3b68689eb7141c79294cf1305" }

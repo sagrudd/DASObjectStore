@@ -3016,7 +3016,7 @@ dependencies = [
 [[package]]
 name = "proxenos"
 version = "0.62.0"
-source = "git+https://github.com/sagrudd/proxenos.git?rev=d228558b7c8603bf58ffcc33d85b5b66d35a5fd0#d228558b7c8603bf58ffcc33d85b5b66d35a5fd0"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=2094a076089e18a99384f0258a32a0ecd2ae612f#2094a076089e18a99384f0258a32a0ecd2ae612f"
 dependencies = [
  "base64 0.22.1",
  "const-oid",
