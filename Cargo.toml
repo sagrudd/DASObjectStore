@@ -55,8 +55,8 @@ p256 = { version = "0.13.2", features = ["ecdsa"] }
 proxenos = { version = "=0.62.0", git = "https://github.com/sagrudd/proxenos.git", rev = "56d4853f57c59a3303124ae4f33800170ed9be44" }
 coset = "0.3.8"
 pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85" }
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e9d3dd75d79c63e3b68689eb7141c79294cf1305" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "e9d3dd75d79c63e3b68689eb7141c79294cf1305" }
+prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "d970ba6f477518141115407e45e9fcdec0a04058" }
+prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "d970ba6f477518141115407e45e9fcdec0a04058" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"

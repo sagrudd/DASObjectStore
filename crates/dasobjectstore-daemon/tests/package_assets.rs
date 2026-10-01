@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "e9d3dd75d79c63e3b68689eb7141c79294cf1305";
+    const REVISION: &str = "d970ba6f477518141115407e45e9fcdec0a04058";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -96,6 +96,7 @@ fn workspace_pins_one_prosopikon_type_identity() {
         2,
         "prosopikon-core and prosopikon-yew must resolve from one revision"
     );
+    assert!(!WORKSPACE_LOCK.contains("e9d3dd75d79c63e3b68689eb7141c79294cf1305"));
 }
 
 #[test]
@@ -113,6 +114,7 @@ fn workspace_pins_the_proposed_pistis_0161_source() {
     );
     assert_contains(WORKSPACE_LOCK, &locked_canonical_crate);
     assert!(!WORKSPACE_MANIFEST.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
+    assert!(!WORKSPACE_LOCK.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
 }
 
 #[test]
