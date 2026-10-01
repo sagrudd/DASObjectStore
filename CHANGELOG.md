@@ -6,10 +6,13 @@
   source at `d970ba6f477518141115407e45e9fcdec0a04058`, its Yew crate at the
   same source revision, Pistis #526's proposed 0.16.1 source, and Thesaurophylax
   0.79.9; adopt Proxenos 0.62.0's store-free Site Trust readiness classifier.
+  Advance the Phoreus limited-profile producer binding to contract 1.0.2 and
+  the exact candidate range `>=0.186.38,<0.186.39`.
   Prosopikon #92 and Pistis #526 remain unmerged draft inputs, and the
-  downstream consumer contract needs owner approval. This is source preparation
-  only; it does not qualify a package, runtime, installation, or six-product
-  lockset.
+  downstream consumer contract needs owner approval. Phoreus does not yet have
+  a source successor admitting Monas 0.130.11 / DASObjectStore 0.186.38; that
+  requires its own source and Kanon mapping. This is source preparation only; it
+  does not qualify a package, runtime, installation, or six-product lockset.
 
 - Propose a source-only Garage service-provision plan export contract with a
   synthetic per-store action fixture. Version 1 binds complete local catalogue
