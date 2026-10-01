@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
+    const REVISION: &str = "e9d3dd75d79c63e3b68689eb7141c79294cf1305";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -99,11 +99,11 @@ fn workspace_pins_one_prosopikon_type_identity() {
 }
 
 #[test]
-fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.61.0";
-    const PROXENOS_REVISION: &str = "d4c3054fb7d88c9f718d2987ec19bf7bc444d391";
-    const THESAUROPHYLAX_VERSION: &str = "0.72.3";
-    const THESAUROPHYLAX_REVISION: &str = "0bfb16857d135d2830de2cf53d245b68ed2d051f";
+fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
+    const PROXENOS_VERSION: &str = "0.62.0";
+    const PROXENOS_REVISION: &str = "d228558b7c8603bf58ffcc33d85b5b66d35a5fd0";
+    const THESAUROPHYLAX_VERSION: &str = "0.79.9";
+    const THESAUROPHYLAX_REVISION: &str = "eb2f180ee7b8cb8673fa325a9235a5ba2709adb9";
 
     assert_contains(
         WORKSPACE_MANIFEST,

@@ -1,6 +1,11 @@
 # Changelog
 
-## 0.186.37 - Unreleased
+## 0.186.38 - Unreleased
+
+- Align the package source graph with Prosopikon 0.32.0 and Thesaurophylax
+  0.79.9, and adopt Proxenos 0.62.0's store-free Site Trust readiness
+  classifier. This is a source-level dependency update; it does not qualify a
+  package, runtime, or installation.
 
 - Propose a source-only Garage service-provision plan export contract with a
   synthetic per-store action fixture. Version 1 binds complete local catalogue
