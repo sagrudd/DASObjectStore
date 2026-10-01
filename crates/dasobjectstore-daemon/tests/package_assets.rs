@@ -140,10 +140,21 @@ fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
 }
 
 #[test]
-fn workspace_lock_remediates_the_h2_empty_data_frame_advisory() {
+fn workspace_lock_uses_h2_version_patched_for_empty_data_frame_advisory() {
     let h2 = locked_package("h2");
-    assert_contains(h2, "version = \"0.4.16\"");
-    assert_not_contains(WORKSPACE_LOCK, "name = \"h2\"\nversion = \"0.4.15\"");
+    let version = h2
+        .lines()
+        .find_map(|line| line.strip_prefix("version = \"")?.strip_suffix('\"'))
+        .expect("locked h2 version");
+    let parts = version
+        .split('.')
+        .map(|part| part.parse::<u64>().expect("numeric h2 version component"))
+        .collect::<Vec<_>>();
+    assert_eq!(parts.len(), 3, "expected a stable semantic h2 version");
+    assert!(
+        (parts[0], parts[1], parts[2]) >= (0, 4, 16),
+        "h2 {version} predates the empty DATA frame fix in 0.4.16"
+    );
 }
 
 fn assert_locked_git_package(name: &str, version: &str, repository: &str, revision: &str) {
