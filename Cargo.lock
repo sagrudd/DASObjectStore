@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "axum",
  "axum-server",
@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "axum",
  "axum-server",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "axum",
  "chrono",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "serde",
  "serde_json",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.186.37"
+version = "0.186.39"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -1219,7 +1219,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2810,12 +2810,12 @@ dependencies = [
 [[package]]
 name = "pistis-canonical"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
 
 [[package]]
 name = "pistis-cose"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
 dependencies = [
  "pistis-canonical",
  "pistis-crypto",
@@ -2827,7 +2827,7 @@ dependencies = [
 [[package]]
 name = "pistis-crypto"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
 dependencies = [
  "p256",
  "pistis-domain",
@@ -2838,7 +2838,7 @@ dependencies = [
 [[package]]
 name = "pistis-domain"
 version = "0.1.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
 dependencies = [
  "serde",
 ]
@@ -2846,7 +2846,7 @@ dependencies = [
 [[package]]
 name = "pistis-protocol"
 version = "0.2.0"
-source = "git+https://github.com/sagrudd/pistis.git?rev=14e481497d3838d3310df3b0a21232f5d01d6f9f#14e481497d3838d3310df3b0a21232f5d01d6f9f"
+source = "git+https://github.com/sagrudd/pistis.git?rev=e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85#e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85"
 dependencies = [
  "getrandom 0.3.4",
  "pistis-canonical",
@@ -2971,8 +2971,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.28.9"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=f09749273ef382c1b42bf04a77d96189dd7361b3#f09749273ef382c1b42bf04a77d96189dd7361b3"
+version = "0.33.2"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=19ea2140b99806ef3ea4cd8d9699abee19259006#19ea2140b99806ef3ea4cd8d9699abee19259006"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3006,7 +3006,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=f09749273ef382c1b42bf04a77d96189dd7361b3#f09749273ef382c1b42bf04a77d96189dd7361b3"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=19ea2140b99806ef3ea4cd8d9699abee19259006#19ea2140b99806ef3ea4cd8d9699abee19259006"
 dependencies = [
  "prosopikon-core",
  "web-sys",
@@ -3015,8 +3015,8 @@ dependencies = [
 
 [[package]]
 name = "proxenos"
-version = "0.61.0"
-source = "git+https://github.com/sagrudd/proxenos.git?rev=d4c3054fb7d88c9f718d2987ec19bf7bc444d391#d4c3054fb7d88c9f718d2987ec19bf7bc444d391"
+version = "0.62.0"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=56d4853f57c59a3303124ae4f33800170ed9be44#56d4853f57c59a3303124ae4f33800170ed9be44"
 dependencies = [
  "base64 0.22.1",
  "const-oid",
@@ -3101,7 +3101,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3434,7 +3434,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3971,8 +3971,8 @@ dependencies = [
 
 [[package]]
 name = "thesaurophylax-api"
-version = "0.72.3"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
+version = "0.79.9"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=eb2f180ee7b8cb8673fa325a9235a5ba2709adb9#eb2f180ee7b8cb8673fa325a9235a5ba2709adb9"
 dependencies = [
  "base64 0.22.1",
  "ciborium",
@@ -3989,21 +3989,21 @@ dependencies = [
 
 [[package]]
 name = "thesaurophylax-core"
-version = "0.72.3"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
+version = "0.79.9"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=eb2f180ee7b8cb8673fa325a9235a5ba2709adb9#eb2f180ee7b8cb8673fa325a9235a5ba2709adb9"
 
 [[package]]
 name = "thesaurophylax-policy"
-version = "0.72.3"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
+version = "0.79.9"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=eb2f180ee7b8cb8673fa325a9235a5ba2709adb9#eb2f180ee7b8cb8673fa325a9235a5ba2709adb9"
 dependencies = [
  "thesaurophylax-core",
 ]
 
 [[package]]
 name = "thesaurophylax-store"
-version = "0.72.3"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=0bfb16857d135d2830de2cf53d245b68ed2d051f#0bfb16857d135d2830de2cf53d245b68ed2d051f"
+version = "0.79.9"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=eb2f180ee7b8cb8673fa325a9235a5ba2709adb9#eb2f180ee7b8cb8673fa325a9235a5ba2709adb9"
 dependencies = [
  "thesaurophylax-core",
 ]

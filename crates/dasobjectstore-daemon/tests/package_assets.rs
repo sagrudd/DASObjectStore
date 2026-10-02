@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
+    const REVISION: &str = "19ea2140b99806ef3ea4cd8d9699abee19259006";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -96,14 +96,33 @@ fn workspace_pins_one_prosopikon_type_identity() {
         2,
         "prosopikon-core and prosopikon-yew must resolve from one revision"
     );
+    assert!(!WORKSPACE_LOCK.contains("e9d3dd75d79c63e3b68689eb7141c79294cf1305"));
 }
 
 #[test]
-fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.61.0";
-    const PROXENOS_REVISION: &str = "d4c3054fb7d88c9f718d2987ec19bf7bc444d391";
-    const THESAUROPHYLAX_VERSION: &str = "0.72.3";
-    const THESAUROPHYLAX_REVISION: &str = "0bfb16857d135d2830de2cf53d245b68ed2d051f";
+fn workspace_pins_the_proposed_pistis_0161_source() {
+    const PISTIS_REVISION: &str = "e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85";
+    assert_contains(
+        WORKSPACE_MANIFEST,
+        &format!(
+            "pistis-canonical = {{ git = \"https://github.com/sagrudd/pistis.git\", rev = \"{PISTIS_REVISION}\" }}"
+        ),
+    );
+
+    let locked_canonical_crate = format!(
+        "name = \"pistis-canonical\"\nversion = \"0.1.0\"\nsource = \"git+https://github.com/sagrudd/pistis.git?rev={PISTIS_REVISION}#{PISTIS_REVISION}\""
+    );
+    assert_contains(WORKSPACE_LOCK, &locked_canonical_crate);
+    assert!(!WORKSPACE_MANIFEST.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
+    assert!(!WORKSPACE_LOCK.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
+}
+
+#[test]
+fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
+    const PROXENOS_VERSION: &str = "0.62.0";
+    const PROXENOS_REVISION: &str = "56d4853f57c59a3303124ae4f33800170ed9be44";
+    const THESAUROPHYLAX_VERSION: &str = "0.79.9";
+    const THESAUROPHYLAX_REVISION: &str = "eb2f180ee7b8cb8673fa325a9235a5ba2709adb9";
 
     assert_contains(
         WORKSPACE_MANIFEST,
@@ -140,10 +159,21 @@ fn package_builders_pin_the_merged_proxenos_and_thesaurophylax_closure() {
 }
 
 #[test]
-fn workspace_lock_remediates_the_h2_empty_data_frame_advisory() {
+fn workspace_lock_uses_h2_version_patched_for_empty_data_frame_advisory() {
     let h2 = locked_package("h2");
-    assert_contains(h2, "version = \"0.4.16\"");
-    assert_not_contains(WORKSPACE_LOCK, "name = \"h2\"\nversion = \"0.4.15\"");
+    let version = h2
+        .lines()
+        .find_map(|line| line.strip_prefix("version = \"")?.strip_suffix('\"'))
+        .expect("locked h2 version");
+    let parts = version
+        .split('.')
+        .map(|part| part.parse::<u64>().expect("numeric h2 version component"))
+        .collect::<Vec<_>>();
+    assert_eq!(parts.len(), 3, "expected a stable semantic h2 version");
+    assert!(
+        (parts[0], parts[1], parts[2]) >= (0, 4, 16),
+        "h2 {version} predates the empty DATA frame fix in 0.4.16"
+    );
 }
 
 fn assert_locked_git_package(name: &str, version: &str, repository: &str, revision: &str) {

@@ -1,9 +1,9 @@
 {
   "schema_version": "dasobjectstore.phoreus-limited-profile-binding.v1",
-  "contract_version": "1.0.1",
+  "contract_version": "1.0.2",
   "producer": {
     "product_id": "dasobjectstore",
-    "compatible_package_range": ">=0.186.36,<0.186.37"
+    "compatible_package_range": ">=0.186.39,<0.186.40"
   },
   "readiness_evidence": {
     "schema_version": "dasobjectstore.profile_readiness.v1",
