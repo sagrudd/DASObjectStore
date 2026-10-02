@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.186.38 - Unreleased
+## 0.186.39 - Unreleased
+
+- Align the packaged plugin-process descriptor with product version 0.186.39.
+  Advance the bounded Phoreus producer candidate to `>=0.186.39,<0.186.40`;
+  the corresponding consumer-source and Kanon candidate rebinding remain in
+  progress. No package artefact or runtime qualification is claimed.
+
+## 0.186.38 - Superseded candidate
 
 - Align the package source graph with the proposed Prosopikon #92 core 0.33.2
   source at `d970ba6f477518141115407e45e9fcdec0a04058`, its Yew crate at the
