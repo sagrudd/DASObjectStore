@@ -8,11 +8,19 @@
   0.79.9; adopt Proxenos 0.62.0's store-free Site Trust readiness classifier.
   Advance the Phoreus limited-profile producer binding to contract 1.0.2 and
   the exact candidate range `>=0.186.38,<0.186.39`.
-  Prosopikon #92 and Pistis #526 remain unmerged draft inputs, and the
-  downstream consumer contract needs owner approval. Phoreus does not yet have
-  a source successor admitting Monas 0.130.11 / DASObjectStore 0.186.38; that
-  requires its own source and Kanon mapping. This is source preparation only; it
-  does not qualify a package, runtime, installation, or six-product lockset.
+  Prosopikon #92 and Pistis #526 remain unmerged proposed inputs, and the
+  downstream consumer contract remains pending owner approval. Phoreus #98 now
+  proposes Monas #525 0.130.12 at `b5d84f25f8b983305c3f8bb6cdea05dcf91cf47b`
+  under producer contract 1.0.8 (`>=0.130.12,<0.130.13`), paired with this
+  DASObjectStore 0.186.38 candidate under binding contract 1.0.2. Draft Kanon
+  #559 records that pair at candidate head
+  `1b3cb1f5b552f6b0b8980283cca0a5a3cabf6115` with content digest
+  `sha256:54100d6b2bb734df5f105f8a7aa6e3a0f397e03b7212de8bd76ff4b788f980a0`;
+  its refreshed exports are recorded in the candidate evidence. Hosted Source
+  validation and independent exact-head review remain pending, as do owner and
+  release gates.
+  This is source preparation only; it does not qualify a package, runtime,
+  installation, or six-product lockset.
 
 - Propose a source-only Garage service-provision plan export contract with a
   synthetic per-store action fixture. Version 1 binds complete local catalogue
