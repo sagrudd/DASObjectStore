@@ -2,10 +2,15 @@
 
 ## 0.186.39 - Unreleased
 
+- Rebind the Prosopikon core and Yew source to exact draft PR #92 head
+  `19ea2140b99806ef3ea4cd8d9699abee19259006` (core 0.33.2; Yew 0.1.4) in
+  direct dependencies, lockfile, web preparation, local container setup, and
+  source-contract tests. This corrects the earlier 0.33.2 source witness without
+  changing the public package version or API.
 - Align the packaged plugin-process descriptor with product version 0.186.39.
   Advance the bounded Phoreus producer candidate to `>=0.186.39,<0.186.40`;
-  the corresponding consumer-source and Kanon candidate rebinding remain in
-  progress. No package artefact or runtime qualification is claimed.
+  the matching consumer and Kanon candidate rebinding remain in progress. No
+  package artefact or runtime qualification is claimed.
 
 ## 0.186.38 - Superseded candidate
 
