@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "axum",
  "axum-server",
@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "axum",
  "axum-server",
@@ -886,7 +886,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -918,7 +918,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "axum",
  "chrono",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -972,7 +972,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "serde",
  "serde_json",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.186.39"
+version = "0.186.40"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -2971,8 +2971,8 @@ dependencies = [
 
 [[package]]
 name = "prosopikon-core"
-version = "0.33.2"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=19ea2140b99806ef3ea4cd8d9699abee19259006#19ea2140b99806ef3ea4cd8d9699abee19259006"
+version = "0.34.0"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=6c421a6e1ddaee63692e88c9b46095c652befe04#6c421a6e1ddaee63692e88c9b46095c652befe04"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3006,7 +3006,7 @@ dependencies = [
 [[package]]
 name = "prosopikon-yew"
 version = "0.1.4"
-source = "git+https://github.com/sagrudd/prosopikon.git?rev=19ea2140b99806ef3ea4cd8d9699abee19259006#19ea2140b99806ef3ea4cd8d9699abee19259006"
+source = "git+https://github.com/sagrudd/prosopikon.git?rev=6c421a6e1ddaee63692e88c9b46095c652befe04#6c421a6e1ddaee63692e88c9b46095c652befe04"
 dependencies = [
  "prosopikon-core",
  "web-sys",

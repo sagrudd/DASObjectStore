@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.186.40 - Unreleased
+
+- Pin both Prosopikon core and Yew to
+  `6c421a6e1ddaee63692e88c9b46095c652befe04` (core 0.34.0; Yew 0.1.4),
+  preserving one exact Rust source identity for DASObjectStore #1 and Monas #178.
+  Update the lockfile, strict source assertion, web preparation and local
+  container setup together. All other supplier pins remain unchanged.
+- This compatible dependency successor does not qualify packages or runtime
+  installation. Downstream resolution, normal delivery gates and the linked
+  Kanon binding remain separate acceptance requirements.
+
 ## 0.186.39 - Unreleased
 
 - Rebind the Prosopikon core and Yew source to exact draft PR #92 head
