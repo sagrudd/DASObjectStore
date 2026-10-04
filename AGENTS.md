@@ -215,10 +215,12 @@ never a second authority. Do not invent, copy, or override Kanon values locally
 to make a build or installation pass.
 
 Any identity, version, dependency, packaging, support or provenance change must
-start with a coordinated Kanon registry change. If resolved content changes,
-create a new immutable Kanon lockset; never rewrite or republish a historical
-lockset. Record the linked Kanon change and exact lockset ID and content digest
-in the component and Terraform delivery.
+start with a coordinated Kanon registry change. Source preparation records the
+exact authoritative Kanon source transaction or verified snapshot; it is not a
+resolved lockset. For package, installation, release or support qualification,
+if resolved content changes, create a new immutable Kanon lockset; never rewrite
+or republish a historical lockset. Record the linked Kanon change and exact
+applicable lockset ID and content digest in the component and Terraform delivery.
 
 Terraform must consume that exact Kanon lockset through the Kanon resolver and
 regenerate its compatibility projection, catalogue, adapters, package
@@ -226,8 +228,9 @@ descriptions and dependency metadata. Do not hand-edit generated projections or
 maintain a second annotation point. The Terraform source pins and the lockset's
 source revisions must agree exactly.
 
-A build, install or release is invalid unless Kanon, Terraform, the checkout,
-DEB/RPM control metadata and provenance agree on lockset ID and digest,
+A package build, install, release or support declaration is invalid unless
+Kanon, Terraform, the checkout, DEB/RPM control metadata and provenance agree
+on lockset ID and digest,
 component identity, version, source revision, architecture, adapter and the
 complete declared dependency closure. Any mismatch is a hard failure.
 
@@ -239,7 +242,8 @@ dependency.
 
 Kanon lock validation, Terraform projection/catalogue validation, adapter and
 package-metadata tests, and stale-artefact checks are release gates for
-`make deb`, `make rpm`, `make install`, Jenkins and customer releases.
+`make deb`, `make rpm`, `make install`, release-capable Jenkins tasks and
+customer releases. Source validation tasks remain non-release and non-deployable.
 If Kanon or its pinned lockset cannot be verified, the supported build and
 installation path fails closed; there is no silent fallback to local metadata.
 
@@ -249,10 +253,42 @@ Terraform projection, adapter validation and DEB/RPM metadata tests before it
 can be described as supported. A pending or unsupported identity cannot be
 declared supported locally.
 
-Before completing a change, run the repository's Kanon/lockset and package
-gates and record the exact lockset ID, digest and source revisions in the
-change or pull request. If a required Kanon or Terraform change is not
-available, report that as a blocker rather than shipping stale content.
+### Normal source merge and product acceptance
+
+Normal source merge requires actual independent review of the exact source
+head; the focused authentic source, test and check receipts required by that
+change; and verification of affected identity, dependency and compatibility
+coordinates against the exact authoritative Kanon source transaction or
+verified snapshot. Record exact revisions, results, evidence limits and
+remaining unknowns in the pull request. Missing required source evidence
+remains blocked or needs-review; no absent check is a PASS.
+
+An independently qualified source slice may merge while parent, package,
+installation or runtime outcomes remain open. Source preparation or a native
+fixture test does not satisfy a resolved lockset or qualify package bytes,
+supported hosts, installation, release or customer acceptance. Partial pull
+requests retain their parent issue's remaining acceptance and do not close it.
+
+Package, installation, release and support acceptance still require the actual
+exact applicable resolved lockset ID and digest, source and artifact provenance,
+complete dependency closure, Terraform projection/catalogue, metadata, adapter
+and stale-artifact gates stated above. Record their genuine results and exact
+source revisions before that acceptance. If the required Kanon lockset,
+Terraform change or package proof is unavailable, those paths fail closed;
+source preparation is no substitute.
+
+This scoped policy amendment applies the standing recovery owner authorization
+of 17 September and delivery simplification of 3 October 2026 in
+`~/Projects/mnemosyne-programme/recovery/OWNER_AUTHORIZATION.md`, together with
+Mnemosyne Engineering Standard 0.3.0's separate source validation and partial
+issue acceptance rules. Its causal example is the dependency slice in
+[DAS #1](https://github.com/sagrudd/DASObjectStore/issues/1),
+[PR #265](https://github.com/sagrudd/DASObjectStore/pull/265), its normally merged
+[Kanon #667](https://github.com/sagrudd/kanon/pull/667), and the independently
+reviewed [native ARM 38-test receipt](https://github.com/sagrudd/DASObjectStore/issues/1#issuecomment-5974693937).
+These source receipts do not complete the parent runtime/installation outcome
+or relax product, data, authentication or release checks.
+
 ## Programme Governance
 
 This repository participates in the Mnemosyne Programme.
