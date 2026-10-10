@@ -338,9 +338,12 @@ mod tests {
         }
     }
 
-    fn old_supplier_config(cert: &[u8], key: &[u8]) -> std::io::Result<rustls::ServerConfig> {
-        let cert = rustls_pemfile::certs(&mut cert.as_ref()).collect::<Result<Vec<_>, _>>()?;
-        let mut keys = rustls_pemfile::read_all(&mut key.as_ref())
+    fn old_supplier_config(
+        mut cert: &[u8],
+        mut key: &[u8],
+    ) -> std::io::Result<rustls::ServerConfig> {
+        let cert = rustls_pemfile::certs(&mut cert).collect::<Result<Vec<_>, _>>()?;
+        let mut keys = rustls_pemfile::read_all(&mut key)
             .filter_map(|item| match item.ok()? {
                 rustls_pemfile::Item::Sec1Key(key) => Some(key.secret_sec1_der().to_vec()),
                 rustls_pemfile::Item::Pkcs1Key(key) => Some(key.secret_pkcs1_der().to_vec()),
