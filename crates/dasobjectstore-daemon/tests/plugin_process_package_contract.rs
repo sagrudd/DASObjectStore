@@ -1117,9 +1117,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "Cargo must receive the explicit copied manifest path"
     );
     assert!(
-        cargo_invocation
-            .find("argv=build --manifest-path")
-            .is_some(),
+        cargo_invocation.contains("argv=build --manifest-path"),
         "Cargo must receive the build subcommand before its manifest argument"
     );
     assert!(

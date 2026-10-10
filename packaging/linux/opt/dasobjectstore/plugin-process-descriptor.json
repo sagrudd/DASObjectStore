@@ -8,5 +8,5 @@
   "uiMount": "/products/dasobjectstore/",
   "apiMount": "/products/dasobjectstore/api/",
   "audience": "monas:dasobjectstore",
-  "version": "0.186.41"
+  "version": "0.187.0"
 }

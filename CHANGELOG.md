@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.187.0
+
+- Add the accepted exact-source continuity owner codec and private immutable-history/CAS adapter. Canonical request, immutable enrollment, floor, exact original retry, bounded history, conditional-conflict reconciliation, fresh clock/expiry checks and lost-ack retention are covered by synthetic source tests.
+- Reserve the continuity mTLS route with an unavailable response. Installed purpose admission, independent backend policy, AWS provisioning and native transport qualification remain absent; general application mTLS and local catalogue CAS do not confer continuity authority.
+- Source transaction: Kanon PR #741; this preparation is not a resolved lockset, installed service or release qualification.
+
 ## 0.186.41 - Unreleased
 
 - Use the already locked Rustls pki-types PEM APIs for the six internal

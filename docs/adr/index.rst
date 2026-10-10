@@ -20,5 +20,6 @@ implementation.
    0010-existing-only-bounded-custody-read
    0011-finite-authenticated-reader-session
    0011-reader-wire-contract
+   0012-maintained-pem-reader-and-server-supplier
    fixtures/0011-reader-wire/README
    fixtures/README
