@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.186.41 - Unreleased
+
+- Use the already locked Rustls pki-types PEM APIs for the six internal
+  certificate/private-key readers, preserving first-key and lazy-first-leaf
+  behavior, collection order, cardinality checks and error categories.
+- Remove the two direct production rustls-pemfile dependency edges and propose
+  the accepted ADR-0012 axum-server 0.8.0 successor. A private shared file loader
+  preserves the prior supplier's full certificate collection, full key scan,
+  exactly-one successful key requirement and h2/http1.1 ALPN. The mTLS first-key
+  reader remains separate. The dependency lock is pending native resolution;
+  two temporary development parser oracles remain until supplier regression
+  qualification. This Source proposal does not establish advisory closure,
+  provider-policy compliance, package qualification or runtime acceptance.
+  Native and coordinated Kanon delivery gates remain required.
+
 ## 0.186.40 - Unreleased
 
 - Pin both Prosopikon core and Yew to

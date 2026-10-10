@@ -51,6 +51,20 @@ impl FilePistisEasyconnectApprovalResolver {
         ),
         PistisGrantResolutionError,
     > {
+        self.resolve_exact_grant_with_catalog(requested_object_store, None)
+    }
+
+    fn resolve_exact_grant_with_catalog(
+        &self,
+        requested_object_store: &str,
+        catalog: Option<&dasobjectstore_object_service::CustodyCatalogBinding>,
+    ) -> Result<
+        (
+            PistisObjectStoreGrantRecord,
+            RemoteEasyconnectObjectStoreGrant,
+        ),
+        PistisGrantResolutionError,
+    > {
         if requested_object_store.trim().is_empty() {
             return Err(PistisGrantResolutionError::UnknownObjectStore);
         }
@@ -82,8 +96,16 @@ impl FilePistisEasyconnectApprovalResolver {
         if !record.can_write {
             return Err(PistisGrantResolutionError::WriteNotGranted);
         }
-        let definitions = read_store_registry(&self.store_registry_path)
-            .map_err(|error| PistisGrantResolutionError::StoreRegistry(error.to_string()))?;
+        let definitions = match catalog {
+            Some(binding) => {
+                dasobjectstore_object_service::read_store_registry_with_custody_catalog(
+                    &self.store_registry_path,
+                    binding,
+                )
+            }
+            None => read_store_registry(&self.store_registry_path),
+        }
+        .map_err(|error| PistisGrantResolutionError::StoreRegistry(error.to_string()))?;
         let stores = definitions
             .iter()
             .filter(|definition| definition.store_id.as_str() == requested_object_store)
@@ -113,12 +135,13 @@ impl FilePistisEasyconnectApprovalResolver {
     }
 }
 
-impl PistisEasyconnectApprovalResolver for FilePistisEasyconnectApprovalResolver {
-    fn resolve(
+impl FilePistisEasyconnectApprovalResolver {
+    fn resolve_with_catalog(
         &self,
         actor: &AuthenticatedGuiActor,
         verified: &VerifiedHostAuthenticatedContext,
         requested_object_store: &str,
+        catalog: Option<&dasobjectstore_object_service::CustodyCatalogBinding>,
     ) -> Result<RemoteEasyconnectApprovalContext, PistisApprovalResolutionError> {
         let context = verified.context();
         if actor.subject_id != self.principal_id.to_string()
@@ -130,9 +153,14 @@ impl PistisEasyconnectApprovalResolver for FilePistisEasyconnectApprovalResolver
                 "verified actor lacks the configured Pistis storage-operator grant",
             ));
         }
-        let (record, grant) = self
-            .resolve_exact_grant(requested_object_store)
-            .map_err(|error| PistisApprovalResolutionError::new(error.to_string()))?;
+        let resolved = match catalog {
+            Some(binding) => {
+                self.resolve_exact_grant_with_catalog(requested_object_store, Some(binding))
+            }
+            None => self.resolve_exact_grant(requested_object_store),
+        };
+        let (record, grant) =
+            resolved.map_err(|error| PistisApprovalResolutionError::new(error.to_string()))?;
         Ok(RemoteEasyconnectApprovalContext {
             authority_id: self.authority_id.to_string(),
             principal_id: self.principal_id.to_string(),
@@ -148,6 +176,17 @@ impl PistisEasyconnectApprovalResolver for FilePistisEasyconnectApprovalResolver
                 record.policy_revision, record.record_id
             ),
         })
+    }
+}
+
+impl PistisEasyconnectApprovalResolver for FilePistisEasyconnectApprovalResolver {
+    fn resolve(
+        &self,
+        actor: &AuthenticatedGuiActor,
+        verified: &VerifiedHostAuthenticatedContext,
+        requested_object_store: &str,
+    ) -> Result<RemoteEasyconnectApprovalContext, PistisApprovalResolutionError> {
+        self.resolve_with_catalog(actor, verified, requested_object_store, None)
     }
 }
 
@@ -199,6 +238,26 @@ impl std::error::Error for PistisGrantResolutionError {}
 
 #[cfg(test)]
 mod tests {
+    struct OwnedFixtureResolver {
+        inner: FilePistisEasyconnectApprovalResolver,
+        catalog: dasobjectstore_object_service::CustodyCatalogBinding,
+    }
+    impl PistisEasyconnectApprovalResolver for OwnedFixtureResolver {
+        fn resolve(
+            &self,
+            actor: &AuthenticatedGuiActor,
+            verified: &VerifiedHostAuthenticatedContext,
+            requested_object_store: &str,
+        ) -> Result<RemoteEasyconnectApprovalContext, PistisApprovalResolutionError> {
+            self.inner.resolve_with_catalog(
+                actor,
+                verified,
+                requested_object_store,
+                Some(&self.catalog),
+            )
+        }
+    }
+
     use super::*;
     use dasobjectstore_core::utc::format_utc_timestamp_seconds;
     use dasobjectstore_core::{
@@ -239,7 +298,7 @@ mod tests {
     fn fixture(
         records: Vec<PistisObjectStoreGrantRecord>,
     ) -> (
-        FilePistisEasyconnectApprovalResolver,
+        OwnedFixtureResolver,
         AuthenticatedGuiActor,
         VerifiedHostAuthenticatedContext,
         PathBuf,
@@ -306,13 +365,19 @@ mod tests {
             correlation_id: Some("test:correlation".to_owned()),
         };
         (
-            FilePistisEasyconnectApprovalResolver::new(
-                authority_id,
-                principal_id,
-                session_id,
-                grants_path,
-                stores_path,
-            ),
+            OwnedFixtureResolver {
+                inner: FilePistisEasyconnectApprovalResolver::new(
+                    authority_id,
+                    principal_id,
+                    session_id,
+                    grants_path,
+                    stores_path,
+                ),
+                catalog: dasobjectstore_object_service::CustodyCatalogBinding::new(
+                    root.join("custody-catalog.jsonl"),
+                )
+                .expect("owned resolver catalogue binding"),
+            },
             actor,
             verified,
             root,

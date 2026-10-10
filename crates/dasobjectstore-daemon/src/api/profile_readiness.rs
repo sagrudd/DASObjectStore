@@ -224,9 +224,10 @@ mod tests {
             env!("CARGO_PKG_VERSION_MINOR").parse::<u64>().unwrap(),
             env!("CARGO_PKG_VERSION_PATCH").parse::<u64>().unwrap(),
         );
-        assert_eq!(current, (0, 186, 39));
+        assert_eq!(current, (0, 186, 41));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 38)));
-        assert!(((0, 186, 39)..(0, 186, 40)).contains(&current));
+        assert!(((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 39)));
+        assert!(!((0, 186, 39)..(0, 186, 40)).contains(&current));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 40)));
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],

@@ -390,46 +390,6 @@ fn write_store_contents_du(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::super::run;
-    use crate::cli::Cli;
-    use clap::Parser;
-
-    #[test]
-    fn renders_user_service_plan_as_json_without_installing_launchd_service() {
-        let cli = Cli::try_parse_from([
-            "dasobjectstore",
-            "store",
-            "user-service-plan",
-            "--executable",
-            "/Users/tester/bin/dasobjectstored",
-            "--config",
-            "/Users/tester/Library/Config/dasobjectstore.json",
-            "--home",
-            "/Users/tester",
-            "--state-home",
-            "/Users/tester/Library/State",
-            "--runtime-home",
-            "/tmp/tester-runtime",
-            "--json",
-        ])
-        .expect("user service plan parses");
-        let mut output = Vec::new();
-        run(&cli, &mut output).expect("plan renders");
-        let response: serde_json::Value = serde_json::from_slice(&output).expect("json output");
-        assert_eq!(response["label"], "org.dasobjectstore.dasobjectstored");
-        assert_eq!(
-            response["state_dir"],
-            "/Users/tester/Library/State/dasobjectstore"
-        );
-        assert!(response["plist"]
-            .as_str()
-            .unwrap()
-            .contains("<key>RunAtLoad</key>"));
-    }
-}
-
 fn write_store_contents_tree(
     snapshot: &StoreContentsSnapshot,
     depth: usize,
@@ -739,4 +699,44 @@ pub(super) fn run_store_validate(
     writeln!(writer, "Store policy is valid: {}", policy.class.name())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::run;
+    use crate::cli::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn renders_user_service_plan_as_json_without_installing_launchd_service() {
+        let cli = Cli::try_parse_from([
+            "dasobjectstore",
+            "store",
+            "user-service-plan",
+            "--executable",
+            "/Users/tester/bin/dasobjectstored",
+            "--config",
+            "/Users/tester/Library/Config/dasobjectstore.json",
+            "--home",
+            "/Users/tester",
+            "--state-home",
+            "/Users/tester/Library/State",
+            "--runtime-home",
+            "/tmp/tester-runtime",
+            "--json",
+        ])
+        .expect("user service plan parses");
+        let mut output = Vec::new();
+        run(&cli, &mut output).expect("plan renders");
+        let response: serde_json::Value = serde_json::from_slice(&output).expect("json output");
+        assert_eq!(response["label"], "org.dasobjectstore.dasobjectstored");
+        assert_eq!(
+            response["state_dir"],
+            "/Users/tester/Library/State/dasobjectstore"
+        );
+        assert!(response["plist"]
+            .as_str()
+            .unwrap()
+            .contains("<key>RunAtLoad</key>"));
+    }
 }

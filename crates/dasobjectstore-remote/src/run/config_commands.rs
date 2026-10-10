@@ -348,21 +348,6 @@ fn clear_legacy_username_for_pistis_pairing(config: &mut RemoteConfig) {
     config.username = None;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pistis_pairing_clears_a_legacy_local_username() {
-        let mut config = empty_config();
-        config.username = Some("obsolete-local-user".to_string());
-
-        clear_legacy_username_for_pistis_pairing(&mut config);
-
-        assert!(config.username.is_none());
-    }
-}
-
 pub(super) fn write_easyconnect_contract(
     contract: &RemoteEasyconnectContract,
     writer: &mut impl Write,
@@ -546,4 +531,19 @@ pub(super) fn run_store_list(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pistis_pairing_clears_a_legacy_local_username() {
+        let mut config = empty_config();
+        config.username = Some("obsolete-local-user".to_string());
+
+        clear_legacy_username_for_pistis_pairing(&mut config);
+
+        assert!(config.username.is_none());
+    }
 }

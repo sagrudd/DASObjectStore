@@ -830,7 +830,7 @@ mod tests {
     use super::default_custody_catalog_path;
     use super::{
         catalog_contains_bucket, catalog_contains_store, claim_custody_catalog_admission,
-        create_custody_catalog_entry, default_custody_ledger_path, read_custody_catalog,
+        create_custody_catalog_entry, custody_ledger_path_for_catalog, read_custody_catalog,
         reject_catalogued_custody_definition, reject_catalogued_custody_mutation, store_claim_path,
         CustodyCatalogEntryV1,
     };
@@ -880,11 +880,15 @@ mod tests {
         }
     }
 
+    fn fixture_ledger(catalog: &std::path::Path, store_id: &StoreId) -> PathBuf {
+        custody_ledger_path_for_catalog(catalog, store_id).expect("owned derived fixture ledger")
+    }
+
     #[test]
     fn creates_durable_append_only_entry_and_supports_read_only_lookup() {
         let catalog = temporary_catalog_path("create").join("catalog.jsonl");
         let definition = definition("custody-a");
-        let ledger = PathBuf::from("/var/lib/dasobjectstore/custody/custody-a.sqlite");
+        let ledger = fixture_ledger(&catalog, &definition.store_id);
 
         let created = create_custody_catalog_entry(
             &catalog,
@@ -912,7 +916,7 @@ mod tests {
     fn rejects_duplicate_store_id_without_replacement_or_second_append() {
         let catalog = temporary_catalog_path("duplicate").join("catalog.jsonl");
         let definition = definition("custody-duplicate");
-        let ledger = PathBuf::from("/var/lib/dasobjectstore/custody/duplicate.sqlite");
+        let ledger = fixture_ledger(&catalog, &definition.store_id);
         create_custody_catalog_entry(
             &catalog,
             &definition,
@@ -946,7 +950,10 @@ mod tests {
         let error = create_custody_catalog_entry(
             &catalog,
             &retired,
-            "/var/lib/dasobjectstore/custody/retired.sqlite",
+            fixture_ledger(
+                &catalog,
+                &StoreId::new("valid-retired-control").expect("fixture id"),
+            ),
             LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
@@ -1034,7 +1041,10 @@ mod tests {
         create_custody_catalog_entry(
             &catalog,
             &definition,
-            "/var/lib/dasobjectstore/custody/ordinary-route.sqlite",
+            fixture_ledger(
+                &catalog,
+                &StoreId::new("custody-ordinary-route").expect("fixture id"),
+            ),
             LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
@@ -1057,7 +1067,10 @@ mod tests {
         create_custody_catalog_entry(
             &catalog,
             &definition,
-            "/var/lib/dasobjectstore/custody/bucket-owner.sqlite",
+            fixture_ledger(
+                &catalog,
+                &StoreId::new("custody-bucket-owner").expect("fixture id"),
+            ),
             LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )
@@ -1099,8 +1112,18 @@ mod tests {
 
     #[test]
     fn default_ledger_path_is_daemon_derived_and_does_not_embed_store_text() {
-        let path = default_custody_ledger_path(&StoreId::new("custody-ledger-path").unwrap())
-            .expect("derived path");
+        let catalog = temporary_catalog_path("ledger-path").join("catalog.jsonl");
+        let store_id = StoreId::new("custody-ledger-path").expect("fixture id");
+        let path = fixture_ledger(&catalog, &store_id);
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(store_id.as_str().as_bytes());
+        assert_eq!(
+            path,
+            catalog
+                .parent()
+                .expect("owned catalog parent")
+                .join("custody-ledgers")
+                .join(format!("{}.sqlite", hex::encode(digest)))
+        );
         assert!(path.is_absolute());
         assert_eq!(
             path.extension().and_then(|value| value.to_str()),
@@ -1116,7 +1139,10 @@ mod tests {
         let entry = create_custody_catalog_entry(
             &catalog,
             &definition("custody-nested-strict"),
-            "/var/lib/dasobjectstore/custody/nested-strict.sqlite",
+            fixture_ledger(
+                &catalog,
+                &StoreId::new("custody-nested-strict").expect("fixture id"),
+            ),
             LEDGER_CONFIGURATION_SHA256,
             CREATED_AT,
         )

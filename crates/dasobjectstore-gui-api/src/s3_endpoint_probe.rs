@@ -1,7 +1,11 @@
 //! Non-secret runtime proof that the public S3 endpoint matches its descriptor.
 
+#[cfg(test)]
+#[path = "../../dasobjectstore-cli/src/supplier_tls_compat.rs"]
+mod supplier_tls_compat;
+
+use rustls::pki_types::{pem::PemObject as _, CertificateDer};
 use std::fmt;
-use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 
@@ -114,13 +118,7 @@ pub async fn verify_public_s3_endpoint(
             endpoint: endpoint.to_string(),
             reason: format!("configured TLS trust material cannot be read: {error}"),
         })?;
-    let configured_certificates = rustls_pemfile::certs(&mut BufReader::new(trust_pem.as_slice()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| S3EndpointProbeError::Unavailable {
-            endpoint: endpoint.to_string(),
-            reason: "configured TLS trust material is not a valid PEM certificate bundle"
-                .to_string(),
-        })?;
+    let configured_certificates = parse_trust_bundle(endpoint, &trust_pem)?;
     let configured_leaf =
         configured_certificates
             .first()
@@ -252,13 +250,26 @@ async fn plaintext_http_responds(host: &str, port: u16) -> bool {
     )
 }
 
+fn parse_trust_bundle(
+    endpoint: &str,
+    trust_pem: &[u8],
+) -> Result<Vec<CertificateDer<'static>>, S3EndpointProbeError> {
+    CertificateDer::pem_slice_iter(trust_pem)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: "configured TLS trust material is not a valid PEM certificate bundle"
+                .to_string(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::supplier_tls_compat;
     use super::*;
     use axum::http::{header, StatusCode};
     use axum::routing::get;
     use axum::Router;
-    use axum_server::tls_rustls::RustlsConfig;
     use rcgen::{
         generate_simple_self_signed, BasicConstraints, CertificateParams, CertifiedIssuer, IsCa,
         KeyPair,
@@ -305,13 +316,17 @@ mod tests {
         let private_key_path = root.join("server.key");
         std::fs::write(&certificate_path, certificate_pem).expect("write certificate");
         std::fs::write(&private_key_path, private_key_pem).expect("write private key");
-        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
+        let tls = supplier_tls_compat::from_pem_file(&certificate_path, &private_key_path)
             .await
             .expect("load TLS");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        listener
+            .set_nonblocking(true)
+            .expect("make owned test TLS listener nonblocking");
         let address = listener.local_addr().expect("address");
         let server = tokio::spawn(async move {
             axum_server::from_tcp_rustls(listener, tls)
+                .expect("compose owned test TLS listener")
                 .serve(app.into_make_service())
                 .await
         });
@@ -504,5 +519,34 @@ mod tests {
             "dasobjectstore-s3-endpoint-probe-{label}-{}",
             uuid::Uuid::new_v4()
         ))
+    }
+}
+
+#[cfg(test)]
+mod bundle_parser_differential_tests {
+    use super::*;
+    #[test]
+    fn actual_probe_parser_matches_old_full_collection() {
+        let one = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
+        let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        for bytes in [
+            Vec::new(),
+            one.to_vec(),
+            bad.to_vec(),
+            [one.as_slice(), bad.as_slice()].concat(),
+        ] {
+            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(bytes.as_slice()))
+                .collect::<Result<Vec<_>, _>>();
+            match old {
+                Ok(expected) => assert_eq!(
+                    parse_trust_bundle("https://fixture.invalid", &bytes).unwrap(),
+                    expected
+                ),
+                Err(_) => assert!(
+                    matches!(parse_trust_bundle("https://fixture.invalid", &bytes),
+                    Err(S3EndpointProbeError::Unavailable { reason, .. }) if reason == "configured TLS trust material is not a valid PEM certificate bundle")
+                ),
+            }
+        }
     }
 }

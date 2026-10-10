@@ -21,7 +21,6 @@ prosopikon-core = { workspace = true, features = ["auth"] }
 rcgen.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -34,6 +33,8 @@ tokio-util.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# Temporary locked migration oracle; not a production parser dependency.
+rustls-pemfile = "=2.2.0"
 axum-server.workspace = true
 rusqlite.workspace = true
 tower.workspace = true

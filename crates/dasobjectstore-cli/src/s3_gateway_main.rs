@@ -5,7 +5,7 @@
 //! SigV4 gateway on port 3900 available while the legacy standalone Web
 //! listener is retired in favour of Monas-hosted, Pistis-verified routes.
 
-use axum_server::tls_rustls::RustlsConfig;
+mod supplier_tls_compat;
 use clap::Parser;
 use dasobjectstore_gui_api::s3_gateway_router;
 use serde::{Deserialize, Serialize};
@@ -130,8 +130,11 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let tls = match RustlsConfig::from_pem_file(&config.certificate_path, &config.private_key_path)
-        .await
+    let tls = match supplier_tls_compat::from_pem_file(
+        &config.certificate_path,
+        &config.private_key_path,
+    )
+    .await
     {
         Ok(tls) => tls,
         Err(error) => {

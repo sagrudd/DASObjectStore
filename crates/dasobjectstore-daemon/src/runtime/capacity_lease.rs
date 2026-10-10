@@ -74,7 +74,7 @@ mod tests {
     use dasobjectstore_core::store::{
         CapacityPolicy, CapacityReservationLedger, StoreClass, StorePolicy,
     };
-    use dasobjectstore_object_service::StoreServiceDefinition;
+    use dasobjectstore_object_service::{CustodyCatalogBinding, StoreServiceDefinition};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -130,6 +130,10 @@ mod tests {
             root.join("backend"),
             root.join("ssd"),
             FixedProbe,
+        )
+        .with_custody_catalog_binding(
+            CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+                .expect("owned fixture custody catalog binding"),
         )
     }
 

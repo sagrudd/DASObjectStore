@@ -9,7 +9,7 @@ use crate::dashboard::{
     TelemetryWindowControlView, TelemetryWindowOptionView, ThroughputDayView,
     ThroughputSummaryView, REDESIGN_DASHBOARD_SCHEMA_VERSION,
 };
-use crate::object_stores_aggregator::registry_object_store_cards;
+use crate::object_stores_aggregator::registry_object_store_cards_with_catalog;
 use dasobjectstore_core::utc::parse_utc_timestamp_seconds;
 use dasobjectstore_daemon::api::ApplianceTelemetryWindow;
 use dasobjectstore_daemon::{
@@ -86,6 +86,13 @@ pub(crate) fn live_home_dashboard_for_window(
 }
 
 fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardView {
+    build_home_dashboard_with_catalog(config, None)
+}
+
+fn build_home_dashboard_with_catalog(
+    config: HomeDashboardAggregatorConfig,
+    catalog: Option<&dasobjectstore_object_service::CustodyCatalogBinding>,
+) -> HomeDashboardView {
     let generated_at_utc = now_utc_string();
     let mut source_warnings = Vec::new();
 
@@ -154,8 +161,13 @@ fn build_home_dashboard(config: HomeDashboardAggregatorConfig) -> HomeDashboardV
             }
             Vec::new()
         });
-    let object_stores =
-        registry_object_store_cards(&config.store_registry_path, None, &[], &mut source_warnings);
+    let object_stores = registry_object_store_cards_with_catalog(
+        &config.store_registry_path,
+        None,
+        &[],
+        &mut source_warnings,
+        catalog,
+    );
     let object_service = config
         .object_service_status
         .unwrap_or_else(object_service::status);
@@ -326,6 +338,11 @@ pub(crate) struct FilesystemCapacity {
     pub(crate) available_bytes: u64,
 }
 
+#[cfg(any(unix, test))]
+fn capacity_bytes_from_blocks<B: Into<u64>, S: Into<u64>>(blocks: B, size: S) -> u64 {
+    blocks.into().saturating_mul(size.into())
+}
+
 #[cfg(unix)]
 pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
     use std::ffi::CString;
@@ -345,8 +362,8 @@ pub(crate) fn capacity_for_root(path: &Path) -> Option<FilesystemCapacity> {
     #[allow(clippy::unnecessary_cast)] // Required when libc uses a narrower unsigned type.
     let fragment_size = stat.f_frsize as u64;
     Some(FilesystemCapacity {
-        total_bytes: (stat.f_blocks as u64).saturating_mul(fragment_size),
-        available_bytes: (stat.f_bavail as u64).saturating_mul(fragment_size),
+        total_bytes: capacity_bytes_from_blocks(stat.f_blocks, fragment_size),
+        available_bytes: capacity_bytes_from_blocks(stat.f_bavail, fragment_size),
     })
 }
 
@@ -924,8 +941,32 @@ pub(crate) fn now_utc_string() -> String {
 
 #[cfg(test)]
 mod tests {
+    fn owned_home_dashboard(config: HomeDashboardAggregatorConfig) -> super::HomeDashboardView {
+        let binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            config
+                .store_registry_path
+                .parent()
+                .expect("owned registry parent")
+                .join("custody-catalog.jsonl"),
+        )
+        .expect("owned home fixture catalogue binding");
+        build_home_dashboard_with_catalog(config, Some(&binding))
+    }
+
+    #[test]
+    fn capacity_bytes_preserves_widths_zero_and_overflow_saturation() {
+        assert_eq!(super::capacity_bytes_from_blocks(3_u32, 4096_u32), 12288);
+        assert_eq!(super::capacity_bytes_from_blocks(3_u64, 4096_u64), 12288);
+        assert_eq!(super::capacity_bytes_from_blocks(3_u32, 4096_u64), 12288);
+        assert_eq!(super::capacity_bytes_from_blocks(3_u64, 4096_u32), 12288);
+        assert_eq!(super::capacity_bytes_from_blocks(u64::MAX, 1_u32), u64::MAX);
+        assert_eq!(super::capacity_bytes_from_blocks(u64::MAX, 2_u32), u64::MAX);
+        assert_eq!(super::capacity_bytes_from_blocks(0_u32, u64::MAX), 0);
+        assert_eq!(super::capacity_bytes_from_blocks(u64::MAX, 0_u32), 0);
+    }
+
     use super::{
-        build_home_dashboard, telemetry_throughput, throughput_interval_label,
+        build_home_dashboard_with_catalog, telemetry_throughput, throughput_interval_label,
         HomeDashboardAggregatorConfig,
     };
     use crate::dashboard::ObjectServiceStatusView;
@@ -977,7 +1018,7 @@ mod tests {
         )
         .expect("throughput");
 
-        let view = build_home_dashboard(HomeDashboardAggregatorConfig {
+        let view = owned_home_dashboard(HomeDashboardAggregatorConfig {
             ssd_root,
             hdd_root,
             store_registry_path: registry_path,
@@ -1013,7 +1054,7 @@ mod tests {
     fn home_aggregator_reports_missing_managed_storage_without_bootstrap_fixture() {
         let root = temp_root("home-aggregator-missing");
 
-        let view = build_home_dashboard(HomeDashboardAggregatorConfig {
+        let view = owned_home_dashboard(HomeDashboardAggregatorConfig {
             ssd_root: root.join("missing-ssd"),
             hdd_root: root.join("missing-hdd"),
             store_registry_path: root.join("missing-stores.json"),
@@ -1075,7 +1116,7 @@ mod tests {
         let telemetry_path = root.join("appliance-telemetry.v1.json");
         fs::write(&telemetry_path, appliance_telemetry_json()).expect("telemetry write");
 
-        let view = build_home_dashboard(HomeDashboardAggregatorConfig {
+        let view = owned_home_dashboard(HomeDashboardAggregatorConfig {
             ssd_root,
             hdd_root,
             store_registry_path: registry_path,

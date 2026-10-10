@@ -249,6 +249,13 @@ pub(crate) fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
     MacosProbeProvider::system().probe()
 }
 
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
+    Err(ProbeError::UnsupportedPlatform {
+        platform: std::env::consts::OS.to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_disk_roots;
@@ -279,11 +286,4 @@ mod tests {
         assert_eq!(roots[1].disk_id.as_str(), "disk-b");
         assert_eq!(roots[1].root_path.to_string_lossy(), "relative/b");
     }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-pub(crate) fn probe_current_platform() -> Result<ProbeReport, ProbeError> {
-    Err(ProbeError::UnsupportedPlatform {
-        platform: std::env::consts::OS.to_string(),
-    })
 }

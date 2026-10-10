@@ -220,7 +220,19 @@ pub(crate) fn validate_bucket_name(bucket_name: &str) -> Result<(), ObjectServic
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_store_service_layout, StoreServiceDefinition};
+    fn fixture_layout_binding() -> crate::custody_catalog::CustodyCatalogBinding {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "layout-fixture-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        crate::custody_catalog::CustodyCatalogBinding::new(root.join("catalog.jsonl"))
+            .expect("owned layout fixture custody catalog binding")
+    }
+
+    use super::{plan_store_service_layout_with_custody_catalog, StoreServiceDefinition};
     use dasobjectstore_core::ids::StoreId;
     use dasobjectstore_core::store::{StoreClass, StorePolicy};
 
@@ -237,7 +249,9 @@ mod tests {
             ),
         ];
 
-        let layout = plan_store_service_layout(&definitions).expect("layout planned");
+        let layout =
+            plan_store_service_layout_with_custody_catalog(&definitions, &fixture_layout_binding())
+                .expect("layout planned");
 
         assert_eq!(layout.credential_requests.len(), 2);
         assert_eq!(layout.bucket_bindings.len(), 2);
@@ -269,7 +283,9 @@ mod tests {
             ),
         ];
 
-        let layout = plan_store_service_layout(&definitions).expect("layout planned");
+        let layout =
+            plan_store_service_layout_with_custody_catalog(&definitions, &fixture_layout_binding())
+                .expect("layout planned");
 
         assert_eq!(layout.bucket_bindings.len(), 1);
         assert_eq!(layout.bucket_bindings[0].store_id.as_str(), "generated");
@@ -283,7 +299,9 @@ mod tests {
         );
         store.bucket_name = Some("custom-generated-data".to_string());
 
-        let layout = plan_store_service_layout(&[store]).expect("layout planned");
+        let layout =
+            plan_store_service_layout_with_custody_catalog(&[store], &fixture_layout_binding())
+                .expect("layout planned");
 
         assert_eq!(
             layout.bucket_bindings[0].bucket_name,
@@ -299,7 +317,9 @@ mod tests {
         );
         store.bucket_name = Some("Invalid_Bucket".to_string());
 
-        let err = plan_store_service_layout(&[store]).expect_err("invalid bucket rejected");
+        let err =
+            plan_store_service_layout_with_custody_catalog(&[store], &fixture_layout_binding())
+                .expect_err("invalid bucket rejected");
 
         assert!(err.to_string().contains("must contain only lowercase"));
     }
@@ -317,7 +337,9 @@ mod tests {
             ),
         ];
 
-        let err = plan_store_service_layout(&definitions).expect_err("duplicate store rejected");
+        let err =
+            plan_store_service_layout_with_custody_catalog(&definitions, &fixture_layout_binding())
+                .expect_err("duplicate store rejected");
 
         assert!(err.to_string().contains("duplicate store definition"));
     }
@@ -329,7 +351,9 @@ mod tests {
             StorePolicy::defaults_for(StoreClass::ExportBundle),
         )];
 
-        let err = plan_store_service_layout(&definitions).expect_err("missing s3 store rejected");
+        let err =
+            plan_store_service_layout_with_custody_catalog(&definitions, &fixture_layout_binding())
+                .expect_err("missing s3 store rejected");
 
         assert!(err
             .to_string()

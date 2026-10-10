@@ -8,6 +8,7 @@ use base64::Engine;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::client::WebPkiServerVerifier;
 use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvider};
+use rustls::pki_types::pem::{Error as PemError, PemObject as _};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{
     ClientConfig, ClientConnection, DigitallySignedStruct, Error as TlsError, RootCertStore,
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs;
-use std::io::{self, BufReader, Write};
+use std::io::{self, Write};
 use std::net::{IpAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -394,8 +395,8 @@ pub fn verify_chain_with_authority(
     presented: &PresentedCertificate,
     authority_pem: &str,
 ) -> Result<(), TrustError> {
-    let mut reader = BufReader::new(authority_pem.as_bytes());
-    let authorities = rustls_pemfile::certs(&mut reader)
+    let authorities = CertificateDer::pem_reader_iter(authority_pem.as_bytes())
+        .map(pem_io_error_result)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| {
             TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}"))
@@ -685,8 +686,8 @@ pub fn format_certificate_details(
 }
 
 pub fn pem_leaf_der(pem: &[u8]) -> Result<Vec<u8>, TrustError> {
-    let mut reader = BufReader::new(pem);
-    let certificate = rustls_pemfile::certs(&mut reader)
+    let certificate = CertificateDer::pem_reader_iter(pem)
+        .map(pem_io_error_result)
         .next()
         .transpose()
         .map_err(|error| TrustError::Invalid(format!("invalid PEM certificate: {error}")))?
@@ -943,6 +944,27 @@ fn atomic_replace_private(path: &Path, bytes: &[u8]) -> Result<(), TrustError> {
     Ok(())
 }
 
+fn pem_io_error(error: PemError) -> io::Error {
+    let message = match error {
+        PemError::Io(error) => return error,
+        PemError::MissingSectionEnd { end_marker } => format!(
+            "section end {:?} missing",
+            String::from_utf8_lossy(&end_marker)
+        ),
+        PemError::IllegalSectionStart { line } => format!(
+            "illegal section start: {:?}",
+            String::from_utf8_lossy(&line)
+        ),
+        PemError::Base64Decode(message) => message,
+        other => format!("{other:?}"),
+    };
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn pem_io_error_result<T>(result: Result<T, PemError>) -> Result<T, io::Error> {
+    result.map_err(pem_io_error)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1131,5 +1153,130 @@ mod tests {
             inspect_leaf_certificate("192.168.1.192", generated.cert.der().as_ref()).unwrap();
         assert!(!presented.address_matches_certificate);
         assert_eq!(presented.tls_server_name.as_deref(), Some("localhost"));
+    }
+}
+
+#[cfg(test)]
+mod pem_leaf_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn lazy_leaf_preserves_first_certificate_and_unconsumed_trailing_error() {
+        let input = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        assert_eq!(pem_leaf_der(input).unwrap(), vec![1]);
+        assert!(pem_leaf_der(b"").is_err());
+        assert!(
+            pem_leaf_der(b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n").is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod pem_leaf_old_new_differential_tests {
+    use super::*;
+
+    #[test]
+    fn real_lazy_leaf_matches_old_first_only_reader() {
+        let good = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
+        let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        for input in [
+            Vec::new(),
+            good.to_vec(),
+            bad.to_vec(),
+            [good.as_slice(), bad.as_slice()].concat(),
+            [bad.as_slice(), good.as_slice()].concat(),
+        ] {
+            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_slice()))
+                .next()
+                .transpose()
+                .map(|item| item.map(|cert| cert.as_ref().to_vec()));
+            match old {
+                Ok(Some(bytes)) => assert_eq!(pem_leaf_der(&input).unwrap(), bytes),
+                Ok(None) => assert_eq!(
+                    pem_leaf_der(&input).unwrap_err().to_string(),
+                    TrustError::Invalid("PEM contains no certificate".to_string()).to_string()
+                ),
+                Err(error) => assert_eq!(
+                    pem_leaf_der(&input).unwrap_err().to_string(),
+                    TrustError::Invalid(format!("invalid PEM certificate: {error}")).to_string()
+                ),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod actual_authority_parser_differential_tests {
+    use super::*;
+    #[test]
+    fn authority_parser_denies_old_malformed_and_cardinality_cases_before_verifier() {
+        let presented = PresentedCertificate {
+            leaf_der: Vec::new(),
+            chain_der: Vec::new(),
+            certificate_pem: String::new(),
+            subject: String::new(),
+            issuer: String::new(),
+            subject_alt_names: Vec::new(),
+            not_before: String::new(),
+            not_after: String::new(),
+            fingerprint_sha256: String::new(),
+            spki_sha256: String::new(),
+            address_matches_certificate: false,
+            tls_server_name: None,
+        };
+        for input in ["", "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n",
+            "-----BEGIN CERTIFICATE-----\nAQ==\n",
+            "-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nAg==\n-----END CERTIFICATE-----\n"] {
+            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_bytes()))
+                .collect::<Result<Vec<_>, _>>();
+            let expected = match old {
+                Err(error) => TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}")).to_string(),
+                Ok(items) => { assert_ne!(items.len(), 1);
+                    TrustError::Invalid("enrolled domain-cert CA must contain exactly one certificate".to_string()).to_string() },
+            };
+            assert_eq!(verify_chain_with_authority("fixture.invalid", &presented, input)
+                .unwrap_err().to_string(), expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod malformed_line_public_differential_tests {
+    use super::*;
+    #[test]
+    fn malformed_begin_lf_and_crlf_preserve_actual_public_diagnostics() {
+        let presented = PresentedCertificate {
+            leaf_der: Vec::new(),
+            chain_der: Vec::new(),
+            certificate_pem: String::new(),
+            subject: String::new(),
+            issuer: String::new(),
+            subject_alt_names: Vec::new(),
+            not_before: String::new(),
+            not_after: String::new(),
+            fingerprint_sha256: String::new(),
+            spki_sha256: String::new(),
+            address_matches_certificate: false,
+            tls_server_name: None,
+        };
+        for input in [
+            "-----BEGIN CERTIFICATE----\n",
+            "-----BEGIN CERTIFICATE----\r\n",
+        ] {
+            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_bytes()))
+                .next()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(
+                pem_leaf_der(input.as_bytes()).unwrap_err().to_string(),
+                TrustError::Invalid(format!("invalid PEM certificate: {old}")).to_string()
+            );
+            assert_eq!(
+                verify_chain_with_authority("fixture.invalid", &presented, input)
+                    .unwrap_err()
+                    .to_string(),
+                TrustError::Invalid(format!("invalid enrolled domain-cert CA: {old}")).to_string()
+            );
+        }
     }
 }

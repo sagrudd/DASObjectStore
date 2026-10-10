@@ -105,15 +105,23 @@ pub(crate) fn live_object_stores_dashboard_for_verified_pistis(
 }
 
 fn build_object_stores_dashboard(config: ObjectStoresAggregatorConfig) -> ObjectStoresPageView {
+    build_object_stores_dashboard_with_catalog(config, None)
+}
+
+fn build_object_stores_dashboard_with_catalog(
+    config: ObjectStoresAggregatorConfig,
+    catalog: Option<&dasobjectstore_object_service::CustodyCatalogBinding>,
+) -> ObjectStoresPageView {
     let mut warnings = Vec::new();
     let groups_snapshot =
         read_storage_groups_for_user(&config.groups_registry_path, &config.current_user_groups);
     warnings.extend(groups_snapshot.warnings.clone());
-    let stores = registry_object_store_cards(
+    let stores = registry_object_store_cards_with_catalog(
         &config.store_registry_path,
         Some(&config.live_sqlite_path),
         &groups_snapshot.groups,
         &mut warnings,
+        catalog,
     );
     let selected_store_id = stores.first().map(|store| store.store_id.clone());
     let mounted_enclosures = config.mounted_enclosures.unwrap_or_else(|| {
@@ -149,7 +157,30 @@ pub(crate) fn registry_object_store_cards(
     groups: &[StorageGroupView],
     warnings: &mut Vec<DashboardWarning>,
 ) -> Vec<ObjectStoreCardView> {
-    let definitions = match read_store_registry(registry_path) {
+    registry_object_store_cards_with_catalog(
+        registry_path,
+        live_sqlite_path,
+        groups,
+        warnings,
+        None,
+    )
+}
+
+pub(crate) fn registry_object_store_cards_with_catalog(
+    registry_path: &Path,
+    live_sqlite_path: Option<&Path>,
+    groups: &[StorageGroupView],
+    warnings: &mut Vec<DashboardWarning>,
+    catalog: Option<&dasobjectstore_object_service::CustodyCatalogBinding>,
+) -> Vec<ObjectStoreCardView> {
+    let read = match catalog {
+        Some(binding) => dasobjectstore_object_service::read_store_registry_with_custody_catalog(
+            registry_path,
+            binding,
+        ),
+        None => read_store_registry(registry_path),
+    };
+    let definitions = match read {
         Ok(definitions) => definitions,
         Err(error) => {
             warnings.push(DashboardWarning::new(
@@ -363,7 +394,21 @@ fn export_policy_label(policy: ExportPolicy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_object_stores_dashboard, ObjectStoresAggregatorConfig};
+    fn owned_object_stores_dashboard(
+        config: ObjectStoresAggregatorConfig,
+    ) -> super::ObjectStoresPageView {
+        let binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            config
+                .store_registry_path
+                .parent()
+                .expect("owned registry parent")
+                .join("custody-catalog.jsonl"),
+        )
+        .expect("owned dashboard catalogue binding");
+        build_object_stores_dashboard_with_catalog(config, Some(&binding))
+    }
+
+    use super::{build_object_stores_dashboard_with_catalog, ObjectStoresAggregatorConfig};
     use crate::dashboard::{
         CapacitySummaryView, DasEnclosureCardView, DashboardHealthStateView,
         EnclosureConnectionView,
@@ -405,7 +450,7 @@ mod tests {
         )
         .expect("groups write");
 
-        let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
+        let view = owned_object_stores_dashboard(ObjectStoresAggregatorConfig {
             store_registry_path: registry_path,
             live_sqlite_path,
             groups_registry_path,
@@ -456,7 +501,7 @@ mod tests {
         let registry_path = root.join("registry-directory");
         fs::create_dir_all(&registry_path).expect("registry dir");
 
-        let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
+        let view = owned_object_stores_dashboard(ObjectStoresAggregatorConfig {
             store_registry_path: registry_path,
             live_sqlite_path: root.join("missing-live.sqlite"),
             groups_registry_path: root.join("missing-groups.json"),
@@ -496,7 +541,7 @@ mod tests {
         create_live_sqlite_with_store_objects(&live_sqlite_path, "different-store");
         fs::write(&groups_registry_path, r#"{"groups":[]}"#).expect("groups write");
 
-        let view = build_object_stores_dashboard(ObjectStoresAggregatorConfig {
+        let view = owned_object_stores_dashboard(ObjectStoresAggregatorConfig {
             store_registry_path: registry_path,
             live_sqlite_path,
             groups_registry_path,

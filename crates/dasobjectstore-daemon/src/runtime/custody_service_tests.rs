@@ -30,8 +30,7 @@ fn custody_only_admission_without_normal_controller_is_connected_and_one_use() {
         root.join("sealed/catalog.jsonl"),
     )
     .unwrap();
-    let normal = config();
-    let custody = custody_config();
+    let (normal, custody) = owned_plane_configs(&root);
     let runner = CustodyRetainRunner::default();
     let provisioner = direct_provisioner();
     let state = CustodyServiceState::default();
@@ -74,8 +73,7 @@ fn custody_only_failed_provision_keeps_claim_across_new_in_process_state() {
         root.join("sealed/catalog.jsonl"),
     )
     .unwrap();
-    let normal = config();
-    let custody = custody_config();
+    let (normal, custody) = owned_plane_configs(&root);
     let runner = super::FakeRunner::failing();
     let provisioner = direct_provisioner();
     let state = CustodyServiceState::default();
@@ -134,11 +132,11 @@ fn custody_only_constructor_denies_aliases_without_effects_or_fallback() {
         root.join("sealed/catalog.jsonl"),
     )
     .unwrap();
-    let normal = config();
+    let (normal, isolated_custody) = owned_plane_configs(&root);
     let runner = CustodyRetainRunner::default();
     let state = CustodyServiceState::default();
     for field in 0..8 {
-        let mut custody = custody_config();
+        let mut custody = isolated_custody.clone();
         match field {
             0 => custody.compose_file = normal.compose_file.clone(),
             1 => custody.project_directory = normal.project_directory.clone(),
@@ -185,8 +183,7 @@ fn custody_only_state_cannot_cross_catalogue_or_plane_compositions() {
         root.join("second/catalog.jsonl"),
     )
     .unwrap();
-    let normal = config();
-    let custody = custody_config();
+    let (normal, custody) = owned_plane_configs(&root);
     let runner = CustodyRetainRunner::default();
     let state = CustodyServiceState::default();
     let bindings = || CustodyServiceBindings {

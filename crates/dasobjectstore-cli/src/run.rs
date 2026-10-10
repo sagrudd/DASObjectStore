@@ -220,14 +220,24 @@ use dasobjectstore_mnemosyne::{
 };
 use dasobjectstore_object_service::{
     credential_reference_for_store, default_store_registry_path, default_subobject_registry_path,
-    mirror_subobject_definition, plan_remote_s3_upload, plan_store_service_layout,
-    portable_store_registry_path, portable_subobject_registry_path, read_store_registry,
-    read_subobject_registry, render_compose, render_garage_data_directories, search_subobjects,
-    upsert_store_definition, ComposeRenderRequest, ComposeServiceConfig, GarageProvider,
-    GarageProviderConfig, ObjectServiceError, ObjectServiceProvider, ObjectServiceProviderId,
-    RemoteS3UploadPlanRequest, StoreRegistryUpdateReport, StoreServiceDefinition,
-    SubObjectDefinition,
+    mirror_subobject_definition, plan_remote_s3_upload, portable_store_registry_path,
+    portable_subobject_registry_path, read_subobject_registry, render_compose,
+    render_garage_data_directories, search_subobjects, ComposeRenderRequest, ComposeServiceConfig,
+    GarageProvider, GarageProviderConfig, ObjectServiceError, ObjectServiceProvider,
+    ObjectServiceProviderId, RemoteS3UploadPlanRequest, StoreRegistryUpdateReport,
+    StoreServiceDefinition, SubObjectDefinition,
 };
+#[cfg(not(test))]
+use dasobjectstore_object_service::{
+    plan_store_service_layout, read_store_registry, upsert_store_definition,
+};
+#[cfg(test)]
+mod source_custody_fixture;
+#[cfg(test)]
+use source_custody_fixture::{
+    plan_store_service_layout, read_store_registry, upsert_store_definition,
+};
+
 #[cfg(target_os = "linux")]
 use dasobjectstore_platform::linux::LinuxProbeProvider;
 #[cfg(target_os = "linux")]
@@ -3683,6 +3693,8 @@ mod tests {
     #[test]
     fn store_create_writes_system_registry_definition() {
         let root = temp_root("store-create");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let registry_path = root.join("stores.json");
         let cli = Cli::try_parse_from([
@@ -3728,6 +3740,8 @@ mod tests {
     #[test]
     fn store_create_mirrors_definition_to_known_portable_ssd() {
         let root = temp_root("store-create-portable");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let host_registry_path = root.join("host").join("stores.json");
         let ssd_root = root.join("ssd");
         create_known_ssd_marker(&ssd_root);
@@ -3893,6 +3907,8 @@ mod tests {
     #[test]
     fn store_adopt_imports_portable_registry_to_host_registry() {
         let root = temp_root("store-adopt-portable");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let host_registry_path = root.join("host").join("stores.json");
         let ssd_root = root.join("ssd");
         create_known_ssd_marker(&ssd_root);
@@ -3940,6 +3956,8 @@ mod tests {
     #[test]
     fn store_list_reads_portable_registry_from_known_ssd() {
         let root = temp_root("store-list-portable");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let ssd_root = root.join("ssd");
         create_known_ssd_marker(&ssd_root);
         write_store_definitions_file(
@@ -3976,6 +3994,8 @@ mod tests {
     #[test]
     fn store_list_reads_system_registry_definitions() {
         let root = temp_root("store-list");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let registry_path = root.join("stores.json");
         write_store_definitions_file(
@@ -4014,6 +4034,8 @@ mod tests {
     #[test]
     fn store_list_writes_json() {
         let root = temp_root("store-list-json");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let registry_path = root.join("stores.json");
         write_store_definitions_file(
@@ -4147,6 +4169,8 @@ mod tests {
     #[test]
     fn store_s3_upload_renders_remote_aws_commands() {
         let root = temp_root("store-s3-upload");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let registry_path = root.join("stores.json");
         write_store_definitions_file(
@@ -4190,6 +4214,8 @@ mod tests {
     #[test]
     fn store_s3_upload_writes_json() {
         let root = temp_root("store-s3-upload-json");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let registry_path = root.join("stores.json");
         write_store_definitions_file(
@@ -4372,6 +4398,8 @@ mod tests {
     #[test]
     fn ingest_files_reports_byte_progress_and_ssd_stress() {
         let root = temp_root("ingest-files");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let source_root = root.join("external");
         let ssd_root = root.join("ssd");
         let hdd_base = root.join("hdd");
@@ -4718,6 +4746,8 @@ mod tests {
     #[test]
     fn subobject_create_list_and_search_report_nested_prefixes() {
         let root = temp_root("subobject-cli");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let stores_registry_path = root.join("stores.json");
         let subobject_registry_path = root.join("subobjects.json");
         let ssd_root = root.join("ssd");
@@ -4857,6 +4887,8 @@ mod tests {
     #[test]
     fn ingest_files_resolves_nested_subobject_endpoint() {
         let root = temp_root("ingest-files-subobject");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         let source_root = root.join("external");
         let ssd_root = root.join("ssd");
         let hdd_base = root.join("hdd");
@@ -5197,6 +5229,8 @@ mod tests {
     #[test]
     fn service_render_compose_writes_store_aware_yaml() {
         let root = temp_root("service-render-compose");
+        let _custody_scope = super::source_custody_fixture::CustodyFixtureScope::enter(&root)
+            .expect("bind private synthetic custody catalogue");
         fs::create_dir_all(&root).expect("create temp root");
         let stores_file = root.join("stores.json");
         write_store_definitions_file(

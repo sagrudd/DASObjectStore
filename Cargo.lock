@@ -280,12 +280,13 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.7.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ab4a3ec9ea8a657c72d99a03a824af695bd0fb5ec639ccbd9cd3543b41a5f9"
+checksum = "b1df331683d982a0b9492b38127151e6453639cd34926eb9c07d4cd8c6d22bfc"
 dependencies = [
  "arc-swap",
  "bytes",
+ "either",
  "fs-err",
  "http 1.5.0",
  "http-body",
@@ -293,7 +294,6 @@ dependencies = [
  "hyper-util",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-cli"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "axum",
  "axum-server",
@@ -802,6 +802,7 @@ dependencies = [
  "prosopikon-core",
  "rand_core 0.6.4",
  "ratatui",
+ "rcgen",
  "rusqlite",
  "rustls",
  "serde",
@@ -815,7 +816,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-core"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -831,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-daemon"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -854,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-api"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "axum",
  "axum-server",
@@ -886,7 +887,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-gui-web"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "getrandom 0.3.4",
  "gloo-net",
@@ -905,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-metadata"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -918,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-mnemosyne"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "axum",
  "chrono",
@@ -942,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-object-service"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -960,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-platform"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -972,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-reference"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "serde",
  "serde_json",
@@ -981,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-remote"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -1005,7 +1006,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-tui"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "crossterm",
  "dasobjectstore-core",
@@ -1015,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "dasobjectstore-workspace-host"
-version = "0.186.40"
+version = "0.186.41"
 dependencies = [
  "dasobjectstore-core",
  "libc",
@@ -1219,7 +1220,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3101,7 +3102,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3434,7 +3435,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

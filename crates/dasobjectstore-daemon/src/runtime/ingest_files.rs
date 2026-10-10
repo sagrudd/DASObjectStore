@@ -1390,6 +1390,11 @@ impl From<dasobjectstore_metadata::SsdCapacityMeasurementError> for DaemonIngest
 }
 #[cfg(test)]
 mod tests {
+    fn owned_catalog(root: &std::path::Path) -> CustodyCatalogBinding {
+        CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+            .expect("owned ingest fixture custody catalog binding")
+    }
+
     use super::{
         collect_ingest_files, default_hdd_worker_count, landing_mode_for_ingest,
         resolve_hdd_worker_count, sync_pending_ssd_stage, FileIngestEntry, HddSettlementDiskState,
@@ -1599,7 +1604,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
 
         let mut progress_events = Vec::new();
@@ -1673,7 +1678,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: Some(capacity_provider.clone()),
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
 
         let mut progress_events = Vec::new();
@@ -1777,7 +1782,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
 
         executor
@@ -1844,7 +1849,7 @@ mod tests {
                 capacity_policy: SsdCapacityPolicy::new(99, 100, 0).expect("capacity policy"),
                 capacity_provider: None,
                 resource_gate: None,
-                custody_catalog: None,
+                custody_catalog: Some(owned_catalog(&root)),
             };
             let mut events = Vec::new();
             let response = executor
@@ -1966,7 +1971,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
         let mut progress_events = Vec::new();
         executor
@@ -2019,7 +2024,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
 
         let mut progress_events = Vec::new();
@@ -2097,7 +2102,7 @@ mod tests {
             capacity_policy: SsdCapacityPolicy::default(),
             capacity_provider: None,
             resource_gate: None,
-            custody_catalog: None,
+            custody_catalog: Some(owned_catalog(&root)),
         };
 
         let mut progress_events = Vec::new();

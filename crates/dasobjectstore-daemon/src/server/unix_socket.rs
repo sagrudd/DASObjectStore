@@ -975,9 +975,10 @@ mod tests {
     use dasobjectstore_object_service::{ObjectServiceProviderId, ServiceState};
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{mpsc, Mutex};
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     #[test]
     fn classifies_cancellation_as_priority_control() {
@@ -1714,12 +1715,12 @@ mod tests {
             }
         }
 
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos();
+        static NEXT_SOCKET_ID: AtomicU32 = AtomicU32::new(0);
+        let socket_id = NEXT_SOCKET_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("test socket counter exhausted");
         let socket_path =
-            std::env::temp_dir().join(format!("dasobjectstored-control-{suffix}.sock"));
+            std::env::temp_dir().join(format!("s{:x}-{socket_id:x}", std::process::id()));
         let (entered_sender, entered_receiver) = mpsc::channel();
         let (release_sender, release_receiver) = mpsc::channel();
         let server = UnixSocketDaemonServer::new(

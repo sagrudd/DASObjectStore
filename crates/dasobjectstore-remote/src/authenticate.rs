@@ -373,6 +373,69 @@ fn normalize_host(value: &str) -> Result<String, RemoteAuthenticateError> {
     Ok(host.to_string())
 }
 
+fn validate_public_certificate(certificate: &[u8]) -> Result<(), RemoteAuthenticateError> {
+    let text = std::str::from_utf8(certificate).map_err(|_| {
+        RemoteAuthenticateError::Http("appliance CA response is not PEM text".to_string())
+    })?;
+    if !text.contains("-----BEGIN CERTIFICATE-----") || text.contains("PRIVATE KEY") {
+        return Err(RemoteAuthenticateError::Http(
+            "appliance CA response is not a public certificate".to_string(),
+        ));
+    }
+    reqwest::Certificate::from_pem(certificate).map_err(|error| {
+        RemoteAuthenticateError::Http(format!("appliance CA certificate is invalid: {error}"))
+    })?;
+    Ok(())
+}
+
+fn redact(value: &str) -> String {
+    let prefix = value.chars().take(4).collect::<String>();
+    format!("{prefix}...redacted")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_host, RemoteConnectionContext};
+
+    #[test]
+    fn normalizes_safe_hosts_and_rejects_paths() {
+        assert_eq!(
+            normalize_host("https://192.168.1.192/").unwrap(),
+            "192.168.1.192"
+        );
+        assert!(normalize_host("192.168.1.192/path").is_err());
+        assert!(normalize_host("user@host").is_err());
+    }
+
+    #[test]
+    fn redacted_context_does_not_expose_secret_values() {
+        let context = RemoteConnectionContext {
+            schema_version: "v1".to_string(),
+            appliance_id: "appliance-1".to_string(),
+            appliance_host: "host".to_string(),
+            endpoint_url: "https://objects.example:9443".to_string(),
+            region: "garage".to_string(),
+            addressing_style: "path".to_string(),
+            object_store: "store".to_string(),
+            bucket: "dos-store".to_string(),
+            access_key_id: "ACCESS123".to_string(),
+            secret_access_key: "SECRET123".to_string(),
+            session_token: Some("TOKEN123".to_string()),
+            session_id: "SESSION123".to_string(),
+            issued_at_utc: "2026-01-01T00:00:00Z".to_string(),
+            expires_at_utc: "2026-01-01T08:00:00Z".to_string(),
+            renew_url: "/renew".to_string(),
+            renew_after_utc: "2026-01-01T07:00:00Z".to_string(),
+            renewal_token: "RENEW123".to_string(),
+            ca_bundle_path: None,
+        };
+        let redacted = serde_json::to_string(&context.redacted()).unwrap();
+        assert!(!redacted.contains("SECRET123"));
+        assert!(!redacted.contains("TOKEN123"));
+        assert!(!redacted.contains("RENEW123"));
+    }
+}
+
 #[cfg(test)]
 mod discovery_descriptor_tests {
     use super::*;
@@ -434,68 +497,5 @@ mod discovery_descriptor_tests {
                 "discover appliance identity returned HTTP 503".to_string(),
             )
         ));
-    }
-}
-
-fn validate_public_certificate(certificate: &[u8]) -> Result<(), RemoteAuthenticateError> {
-    let text = std::str::from_utf8(certificate).map_err(|_| {
-        RemoteAuthenticateError::Http("appliance CA response is not PEM text".to_string())
-    })?;
-    if !text.contains("-----BEGIN CERTIFICATE-----") || text.contains("PRIVATE KEY") {
-        return Err(RemoteAuthenticateError::Http(
-            "appliance CA response is not a public certificate".to_string(),
-        ));
-    }
-    reqwest::Certificate::from_pem(certificate).map_err(|error| {
-        RemoteAuthenticateError::Http(format!("appliance CA certificate is invalid: {error}"))
-    })?;
-    Ok(())
-}
-
-fn redact(value: &str) -> String {
-    let prefix = value.chars().take(4).collect::<String>();
-    format!("{prefix}...redacted")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{normalize_host, RemoteConnectionContext};
-
-    #[test]
-    fn normalizes_safe_hosts_and_rejects_paths() {
-        assert_eq!(
-            normalize_host("https://192.168.1.192/").unwrap(),
-            "192.168.1.192"
-        );
-        assert!(normalize_host("192.168.1.192/path").is_err());
-        assert!(normalize_host("user@host").is_err());
-    }
-
-    #[test]
-    fn redacted_context_does_not_expose_secret_values() {
-        let context = RemoteConnectionContext {
-            schema_version: "v1".to_string(),
-            appliance_id: "appliance-1".to_string(),
-            appliance_host: "host".to_string(),
-            endpoint_url: "https://objects.example:9443".to_string(),
-            region: "garage".to_string(),
-            addressing_style: "path".to_string(),
-            object_store: "store".to_string(),
-            bucket: "dos-store".to_string(),
-            access_key_id: "ACCESS123".to_string(),
-            secret_access_key: "SECRET123".to_string(),
-            session_token: Some("TOKEN123".to_string()),
-            session_id: "SESSION123".to_string(),
-            issued_at_utc: "2026-01-01T00:00:00Z".to_string(),
-            expires_at_utc: "2026-01-01T08:00:00Z".to_string(),
-            renew_url: "/renew".to_string(),
-            renew_after_utc: "2026-01-01T07:00:00Z".to_string(),
-            renewal_token: "RENEW123".to_string(),
-            ca_bundle_path: None,
-        };
-        let redacted = serde_json::to_string(&context.redacted()).unwrap();
-        assert!(!redacted.contains("SECRET123"));
-        assert!(!redacted.contains("TOKEN123"));
-        assert!(!redacted.contains("RENEW123"));
     }
 }
