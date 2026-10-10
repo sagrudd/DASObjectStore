@@ -1365,10 +1365,11 @@ mod tests {
     use dasobjectstore_core::store::{ExportPolicy, IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
-        create_custody_catalog_entry, write_managed_credential_registry, CustodyAssuranceClass,
-        CustodyRetentionPolicyV1, CustodyStoreDefinitionV1, CustodyStoreProfileV1,
-        ManagedCredentialRegistry, ManagedStoreCredentialRecord, ObjectServiceProviderId,
-        ServiceState, StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
+        create_custody_catalog_entry, read_store_registry_with_custody_catalog,
+        write_managed_credential_registry, CustodyAssuranceClass, CustodyRetentionPolicyV1,
+        CustodyStoreDefinitionV1, CustodyStoreProfileV1, ManagedCredentialRegistry,
+        ManagedStoreCredentialRecord, ObjectServiceProviderId, ServiceState,
+        StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use rusqlite::{params, Connection};
