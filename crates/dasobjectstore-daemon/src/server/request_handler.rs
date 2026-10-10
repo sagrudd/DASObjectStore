@@ -2084,7 +2084,8 @@ mod tests {
             &backend_root,
             crate::runtime::StatvfsCapacitySpaceProbe,
         )
-        .with_profile_binding_registry_path(&profile_registry);
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_custody_catalog_binding(fixture_binding.clone());
         crate::runtime::CapacityAdmissionProvider::initialize_store(
             &provider,
             &StoreId::new("upload-store").expect("store id"),
