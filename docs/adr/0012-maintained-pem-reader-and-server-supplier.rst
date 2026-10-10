@@ -1,5 +1,5 @@
 ADR-0012: Conditional design for maintained PEM readers and server supplier migration
-======================================================================
+=====================================================================================
 
 :Status: Accepted conditionally for design only; implementation not authorized
 :Date: 2026-10-10
