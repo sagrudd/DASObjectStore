@@ -597,26 +597,25 @@ mod site_bundle_old_new_differential_tests {
     fn actual_site_parser_matches_old_cardinality_and_public_error() {
         let one = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
         let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
-        for bytes in [
-            Vec::new(),
-            one.to_vec(),
-            bad.to_vec(),
-            [one.as_slice(), one.as_slice()].concat(),
-            [one.as_slice(), bad.as_slice()].concat(),
-        ] {
-            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(bytes.as_slice()))
-                .collect::<Result<Vec<_>, _>>();
-            let expected = match old {
-                Ok(items) if items.len() == 1 => Ok(items[0].as_ref().to_vec()),
-                Ok(_) => Err(SiteTrustError::Invalid(
-                    "Site Trust CA bundle must contain exactly one certificate".to_string(),
-                )
-                .to_string()),
-                Err(_) => Err(SiteTrustError::Invalid(
-                    "Site Trust CA bundle is not valid PEM".to_string(),
-                )
-                .to_string()),
-            };
+        let cases = [
+            (
+                Vec::new(),
+                Err("Site Trust CA bundle must contain exactly one certificate"),
+            ),
+            (one.to_vec(), Ok(vec![1])),
+            (bad.to_vec(), Err("Site Trust CA bundle is not valid PEM")),
+            (
+                [one.as_slice(), one.as_slice()].concat(),
+                Err("Site Trust CA bundle must contain exactly one certificate"),
+            ),
+            (
+                [one.as_slice(), bad.as_slice()].concat(),
+                Err("Site Trust CA bundle is not valid PEM"),
+            ),
+        ];
+        for (bytes, expected) in cases {
+            let expected = expected
+                .map_err(|message| SiteTrustError::Invalid(message.to_string()).to_string());
             assert_eq!(
                 pem_to_der(&bytes).map_err(|error| error.to_string()),
                 expected

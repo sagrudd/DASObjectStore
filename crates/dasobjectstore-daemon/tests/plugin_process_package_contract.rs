@@ -1963,7 +1963,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
                 .as_nanos()
         ));
     fs::create_dir(&temp).expect("temporary harness root");
-    let sealed = staged_fixture(&temp);
+    let sealed = current_trunk_fixture(&temp);
     let attempt = temp.join("attempt");
     let diagnostic = temp.join("diagnostic");
     fs::create_dir(&attempt).expect("create external attempt root");
@@ -1991,7 +1991,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let staged_trunk = sealed.join("toolchain/bin/trunk");
     write(
         &staged_trunk,
-        &fixture_tool_script("trunk fixture 1.0.0", "set -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n"),
+        &fixture_tool_script("trunk fixture 1.0.0", "set -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/6c421a6/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n"),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
         .expect("make staged Trunk executable");
@@ -2022,8 +2022,15 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
-        .expect("read staged Trunk temporary-storage evidence");
+    let trunk_environment =
+        fs::read_to_string(attempt.join("tmp/trunk-env.log")).unwrap_or_else(|error| {
+            panic!(
+                "missing Trunk evidence: {error}; status={}; stdout={}; stderr={}",
+                result.status,
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            )
+        });
     let expected_tmp = "/var/tmp/tmp";
     let expected_xdg_cache = "/var/tmp/xdg-cache";
     assert!(
@@ -2580,6 +2587,83 @@ fn write_f05_manifest(stage: &Path) {
         .collect::<Vec<_>>()
         .join("\n");
     write(stage.join("f05-inputs.sha256"), &(manifest + "\n"));
+}
+
+// This current preparer assay deliberately leaves the historical shared fixture unchanged.
+fn current_trunk_fixture(root: &Path) -> PathBuf {
+    const OLD: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
+    const CURRENT: &str = "6c421a6e1ddaee63692e88c9b46095c652befe04";
+    let stage = staged_fixture(root);
+    for name in ["Cargo.toml", "Cargo.lock"] {
+        let path = stage.join("source").join(name);
+        let before = fs::read_to_string(&path).expect("read owned current Trunk input");
+        assert_eq!(
+            before.matches(OLD).count(),
+            2,
+            "both Prosop bindings must be historical"
+        );
+        let after = before.replace(OLD, CURRENT);
+        assert!(!after.contains(OLD));
+        assert_eq!(after.matches(CURRENT).count(), 2);
+        assert_ne!(before, after);
+        fs::write(path, after).expect("bind owned current Trunk input");
+    }
+    let cache = stage.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d");
+    assert!(cache.join("f097492/fixture").is_file());
+    assert!(!cache.join("6c421a6").exists());
+    fs::rename(cache.join("f097492"), cache.join("6c421a6"))
+        .expect("bind current owned Prosop cache coordinate");
+    assert!(cache.join("6c421a6/fixture").is_file());
+    write_f05_manifest(&stage);
+    stage
+}
+
+#[derive(Clone, Copy)]
+enum ModeMutation {
+    Duplicate,
+    Missing,
+    Mixed,
+    Writable,
+}
+
+fn mutate_mode_fixture(stage: &Path, mutation: ModeMutation) {
+    const FIELD: &str = "toolchain_kind = \"container-image\"";
+    let path = stage.join("inputs/provenance-tuple.toml");
+    let before = fs::read_to_string(&path).expect("read owned mode input");
+    assert_eq!(before.lines().filter(|line| *line == FIELD).count(), 1);
+    let after = match mutation {
+        ModeMutation::Duplicate => format!("{before}\n{FIELD}\n"),
+        ModeMutation::Missing => before.replace(&format!("{FIELD}\n"), ""),
+        ModeMutation::Mixed => before.replace(FIELD, "toolchain_kind = \"native-tool-bundle\""),
+        ModeMutation::Writable => before.clone(),
+    };
+    let fields = after
+        .lines()
+        .filter(|line| line.starts_with("toolchain_kind = "))
+        .count();
+    match mutation {
+        ModeMutation::Duplicate => {
+            assert_eq!(fields, 2);
+            assert_eq!(after.lines().filter(|line| *line == FIELD).count(), 2);
+        }
+        ModeMutation::Missing => assert_eq!(fields, 0),
+        ModeMutation::Mixed => {
+            assert_eq!(fields, 1);
+            assert!(after.contains("toolchain_kind = \"native-tool-bundle\""));
+        }
+        ModeMutation::Writable => assert_eq!(before, after),
+    }
+    if !matches!(mutation, ModeMutation::Writable) {
+        assert_ne!(
+            before, after,
+            "negative fixture must actually mutate its input"
+        );
+    }
+    fs::write(&path, &after).expect("write exact owned mode input");
+    assert_eq!(
+        fs::read_to_string(path).expect("read back mode mutation"),
+        after
+    );
 }
 
 fn staged_fixture(root: &Path) -> PathBuf {
@@ -3452,25 +3536,25 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         );
     }
 
-    for (name, mutate, expected) in [
+    for (name, mutation, expected) in [
         (
             "duplicate-mode",
-            "printf '\\ntoolchain_kind = \\\"container-image\\\"\\n' >> inputs/provenance-tuple.toml",
+            ModeMutation::Duplicate,
             "requires exactly one toolchain_kind",
         ),
         (
             "missing-mode",
-            "sed -i '/^toolchain_kind = /d' inputs/provenance-tuple.toml",
+            ModeMutation::Missing,
             "requires exactly one toolchain_kind",
         ),
         (
             "mixed-native-container",
-            "sed -i 's/toolchain_kind = \\\"container-image\\\"/toolchain_kind = \\\"native-tool-bundle\\\"/' inputs/provenance-tuple.toml",
+            ModeMutation::Mixed,
             "native mode requires only one inventory digest and no image fields",
         ),
         (
             "writable-sealed-input",
-            "true",
+            ModeMutation::Writable,
             "requires immutable sealed identity inputs while leaving fresh output roots writable",
         ),
     ] {
@@ -3499,15 +3583,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 fs::remove_file(path).expect("remove disposable staged file");
             }
         }
-        assert!(
-            Command::new("sh")
-                .args(["-c", mutate])
-                .current_dir(&mode_stage)
-                .status()
-                .expect("mutate disposable mode fixture")
-                .success(),
-            "prepare {name} mode fixture"
-        );
+        mutate_mode_fixture(&mode_stage, mutation);
         if name != "writable-sealed-input" {
             seal_tool_stage_identity_inputs(&mode_stage);
         }
@@ -3552,8 +3628,22 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .expect("make unlaunchable staged trunk executable");
     let new_trunk_sha = sha256(&unlaunchable_input.join("toolchain/bin/trunk"));
     let new_toolchain_tree = tree_sha256(&unlaunchable_input.join("toolchain"));
+    assert_ne!(old_trunk_sha, new_trunk_sha);
+    assert_ne!(old_toolchain_tree, new_toolchain_tree);
     let inventory = fs::read_to_string(unlaunchable_input.join("tool-input-inventory.txt"))
         .expect("read unlaunchable tool inventory");
+    assert_eq!(
+        inventory
+            .matches(&format!("sha256={old_trunk_sha}"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        inventory
+            .matches(&format!("tree_sha256={old_toolchain_tree}"))
+            .count(),
+        1
+    );
     write(
         unlaunchable_input.join("tool-input-inventory.txt"),
         &inventory
@@ -3570,6 +3660,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     let unlaunchable_inventory_sha = sha256(&unlaunchable_input.join("tool-input-inventory.txt"));
     let input_receipt = fs::read_to_string(unlaunchable_input.join("tool-inputs.toml"))
         .expect("read unlaunchable input receipt");
+    assert_ne!(original_inventory_sha, unlaunchable_inventory_sha);
+    assert_eq!(input_receipt.matches(&original_inventory_sha).count(), 1);
     write(
         unlaunchable_input.join("tool-inputs.toml"),
         &input_receipt.replace(&original_inventory_sha, &unlaunchable_inventory_sha),

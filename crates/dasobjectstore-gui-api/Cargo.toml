@@ -33,8 +33,6 @@ tokio-util.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-# Temporary locked migration oracle; not a production parser dependency.
-rustls-pemfile = "=2.2.0"
 axum-server.workspace = true
 rusqlite.workspace = true
 tower.workspace = true

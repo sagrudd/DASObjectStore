@@ -543,76 +543,102 @@ mod pem_reader_compatibility_tests {
 #[cfg(test)]
 mod pem_old_new_differential_tests {
     use super::*;
-
     fn block(label: &str, body: &str) -> String {
         format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----\n")
     }
-
     fn key_identity(key: PrivateKeyDer<'_>) -> (u8, Vec<u8>) {
         let kind = match &key {
             PrivateKeyDer::Pkcs1(_) => 1,
             PrivateKeyDer::Pkcs8(_) => 2,
             PrivateKeyDer::Sec1(_) => 3,
-            _ => panic!("fixture unexpectedly returned another key kind"),
+            _ => panic!("unexpected fixture key kind"),
         };
         (kind, key.secret_der().to_vec())
     }
-
     #[test]
     fn old_and_new_private_readers_match_first_key_and_error_boundaries() {
-        let mut inputs = vec![
-            String::new(),
-            block("CERTIFICATE", "AQ=="),
-            block("PRIVATE KEY", "!!!"),
-            "-----BEGIN PRIVATE KEY-----\nAQ==\n".into(),
+        let mut cases = vec![
+            (String::new(), Ok(None)),
+            (block("CERTIFICATE", "AQ=="), Ok(None)),
+            (block("PRIVATE KEY", "!!!"), Err("InvalidCharacter(33)")),
+            (
+                "-----BEGIN PRIVATE KEY-----\nAQ==\n".into(),
+                Err("section end \"PRIVATE KEY\" missing"),
+            ),
         ];
-        for label in ["RSA PRIVATE KEY", "PRIVATE KEY", "EC PRIVATE KEY"] {
-            inputs.push(block(label, "AQ=="));
-            inputs.push(block(label, "AQ==") + &block("PRIVATE KEY", "!!!"));
-            inputs.push(block("PRIVATE KEY", "!!!") + &block(label, "Ag=="));
-            inputs.push(block(label, "AQ==") + &block("PRIVATE KEY", "Ag=="));
+        for (label, kind) in [
+            ("RSA PRIVATE KEY", 1),
+            ("PRIVATE KEY", 2),
+            ("EC PRIVATE KEY", 3),
+        ] {
+            cases.push((block(label, "AQ=="), Ok(Some((kind, vec![1])))));
+            cases.push((
+                block(label, "AQ==") + &block("PRIVATE KEY", "!!!"),
+                Ok(Some((kind, vec![1]))),
+            ));
+            cases.push((
+                block("PRIVATE KEY", "!!!") + &block(label, "Ag=="),
+                Err("InvalidCharacter(33)"),
+            ));
+            cases.push((
+                block(label, "AQ==") + &block("PRIVATE KEY", "Ag=="),
+                Ok(Some((kind, vec![1]))),
+            ));
         }
-        for input in inputs {
-            let old = rustls_pemfile::private_key(&mut std::io::BufReader::new(input.as_bytes()))
-                .map(|key| key.map(key_identity))
-                .map_err(|error| (error.kind(), error.to_string()));
-            let new = match PrivateKeyDer::from_pem_reader(input.as_bytes()) {
+        for (input, expected) in cases {
+            let actual = match PrivateKeyDer::from_pem_reader(input.as_bytes()) {
                 Ok(key) => Ok(Some(key_identity(key))),
                 Err(PemError::NoItemsFound) => Ok(None),
                 Err(error) => {
                     let error = pem_io_error(error);
-                    Err((error.kind(), error.to_string()))
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    Err(error.to_string())
                 }
             };
-            assert_eq!(old, new, "generated fixture boundary mismatch");
+            assert_eq!(
+                actual,
+                expected.map_err(str::to_string),
+                "fixed first-key corpus"
+            );
         }
     }
-
     #[test]
     fn old_and_new_full_certificate_iterators_match_order_and_errors() {
         let one = block("CERTIFICATE", "AQ==");
-        for input in [
-            String::new(),
-            one.clone(),
-            one.clone() + &block("CERTIFICATE", "Ag=="),
-            one + &block("CERTIFICATE", "!!!"),
-            block("PRIVATE KEY", "AQ=="),
-            "-----BEGIN CERTIFICATE-----\nAQ==\n".into(),
-        ] {
-            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_bytes()))
-                .map(|item| {
-                    item.map(|cert| cert.as_ref().to_vec())
-                        .map_err(|error| (error.kind(), error.to_string()))
-                })
-                .collect::<Vec<_>>();
-            let new = CertificateDer::pem_slice_iter(input.as_bytes())
+        let cases = [
+            (String::new(), vec![]),
+            (one.clone(), vec![Ok(vec![1])]),
+            (
+                one.clone() + &block("CERTIFICATE", "Ag=="),
+                vec![Ok(vec![1]), Ok(vec![2])],
+            ),
+            (
+                one + &block("CERTIFICATE", "!!!"),
+                vec![Ok(vec![1]), Err("InvalidCharacter(33)")],
+            ),
+            (block("PRIVATE KEY", "AQ=="), vec![]),
+            (
+                "-----BEGIN CERTIFICATE-----\nAQ==\n".into(),
+                vec![Err("section end \"CERTIFICATE\" missing")],
+            ),
+        ];
+        for (input, expected) in cases {
+            let actual = CertificateDer::pem_slice_iter(input.as_bytes())
                 .map(pem_io_error_result)
                 .map(|item| {
-                    item.map(|cert| cert.as_ref().to_vec())
-                        .map_err(|error| (error.kind(), error.to_string()))
+                    item.map(|c| c.as_ref().to_vec()).map_err(|error| {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        error.to_string()
+                    })
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(old, new, "generated certificate boundary mismatch");
+            assert_eq!(
+                actual,
+                expected
+                    .into_iter()
+                    .map(|item| item.map_err(str::to_string))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 }
@@ -642,44 +668,79 @@ mod actual_pem_wrapper_differential_tests {
         std::io::Write::write_all(&mut file, bytes).unwrap();
         Fixture(path)
     }
+    struct WrapperCase {
+        bytes: &'static [u8],
+        key: Option<&'static [u8]>,
+        key_error: Option<&'static str>,
+        cert_error: Option<&'static str>,
+        certs: &'static [&'static [u8]],
+    }
+    fn case(
+        bytes: &'static [u8],
+        key: Option<&'static [u8]>,
+        key_error: Option<&'static str>,
+        cert_error: Option<&'static str>,
+        certs: &'static [&'static [u8]],
+    ) -> WrapperCase {
+        WrapperCase {
+            bytes,
+            key,
+            key_error,
+            cert_error,
+            certs,
+        }
+    }
     #[test]
     fn actual_file_wrappers_match_old_error_categories_and_selection() {
-        let inputs: &[&[u8]] = &[b"",
-            b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",
-            b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n",
-            b"-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n",
-            b"-----BEGIN CERTIFICATE-----\nAQ==\n",
-            b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n"];
-        for bytes in inputs {
-            let fixture = fixture(bytes);
-            let old_key = rustls_pemfile::private_key(&mut std::io::BufReader::new(*bytes));
-            match old_key {
-                Ok(Some(key)) => assert_eq!(
-                    read_private_key(&fixture.0).unwrap().secret_der(),
-                    key.secret_der()
-                ),
-                Ok(None) => assert!(
-                    matches!(read_private_key(&fixture.0), Err(MtlsListenerError::Tls(message)) if message == "server private-key file contains no key")
-                ),
-                Err(old) => match read_private_key(&fixture.0).unwrap_err() {
-                    MtlsListenerError::Io(new) => {
-                        assert_eq!(new.kind(), old.kind());
-                        assert_eq!(new.to_string(), old.to_string());
+        let cases = [
+            case(b"",None,None,None,&[]),
+            case(b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",Some(&[1]),None,None,&[]),
+            case(b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n",None,None,None,&[&[1]]),
+            case(b"-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n",None,Some("InvalidCharacter(33)"),Some("InvalidCharacter(33)"),&[]),
+            case(b"-----BEGIN CERTIFICATE-----\nAQ==\n",None,Some("section end \"CERTIFICATE\" missing"),Some("section end \"CERTIFICATE\" missing"),&[]),
+            case(b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n",Some(&[1]),None,Some("InvalidCharacter(33)"),&[]),
+        ];
+        for WrapperCase {
+            bytes,
+            key,
+            key_error,
+            cert_error,
+            certs,
+        } in cases
+        {
+            let file = fixture(bytes);
+            match (key, key_error) {
+                (_, Some(message)) => match read_private_key(&file.0).unwrap_err() {
+                    MtlsListenerError::Io(error) => {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        assert_eq!(error.to_string(), message);
                     }
-                    _ => panic!("private parser lost I/O category"),
+                    _ => panic!("lost private parser I/O category"),
                 },
+                (Some(expected), None) => {
+                    assert_eq!(read_private_key(&file.0).unwrap().secret_der(), expected)
+                }
+                (None, None) => assert!(
+                    matches!(read_private_key(&file.0),Err(MtlsListenerError::Tls(message)) if message=="server private-key file contains no key")
+                ),
             }
-            let old_certs = rustls_pemfile::certs(&mut std::io::BufReader::new(*bytes))
-                .collect::<Result<Vec<_>, _>>();
-            match old_certs {
-                Ok(old) => assert_eq!(read_certificates(&fixture.0).unwrap(), old),
-                Err(old) => match read_certificates(&fixture.0).unwrap_err() {
-                    MtlsListenerError::Io(new) => {
-                        assert_eq!(new.kind(), old.kind());
-                        assert_eq!(new.to_string(), old.to_string());
+            if let Some(message) = cert_error {
+                match read_certificates(&file.0).unwrap_err() {
+                    MtlsListenerError::Io(error) => {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        assert_eq!(error.to_string(), message);
                     }
-                    _ => panic!("certificate parser lost I/O category"),
-                },
+                    _ => panic!("lost certificate parser I/O category"),
+                }
+            } else {
+                assert_eq!(
+                    read_certificates(&file.0)
+                        .unwrap()
+                        .iter()
+                        .map(|c| c.as_ref())
+                        .collect::<Vec<_>>(),
+                    certs
+                );
             }
         }
     }
@@ -690,7 +751,7 @@ mod pem_missing_boundary_differential_tests {
     use super::*;
     struct FailingRead;
     impl io::Read for FailingRead {
-        fn read(&mut self, _bytes: &mut [u8]) -> io::Result<usize> {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "generated reader failure",
@@ -699,39 +760,34 @@ mod pem_missing_boundary_differential_tests {
     }
     #[test]
     fn genuine_read_failure_keeps_old_error_kind_and_display() {
-        let old =
-            rustls_pemfile::private_key(&mut std::io::BufReader::new(FailingRead)).unwrap_err();
-        let new = pem_io_error(PrivateKeyDer::from_pem_reader(FailingRead).unwrap_err());
-        assert_eq!(new.kind(), old.kind());
-        assert_eq!(new.to_string(), old.to_string());
-        let old = rustls_pemfile::certs(&mut std::io::BufReader::new(FailingRead))
-            .next()
-            .unwrap()
-            .unwrap_err();
-        let new = pem_io_error(
+        let key = pem_io_error(PrivateKeyDer::from_pem_reader(FailingRead).unwrap_err());
+        let cert = pem_io_error(
             CertificateDer::pem_reader_iter(FailingRead)
                 .next()
                 .unwrap()
                 .unwrap_err(),
         );
-        assert_eq!(new.kind(), old.kind());
-        assert_eq!(new.to_string(), old.to_string());
+        for error in [key, cert] {
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(error.to_string(), "generated reader failure");
+        }
     }
     #[test]
     fn unsupported_prefix_malformed_preceding_and_mismatched_end_match_old() {
-        for input in [
-            "-----BEGIN UNRECOGNIZED-----\nAQ==\n-----END UNRECOGNIZED-----\n-----BEGIN PRIVATE KEY-----\nAg==\n-----END PRIVATE KEY-----\n",
-            "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",
-            "-----BEGIN PRIVATE KEY-----\nAQ==\n-----END CERTIFICATE-----\n",
-        ] {
-            let old = rustls_pemfile::private_key(&mut std::io::BufReader::new(input.as_bytes()));
-            let new = PrivateKeyDer::from_pem_reader(input.as_bytes());
-            match (old, new) {
-                (Ok(Some(old)), Ok(new)) => assert_eq!(old.secret_der(), new.secret_der()),
-                (Err(old), Err(new)) => { let new = pem_io_error(new);
-                    assert_eq!(new.kind(), old.kind()); assert_eq!(new.to_string(), old.to_string()); },
-                _ => panic!("generated boundary selection changed"),
-            }
+        let cases=[
+            ("-----BEGIN UNRECOGNIZED-----\nAQ==\n-----END UNRECOGNIZED-----\n-----BEGIN PRIVATE KEY-----\nAg==\n-----END PRIVATE KEY-----\n",Ok(vec![2])),
+            ("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",Err("InvalidCharacter(33)")),
+            ("-----BEGIN PRIVATE KEY-----\nAQ==\n-----END CERTIFICATE-----\n",Err("section end \"PRIVATE KEY\" missing")),
+        ];
+        for (input, expected) in cases {
+            let actual = PrivateKeyDer::from_pem_reader(input.as_bytes())
+                .map(|k| k.secret_der().to_vec())
+                .map_err(|error| {
+                    let error = pem_io_error(error);
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    error.to_string()
+                });
+            assert_eq!(actual, expected.map_err(str::to_string));
         }
     }
 }

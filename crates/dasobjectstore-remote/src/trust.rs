@@ -1179,28 +1179,26 @@ mod pem_leaf_old_new_differential_tests {
     fn real_lazy_leaf_matches_old_first_only_reader() {
         let good = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
         let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
-        for input in [
-            Vec::new(),
-            good.to_vec(),
-            bad.to_vec(),
-            [good.as_slice(), bad.as_slice()].concat(),
-            [bad.as_slice(), good.as_slice()].concat(),
-        ] {
-            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_slice()))
-                .next()
-                .transpose()
-                .map(|item| item.map(|cert| cert.as_ref().to_vec()));
-            match old {
-                Ok(Some(bytes)) => assert_eq!(pem_leaf_der(&input).unwrap(), bytes),
-                Ok(None) => assert_eq!(
-                    pem_leaf_der(&input).unwrap_err().to_string(),
-                    TrustError::Invalid("PEM contains no certificate".to_string()).to_string()
-                ),
-                Err(error) => assert_eq!(
-                    pem_leaf_der(&input).unwrap_err().to_string(),
-                    TrustError::Invalid(format!("invalid PEM certificate: {error}")).to_string()
-                ),
-            }
+        let cases = [
+            (Vec::new(), Err("PEM contains no certificate")),
+            (good.to_vec(), Ok(vec![1])),
+            (
+                bad.to_vec(),
+                Err("invalid PEM certificate: InvalidCharacter(33)"),
+            ),
+            ([good.as_slice(), bad.as_slice()].concat(), Ok(vec![1])),
+            (
+                [bad.as_slice(), good.as_slice()].concat(),
+                Err("invalid PEM certificate: InvalidCharacter(33)"),
+            ),
+        ];
+        for (input, expected) in cases {
+            let expected =
+                expected.map_err(|message| TrustError::Invalid(message.to_string()).to_string());
+            assert_eq!(
+                pem_leaf_der(&input).map_err(|error| error.to_string()),
+                expected
+            );
         }
     }
 }
@@ -1224,18 +1222,20 @@ mod actual_authority_parser_differential_tests {
             address_matches_certificate: false,
             tls_server_name: None,
         };
-        for input in ["", "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n",
-            "-----BEGIN CERTIFICATE-----\nAQ==\n",
-            "-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nAg==\n-----END CERTIFICATE-----\n"] {
-            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_bytes()))
-                .collect::<Result<Vec<_>, _>>();
-            let expected = match old {
-                Err(error) => TrustError::Invalid(format!("invalid enrolled domain-cert CA: {error}")).to_string(),
-                Ok(items) => { assert_ne!(items.len(), 1);
-                    TrustError::Invalid("enrolled domain-cert CA must contain exactly one certificate".to_string()).to_string() },
-            };
-            assert_eq!(verify_chain_with_authority("fixture.invalid", &presented, input)
-                .unwrap_err().to_string(), expected);
+        let cases = [
+            ("", "enrolled domain-cert CA must contain exactly one certificate"),
+            ("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n", "invalid enrolled domain-cert CA: InvalidCharacter(33)"),
+            ("-----BEGIN CERTIFICATE-----\nAQ==\n", "invalid enrolled domain-cert CA: section end \"CERTIFICATE\" missing"),
+            ("-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n-----BEGIN CERTIFICATE-----\nAg==\n-----END CERTIFICATE-----\n", "enrolled domain-cert CA must contain exactly one certificate"),
+        ];
+        for (input, message) in cases {
+            let expected = TrustError::Invalid(message.to_string()).to_string();
+            assert_eq!(
+                verify_chain_with_authority("fixture.invalid", &presented, input)
+                    .unwrap_err()
+                    .to_string(),
+                expected
+            );
         }
     }
 }
@@ -1263,19 +1263,17 @@ mod malformed_line_public_differential_tests {
             "-----BEGIN CERTIFICATE----\n",
             "-----BEGIN CERTIFICATE----\r\n",
         ] {
-            let old = rustls_pemfile::certs(&mut std::io::BufReader::new(input.as_bytes()))
-                .next()
-                .unwrap()
-                .unwrap_err();
+            let expected = format!("illegal section start: {input:?}");
             assert_eq!(
                 pem_leaf_der(input.as_bytes()).unwrap_err().to_string(),
-                TrustError::Invalid(format!("invalid PEM certificate: {old}")).to_string()
+                TrustError::Invalid(format!("invalid PEM certificate: {expected}")).to_string()
             );
             assert_eq!(
                 verify_chain_with_authority("fixture.invalid", &presented, input)
                     .unwrap_err()
                     .to_string(),
-                TrustError::Invalid(format!("invalid enrolled domain-cert CA: {old}")).to_string()
+                TrustError::Invalid(format!("invalid enrolled domain-cert CA: {expected}"))
+                    .to_string()
             );
         }
     }
