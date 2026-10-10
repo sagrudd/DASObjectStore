@@ -338,6 +338,165 @@ mod tests {
         }
     }
 
+    fn old_supplier_config(cert: &[u8], key: &[u8]) -> std::io::Result<rustls::ServerConfig> {
+        let cert = rustls_pemfile::certs(&mut cert.as_ref()).collect::<Result<Vec<_>, _>>()?;
+        let mut keys = rustls_pemfile::read_all(&mut key.as_ref())
+            .filter_map(|item| match item.ok()? {
+                rustls_pemfile::Item::Sec1Key(key) => Some(key.secret_sec1_der().to_vec()),
+                rustls_pemfile::Item::Pkcs1Key(key) => Some(key.secret_pkcs1_der().to_vec()),
+                rustls_pemfile::Item::Pkcs8Key(key) => Some(key.secret_pkcs8_der().to_vec()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if keys.len() != 1 {
+            return Err(std::io::Error::other("private key format not supported"));
+        }
+        let key = rustls::pki_types::PrivateKeyDer::try_from(keys.remove(0))
+            .map_err(std::io::Error::other)?;
+        let mut config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert, key)
+            .map_err(std::io::Error::other)?;
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Ok(config)
+    }
+
+    fn compare_supplier_result(cert: &[u8], key: &[u8]) {
+        let old = old_supplier_config(cert, key);
+        let new = supplier_tls_compat::tests::new_config(cert, key);
+        match (old, new) {
+            (Ok(old), Ok(new)) => assert_eq!(old.alpn_protocols, new.alpn_protocols),
+            (Err(old), Err(new)) => {
+                assert_eq!(old.kind(), new.kind());
+                assert_eq!(old.to_string(), new.to_string());
+            }
+            _ => panic!("old/new supplier acceptance differs"),
+        }
+    }
+
+    #[test]
+    fn supplier_old_new_generated_format_and_error_corpus_matches() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let fixture = supplier_tls_compat::tests::generated_formats();
+        let malformed_key = "-----BEGIN PRIVATE KEY-----\n!\n-----END PRIVATE KEY-----\n";
+        let malformed_cert = "-----BEGIN CERTIFICATE-----\n!\n-----END CERTIFICATE-----\n";
+        for (cert, key) in &fixture.pairs {
+            for keys in [
+                key.clone(),
+                format!("{cert}{key}"),
+                format!("{malformed_key}{key}"),
+                format!("{key}{malformed_key}"),
+                String::new(),
+                cert.clone(),
+                format!("{key}{key}"),
+                key.replace("PRIVATE KEY", "RSA PRIVATE KEY"),
+            ] {
+                compare_supplier_result(cert.as_bytes(), keys.as_bytes());
+            }
+            compare_supplier_result(format!("{cert}{malformed_cert}").as_bytes(), key.as_bytes());
+            compare_supplier_result(format!("{malformed_cert}{cert}").as_bytes(), key.as_bytes());
+            compare_supplier_result(
+                format!("{cert}{malformed_cert}")
+                    .replace("\n", "\r\n")
+                    .as_bytes(),
+                key.as_bytes(),
+            );
+            compare_supplier_result(&[], key.as_bytes());
+        }
+        compare_supplier_result(fixture.pairs[0].0.as_bytes(), fixture.pairs[2].1.as_bytes());
+        compare_supplier_result(
+            fixture.pairs[0].0.as_bytes(),
+            format!("{}{}", fixture.pairs[0].1, fixture.pairs[2].1).as_bytes(),
+        );
+    }
+
+    #[tokio::test]
+    async fn supplier_old_new_three_formats_complete_real_https_handshakes() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let formats = supplier_tls_compat::tests::generated_formats();
+        for (cert, key) in &formats.pairs {
+            for old in [true, false] {
+                let root = test_root("supplier-format-handshake");
+                std::fs::create_dir_all(&root).expect("owned handshake root");
+                let certificate_path = root.join("server.crt");
+                std::fs::write(&certificate_path, cert).expect("owned certificate");
+                let config = if old {
+                    old_supplier_config(cert.as_bytes(), key.as_bytes())
+                } else {
+                    supplier_tls_compat::tests::new_config(cert.as_bytes(), key.as_bytes())
+                }
+                .expect("actual supplier DER/provider config");
+                let tls =
+                    axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(config));
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("owned listener");
+                listener
+                    .set_nonblocking(true)
+                    .expect("nonblocking listener");
+                let address = listener.local_addr().expect("listener address");
+                let server = tokio::spawn(async move {
+                    axum_server::from_tcp_rustls(listener, tls)
+                        .expect("compose TLS listener")
+                        .serve(valid_s3_app().into_make_service())
+                        .await
+                });
+                let fixture = TlsS3Fixture {
+                    address,
+                    certificate_path,
+                    root,
+                    server,
+                };
+                let endpoint = format!("https://localhost:{}", fixture.address.port());
+                let verified = verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
+                    .await
+                    .expect("real old/new format TLS and S3 verification");
+                assert_eq!(verified.host, "localhost");
+                assert_eq!(verified.port, fixture.address.port());
+            }
+        }
+    }
+
+    #[test]
+    fn supplier_dual_provider_failure_is_isolated() {
+        if std::env::var_os("DAS_SUPPLIER_PROVIDER_CHILD").as_deref()
+            != Some(std::ffi::OsStr::new("1"))
+        {
+            let (_, module) = module_path!().split_once("::").expect("test module path");
+            let filter = format!("{module}::supplier_dual_provider_failure_is_isolated");
+            let output =
+                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                    .args(["--exact", &filter, "--nocapture"])
+                    .env("DAS_SUPPLIER_PROVIDER_CHILD", "1")
+                    .output()
+                    .expect("provider child");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success(), "isolated provider assay failed");
+            assert!(stdout.contains("running 1 test") && stdout.contains("1 passed; 0 failed"));
+            return;
+        }
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_none(),
+            "fresh child default provider"
+        );
+        let _ = rustls::crypto::ring::default_provider();
+        let _ = rustls::crypto::aws_lc_rs::default_provider();
+        let fixture = supplier_tls_compat::tests::generated_formats();
+        let (cert, key) = &fixture.pairs[0];
+        let old = std::panic::catch_unwind(|| old_supplier_config(cert.as_bytes(), key.as_bytes()));
+        assert!(
+            old.is_err(),
+            "dual-provider old builder must fail without selected provider"
+        );
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+        let new = std::panic::catch_unwind(|| {
+            supplier_tls_compat::tests::new_config(cert.as_bytes(), key.as_bytes())
+        });
+        assert!(
+            new.is_err(),
+            "dual-provider new builder must fail without selected provider"
+        );
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
+    }
+
     fn ca_issued_fullchains() -> (String, String, String) {
         let mut ca_params = CertificateParams::default();
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);

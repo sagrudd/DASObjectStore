@@ -64,12 +64,127 @@ fn pem_io_error(error: PemError) -> io::Error {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{config_from_pem, from_pem_file};
     use std::{
         fs, io,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    pub(crate) struct GeneratedFormats {
+        root: std::path::PathBuf,
+        pub(crate) pairs: Vec<(String, String)>,
+    }
+
+    impl Drop for GeneratedFormats {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    pub(crate) fn generated_formats() -> GeneratedFormats {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("supplier-formats-{}-{nonce}", std::process::id()));
+        fs::create_dir(&root).expect("owned ephemeral key fixture directory");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+                .expect("private key fixture directory");
+        }
+        let mut fixture = GeneratedFormats {
+            root,
+            pairs: Vec::new(),
+        };
+        fn openssl(root: &std::path::Path, args: &[&str]) {
+            let result = std::process::Command::new("openssl")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .expect("installed native OpenSSL fixture producer required");
+            assert!(
+                result.status.success(),
+                "native OpenSSL fixture producer failed"
+            );
+        }
+        openssl(
+            &fixture.root,
+            &["genrsa", "-traditional", "-out", "rsa1.pem", "2048"],
+        );
+        openssl(
+            &fixture.root,
+            &[
+                "pkcs8", "-topk8", "-nocrypt", "-in", "rsa1.pem", "-out", "rsa8.pem",
+            ],
+        );
+        openssl(
+            &fixture.root,
+            &[
+                "ecparam",
+                "-name",
+                "prime256v1",
+                "-genkey",
+                "-noout",
+                "-out",
+                "ec.pem",
+            ],
+        );
+        for (key, cert) in [("rsa1.pem", "rsa.crt"), ("ec.pem", "ec.crt")] {
+            openssl(
+                &fixture.root,
+                &[
+                    "req",
+                    "-new",
+                    "-x509",
+                    "-key",
+                    key,
+                    "-out",
+                    cert,
+                    "-days",
+                    "1",
+                    "-subj",
+                    "/CN=localhost",
+                    "-addext",
+                    "subjectAltName=DNS:localhost",
+                    "-addext",
+                    "basicConstraints=critical,CA:FALSE",
+                ],
+            );
+        }
+        for (cert, key) in [
+            ("rsa.crt", "rsa1.pem"),
+            ("rsa.crt", "rsa8.pem"),
+            ("ec.crt", "ec.pem"),
+        ] {
+            fixture.pairs.push((
+                fs::read_to_string(fixture.root.join(cert)).expect("owned certificate"),
+                fs::read_to_string(fixture.root.join(key)).expect("owned key"),
+            ));
+        }
+        fixture
+    }
+
+    pub(crate) fn new_config(cert: &[u8], key: &[u8]) -> io::Result<rustls::ServerConfig> {
+        config_from_pem(cert, key)
+    }
+
+    #[test]
+    fn supplier_generated_formats_preserve_supported_der_and_alpn() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let fixture = generated_formats();
+        for (cert, key) in &fixture.pairs {
+            let config =
+                new_config(cert.as_bytes(), key.as_bytes()).expect("generated matching format");
+            assert_eq!(
+                config.alpn_protocols,
+                [b"h2".to_vec(), b"http/1.1".to_vec()]
+            );
+        }
+    }
 
     fn material() -> (String, String) {
         let _ = rustls::crypto::ring::default_provider().install_default();
