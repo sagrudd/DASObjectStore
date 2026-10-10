@@ -1259,11 +1259,19 @@ mod malformed_line_public_differential_tests {
             address_matches_certificate: false,
             tls_server_name: None,
         };
-        for input in [
-            "-----BEGIN CERTIFICATE----\n",
-            "-----BEGIN CERTIFICATE----\r\n",
+        // The supplier PEM reader ends a line at the first CR or LF, so the
+        // reported CRLF line keeps only its CR.
+        for (input, line) in [
+            (
+                "-----BEGIN CERTIFICATE----\n",
+                "-----BEGIN CERTIFICATE----\n",
+            ),
+            (
+                "-----BEGIN CERTIFICATE----\r\n",
+                "-----BEGIN CERTIFICATE----\r",
+            ),
         ] {
-            let expected = format!("illegal section start: {input:?}");
+            let expected = format!("illegal section start: {line:?}");
             assert_eq!(
                 pem_leaf_der(input.as_bytes()).unwrap_err().to_string(),
                 TrustError::Invalid(format!("invalid PEM certificate: {expected}")).to_string()

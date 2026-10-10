@@ -443,13 +443,16 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         let stage = unseeded_stage(&format!("post-manifest-{fault}-failure"));
         let manifest_before =
             fs::read(stage.join("f05-inputs.sha256")).expect("read pre-producer manifest bytes");
-        let failed = Command::new("bash")
+        let mut command = Command::new("bash");
+        command
             .arg(&script)
             .args(["--sealed-root"])
             .arg(&stage)
             .args(["--stage-closure-provenance-inputs"])
             .arg(&input)
-            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault)
+            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault);
+        restore_default_sigint(&mut command);
+        let failed = command
             .output()
             .expect("inject post-manifest publication failure");
         assert!(
@@ -2587,6 +2590,21 @@ fn write_f05_manifest(stage: &Path) {
         .collect::<Vec<_>>()
         .join("\n");
     write(stage.join("f05-inputs.sha256"), &(manifest + "\n"));
+}
+
+// Bash cannot trap a signal that was already ignored when it started, and
+// non-interactive CI shells launch background jobs with SIGINT ignored.
+fn restore_default_sigint(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: the closure only calls the async-signal-safe signal(2).
+    unsafe {
+        command.pre_exec(|| {
+            if libc::signal(libc::SIGINT, libc::SIG_DFL) == libc::SIG_ERR {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
 }
 
 // This current preparer assay deliberately leaves the historical shared fixture unchanged.

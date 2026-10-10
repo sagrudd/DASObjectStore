@@ -330,6 +330,20 @@ impl Default for DaemonIngestSystemSafetyReserve {
 mod tests {
     use super::*;
 
+    // Pinned so budget arithmetic does not depend on the test host's CPU count.
+    fn eight_core_worker_counts() -> DaemonIngestWorkerCounts {
+        DaemonIngestWorkerCounts {
+            scan: 1,
+            source_read: 4,
+            ssd_stage: 4,
+            checksum_manifest: 7,
+            hdd_placement: 1,
+            hdd_write: 8,
+            verification: 7,
+            finalization: 1,
+        }
+    }
+
     fn reservation() -> DaemonIngestResourceReservation {
         DaemonIngestResourceReservation {
             cpu_cores: 1,
@@ -434,6 +448,7 @@ mod tests {
     fn automatic_transaction_limit_uses_cpu_memory_and_io_budgets() {
         let policy = DaemonIngestResourcePolicy {
             max_concurrent_transactions: None,
+            worker_counts: eight_core_worker_counts(),
             memory_budget_bytes: 1024 * 1024 * 1024,
             system_safety_reserve: DaemonIngestSystemSafetyReserve {
                 cpu_cores: 2,
@@ -452,6 +467,7 @@ mod tests {
     fn explicit_transaction_limit_caps_but_does_not_override_resources() {
         let policy = DaemonIngestResourcePolicy {
             max_concurrent_transactions: Some(12),
+            worker_counts: eight_core_worker_counts(),
             memory_budget_bytes: 1024 * 1024 * 1024,
             system_safety_reserve: DaemonIngestSystemSafetyReserve {
                 cpu_cores: 0,
