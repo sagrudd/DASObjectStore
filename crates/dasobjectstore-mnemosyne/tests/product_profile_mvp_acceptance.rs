@@ -57,7 +57,14 @@ fn product_profile_provisions_and_survives_generated_data_s3_stress() {
         state_root.join("subobjects.json"),
     )
     .with_profile_binding_registry_path(state_root.join("profile-bindings.json"))
-    .with_live_sqlite_path(state_root.join("live.sqlite"));
+    .with_live_sqlite_path(state_root.join("live.sqlite"))
+    .try_with_custody_catalog_binding(
+        dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned acceptance catalogue binding"),
+    )
+    .expect("bind owned acceptance catalogue");
     let client = DaemonClient::new(InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))

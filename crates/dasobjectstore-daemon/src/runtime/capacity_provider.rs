@@ -1496,6 +1496,30 @@ mod tests {
         ))
     }
 
+    fn fixture_provider<P: CapacitySpaceProbe>(
+        registry_path: PathBuf,
+        ledger_dir: PathBuf,
+        backend_root: PathBuf,
+        ssd_root: PathBuf,
+        probe: P,
+    ) -> FileBackedCapacityAdmissionProvider<P> {
+        let binding = CustodyCatalogBinding::new(
+            registry_path
+                .parent()
+                .expect("owned fixture registry parent")
+                .join("custody-catalog.jsonl"),
+        )
+        .expect("owned fixture custody catalog binding");
+        FileBackedCapacityAdmissionProvider::new(
+            registry_path,
+            ledger_dir,
+            backend_root,
+            ssd_root,
+            probe,
+        )
+        .with_custody_catalog_binding(binding)
+    }
+
     fn request(origin: DaemonIngressOrigin, id: &str) -> CapacityAdmissionRequest {
         CapacityAdmissionRequest {
             store_id: "codex".to_string(),
@@ -1565,7 +1589,7 @@ mod tests {
         let root = root("custom-custody-capacity-denial");
         let (registry_path, _) = registry(&root);
         let ledger_dir = root.join("ledgers");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir.clone(),
             root.join("backend"),
@@ -1607,7 +1631,7 @@ mod tests {
         let ledger =
             CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
         save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("backend"),
@@ -1689,7 +1713,7 @@ mod tests {
         let ssd = root.join("ssd");
         std::fs::create_dir_all(&backend).expect("shared backend");
         std::fs::create_dir_all(&ssd).expect("shared SSD");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             backend,
@@ -1735,7 +1759,7 @@ mod tests {
                 .expect("flat ledger"),
         )
         .expect("flat ledger seed");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path.clone(),
             ledger_dir.clone(),
             root.join("backend"),
@@ -1789,7 +1813,7 @@ mod tests {
             .commit_subobject(&store_id, "experiment-a", "child-upload-1")
             .expect("child commit updates both ledgers");
         drop(provider);
-        let restarted = FileBackedCapacityAdmissionProvider::new(
+        let restarted = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("backend"),
@@ -1835,7 +1859,7 @@ mod tests {
         let root = root("initialize");
         let (registry_path, _) = registry(&root);
         let ledger_dir = root.join("ledgers");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir.clone(),
             root.join("backend"),
@@ -1884,7 +1908,7 @@ mod tests {
         let root = root("initialize-rollback");
         let (registry_path, _) = registry(&root);
         let ledger_dir = root.join("ledgers");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir.clone(),
             root.join("backend"),
@@ -1923,7 +1947,7 @@ mod tests {
         let ledger = CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 900)
             .expect("ledger");
         save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("backend"),
@@ -1983,7 +2007,7 @@ mod tests {
         let profile_registry = root.join("profile-bindings.json");
         crate::runtime::upsert_profile_binding(&profile_registry, binding)
             .expect("profile binding");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("fallback-backend"),
@@ -2046,7 +2070,7 @@ mod tests {
             .expect("manifest JSON"),
         )
         .expect("manifest");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             backend_root.clone(),
@@ -2113,7 +2137,7 @@ mod tests {
         let ledger =
             CapacityReservationLedger::new(CapacityPolicy::bounded(1_000, 100), 0).expect("ledger");
         save_capacity_ledger(ledger_dir.join("codex.json"), &ledger).expect("ledger seed");
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("backend"),
@@ -2148,7 +2172,7 @@ mod tests {
         std::fs::create_dir_all(&backend_root).expect("backend root");
         std::fs::create_dir_all(&ssd_root).expect("ssd root");
 
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path,
             ledger_dir,
             backend_root,
@@ -2186,7 +2210,7 @@ mod tests {
             .expect("active reservation");
         save_capacity_ledger(&ledger_path, &ledger).expect("ledger seed");
 
-        let provider = FileBackedCapacityAdmissionProvider::new(
+        let provider = fixture_provider(
             registry_path.clone(),
             ledger_dir.clone(),
             root.join("backend"),
@@ -2208,7 +2232,7 @@ mod tests {
         assert_eq!(restored.reservation_bytes("stale"), None);
         assert_eq!(restored.reservation_bytes("active"), Some(200));
 
-        let restarted = FileBackedCapacityAdmissionProvider::new(
+        let restarted = fixture_provider(
             registry_path,
             ledger_dir,
             root.join("backend"),

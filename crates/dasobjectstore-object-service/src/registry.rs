@@ -330,7 +330,7 @@ fn restrict_dir(path: &Path) -> Result<(), ObjectServiceError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        delete_store_definition, read_store_registry, upsert_store_definition,
+        delete_store_definition_with_custody_catalog, read_store_registry_with_custody_catalog,
         upsert_store_definition_with_custody_catalog, StoreRegistryAction,
     };
     use crate::custody::{
@@ -358,11 +358,46 @@ mod tests {
 
     #[test]
     fn creates_system_managed_store_registry() {
+        // Verify the exact creation modes in a child with a declared mask, without
+        // changing the parallel test runner's process-wide mask.
+        #[cfg(unix)]
+        if std::env::var_os("DAS_REGISTRY_MODE_FIXTURE_CHILD").as_deref()
+            != Some(std::ffi::OsStr::new("1"))
+        {
+            let output = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "umask 027; exec \"$1\" --exact \"$2\" --nocapture",
+                    "registry-mode-fixture",
+                ])
+                .arg(std::env::current_exe().expect("registry test executable"))
+                .arg("registry::tests::creates_system_managed_store_registry")
+                .env("DAS_REGISTRY_MODE_FIXTURE_CHILD", "1")
+                .output()
+                .expect("launch isolated registry mode fixture");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(
+                output.status.success(),
+                "isolated registry mode fixture failed: {stdout}\n{stderr}"
+            );
+            assert!(
+                stdout.contains("running 1 test"),
+                "exact registry fixture was not executed: {stdout}\n{stderr}"
+            );
+            assert!(
+                stdout.contains("1 passed; 0 failed"),
+                "exact registry fixture did not pass: {stdout}\n{stderr}"
+            );
+            return;
+        }
         let root = temp_root("store-registry-create");
         let registry_path = root.join("stores.json");
-        let report = upsert_store_definition(
+        let binding = fixture_catalog_binding(&root);
+        let report = upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition("generated-data", StoreClass::GeneratedData, None),
+            &binding,
         )
         .expect("store created");
 
@@ -373,7 +408,8 @@ mod tests {
             Some("secret://dasobjectstore/stores/generated-data/s3")
         );
 
-        let definitions = read_store_registry(&registry_path).expect("registry reads");
+        let definitions = read_store_registry_with_custody_catalog(&registry_path, &binding)
+            .expect("registry reads");
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].store_id.as_str(), "generated-data");
 
@@ -404,19 +440,22 @@ mod tests {
     fn updates_existing_store_definition() {
         let root = temp_root("store-registry-update");
         let registry_path = root.join("stores.json");
-        upsert_store_definition(
+        let binding = fixture_catalog_binding(&root);
+        upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition("generated-data", StoreClass::GeneratedData, None),
+            &binding,
         )
         .expect("store created");
 
-        let report = upsert_store_definition(
+        let report = upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition(
                 "generated-data",
                 StoreClass::CriticalMetadata,
                 Some("critical-generated-data".to_string()),
             ),
+            &binding,
         )
         .expect("store updated");
 
@@ -425,7 +464,8 @@ mod tests {
             report.bucket_name.as_deref(),
             Some("critical-generated-data")
         );
-        let definitions = read_store_registry(&registry_path).expect("registry reads");
+        let definitions = read_store_registry_with_custody_catalog(&registry_path, &binding)
+            .expect("registry reads");
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].policy.class, StoreClass::CriticalMetadata);
 
@@ -436,23 +476,26 @@ mod tests {
     fn rejects_duplicate_bucket_names() {
         let root = temp_root("store-registry-duplicate-bucket");
         let registry_path = root.join("stores.json");
-        upsert_store_definition(
+        let binding = fixture_catalog_binding(&root);
+        upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition(
                 "store-a",
                 StoreClass::GeneratedData,
                 Some("shared".to_string()),
             ),
+            &binding,
         )
         .expect("store a created");
 
-        let err = upsert_store_definition(
+        let err = upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition(
                 "store-b",
                 StoreClass::GeneratedData,
                 Some("shared".to_string()),
             ),
+            &binding,
         )
         .expect_err("duplicate bucket rejected");
 
@@ -465,22 +508,27 @@ mod tests {
     fn deletes_store_definition() {
         let root = temp_root("store-registry-delete");
         let registry_path = root.join("stores.json");
-        upsert_store_definition(
+        let binding = fixture_catalog_binding(&root);
+        upsert_store_definition_with_custody_catalog(
             &registry_path,
             definition("generated-data", StoreClass::GeneratedData, None),
+            &binding,
         )
         .expect("store created");
 
-        let report = delete_store_definition(
+        let report = delete_store_definition_with_custody_catalog(
             &registry_path,
             &StoreId::new("generated-data").expect("store id"),
+            &binding,
         )
         .expect("store deleted");
 
         assert!(report.removed);
-        assert!(read_store_registry(&registry_path)
-            .expect("registry reads")
-            .is_empty());
+        assert!(
+            read_store_registry_with_custody_catalog(&registry_path, &binding)
+                .expect("registry reads")
+                .is_empty()
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp root");
     }
@@ -489,23 +537,26 @@ mod tests {
     fn custody_fields_and_bootstrap_namespace_cannot_enter_mutable_registry() {
         let root = temp_root("custody-registry-denial");
         let registry_path = root.join("stores.json");
+        let binding = fixture_catalog_binding(&root);
         fs::create_dir_all(&root).expect("create fixture root");
         let initial =
             br#"[{"store_id":"formal-custody","policy":{},"custody_profile":{}}]"#.to_vec();
         fs::write(&registry_path, &initial).expect("write legacy custody registry fixture");
-        assert!(delete_store_definition(
+        assert!(delete_store_definition_with_custody_catalog(
             &registry_path,
             &StoreId::new("formal-custody").expect("store id"),
+            &binding
         )
         .is_err());
         assert_eq!(fs::read(&registry_path).expect("read fixture"), initial);
-        assert!(upsert_store_definition(
+        assert!(upsert_store_definition_with_custody_catalog(
             root.join("bootstrap.json"),
             definition(
                 crate::custody::R237_BOOTSTRAP_STORE_ID,
                 StoreClass::CriticalMetadata,
                 Some(crate::custody::R237_BOOTSTRAP_BUCKET_NAME.to_string()),
             ),
+            &binding
         )
         .is_err());
         fs::remove_dir_all(root).expect("cleanup temp root");
@@ -557,6 +608,11 @@ mod tests {
         assert!(error.to_string().contains("sealed custody bucket"));
         assert!(!registry.exists());
         fs::remove_dir_all(root).expect("cleanup temp root");
+    }
+
+    fn fixture_catalog_binding(root: &std::path::Path) -> CustodyCatalogBinding {
+        CustodyCatalogBinding::new(root.join("custody-catalog.jsonl"))
+            .expect("owned fixture custody catalog binding")
     }
 
     fn definition(

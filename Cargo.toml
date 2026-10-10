@@ -17,7 +17,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.186.40"
+version = "0.186.41"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -25,7 +25,7 @@ repository = "https://github.com/sagrudd/DASObjectStore"
 [workspace.dependencies]
 argon2 = "0.5.3"
 axum = "0.8.9"
-axum-server = { version = "0.7.2", features = ["tls-rustls"] }
+axum-server = { version = "=0.8.0", features = ["tls-rustls"] }
 base64 = "0.22.1"
 ed25519-dalek = { version = "2.2", default-features = false }
 bytes = "1.11.0"
@@ -64,7 +64,6 @@ regex = "1.12.2"
 libc = "0.2"
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
 rustls = "0.23.42"
-rustls-pemfile = "2.2.0"
 tokio-rustls = "0.26.4"
 ring = "0.17.14"
 rusqlite = { version = "0.37", features = ["bundled", "hooks"] }

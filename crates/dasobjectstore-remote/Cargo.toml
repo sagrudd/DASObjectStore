@@ -20,7 +20,6 @@ dasobjectstore-daemon.workspace = true
 hex.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
-rustls-pemfile.workspace = true
 proxenos.workspace = true
 serde.workspace = true
 serde_json.workspace = true

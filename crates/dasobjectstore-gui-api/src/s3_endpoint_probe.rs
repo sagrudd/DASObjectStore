@@ -1,7 +1,11 @@
 //! Non-secret runtime proof that the public S3 endpoint matches its descriptor.
 
+#[cfg(test)]
+#[path = "../../dasobjectstore-cli/src/supplier_tls_compat.rs"]
+mod supplier_tls_compat;
+
+use rustls::pki_types::{pem::PemObject as _, CertificateDer};
 use std::fmt;
-use std::io::BufReader;
 use std::path::Path;
 use std::time::Duration;
 
@@ -114,13 +118,7 @@ pub async fn verify_public_s3_endpoint(
             endpoint: endpoint.to_string(),
             reason: format!("configured TLS trust material cannot be read: {error}"),
         })?;
-    let configured_certificates = rustls_pemfile::certs(&mut BufReader::new(trust_pem.as_slice()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| S3EndpointProbeError::Unavailable {
-            endpoint: endpoint.to_string(),
-            reason: "configured TLS trust material is not a valid PEM certificate bundle"
-                .to_string(),
-        })?;
+    let configured_certificates = parse_trust_bundle(endpoint, &trust_pem)?;
     let configured_leaf =
         configured_certificates
             .first()
@@ -252,13 +250,26 @@ async fn plaintext_http_responds(host: &str, port: u16) -> bool {
     )
 }
 
+fn parse_trust_bundle(
+    endpoint: &str,
+    trust_pem: &[u8],
+) -> Result<Vec<CertificateDer<'static>>, S3EndpointProbeError> {
+    CertificateDer::pem_slice_iter(trust_pem)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| S3EndpointProbeError::Unavailable {
+            endpoint: endpoint.to_string(),
+            reason: "configured TLS trust material is not a valid PEM certificate bundle"
+                .to_string(),
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::supplier_tls_compat;
     use super::*;
     use axum::http::{header, StatusCode};
     use axum::routing::get;
     use axum::Router;
-    use axum_server::tls_rustls::RustlsConfig;
     use rcgen::{
         generate_simple_self_signed, BasicConstraints, CertificateParams, CertifiedIssuer, IsCa,
         KeyPair,
@@ -305,13 +316,17 @@ mod tests {
         let private_key_path = root.join("server.key");
         std::fs::write(&certificate_path, certificate_pem).expect("write certificate");
         std::fs::write(&private_key_path, private_key_pem).expect("write private key");
-        let tls = RustlsConfig::from_pem_file(&certificate_path, &private_key_path)
+        let tls = supplier_tls_compat::from_pem_file(&certificate_path, &private_key_path)
             .await
             .expect("load TLS");
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve port");
+        listener
+            .set_nonblocking(true)
+            .expect("make owned test TLS listener nonblocking");
         let address = listener.local_addr().expect("address");
         let server = tokio::spawn(async move {
             axum_server::from_tcp_rustls(listener, tls)
+                .expect("compose owned test TLS listener")
                 .serve(app.into_make_service())
                 .await
         });
@@ -321,6 +336,165 @@ mod tests {
             root,
             server,
         }
+    }
+
+    fn assert_supplier_accepts(cert: &[u8], key: &[u8]) {
+        let config =
+            supplier_tls_compat::tests::new_config(cert, key).expect("fixed valid supplier corpus");
+        assert_eq!(
+            config.alpn_protocols,
+            [b"h2".to_vec(), b"http/1.1".to_vec()]
+        );
+    }
+    fn assert_supplier_denies(cert: &[u8], key: &[u8], kind: std::io::ErrorKind, message: &str) {
+        let error = supplier_tls_compat::tests::new_config(cert, key)
+            .expect_err("fixed denied supplier corpus");
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.to_string(), message);
+    }
+    #[test]
+    fn supplier_old_new_generated_format_and_error_corpus_matches() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let fixture = supplier_tls_compat::tests::generated_formats();
+        let malformed_key = "-----BEGIN PRIVATE KEY-----\n!\n-----END PRIVATE KEY-----\n";
+        let malformed_cert = "-----BEGIN CERTIFICATE-----\n!\n-----END CERTIFICATE-----\n";
+        for (index, (cert, key)) in fixture.pairs.iter().enumerate() {
+            for keys in [
+                key.clone(),
+                format!("{cert}{key}"),
+                format!("{malformed_key}{key}"),
+                format!("{key}{malformed_key}"),
+            ] {
+                assert_supplier_accepts(cert.as_bytes(), keys.as_bytes());
+            }
+            let relabeled = key.replace("PRIVATE KEY", "RSA PRIVATE KEY");
+            if index == 1 {
+                assert_supplier_accepts(cert.as_bytes(), relabeled.as_bytes());
+            } else {
+                assert_supplier_denies(
+                    cert.as_bytes(),
+                    relabeled.as_bytes(),
+                    std::io::ErrorKind::Other,
+                    "private key format not supported",
+                );
+            }
+            for keys in [String::new(), cert.clone(), format!("{key}{key}")] {
+                assert_supplier_denies(
+                    cert.as_bytes(),
+                    keys.as_bytes(),
+                    std::io::ErrorKind::Other,
+                    "private key format not supported",
+                );
+            }
+            for certs in [
+                format!("{cert}{malformed_cert}"),
+                format!("{malformed_cert}{cert}"),
+                format!("{cert}{malformed_cert}").replace("\n", "\r\n"),
+            ] {
+                assert_supplier_denies(
+                    certs.as_bytes(),
+                    key.as_bytes(),
+                    std::io::ErrorKind::InvalidData,
+                    "InvalidCharacter(33)",
+                );
+            }
+            assert_supplier_denies(
+                &[],
+                key.as_bytes(),
+                std::io::ErrorKind::Other,
+                "peer sent no certificates",
+            );
+        }
+        assert_supplier_denies(
+            fixture.pairs[0].0.as_bytes(),
+            fixture.pairs[2].1.as_bytes(),
+            std::io::ErrorKind::Other,
+            "keys may not be consistent: KeyMismatch",
+        );
+        assert_supplier_denies(
+            fixture.pairs[0].0.as_bytes(),
+            format!("{}{}", fixture.pairs[0].1, fixture.pairs[2].1).as_bytes(),
+            std::io::ErrorKind::Other,
+            "private key format not supported",
+        );
+    }
+
+    #[tokio::test]
+    async fn supplier_old_new_three_formats_complete_real_https_handshakes() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let formats = supplier_tls_compat::tests::generated_formats();
+        for (cert, key) in &formats.pairs {
+            {
+                let root = test_root("supplier-format-handshake");
+                std::fs::create_dir_all(&root).expect("owned handshake root");
+                let certificate_path = root.join("server.crt");
+                std::fs::write(&certificate_path, cert).expect("owned certificate");
+                let config =
+                    supplier_tls_compat::tests::new_config(cert.as_bytes(), key.as_bytes())
+                        .expect("actual supplier DER/provider config");
+                let tls =
+                    axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(config));
+                let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("owned listener");
+                listener
+                    .set_nonblocking(true)
+                    .expect("nonblocking listener");
+                let address = listener.local_addr().expect("listener address");
+                let server = tokio::spawn(async move {
+                    axum_server::from_tcp_rustls(listener, tls)
+                        .expect("compose TLS listener")
+                        .serve(valid_s3_app().into_make_service())
+                        .await
+                });
+                let fixture = TlsS3Fixture {
+                    address,
+                    certificate_path,
+                    root,
+                    server,
+                };
+                let endpoint = format!("https://localhost:{}", fixture.address.port());
+                let verified = verify_public_s3_endpoint(&endpoint, &fixture.certificate_path)
+                    .await
+                    .expect("real supported-format TLS and S3 verification");
+                assert_eq!(verified.host, "localhost");
+                assert_eq!(verified.port, fixture.address.port());
+            }
+        }
+    }
+
+    #[test]
+    fn supplier_dual_provider_failure_is_isolated() {
+        if std::env::var_os("DAS_SUPPLIER_PROVIDER_CHILD").as_deref()
+            != Some(std::ffi::OsStr::new("1"))
+        {
+            let (_, module) = module_path!().split_once("::").expect("test module path");
+            let filter = format!("{module}::supplier_dual_provider_failure_is_isolated");
+            let output =
+                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                    .args(["--exact", &filter, "--nocapture"])
+                    .env("DAS_SUPPLIER_PROVIDER_CHILD", "1")
+                    .output()
+                    .expect("provider child");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(output.status.success(), "isolated provider assay failed");
+            assert!(stdout.contains("running 1 test") && stdout.contains("1 passed; 0 failed"));
+            return;
+        }
+        assert!(
+            rustls::crypto::CryptoProvider::get_default().is_none(),
+            "fresh child default provider"
+        );
+        let _ = rustls::crypto::ring::default_provider();
+        let _ = rustls::crypto::aws_lc_rs::default_provider();
+        let fixture = supplier_tls_compat::tests::generated_formats();
+        let (cert, key) = &fixture.pairs[0];
+        let new = std::panic::catch_unwind(|| {
+            supplier_tls_compat::tests::new_config(cert.as_bytes(), key.as_bytes())
+        });
+        assert!(
+            new.is_err(),
+            "dual-provider new builder must fail without selected provider"
+        );
+        assert!(rustls::crypto::CryptoProvider::get_default().is_none());
     }
 
     fn ca_issued_fullchains() -> (String, String, String) {
@@ -504,5 +678,36 @@ mod tests {
             "dasobjectstore-s3-endpoint-probe-{label}-{}",
             uuid::Uuid::new_v4()
         ))
+    }
+}
+
+#[cfg(test)]
+mod bundle_parser_differential_tests {
+    use super::*;
+    #[test]
+    fn actual_probe_parser_matches_old_full_collection() {
+        let one = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
+        let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        for (bytes, expected) in [
+            (Vec::new(), Some(Vec::<Vec<u8>>::new())),
+            (one.to_vec(), Some(vec![vec![1]])),
+            (bad.to_vec(), None),
+            ([one.as_slice(), bad.as_slice()].concat(), None),
+        ] {
+            if let Some(expected) = expected {
+                let actual = parse_trust_bundle("https://fixture.invalid", &bytes).unwrap();
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|cert| cert.as_ref().to_vec())
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            } else {
+                assert!(
+                    matches!(parse_trust_bundle("https://fixture.invalid",&bytes),Err(S3EndpointProbeError::Unavailable{reason,..}) if reason=="configured TLS trust material is not a valid PEM certificate bundle")
+                );
+            }
+        }
     }
 }

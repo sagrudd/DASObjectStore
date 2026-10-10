@@ -38,7 +38,14 @@ fn non_root_writer_submits_ingest_through_daemon_without_managed_root_write_acce
         },
         FixedDaemonClock::new("2026-07-09T09:34:00Z"),
     )
-    .with_registry_paths(store_registry, subobject_registry);
+    .with_registry_paths(store_registry, subobject_registry)
+    .try_with_custody_catalog_binding(
+        dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned non-root fixture catalogue"),
+    )
+    .expect("bind owned non-root fixture catalogue");
     let transport = InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))
@@ -72,7 +79,14 @@ fn non_writer_is_rejected_by_daemon_before_ingest_service_runs() {
         },
         FixedDaemonClock::new("2026-07-09T09:34:00Z"),
     )
-    .with_registry_paths(store_registry, subobject_registry);
+    .with_registry_paths(store_registry, subobject_registry)
+    .try_with_custody_catalog_binding(
+        dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned non-root fixture catalogue"),
+    )
+    .expect("bind owned non-root fixture catalogue");
     let transport = InProcessDaemonTransport::new(move |request| {
         handler
             .handle_with_progress_for_actor(request, Some(&actor), |_| Ok(()))

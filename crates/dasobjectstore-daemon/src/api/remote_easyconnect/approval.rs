@@ -24,33 +24,6 @@ impl RemoteEasyconnectPairingStatusRequest {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::RemoteEasyconnectPairingStatusRequest;
-
-    #[test]
-    fn status_requires_exactly_one_pairing_or_browser_handoff_reference() {
-        assert!(RemoteEasyconnectPairingStatusRequest {
-            pairing_id: Some("pairing-1".to_string()),
-            browser_handoff_reference: None,
-        }
-        .validate()
-        .is_ok());
-        assert!(RemoteEasyconnectPairingStatusRequest {
-            pairing_id: None,
-            browser_handoff_reference: Some("handoff-1".to_string()),
-        }
-        .validate()
-        .is_ok());
-        assert!(RemoteEasyconnectPairingStatusRequest {
-            pairing_id: Some("pairing-1".to_string()),
-            browser_handoff_reference: Some("handoff-1".to_string()),
-        }
-        .validate()
-        .is_err());
-    }
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteEasyconnectPairingState {
@@ -185,4 +158,31 @@ pub struct RemoteEasyconnectExchangeConnectionResponse {
     #[serde(flatten)]
     pub exchange: RemoteEasyconnectExchangePairingResponse,
     pub s3: RemoteEasyconnectS3ConnectionDescriptor,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RemoteEasyconnectPairingStatusRequest;
+
+    #[test]
+    fn status_requires_exactly_one_pairing_or_browser_handoff_reference() {
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: Some("pairing-1".to_string()),
+            browser_handoff_reference: None,
+        }
+        .validate()
+        .is_ok());
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: None,
+            browser_handoff_reference: Some("handoff-1".to_string()),
+        }
+        .validate()
+        .is_ok());
+        assert!(RemoteEasyconnectPairingStatusRequest {
+            pairing_id: Some("pairing-1".to_string()),
+            browser_handoff_reference: Some("handoff-1".to_string()),
+        }
+        .validate()
+        .is_err());
+    }
 }

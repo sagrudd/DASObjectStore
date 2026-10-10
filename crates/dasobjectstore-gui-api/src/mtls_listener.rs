@@ -14,6 +14,7 @@ use dasobjectstore_daemon::api::{
     APPLICATION_UPLOAD_COMPLETION_ROUTE,
 };
 use dasobjectstore_daemon::{DaemonClient, DaemonRuntimeConfig, UnixSocketDaemonTransport};
+use rustls::pki_types::pem::{Error as PemError, PemObject as _};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
@@ -21,7 +22,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -258,16 +259,42 @@ fn read_certificates(
     path: &std::path::Path,
 ) -> Result<Vec<CertificateDer<'static>>, MtlsListenerError> {
     let file = File::open(path)?;
-    rustls_pemfile::certs(&mut BufReader::new(file))
+    CertificateDer::pem_reader_iter(file)
+        .map(pem_io_error_result)
         .collect::<Result<Vec<_>, _>>()
         .map_err(MtlsListenerError::Io)
 }
 
 fn read_private_key(path: &std::path::Path) -> Result<PrivateKeyDer<'static>, MtlsListenerError> {
     let file = File::open(path)?;
-    rustls_pemfile::private_key(&mut BufReader::new(file))?.ok_or_else(|| {
-        MtlsListenerError::Tls("server private-key file contains no key".to_string())
-    })
+    match PrivateKeyDer::from_pem_reader(file) {
+        Ok(key) => Ok(key),
+        Err(PemError::NoItemsFound) => Err(MtlsListenerError::Tls(
+            "server private-key file contains no key".to_string(),
+        )),
+        Err(error) => Err(MtlsListenerError::Io(pem_io_error(error))),
+    }
+}
+
+fn pem_io_error(error: PemError) -> io::Error {
+    let message = match error {
+        PemError::Io(error) => return error,
+        PemError::MissingSectionEnd { end_marker } => format!(
+            "section end {:?} missing",
+            String::from_utf8_lossy(&end_marker)
+        ),
+        PemError::IllegalSectionStart { line } => format!(
+            "illegal section start: {:?}",
+            String::from_utf8_lossy(&line)
+        ),
+        PemError::Base64Decode(message) => message,
+        other => format!("{other:?}"),
+    };
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn pem_io_error_result<T>(result: Result<T, PemError>) -> Result<T, io::Error> {
+    result.map_err(pem_io_error)
 }
 
 #[derive(Debug)]
@@ -432,5 +459,335 @@ mod tests {
             ));
         fs::create_dir_all(&root).expect("fixture root");
         root
+    }
+}
+
+#[cfg(test)]
+mod pem_reader_compatibility_tests {
+    use super::*;
+
+    fn block(label: &str, body: &str) -> String {
+        format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----\n")
+    }
+
+    #[test]
+    fn private_first_key_keeps_kind_order_and_does_not_scan_trailing_error() {
+        for (label, kind) in [
+            ("RSA PRIVATE KEY", 1),
+            ("PRIVATE KEY", 2),
+            ("EC PRIVATE KEY", 3),
+        ] {
+            let bytes = format!(
+                "{}{}{}",
+                block("CERTIFICATE", "AQ=="),
+                block(label, "Ag=="),
+                block("PRIVATE KEY", "!!!")
+            );
+            let key = PrivateKeyDer::from_pem_reader(bytes.as_bytes()).unwrap();
+            assert!(matches!(
+                (key, kind),
+                (PrivateKeyDer::Pkcs1(_), 1)
+                    | (PrivateKeyDer::Pkcs8(_), 2)
+                    | (PrivateKeyDer::Sec1(_), 3)
+            ));
+        }
+    }
+
+    #[test]
+    fn private_initial_error_is_not_overwritten_by_later_key() {
+        let input = block("PRIVATE KEY", "!!!") + &block("PRIVATE KEY", "AQ==");
+        let error = PrivateKeyDer::from_pem_reader(input.as_bytes()).unwrap_err();
+        assert_eq!(pem_io_error(error).kind(), io::ErrorKind::InvalidData);
+        for input in [String::new(), block("CERTIFICATE", "AQ==")] {
+            assert!(matches!(
+                PrivateKeyDer::from_pem_reader(input.as_bytes()),
+                Err(PemError::NoItemsFound)
+            ));
+        }
+    }
+
+    #[test]
+    fn certificate_collection_preserves_empty_order_and_trailing_error() {
+        let empty = CertificateDer::pem_slice_iter(b"")
+            .map(pem_io_error_result)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert!(empty.is_empty());
+        let input = block("CERTIFICATE", "AQ==") + &block("CERTIFICATE", "Ag==");
+        let items = CertificateDer::pem_slice_iter(input.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(items[0].as_ref(), &[1]);
+        assert_eq!(items[1].as_ref(), &[2]);
+        let bad = input + &block("CERTIFICATE", "!!!");
+        assert!(CertificateDer::pem_slice_iter(bad.as_bytes())
+            .map(pem_io_error_result)
+            .collect::<Result<Vec<_>, _>>()
+            .is_err());
+    }
+
+    #[test]
+    fn io_errors_keep_kind_and_legacy_missing_end_diagnostic() {
+        let error = pem_io_error(PemError::Io(io::Error::from(
+            io::ErrorKind::PermissionDenied,
+        )));
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let error = pem_io_error(PemError::MissingSectionEnd {
+            end_marker: b"END".to_vec(),
+        });
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(error.to_string(), "section end \"END\" missing");
+    }
+}
+
+#[cfg(test)]
+mod pem_old_new_differential_tests {
+    use super::*;
+    fn block(label: &str, body: &str) -> String {
+        format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----\n")
+    }
+    fn key_identity(key: PrivateKeyDer<'_>) -> (u8, Vec<u8>) {
+        let kind = match &key {
+            PrivateKeyDer::Pkcs1(_) => 1,
+            PrivateKeyDer::Pkcs8(_) => 2,
+            PrivateKeyDer::Sec1(_) => 3,
+            _ => panic!("unexpected fixture key kind"),
+        };
+        (kind, key.secret_der().to_vec())
+    }
+    #[test]
+    fn old_and_new_private_readers_match_first_key_and_error_boundaries() {
+        let mut cases = vec![
+            (String::new(), Ok(None)),
+            (block("CERTIFICATE", "AQ=="), Ok(None)),
+            (block("PRIVATE KEY", "!!!"), Err("InvalidCharacter(33)")),
+            (
+                "-----BEGIN PRIVATE KEY-----\nAQ==\n".into(),
+                Err("section end \"PRIVATE KEY\" missing"),
+            ),
+        ];
+        for (label, kind) in [
+            ("RSA PRIVATE KEY", 1),
+            ("PRIVATE KEY", 2),
+            ("EC PRIVATE KEY", 3),
+        ] {
+            cases.push((block(label, "AQ=="), Ok(Some((kind, vec![1])))));
+            cases.push((
+                block(label, "AQ==") + &block("PRIVATE KEY", "!!!"),
+                Ok(Some((kind, vec![1]))),
+            ));
+            cases.push((
+                block("PRIVATE KEY", "!!!") + &block(label, "Ag=="),
+                Err("InvalidCharacter(33)"),
+            ));
+            cases.push((
+                block(label, "AQ==") + &block("PRIVATE KEY", "Ag=="),
+                Ok(Some((kind, vec![1]))),
+            ));
+        }
+        for (input, expected) in cases {
+            let actual = match PrivateKeyDer::from_pem_reader(input.as_bytes()) {
+                Ok(key) => Ok(Some(key_identity(key))),
+                Err(PemError::NoItemsFound) => Ok(None),
+                Err(error) => {
+                    let error = pem_io_error(error);
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    Err(error.to_string())
+                }
+            };
+            assert_eq!(
+                actual,
+                expected.map_err(str::to_string),
+                "fixed first-key corpus"
+            );
+        }
+    }
+    #[test]
+    fn old_and_new_full_certificate_iterators_match_order_and_errors() {
+        let one = block("CERTIFICATE", "AQ==");
+        let cases = [
+            (String::new(), vec![]),
+            (one.clone(), vec![Ok(vec![1])]),
+            (
+                one.clone() + &block("CERTIFICATE", "Ag=="),
+                vec![Ok(vec![1]), Ok(vec![2])],
+            ),
+            (
+                one + &block("CERTIFICATE", "!!!"),
+                vec![Ok(vec![1]), Err("InvalidCharacter(33)")],
+            ),
+            (block("PRIVATE KEY", "AQ=="), vec![]),
+            (
+                "-----BEGIN CERTIFICATE-----\nAQ==\n".into(),
+                vec![Err("section end \"CERTIFICATE\" missing")],
+            ),
+        ];
+        for (input, expected) in cases {
+            let actual = CertificateDer::pem_slice_iter(input.as_bytes())
+                .map(pem_io_error_result)
+                .map(|item| {
+                    item.map(|c| c.as_ref().to_vec()).map_err(|error| {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        error.to_string()
+                    })
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual,
+                expected
+                    .into_iter()
+                    .map(|item| item.map_err(str::to_string))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod actual_pem_wrapper_differential_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    struct Fixture(std::path::PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    fn fixture(bytes: &[u8]) -> Fixture {
+        let path = std::env::temp_dir().join(format!(
+            "das-pem-fixture-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, bytes).unwrap();
+        Fixture(path)
+    }
+    struct WrapperCase {
+        bytes: &'static [u8],
+        key: Option<&'static [u8]>,
+        key_error: Option<&'static str>,
+        cert_error: Option<&'static str>,
+        certs: &'static [&'static [u8]],
+    }
+    fn case(
+        bytes: &'static [u8],
+        key: Option<&'static [u8]>,
+        key_error: Option<&'static str>,
+        cert_error: Option<&'static str>,
+        certs: &'static [&'static [u8]],
+    ) -> WrapperCase {
+        WrapperCase {
+            bytes,
+            key,
+            key_error,
+            cert_error,
+            certs,
+        }
+    }
+    #[test]
+    fn actual_file_wrappers_match_old_error_categories_and_selection() {
+        let cases = [
+            case(b"",None,None,None,&[]),
+            case(b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",Some(&[1]),None,None,&[]),
+            case(b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n",None,None,None,&[&[1]]),
+            case(b"-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n",None,Some("InvalidCharacter(33)"),Some("InvalidCharacter(33)"),&[]),
+            case(b"-----BEGIN CERTIFICATE-----\nAQ==\n",None,Some("section end \"CERTIFICATE\" missing"),Some("section end \"CERTIFICATE\" missing"),&[]),
+            case(b"-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\n!!!\n-----END PRIVATE KEY-----\n",Some(&[1]),None,Some("InvalidCharacter(33)"),&[]),
+        ];
+        for WrapperCase {
+            bytes,
+            key,
+            key_error,
+            cert_error,
+            certs,
+        } in cases
+        {
+            let file = fixture(bytes);
+            match (key, key_error) {
+                (_, Some(message)) => match read_private_key(&file.0).unwrap_err() {
+                    MtlsListenerError::Io(error) => {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        assert_eq!(error.to_string(), message);
+                    }
+                    _ => panic!("lost private parser I/O category"),
+                },
+                (Some(expected), None) => {
+                    assert_eq!(read_private_key(&file.0).unwrap().secret_der(), expected)
+                }
+                (None, None) => assert!(
+                    matches!(read_private_key(&file.0),Err(MtlsListenerError::Tls(message)) if message=="server private-key file contains no key")
+                ),
+            }
+            if let Some(message) = cert_error {
+                match read_certificates(&file.0).unwrap_err() {
+                    MtlsListenerError::Io(error) => {
+                        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                        assert_eq!(error.to_string(), message);
+                    }
+                    _ => panic!("lost certificate parser I/O category"),
+                }
+            } else {
+                assert_eq!(
+                    read_certificates(&file.0)
+                        .unwrap()
+                        .iter()
+                        .map(|c| c.as_ref())
+                        .collect::<Vec<_>>(),
+                    certs
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod pem_missing_boundary_differential_tests {
+    use super::*;
+    struct FailingRead;
+    impl io::Read for FailingRead {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "generated reader failure",
+            ))
+        }
+    }
+    #[test]
+    fn genuine_read_failure_keeps_old_error_kind_and_display() {
+        let key = pem_io_error(PrivateKeyDer::from_pem_reader(FailingRead).unwrap_err());
+        let cert = pem_io_error(
+            CertificateDer::pem_reader_iter(FailingRead)
+                .next()
+                .unwrap()
+                .unwrap_err(),
+        );
+        for error in [key, cert] {
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            assert_eq!(error.to_string(), "generated reader failure");
+        }
+    }
+    #[test]
+    fn unsupported_prefix_malformed_preceding_and_mismatched_end_match_old() {
+        let cases=[
+            ("-----BEGIN UNRECOGNIZED-----\nAQ==\n-----END UNRECOGNIZED-----\n-----BEGIN PRIVATE KEY-----\nAg==\n-----END PRIVATE KEY-----\n",Ok(vec![2])),
+            ("-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n-----BEGIN PRIVATE KEY-----\nAQ==\n-----END PRIVATE KEY-----\n",Err("InvalidCharacter(33)")),
+            ("-----BEGIN PRIVATE KEY-----\nAQ==\n-----END CERTIFICATE-----\n",Err("section end \"PRIVATE KEY\" missing")),
+        ];
+        for (input, expected) in cases {
+            let actual = PrivateKeyDer::from_pem_reader(input.as_bytes())
+                .map(|k| k.secret_der().to_vec())
+                .map_err(|error| {
+                    let error = pem_io_error(error);
+                    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+                    error.to_string()
+                });
+            assert_eq!(actual, expected.map_err(str::to_string));
+        }
     }
 }

@@ -101,6 +101,16 @@ where
     }
 
     pub fn new(config: GarageServiceRuntimeConfig, runner: R) -> Self {
+        let custody_catalog = CustodyCatalogBinding::new(default_custody_catalog_path())
+            .expect("the fixed default custody catalog path is absolute and canonical");
+        Self::from_resolved_catalog(config, runner, custody_catalog)
+    }
+
+    fn from_resolved_catalog(
+        config: GarageServiceRuntimeConfig,
+        runner: R,
+        custody_catalog: CustodyCatalogBinding,
+    ) -> Self {
         Self {
             config,
             runner,
@@ -108,12 +118,20 @@ where
             ingest_resource_gate: None,
             custody_runtime_credential_resolver: None,
             custody_admission_provisioning_authority: None,
-            custody_catalog: CustodyCatalogBinding::new(default_custody_catalog_path())
-                .expect("the fixed default custody catalog path is absolute and canonical"),
+            custody_catalog,
             custody_catalog_explicitly_bound: false,
             custody_plane_config: None,
             custody_state: super::CustodyServiceState::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_only_from_owned_catalog(
+        config: GarageServiceRuntimeConfig,
+        runner: R,
+        custody_catalog: CustodyCatalogBinding,
+    ) -> Self {
+        Self::from_resolved_catalog(config, runner, custody_catalog)
     }
 
     pub fn with_capacity_admission_provider(
@@ -1427,7 +1445,7 @@ mod tests {
         StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1458,7 +1476,7 @@ mod tests {
         let runner = super::FakeRunner::with_stdout(
             r#"[{"Name":"garage","Service":"garage","State":"running"}]"#,
         );
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let status = controller
             .status(DaemonServiceStatusRequest {
@@ -1475,7 +1493,7 @@ mod tests {
     #[test]
     fn lifecycle_start_runs_compose_up() {
         let runner = super::FakeRunner::with_stdout("[]");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let response = controller
             .lifecycle(
@@ -1504,7 +1522,7 @@ mod tests {
     #[test]
     fn lifecycle_dry_run_does_not_execute_compose() {
         let runner = super::FakeRunner::with_stdout("[]");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let response = controller
             .lifecycle(
@@ -1526,7 +1544,7 @@ mod tests {
     fn provision_buckets_runs_garage_commands_through_compose() {
         let credentials = credentials();
         let runner = super::FakeRunner::with_stdout("");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let summary = controller
             .provision_buckets(&credentials)
@@ -1554,7 +1572,7 @@ mod tests {
         let credentials = credentials();
         let secret = credentials[0].secret_access_key.expose_secret().to_string();
         let runner = super::FakeRunner::failing();
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let err = controller
             .provision_buckets(&credentials)
@@ -1569,7 +1587,7 @@ mod tests {
     fn provision_buckets_treats_existing_key_and_bucket_as_idempotent() {
         let credentials = credentials();
         let runner = super::FakeRunner::bucket_already_exists();
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let summary = controller
             .provision_buckets(&credentials)
@@ -1584,7 +1602,7 @@ mod tests {
         let registry_path = write_store_registry();
         let credential_registry_path = temp_root().join("garage-credentials.json");
         let runner = super::FakeRunner::with_stdout("");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let summary = super::provision_garage_store_registry_with_credentials_path(
             &controller,
@@ -1612,7 +1630,7 @@ mod tests {
         let registry_path = write_store_registry();
         let credential_registry_path = temp_root().join("garage-credentials.json");
         let runner = super::FakeRunner::with_stdout("");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let summary = super::provision_garage_store_registry_with_credentials_path(
             &controller,
@@ -1637,7 +1655,7 @@ mod tests {
         let registry_path = write_store_registry();
         let credential_registry_path = temp_root().join("garage-credentials.json");
         let runner = super::FakeRunner::with_stdout("");
-        let controller = GarageServiceController::new(config(), runner);
+        let controller = fixture_controller(config(), runner);
 
         let first = super::provision_garage_store_registry_with_credentials_path(
             &controller,
@@ -1705,13 +1723,13 @@ mod tests {
 
     #[test]
     fn custody_plane_rejects_any_reused_normal_garage_coordinate() {
-        let normal = config();
-        let catalog = temp_root().join("sealed/custody-catalog.jsonl");
-        let controller =
-            GarageServiceController::new(normal.clone(), super::FakeRunner::with_stdout("[]"))
-                .with_custody_plane_config(normal)
-                .try_with_custody_catalog_path(&catalog)
-                .expect("explicit test custody catalog");
+        let root = temp_root();
+        let (normal, _) = owned_plane_configs(&root);
+        let catalog = root.join("sealed/custody-catalog.jsonl");
+        let controller = fixture_controller(normal.clone(), super::FakeRunner::with_stdout("[]"))
+            .with_custody_plane_config(normal)
+            .try_with_custody_catalog_path(&catalog)
+            .expect("explicit test custody catalog");
 
         let error = controller
             .custody_plane_config()
@@ -1723,10 +1741,11 @@ mod tests {
     #[test]
     fn active_custody_plane_requires_one_explicit_non_replaceable_catalog_binding() {
         let root = temp_root();
+        let (normal, custody) = owned_plane_configs(&root);
         let first = root.join("one/custody-catalog.jsonl");
         let second = root.join("two/custody-catalog.jsonl");
-        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
-            .with_custody_plane_config(custody_config());
+        let controller = fixture_controller(normal, CustodyRetainRunner::default())
+            .with_custody_plane_config(custody);
         assert!(controller.custody_plane_config().is_err());
         let controller = controller
             .try_with_custody_catalog_path(&first)
@@ -1745,10 +1764,11 @@ mod tests {
     #[test]
     fn custody_endpoint_loopback_alias_is_not_a_distinct_plane() {
         let root = temp_root();
+        let (normal, custody) = owned_plane_configs(&root);
         let catalog = root.join("custody-catalog.jsonl");
-        let mut alias = custody_config();
+        let mut alias = custody;
         alias.endpoint = "http://localhost:3900".to_string();
-        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
+        let controller = fixture_controller(normal, CustodyRetainRunner::default())
             .with_custody_plane_config(alias)
             .try_with_custody_catalog_path(&catalog)
             .expect("explicit catalog");
@@ -1763,9 +1783,10 @@ mod tests {
     #[test]
     fn default_controller_denies_custody_before_claim_or_garage_effect() {
         let root = temp_root();
+        let (normal, _) = owned_plane_configs(&root);
         let catalog = root.join("sealed/custody-catalog.jsonl");
         let definition = custody_definition();
-        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
+        let controller = fixture_controller(normal, CustodyRetainRunner::default())
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical");
 
@@ -1789,6 +1810,7 @@ mod tests {
     #[test]
     fn custody_retain_uses_only_the_isolated_plane_and_consumes_both_handoffs() {
         let root = temp_root();
+        let (normal, custody) = owned_plane_configs(&root);
         let catalog = root.join("sealed/custody-catalog.jsonl");
         let definition = custody_definition();
         let definition_digest = custody_store_definition_sha256(&definition).expect("definition");
@@ -1839,8 +1861,8 @@ mod tests {
             )])
             .expect("one-use provisioner authority"),
         );
-        let controller = GarageServiceController::new(config(), runner)
-            .with_custody_plane_config(custody_config())
+        let controller = fixture_controller(normal, runner)
+            .with_custody_plane_config(custody)
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical")
             .with_custody_admission_provisioning_authority(provisioner)
@@ -1943,10 +1965,11 @@ mod tests {
     #[test]
     fn custody_admission_rejects_a_detached_proof_before_ledger_or_catalog_mutation() {
         let root = temp_root();
+        let (normal, custody) = owned_plane_configs(&root);
         let catalog = root.join("sealed/custody-catalog.jsonl");
         let definition = custody_definition();
-        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
-            .with_custody_plane_config(custody_config())
+        let controller = fixture_controller(normal, CustodyRetainRunner::default())
+            .with_custody_plane_config(custody)
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical");
 
@@ -1977,6 +2000,7 @@ mod tests {
     #[test]
     fn custody_admission_rejects_alternate_provisioner_reference_before_consumption_or_effect() {
         let root = temp_root();
+        let (normal, custody) = owned_plane_configs(&root);
         let catalog = root.join("sealed/custody-catalog.jsonl");
         let definition = custody_definition();
         let attacker_reference = "attended://attacker-provisioner";
@@ -1993,8 +2017,8 @@ mod tests {
             ])
             .expect("independent provisioner handoffs"),
         );
-        let controller = GarageServiceController::new(config(), CustodyRetainRunner::default())
-            .with_custody_plane_config(custody_config())
+        let controller = fixture_controller(normal, CustodyRetainRunner::default())
+            .with_custody_plane_config(custody)
             .try_with_custody_catalog_path(&catalog)
             .expect("custom test catalog is canonical")
             .with_custody_admission_provisioning_authority(provisioner.clone());
@@ -2024,6 +2048,37 @@ mod tests {
             .consume_one_use_provisioning_request(attacker_reference, &definition)
             .expect("alternate handoff must remain unconsumed after denial");
         let _ = fs::remove_dir_all(root);
+    }
+
+    fn owned_plane_configs(
+        root: &Path,
+    ) -> (GarageServiceRuntimeConfig, GarageServiceRuntimeConfig) {
+        fn rebase(
+            mut config: GarageServiceRuntimeConfig,
+            root: PathBuf,
+        ) -> GarageServiceRuntimeConfig {
+            config.compose_file = root.join("compose.yml");
+            config.project_directory = Some(root.join("project"));
+            config.config_path = root.join("garage.toml");
+            config.metadata_path = root.join("metadata");
+            config.data_path = root.join("data");
+            config
+        }
+        (
+            rebase(config(), root.join("ordinary-plane")),
+            rebase(custody_config(), root.join("custody-plane")),
+        )
+    }
+
+    fn fixture_controller<R: ServiceCommandRunner>(
+        config: GarageServiceRuntimeConfig,
+        runner: R,
+    ) -> GarageServiceController<R> {
+        let binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            temp_root().join("custody-catalog.jsonl"),
+        )
+        .expect("owned fixture custody catalog binding");
+        GarageServiceController::test_only_from_owned_catalog(config, runner, binding)
     }
 
     fn config() -> GarageServiceRuntimeConfig {

@@ -118,14 +118,15 @@ impl BatchFixture {
             )])
             .unwrap(),
         );
+        let (normal, custody) = owned_plane_configs(&root);
         let fixture = Self {
             catalog: dasobjectstore_object_service::CustodyCatalogBinding::new(
                 root.join("sealed/catalog.jsonl"),
             )
             .unwrap(),
             root,
-            normal: config(),
-            custody: custody_config(),
+            normal,
+            custody,
             state: Default::default(),
             runner: Default::default(),
             credentials,

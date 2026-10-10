@@ -83,8 +83,13 @@ impl CapacityAdmissionProvider for RecordingCreationCapacity {
     }
 }
 
-fn controller(provider: Arc<dyn CapacityAdmissionProvider>) -> GarageServiceController<NoopRunner> {
-    GarageServiceController::new(
+fn controller(
+    provider: Arc<dyn CapacityAdmissionProvider>,
+    catalog: &std::path::Path,
+) -> GarageServiceController<NoopRunner> {
+    let binding = dasobjectstore_object_service::CustodyCatalogBinding::new(catalog)
+        .expect("owned fixture custody catalog binding");
+    GarageServiceController::test_only_from_owned_catalog(
         crate::runtime::GarageServiceRuntimeConfig {
             compose_file: PathBuf::from("/tmp/compose.yml"),
             project_directory: Some(PathBuf::from("/tmp")),
@@ -96,6 +101,7 @@ fn controller(provider: Arc<dyn CapacityAdmissionProvider>) -> GarageServiceCont
             endpoint: "http://127.0.0.1:3900".to_string(),
         },
         NoopRunner,
+        binding,
     )
     .with_capacity_admission_provider(provider)
 }
@@ -181,7 +187,7 @@ fn sealed_store_or_bucket_is_denied_before_creation_intent_or_capacity_effect() 
         }),
     ] {
         let provider = Arc::new(RecordingCreationCapacity::default());
-        let guarded = controller(provider.clone())
+        let guarded = controller(provider.clone(), &catalog)
             .try_with_custody_catalog_path(&catalog)
             .expect("catalog binding");
         let intent = root.join(format!("{label}-intents.json"));
@@ -230,7 +236,7 @@ fn replay_adopts_exact_orphan_ledger_after_capacity_side_effect_crash() {
     .expect("pre-side-effect checkpoint");
     let provider = Arc::new(RecordingCreationCapacity::existing());
     let response = create_object_store_with_capacity_and_intent_path(
-        &controller(provider.clone()),
+        &controller(provider.clone(), &root.join("custody-catalog.jsonl")),
         request.clone(),
         "later",
         &intent_path,
@@ -264,7 +270,7 @@ fn publication_failure_rolls_back_owned_capacity_and_retry_recovers() {
         registry_path.clone(),
     ));
     let error = create_object_store_with_capacity_and_intent_path(
-        &controller(provider.clone()),
+        &controller(provider.clone(), &root.join("custody-catalog.jsonl")),
         request.clone(),
         "2026-07-27T10:00:00Z",
         &intent_path,
@@ -286,7 +292,7 @@ fn publication_failure_rolls_back_owned_capacity_and_retry_recovers() {
     fs::remove_dir(&registry_path).expect("remove injected directory");
     fs::write(&registry_path, "[]").expect("restore registry");
     create_object_store_with_capacity_and_intent_path(
-        &controller(provider.clone()),
+        &controller(provider.clone(), &root.join("custody-catalog.jsonl")),
         request,
         "later",
         &intent_path,

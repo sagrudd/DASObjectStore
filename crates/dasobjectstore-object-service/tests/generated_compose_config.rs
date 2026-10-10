@@ -1,8 +1,8 @@
 use dasobjectstore_core::ids::StoreId;
 use dasobjectstore_core::store::{StoreClass, StorePolicy};
 use dasobjectstore_object_service::{
-    plan_store_service_layout, render_compose, ComposeRenderRequest, ComposeServiceConfig,
-    ObjectServiceProviderId, StoreServiceDefinition,
+    plan_store_service_layout_with_custody_catalog, render_compose, ComposeRenderRequest,
+    ComposeServiceConfig, ObjectServiceProviderId, StoreServiceDefinition,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,14 +49,20 @@ fn docker_compose_available() -> bool {
 }
 
 fn render_sample_compose(root: &Path) -> String {
-    let layout = plan_store_service_layout(&[StoreServiceDefinition {
-        store_id: StoreId::new("generated").expect("store id"),
-        policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
-        bucket_name: None,
-        reader_group: None,
-        writer_group: None,
-        public: false,
-    }])
+    let binding =
+        dasobjectstore_object_service::CustodyCatalogBinding::new(root.join("catalog.jsonl"))
+            .expect("owned Compose fixture custody catalog binding");
+    let layout = plan_store_service_layout_with_custody_catalog(
+        &[StoreServiceDefinition {
+            store_id: StoreId::new("generated").expect("store id"),
+            policy: StorePolicy::defaults_for(StoreClass::GeneratedData),
+            bucket_name: None,
+            reader_group: None,
+            writer_group: None,
+            public: false,
+        }],
+        &binding,
+    )
     .expect("layout planned");
     let request = ComposeRenderRequest {
         project_name: "dasobjectstore-compose-test".to_string(),

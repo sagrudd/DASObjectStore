@@ -88,10 +88,10 @@ impl CommandRunner for TrustedR237CommandRunner {
                     message: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
                 });
             }
-            return String::from_utf8(output.stdout).map_err(|error| ProbeError::ParseFailed {
+            String::from_utf8(output.stdout).map_err(|error| ProbeError::ParseFailed {
                 source: command.to_owned(),
                 message: error.to_string(),
-            });
+            })
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -164,7 +164,7 @@ where
     fn observe(&self) -> R237BootstrapLocalObservationV1 {
         #[cfg(target_os = "linux")]
         {
-            return collect_r237_local_observation(&self.runner, &SystemR237LocalReadOnlyAccess);
+            collect_r237_local_observation(&self.runner, &SystemR237LocalReadOnlyAccess)
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -752,6 +752,11 @@ fn marker_root_state_at(path: &str) -> Option<R237ObservationStatusV1> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn available_bytes_from_blocks<B: Into<u64>, S: Into<u64>>(blocks: B, size: S) -> Option<u64> {
+    blocks.into().checked_mul(size.into())
+}
+
 #[cfg(target_os = "linux")]
 fn statvfs_available_bytes(path: &str) -> Option<u64> {
     let path = CString::new(path).ok()?;
@@ -760,7 +765,7 @@ fn statvfs_available_bytes(path: &str) -> Option<u64> {
         return None;
     }
     let stat = unsafe { stat.assume_init() };
-    (stat.f_bavail as u64).checked_mul(stat.f_frsize as u64)
+    available_bytes_from_blocks(stat.f_bavail, stat.f_frsize)
 }
 
 #[cfg(target_os = "linux")]
@@ -1023,6 +1028,32 @@ fn sha256(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn available_bytes_preserves_native_widths_and_checked_overflow() {
+        assert_eq!(
+            super::available_bytes_from_blocks(3_u32, 4096_u32),
+            Some(12288)
+        );
+        assert_eq!(
+            super::available_bytes_from_blocks(3_u64, 4096_u64),
+            Some(12288)
+        );
+        assert_eq!(
+            super::available_bytes_from_blocks(3_u32, 4096_u64),
+            Some(12288)
+        );
+        assert_eq!(
+            super::available_bytes_from_blocks(3_u64, 4096_u32),
+            Some(12288)
+        );
+        assert_eq!(
+            super::available_bytes_from_blocks(u64::MAX, 1_u32),
+            Some(u64::MAX)
+        );
+        assert_eq!(super::available_bytes_from_blocks(u64::MAX, 2_u32), None);
+        assert_eq!(super::available_bytes_from_blocks(0_u32, u64::MAX), Some(0));
+    }
+
     use super::*;
     use crate::probe::ProbeError;
     use dasobjectstore_core::R237_REQUIRED_FREE_BYTES_PER_SELECTED_HDD;

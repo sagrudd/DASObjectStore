@@ -502,9 +502,9 @@ mod tests {
     use std::io::{BufRead, BufReader, Error as IoError, ErrorKind, Write};
     use std::os::unix::net::UnixListener;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     #[test]
     fn unix_socket_transport_round_trips_request() {
@@ -948,16 +948,11 @@ mod tests {
     }
 
     fn unique_socket_path() -> PathBuf {
-        static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(0);
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock")
-            .as_nanos();
-        let socket_id = NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "dasobjectstore-{}-{now}-{socket_id}.sock",
-            std::process::id()
-        ))
+        static NEXT_SOCKET_ID: AtomicU32 = AtomicU32::new(0);
+        let socket_id = NEXT_SOCKET_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .expect("test socket counter exhausted");
+        std::env::temp_dir().join(format!("c{:x}-{socket_id:x}", std::process::id()))
     }
 
     struct ProviderStreamHandler;

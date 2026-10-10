@@ -11,6 +11,7 @@ use base64::Engine as _;
 use proxenos::site_root_public_consumer_v1::{
     verify_site_root_public_consumer_envelope_v1, SiteRootPublicConsumerActionV1,
 };
+use rustls::pki_types::{pem::PemObject as _, CertificateDer};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -425,8 +426,7 @@ fn pem(der: &[u8]) -> Vec<u8> {
 }
 
 fn pem_to_der(pem: &[u8]) -> Result<Vec<u8>, SiteTrustError> {
-    let mut reader = std::io::BufReader::new(pem);
-    let certificates = rustls_pemfile::certs(&mut reader)
+    let certificates = CertificateDer::pem_slice_iter(pem)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| {
             SiteTrustError::Invalid("Site Trust CA bundle is not valid PEM".to_string())
@@ -572,5 +572,54 @@ mod tests {
             "dasobjectstore-site-trust-{}-{nonce}-{name}",
             std::process::id()
         ))
+    }
+}
+
+#[cfg(test)]
+mod pem_bundle_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn exact_single_certificate_rejects_empty_multiple_and_trailing_error() {
+        let one = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
+        assert_eq!(pem_to_der(one).unwrap(), vec![1]);
+        assert!(pem_to_der(b"").is_err());
+        assert!(pem_to_der(&[one.as_slice(), one.as_slice()].concat()).is_err());
+        let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        assert!(pem_to_der(&[one.as_slice(), bad.as_slice()].concat()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod site_bundle_old_new_differential_tests {
+    use super::*;
+    #[test]
+    fn actual_site_parser_matches_old_cardinality_and_public_error() {
+        let one = b"-----BEGIN CERTIFICATE-----\nAQ==\n-----END CERTIFICATE-----\n";
+        let bad = b"-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
+        let cases = [
+            (
+                Vec::new(),
+                Err("Site Trust CA bundle must contain exactly one certificate"),
+            ),
+            (one.to_vec(), Ok(vec![1])),
+            (bad.to_vec(), Err("Site Trust CA bundle is not valid PEM")),
+            (
+                [one.as_slice(), one.as_slice()].concat(),
+                Err("Site Trust CA bundle must contain exactly one certificate"),
+            ),
+            (
+                [one.as_slice(), bad.as_slice()].concat(),
+                Err("Site Trust CA bundle is not valid PEM"),
+            ),
+        ];
+        for (bytes, expected) in cases {
+            let expected = expected
+                .map_err(|message| SiteTrustError::Invalid(message.to_string()).to_string());
+            assert_eq!(
+                pem_to_der(&bytes).map_err(|error| error.to_string()),
+                expected
+            );
+        }
     }
 }

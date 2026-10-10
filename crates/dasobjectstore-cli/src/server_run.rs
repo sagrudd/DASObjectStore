@@ -5,6 +5,8 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
+#[path = "supplier_tls_compat.rs"]
+mod supplier_tls_compat;
 use dasobjectstore_gui_api::{
     application_mtls_router, build_application_mtls_listener, ensure_standalone_tls_assets,
     gui_api_router_for_host_mode_with_s3_descriptor_and_tls_certificate, s3_gateway_router,
@@ -56,9 +58,11 @@ async fn start_server(
 ) -> Result<(), ServerRunError> {
     let socket_addr = config.socket_addr()?;
     ensure_standalone_tls_assets(&config)?;
-    let tls =
-        RustlsConfig::from_pem_file(&config.tls.certificate_path, &config.tls.private_key_path)
-            .await?;
+    let tls = supplier_tls_compat::from_pem_file(
+        &config.tls.certificate_path,
+        &config.tls.private_key_path,
+    )
+    .await?;
     let s3_tls_certificate_path = config.tls.certificate_path.clone();
     let s3_tls = tls.clone();
     writeln!(

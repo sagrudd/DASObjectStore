@@ -1258,6 +1258,26 @@ fn default_live_sqlite_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    fn owned_fixture_handler<S: DaemonServiceOrchestrator, C: DaemonClock>(
+        handler: DaemonRequestHandler<S, C>,
+        root: &std::path::Path,
+    ) -> DaemonRequestHandler<S, C> {
+        let binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned handler fixture custody catalog binding");
+        owned_fixture_handler_with_binding(handler, binding)
+    }
+
+    fn owned_fixture_handler_with_binding<S: DaemonServiceOrchestrator, C: DaemonClock>(
+        handler: DaemonRequestHandler<S, C>,
+        binding: dasobjectstore_object_service::CustodyCatalogBinding,
+    ) -> DaemonRequestHandler<S, C> {
+        handler
+            .try_with_custody_catalog_binding(binding)
+            .expect("bind owned handler fixture catalogue")
+    }
+
     use super::{
         require_verified_pistis_host_authority, DaemonClock, DaemonRequestHandler,
         DaemonServiceOrchestrator, FixedDaemonClock, SystemDaemonClock,
@@ -1345,11 +1365,11 @@ mod tests {
     use dasobjectstore_core::store::{ExportPolicy, IngestMode, StoreClass, StorePolicy};
     use dasobjectstore_metadata::LIVE_SCHEMA_SQL;
     use dasobjectstore_object_service::{
-        create_custody_catalog_entry, read_store_registry, write_managed_credential_registry,
-        CustodyAssuranceClass, CustodyRetentionPolicyV1, CustodyStoreDefinitionV1,
-        CustodyStoreProfileV1, ManagedCredentialRegistry, ManagedStoreCredentialRecord,
-        ObjectServiceProviderId, ServiceState, StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1,
-        CUSTODY_PROFILE_V1,
+        create_custody_catalog_entry, read_store_registry_with_custody_catalog,
+        write_managed_credential_registry, CustodyAssuranceClass, CustodyRetentionPolicyV1,
+        CustodyStoreDefinitionV1, CustodyStoreProfileV1, ManagedCredentialRegistry,
+        ManagedStoreCredentialRecord, ObjectServiceProviderId, ServiceState,
+        StoreServiceDefinition, CUSTODY_OVERLAY_SCHEMA_V1, CUSTODY_PROFILE_V1,
     };
     use ring::signature::{Ed25519KeyPair, KeyPair};
     use rusqlite::{params, Connection};
@@ -1621,7 +1641,13 @@ mod tests {
             None,
             false,
         );
-        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned reader and handler catalogue");
+        let mut store_definitions =
+            read_store_registry_with_custody_catalog(&store_registry, &fixture_binding)
+                .expect("store registry");
         store_definitions[0].policy.capacity =
             dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
         fs::write(
@@ -1630,13 +1656,16 @@ mod tests {
         )
         .expect("bounded store registry written");
         let profile_registry = root.join("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-14T09:00:00Z"),
-        )
-        .with_registry_paths(&store_registry, &subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry)
-        .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store"));
+        let handler = owned_fixture_handler_with_binding(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-14T09:00:00Z"),
+            )
+            .with_registry_paths(&store_registry, &subobject_registry)
+            .with_profile_binding_registry_path(&profile_registry)
+            .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "stream-store")),
+            fixture_binding.clone(),
+        );
         let service_peer = DaemonLocalActor::new(997)
             .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
             .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
@@ -1745,7 +1774,13 @@ mod tests {
             None,
             false,
         );
-        let mut definitions = read_store_registry(&store_registry).expect("store registry");
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned reader and handler catalogue");
+        let mut definitions =
+            read_store_registry_with_custody_catalog(&store_registry, &fixture_binding)
+                .expect("store registry");
         definitions[0].policy.capacity =
             dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
         fs::write(
@@ -1754,13 +1789,16 @@ mod tests {
         )
         .expect("store registry written");
         let profile_registry = root.join("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-08-09T10:00:00Z"),
-        )
-        .with_registry_paths(&store_registry, &subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry)
-        .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "dossiers"));
+        let handler = owned_fixture_handler_with_binding(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-08-09T10:00:00Z"),
+            )
+            .with_registry_paths(&store_registry, &subobject_registry)
+            .with_profile_binding_registry_path(&profile_registry)
+            .with_live_sqlite_path(create_live_sqlite(&root.join("metadata"), "dossiers")),
+            fixture_binding.clone(),
+        );
         let service_peer = DaemonLocalActor::new(997)
             .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
             .with_groups([crate::DEFAULT_DAEMON_SERVICE_USER]);
@@ -1914,11 +1952,13 @@ mod tests {
             .expect("S3 binding inserts");
         drop(connection);
 
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
-                .with_hdd_root_path(hdd_root);
+                .with_hdd_root_path(hdd_root),
+            &root,
+        );
         let actor = DaemonLocalActor::new(997)
             .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
             .with_groups(["dasobjectstore"]);
@@ -2012,7 +2052,13 @@ mod tests {
             Some("mnemosyne"),
             true,
         );
-        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned reader and handler catalogue");
+        let mut store_definitions =
+            read_store_registry_with_custody_catalog(&store_registry, &fixture_binding)
+                .expect("store registry");
         store_definitions[0].policy.capacity =
             dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
         fs::write(
@@ -2038,7 +2084,8 @@ mod tests {
             &backend_root,
             crate::runtime::StatvfsCapacitySpaceProbe,
         )
-        .with_profile_binding_registry_path(&profile_registry);
+        .with_profile_binding_registry_path(&profile_registry)
+        .with_custody_catalog_binding(fixture_binding.clone());
         crate::runtime::CapacityAdmissionProvider::initialize_store(
             &provider,
             &StoreId::new("upload-store").expect("store id"),
@@ -2049,12 +2096,14 @@ mod tests {
             capacity_provider: Some(Arc::new(provider)),
             ..FakeService::default()
         };
-        let handler =
+        let handler = owned_fixture_handler_with_binding(
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-14T09:00:00Z"))
                 .with_registry_paths(&store_registry, &subobject_registry)
                 .with_live_sqlite_path(&live_sqlite)
                 .with_hdd_root_path(&hdd_root)
-                .with_profile_binding_registry_path(&profile_registry);
+                .with_profile_binding_registry_path(&profile_registry),
+            fixture_binding.clone(),
+        );
         let actor = preverified_host_service_actor();
         let mut binding_request =
             profile_binding_request_for_auth_test("upload-store", backend_root.clone());
@@ -2599,12 +2648,15 @@ mod tests {
             verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-16T12:00:00Z"),
-        )
-        .with_registry_paths(&broken_store_registry, &subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-16T12:00:00Z"),
+            )
+            .with_registry_paths(&broken_store_registry, &subobject_registry)
+            .with_profile_binding_registry_path(&profile_registry),
+            &root,
+        );
 
         let error = handler
             .handle_with_progress_for_actor(
@@ -2674,13 +2726,16 @@ mod tests {
             verified_subject: Some(verified_pistis_subject()),
             confirmation_marker: PROFILE_BINDING_CONFIRMATION.to_string(),
         };
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T10:01:00Z"),
-        )
-        .with_profile_binding_registry_path(&profile_registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T10:01:00Z"),
+            )
+            .with_profile_binding_registry_path(&profile_registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
 
         let actor = preverified_host_service_actor();
         let first_response = handler
@@ -2775,9 +2830,11 @@ mod tests {
             Some("writers"),
             false,
         );
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
-                .with_registry_paths(store_registry, subobject_registry);
+                .with_registry_paths(store_registry, subobject_registry),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("guest")
             .with_groups(["users"]);
@@ -2838,8 +2895,11 @@ mod tests {
             capacity_admission_response: Some(expected.clone()),
             ..FakeService::default()
         };
-        let handler = DaemonRequestHandler::new(service, FixedDaemonClock::new("now"))
-            .with_registry_paths(store_registry, subobject_registry);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(service, FixedDaemonClock::new("now"))
+                .with_registry_paths(store_registry, subobject_registry),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("reader")
             .with_groups(["readers"]);
@@ -2867,9 +2927,11 @@ mod tests {
         let root = temp_root("capacity-admission-unavailable");
         let (store_registry, subobject_registry) =
             write_test_store_registry_with_read_policy(&root, "codex", None, Some("writers"), true);
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
-                .with_registry_paths(store_registry, subobject_registry);
+                .with_registry_paths(store_registry, subobject_registry),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001).with_username("reader");
 
         let response = handler
@@ -3579,11 +3641,18 @@ mod tests {
         let root = temp_root("update-ingest-policy");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
         )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        .expect("owned reader and handler catalogue");
+        let handler = owned_fixture_handler_with_binding(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path),
+            fixture_binding.clone(),
+        );
 
         let actor = DaemonLocalActor::new(997)
             .with_username(crate::DEFAULT_DAEMON_SERVICE_USER)
@@ -3612,7 +3681,9 @@ mod tests {
                     && response.ingest_mode == IngestMode::DirectToHdd
                     && response.changed
         ));
-        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        let definitions =
+            read_store_registry_with_custody_catalog(&store_registry_path, &fixture_binding)
+                .expect("registry readable");
         assert_eq!(definitions[0].policy.ingest_mode, IngestMode::DirectToHdd);
         assert_eq!(definitions[0].policy.copies, 1);
         cleanup(&root);
@@ -3623,11 +3694,18 @@ mod tests {
         let root = temp_root("update-ingest-policy-direct-privileged-peer");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
         )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        .expect("owned reader and handler catalogue");
+        let handler = owned_fixture_handler_with_binding(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path),
+            fixture_binding.clone(),
+        );
         let direct_peers = [
             DaemonLocalActor::new(0).with_username("root"),
             DaemonLocalActor::new(1000)
@@ -3662,7 +3740,9 @@ mod tests {
                     if error.code == "preverified_host_authority_required"
             ));
         }
-        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        let definitions =
+            read_store_registry_with_custody_catalog(&store_registry_path, &fixture_binding)
+                .expect("registry readable");
         assert_eq!(definitions[0].policy.ingest_mode, IngestMode::SsdFirst);
         cleanup(&root);
     }
@@ -3672,11 +3752,18 @@ mod tests {
         let root = temp_root("update-acknowledgement-policy-direct-root-peer");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
         )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        .expect("owned reader and handler catalogue");
+        let handler = owned_fixture_handler_with_binding(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path),
+            fixture_binding.clone(),
+        );
         let root_peer = DaemonLocalActor::new(0)
             .with_username("root")
             .with_groups(["sudo", "dasobjectstore-admin"]);
@@ -3703,7 +3790,9 @@ mod tests {
             DaemonApiResponse::Error(error)
                 if error.code == "preverified_host_authority_required"
         ));
-        let definitions = read_store_registry(&store_registry_path).expect("registry readable");
+        let definitions =
+            read_store_registry_with_custody_catalog(&store_registry_path, &fixture_binding)
+                .expect("registry readable");
         assert_eq!(
             definitions[0].policy.acknowledgement_policy,
             dasobjectstore_core::store::AcknowledgementPolicy::AfterSsdIngest
@@ -3787,11 +3876,14 @@ mod tests {
         let root = temp_root("update-ingest-policy-web-peer");
         let (store_registry_path, subobject_registry_path) =
             write_test_store_registry(&root, "zymo", Some("bioinformatics"));
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-10T01:02:03Z"),
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-10T01:02:03Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path),
+            &root,
+        );
         let actor = DaemonLocalActor::new(997).with_username(crate::DEFAULT_DAEMON_SERVICE_USER);
 
         let response = handler
@@ -4046,15 +4138,18 @@ mod tests {
             &root,
         )));
         let service = FakeService::default();
-        let handler = DaemonRequestHandler::new_with_admin_job_registry(
-            service,
-            FixedDaemonClock::new("2026-07-11T06:20:00Z"),
-            registry,
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path)
-        .with_live_sqlite_path(live_sqlite.clone())
-        .with_hdd_root_path(hdd_root)
-        .with_profile_binding_registry_path(root.join("profile-bindings.json"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new_with_admin_job_registry(
+                service,
+                FixedDaemonClock::new("2026-07-11T06:20:00Z"),
+                registry,
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path)
+            .with_live_sqlite_path(live_sqlite.clone())
+            .with_hdd_root_path(hdd_root)
+            .with_profile_binding_registry_path(root.join("profile-bindings.json")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         let mut progress_events = Vec::new();
 
@@ -4401,8 +4496,16 @@ mod tests {
 
     #[test]
     fn maintenance_operations_reject_direct_os_authority_even_with_spoofed_subject() {
-        let handler =
-            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"));
+        let fixture_root = temp_root("maintenance-spoofed-subject");
+        cleanup(&fixture_root);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
+                .with_registry_paths(
+                    fixture_root.join("stores.json"),
+                    fixture_root.join("subobjects.json"),
+                ),
+            &fixture_root,
+        );
         let root = DaemonLocalActor::new(0).with_username("root");
         let requests = vec![
             DaemonApiRequest::StoreDrain(StoreDrainRequest {
@@ -4455,6 +4558,7 @@ mod tests {
                     if error.code == "preverified_host_authority_required"
             ));
         }
+        cleanup(&fixture_root);
     }
 
     #[test]
@@ -4545,9 +4649,11 @@ mod tests {
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
         let service = FakeService::default();
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T09:25:00Z"))
-                .with_registry_paths(store_registry, subobject_registry);
+                .with_registry_paths(store_registry, subobject_registry),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1000)
             .with_username("stephen")
             .with_groups(["mnemosyne"]);
@@ -4596,9 +4702,11 @@ mod tests {
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "zymo_fecal_2025.05", Some("mnemosyne"));
         let service = FakeService::default();
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(service, FixedDaemonClock::new("2026-07-09T09:25:00Z"))
-                .with_registry_paths(store_registry, subobject_registry);
+                .with_registry_paths(store_registry, subobject_registry),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("guest")
             .with_groups(["users"]);
@@ -4759,10 +4867,12 @@ mod tests {
             write_test_store_registry(&root, "ena", Some("mnemosyne"));
         let live_sqlite = create_live_sqlite(&root, "ena");
         insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_live_sqlite_path(live_sqlite),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("guest")
             .with_groups(["users"]);
@@ -4791,10 +4901,12 @@ mod tests {
             write_test_store_registry(&root, "ena", Some("mnemosyne"));
         let live_sqlite = create_live_sqlite(&root, "ena");
         insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_live_sqlite_path(live_sqlite),
+            &root,
+        );
         let peer_actor = DaemonLocalActor::new(997)
             .with_username("dasobjectstore")
             .with_groups(["dasobjectstore"]);
@@ -4902,10 +5014,12 @@ mod tests {
         let root = temp_root("browser-verified-peer-bound");
         let (store_registry, subobject_registry) = write_test_store_registry(&root, "ena", None);
         let live_sqlite = create_live_sqlite(&root, "ena");
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_live_sqlite_path(live_sqlite),
+            &root,
+        );
         let mut request = object_browser_request("ena");
         request.prefix = Some("ENA/Xeno".to_string());
         request.verified_subject = Some(ObjectBrowserVerifiedSubject {
@@ -4958,10 +5072,12 @@ mod tests {
         );
         let live_sqlite = create_live_sqlite(&root, "ena");
         insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_live_sqlite_path(live_sqlite),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("reader")
             .with_groups(["readers"]);
@@ -4997,11 +5113,13 @@ mod tests {
         let source_path = disk_root.join("ena/raw/sample.fastq.gz");
         fs::create_dir_all(source_path.parent().expect("source parent")).expect("source parent");
         fs::write(&source_path, b"download payload").expect("write source");
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
-                .with_hdd_root_path(hdd_root);
+                .with_hdd_root_path(hdd_root),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("reader")
             .with_groups(["readers"]);
@@ -5055,11 +5173,13 @@ mod tests {
         fs::write(&sample_path, b"sample payload").expect("write sample");
         let metadata_path = disk_root.join("ena/raw/Xeno/metadata.tsv");
         fs::write(&metadata_path, b"metadata").expect("write metadata");
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
-                .with_hdd_root_path(hdd_root);
+                .with_hdd_root_path(hdd_root),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("reader")
             .with_groups(["readers"]);
@@ -5099,10 +5219,12 @@ mod tests {
             write_test_store_registry_with_read_policy(&root, "ena", None, None, true);
         let live_sqlite = create_live_sqlite(&root, "ena");
         insert_browser_object(&live_sqlite, "ena/raw/sample.fastq.gz", "Protected", true);
-        let handler =
+        let handler = owned_fixture_handler(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(store_registry, subobject_registry)
-                .with_live_sqlite_path(live_sqlite);
+                .with_live_sqlite_path(live_sqlite),
+            &root,
+        );
         let actor = DaemonLocalActor::new(1001)
             .with_username("guest")
             .with_groups(["users"]);
@@ -5126,7 +5248,13 @@ mod tests {
         cleanup(&root);
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "ena", Some("mnemosyne"));
-        let mut store_definitions = read_store_registry(&store_registry).expect("store registry");
+        let fixture_binding = dasobjectstore_object_service::CustodyCatalogBinding::new(
+            root.join("custody-catalog.jsonl"),
+        )
+        .expect("owned reader and handler catalogue");
+        let mut store_definitions =
+            read_store_registry_with_custody_catalog(&store_registry, &fixture_binding)
+                .expect("store registry");
         store_definitions[0].policy.capacity =
             dasobjectstore_core::store::CapacityPolicy::bounded(4096, 64);
         fs::write(
@@ -5145,11 +5273,13 @@ mod tests {
         let backend_root = root.join("profile-backend");
         fs::create_dir_all(&backend_root).expect("backend root");
         let profile_registry = root.join("profile-bindings.json");
-        let handler =
+        let handler = owned_fixture_handler_with_binding(
             DaemonRequestHandler::new(FakeService::default(), FixedDaemonClock::new("now"))
                 .with_registry_paths(&store_registry, &subobject_registry)
                 .with_live_sqlite_path(live_sqlite)
-                .with_profile_binding_registry_path(&profile_registry);
+                .with_profile_binding_registry_path(&profile_registry),
+            fixture_binding.clone(),
+        );
         let mut binding_request =
             profile_binding_request_for_auth_test("ena", backend_root.clone());
         binding_request.store_definition = Some(store_definitions[0].clone());
@@ -5751,12 +5881,15 @@ mod tests {
         session_store
             .upsert(paired_session("session-1"))
             .expect("session stored");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path)
-        .with_remote_easyconnect_session_store_path(&session_store_path);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path)
+            .with_remote_easyconnect_session_store_path(&session_store_path),
+            &root,
+        );
 
         let response = handler
             .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
@@ -5786,12 +5919,15 @@ mod tests {
         let mut session = paired_session("session-1");
         session.object_stores[0].can_write = false;
         session_store.upsert(session).expect("session stored");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path)
-        .with_remote_easyconnect_session_store_path(&session_store_path);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path)
+            .with_remote_easyconnect_session_store_path(&session_store_path),
+            &root,
+        );
 
         let response = handler
             .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
@@ -5825,12 +5961,15 @@ mod tests {
         session_store
             .upsert(paired_session("session-1"))
             .expect("session stored");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path)
-        .with_remote_easyconnect_session_store_path(&session_store_path);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path)
+            .with_remote_easyconnect_session_store_path(&session_store_path),
+            &root,
+        );
 
         let response = handler
             .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
@@ -5859,12 +5998,15 @@ mod tests {
         session_store
             .upsert(paired_session("session-1"))
             .expect("session stored");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-09T16:20:00Z"),
-        )
-        .with_registry_paths(&store_registry_path, &subobject_registry_path)
-        .with_remote_easyconnect_session_store_path(&session_store_path);
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-09T16:20:00Z"),
+            )
+            .with_registry_paths(&store_registry_path, &subobject_registry_path)
+            .with_remote_easyconnect_session_store_path(&session_store_path),
+            &root,
+        );
 
         let response = handler
             .handle(DaemonApiRequest::StoreInventory(StoreInventoryRequest {
@@ -6235,13 +6377,16 @@ mod tests {
         cleanup(&root);
         fs::create_dir_all(&root).expect("backend root");
         let registry = root.join("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:02:00Z"),
-        )
-        .with_profile_binding_registry_path(&registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:02:00Z"),
+            )
+            .with_profile_binding_registry_path(&registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         let response = handler
             .handle_with_progress_for_actor(
@@ -6944,13 +7089,16 @@ mod tests {
         fs::create_dir_all(&backend).expect("backend root");
         fs::write(backend.join("user.txt"), b"unmanaged").expect("user file");
         let registry = root.with_extension("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:03:00Z"),
-        )
-        .with_profile_binding_registry_path(&registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:03:00Z"),
+            )
+            .with_profile_binding_registry_path(&registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let binding_request = profile_binding_request_for_auth_test("inspect", backend);
         let actor = preverified_host_service_actor();
         handler
@@ -7001,13 +7149,16 @@ mod tests {
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let registry = root.with_extension("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:04:00Z"),
-        )
-        .with_profile_binding_registry_path(&registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:04:00Z"),
+            )
+            .with_profile_binding_registry_path(&registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
@@ -7047,13 +7198,16 @@ mod tests {
         let backend = root.join("backend");
         fs::create_dir_all(&backend).expect("backend root");
         let registry = root.with_extension("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:05:00Z"),
-        )
-        .with_profile_binding_registry_path(&registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:05:00Z"),
+            )
+            .with_profile_binding_registry_path(&registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
@@ -7218,13 +7372,16 @@ mod tests {
         let (store_registry, subobject_registry) =
             write_test_store_registry(&root, "browser", Some("users"));
         let profile_registry = root.join("profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:06:00Z"),
-        )
-        .with_registry_paths(store_registry, subobject_registry)
-        .with_profile_binding_registry_path(&profile_registry)
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:06:00Z"),
+            )
+            .with_registry_paths(store_registry, subobject_registry)
+            .with_profile_binding_registry_path(&profile_registry)
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         handler
             .handle_with_progress_for_actor(
@@ -7289,13 +7446,16 @@ mod tests {
         fs::create_dir_all(source.parent().expect("source parent")).expect("source directory");
         fs::write(&source, b"adopted").expect("source file");
         let registry = root.join("state/profile-bindings.json");
-        let handler = DaemonRequestHandler::new(
-            FakeService::default(),
-            FixedDaemonClock::new("2026-07-13T11:05:00Z"),
-        )
-        .with_profile_binding_registry_path(&registry)
-        .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
-        .with_live_sqlite_path(root.join("live.sqlite"));
+        let handler = owned_fixture_handler(
+            DaemonRequestHandler::new(
+                FakeService::default(),
+                FixedDaemonClock::new("2026-07-13T11:05:00Z"),
+            )
+            .with_profile_binding_registry_path(&registry)
+            .with_registry_paths(root.join("stores.json"), root.join("subobjects.json"))
+            .with_live_sqlite_path(root.join("live.sqlite")),
+            &root,
+        );
         let actor = preverified_host_service_actor();
         let mut request = profile_binding_request_for_auth_test("adopt", backend.clone());
         request.operation = ProfileBindingOperation::Adopt;

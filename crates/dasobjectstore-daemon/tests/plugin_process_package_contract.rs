@@ -443,13 +443,16 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         let stage = unseeded_stage(&format!("post-manifest-{fault}-failure"));
         let manifest_before =
             fs::read(stage.join("f05-inputs.sha256")).expect("read pre-producer manifest bytes");
-        let failed = Command::new("bash")
+        let mut command = Command::new("bash");
+        command
             .arg(&script)
             .args(["--sealed-root"])
             .arg(&stage)
             .args(["--stage-closure-provenance-inputs"])
             .arg(&input)
-            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault)
+            .env("DASOBJECTSTORE_F05_FAIL_PROVENANCE_POST_MANIFEST", fault);
+        restore_default_sigint(&mut command);
+        let failed = command
             .output()
             .expect("inject post-manifest publication failure");
         assert!(
@@ -531,7 +534,8 @@ fn provenance_stage_emits_validator_accepted_inputs_and_rejects_expected_tuple_m
         .expect("run native toolchain stage after provenance");
     assert!(
         native_stage.status.success(),
-        "native stage after provenance failed: {}",
+        "native stage after provenance failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&native_stage.stdout),
         String::from_utf8_lossy(&native_stage.stderr)
     );
     assert!(
@@ -952,7 +956,7 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "CARGO_NET_OFFLINE=true",
         "RUSTC=\"$staged_rustc\"",
         "\"$staged_trunk\" build --release",
-        "F05_PROSOPIKON_REVISION=f09749273ef382c1b42bf04a77d96189dd7361b3",
+        "F05_PROSOPIKON_REVISION=6c421a6e1ddaee63692e88c9b46095c652befe04",
         "requires the exact Prosopikon lock revision",
         "rejects an ambient Prosopikon sibling",
         "does not accept a prebuilt web distribution",
@@ -1067,7 +1071,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'cargo_home=%s\\n' \"$CARGO_HOME\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'umask=%s\\n' \"$(umask)\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'mutable Cargo cache\\n' > \"$CARGO_HOME/.global-cache/fixture\"\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n",
+        &fixture_tool_script("cargo fixture 1.0.0", "printf 'cwd=%s\\n' \"$PWD\" > \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'argv=%s\\n' \"$*\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'cargo_home=%s\\n' \"$CARGO_HOME\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'tmpdir=%s\\n' \"$TMPDIR\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nprintf 'umask=%s\\n' \"$(umask)\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\ntest \"$TMPDIR\" = \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/tmp\" && test -d \"$TMPDIR\" && test -w \"$TMPDIR\" || exit 72\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'mutable Cargo cache\\n' > \"$CARGO_HOME/.global-cache/fixture\"\nprintf 'tmp_writable=PASS\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-invocation.log\"\nexit 71\n"),
     );
     #[cfg(unix)]
     {
@@ -1335,11 +1339,13 @@ fn closure_stage_producer_binds_current_inputs_before_real_preflight() {
         .args(["--stage-cache-root"])
         .arg(&cache)
         .arg("--preflight-only")
-        .status()
+        .output()
         .expect("run real preflight handoff");
     assert!(
-        preflight.success(),
-        "generated source stage must hand off to the real preflight"
+        preflight.status.success(),
+        "generated source stage must hand off to the real preflight: stdout={} stderr={}",
+        String::from_utf8_lossy(&preflight.stdout),
+        String::from_utf8_lossy(&preflight.stderr)
     );
     assert!(
         fs::read_to_string(diagnostic.join("preflight.log"))
@@ -1457,7 +1463,7 @@ fn external_attempt_harness_reuses_only_a_fully_revalidated_immutable_leased_sta
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  test -d \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\" || exit 72\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-resolution.log\"\n  exit 0\nfi\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n",
+        &fixture_tool_script("cargo fixture 1.0.0", "if [ \"${1-}\" = tree ]; then\n  test -d \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\" || exit 72\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-resolution.log\"\n  exit 0\nfi\nprintf 'cargo=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo.log\"\nexit 71\n"),
     );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
@@ -1867,7 +1873,7 @@ fn preflight_cargo_tree_denies_a_separately_copied_missing_git_input_before_comp
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nif [ \"${1-}\" = tree ]; then\n  checkout=\"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\"\n  if [ ! -d \"$checkout\" ]; then\n    printf 'missing_git_input=prosopikon\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n    exit 72\n  fi\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n  exit 0\nfi\nprintf 'unexpected_cargo_subcommand=%s\\n' \"${1-}\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\nexit 71\n",
+        &fixture_tool_script("cargo fixture 1.0.0", "if [ \"${1-}\" = tree ]; then\n  checkout=\"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492\"\n  if [ ! -d \"$checkout\" ]; then\n    printf 'missing_git_input=prosopikon\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n    exit 72\n  fi\n  printf 'offline_resolution=called\\n' >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\n  exit 0\nfi\nprintf 'unexpected_cargo_subcommand=%s\\n' \"${1-}\" >> \"$DASOBJECTSTORE_F05_ATTEMPT_ROOT/cargo-tree.log\"\nexit 71\n"),
     );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
@@ -1960,7 +1966,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
                 .as_nanos()
         ));
     fs::create_dir(&temp).expect("temporary harness root");
-    let sealed = staged_fixture(&temp);
+    let sealed = current_trunk_fixture(&temp);
     let attempt = temp.join("attempt");
     let diagnostic = temp.join("diagnostic");
     fs::create_dir(&attempt).expect("create external attempt root");
@@ -1968,7 +1974,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let staged_cargo = sealed.join("toolchain/bin/cargo");
     write(
         &staged_cargo,
-        "#!/bin/sh\nset -eu\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'attempt-only-cargo-cache\\n' > \"$CARGO_HOME/.global-cache/cargo-sentinel\"\nexit 0\n",
+        &fixture_tool_script("cargo fixture 1.0.0", "set -eu\nmkdir -p \"$CARGO_HOME/.global-cache\"\nprintf 'attempt-only-cargo-cache\\n' > \"$CARGO_HOME/.global-cache/cargo-sentinel\"\nexit 0\n"),
     );
     fs::set_permissions(&staged_cargo, fs::Permissions::from_mode(0o755))
         .expect("make staged Cargo executable");
@@ -1988,9 +1994,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let staged_trunk = sealed.join("toolchain/bin/trunk");
     write(
         &staged_trunk,
-        &format!(
-            "#!/bin/sh\nset -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/f097492/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n",
-        ),
+        &fixture_tool_script("trunk fixture 1.0.0", "set -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/6c421a6/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n"),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
         .expect("make staged Trunk executable");
@@ -2021,8 +2025,15 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
         String::from_utf8_lossy(&result.stderr)
     );
 
-    let trunk_environment = fs::read_to_string(attempt.join("tmp/trunk-env.log"))
-        .expect("read staged Trunk temporary-storage evidence");
+    let trunk_environment =
+        fs::read_to_string(attempt.join("tmp/trunk-env.log")).unwrap_or_else(|error| {
+            panic!(
+                "missing Trunk evidence: {error}; status={}; stdout={}; stderr={}",
+                result.status,
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            )
+        });
     let expected_tmp = "/var/tmp/tmp";
     let expected_xdg_cache = "/var/tmp/xdg-cache";
     assert!(
@@ -2487,6 +2498,13 @@ fn write(path: impl AsRef<Path>, contents: &str) {
     fs::write(path, contents).expect("write fixture input");
 }
 
+// Version admission must not execute an override's operation-specific body.
+fn fixture_tool_script(version: &str, body: &str) -> String {
+    format!(
+        "#!/bin/sh\nif [ \"${{1-}}\" = --version ]; then\n  printf '%s\\n' '{version}'\n  exit 0\nfi\n{body}"
+    )
+}
+
 fn executable(path: impl AsRef<Path>, version: &str) {
     let path = path.as_ref();
     write(
@@ -2572,6 +2590,98 @@ fn write_f05_manifest(stage: &Path) {
         .collect::<Vec<_>>()
         .join("\n");
     write(stage.join("f05-inputs.sha256"), &(manifest + "\n"));
+}
+
+// Bash cannot trap a signal that was already ignored when it started, and
+// non-interactive CI shells launch background jobs with SIGINT ignored.
+fn restore_default_sigint(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: the closure only calls the async-signal-safe signal(2).
+    unsafe {
+        command.pre_exec(|| {
+            if libc::signal(libc::SIGINT, libc::SIG_DFL) == libc::SIG_ERR {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+// This current preparer assay deliberately leaves the historical shared fixture unchanged.
+fn current_trunk_fixture(root: &Path) -> PathBuf {
+    const OLD: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
+    const CURRENT: &str = "6c421a6e1ddaee63692e88c9b46095c652befe04";
+    let stage = staged_fixture(root);
+    for name in ["Cargo.toml", "Cargo.lock"] {
+        let path = stage.join("source").join(name);
+        let before = fs::read_to_string(&path).expect("read owned current Trunk input");
+        assert_eq!(
+            before.matches(OLD).count(),
+            2,
+            "both Prosop bindings must be historical"
+        );
+        let after = before.replace(OLD, CURRENT);
+        assert!(!after.contains(OLD));
+        assert_eq!(after.matches(CURRENT).count(), 2);
+        assert_ne!(before, after);
+        fs::write(path, after).expect("bind owned current Trunk input");
+    }
+    let cache = stage.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d");
+    assert!(cache.join("f097492/fixture").is_file());
+    assert!(!cache.join("6c421a6").exists());
+    fs::rename(cache.join("f097492"), cache.join("6c421a6"))
+        .expect("bind current owned Prosop cache coordinate");
+    assert!(cache.join("6c421a6/fixture").is_file());
+    write_f05_manifest(&stage);
+    stage
+}
+
+#[derive(Clone, Copy)]
+enum ModeMutation {
+    Duplicate,
+    Missing,
+    Mixed,
+    Writable,
+}
+
+fn mutate_mode_fixture(stage: &Path, mutation: ModeMutation) {
+    const FIELD: &str = "toolchain_kind = \"container-image\"";
+    let path = stage.join("inputs/provenance-tuple.toml");
+    let before = fs::read_to_string(&path).expect("read owned mode input");
+    assert_eq!(before.lines().filter(|line| *line == FIELD).count(), 1);
+    let after = match mutation {
+        ModeMutation::Duplicate => format!("{before}\n{FIELD}\n"),
+        ModeMutation::Missing => before.replace(&format!("{FIELD}\n"), ""),
+        ModeMutation::Mixed => before.replace(FIELD, "toolchain_kind = \"native-tool-bundle\""),
+        ModeMutation::Writable => before.clone(),
+    };
+    let fields = after
+        .lines()
+        .filter(|line| line.starts_with("toolchain_kind = "))
+        .count();
+    match mutation {
+        ModeMutation::Duplicate => {
+            assert_eq!(fields, 2);
+            assert_eq!(after.lines().filter(|line| *line == FIELD).count(), 2);
+        }
+        ModeMutation::Missing => assert_eq!(fields, 0),
+        ModeMutation::Mixed => {
+            assert_eq!(fields, 1);
+            assert!(after.contains("toolchain_kind = \"native-tool-bundle\""));
+        }
+        ModeMutation::Writable => assert_eq!(before, after),
+    }
+    if !matches!(mutation, ModeMutation::Writable) {
+        assert_ne!(
+            before, after,
+            "negative fixture must actually mutate its input"
+        );
+    }
+    fs::write(&path, &after).expect("write exact owned mode input");
+    assert_eq!(
+        fs::read_to_string(path).expect("read back mode mutation"),
+        after
+    );
 }
 
 fn staged_fixture(root: &Path) -> PathBuf {
@@ -3117,7 +3227,8 @@ fn native_tool_input_stage_emits_only_a_native_receipt_into_a_fresh_output_path(
         .expect("run native tool-input stage");
     assert!(
         result.status.success(),
-        "native tool-input stage failed: {}",
+        "native tool-input stage failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)
     );
     let receipt = fs::read_to_string(sealed.join("inputs/toolchain-input-receipt.toml"))
@@ -3209,7 +3320,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .expect("run source-owned tool-input stage");
     assert!(
         staged.status.success(),
-        "tool-input stage failed: {}",
+        "tool-input stage failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&staged.stdout),
         String::from_utf8_lossy(&staged.stderr)
     );
     let staged_stdout = String::from_utf8(staged.stdout).expect("tool-input stage stdout");
@@ -3442,25 +3554,25 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         );
     }
 
-    for (name, mutate, expected) in [
+    for (name, mutation, expected) in [
         (
             "duplicate-mode",
-            "printf '\\ntoolchain_kind = \\\"container-image\\\"\\n' >> inputs/provenance-tuple.toml",
+            ModeMutation::Duplicate,
             "requires exactly one toolchain_kind",
         ),
         (
             "missing-mode",
-            "sed -i '/^toolchain_kind = /d' inputs/provenance-tuple.toml",
+            ModeMutation::Missing,
             "requires exactly one toolchain_kind",
         ),
         (
             "mixed-native-container",
-            "sed -i 's/toolchain_kind = \\\"container-image\\\"/toolchain_kind = \\\"native-tool-bundle\\\"/' inputs/provenance-tuple.toml",
+            ModeMutation::Mixed,
             "native mode requires only one inventory digest and no image fields",
         ),
         (
             "writable-sealed-input",
-            "true",
+            ModeMutation::Writable,
             "requires immutable sealed identity inputs while leaving fresh output roots writable",
         ),
     ] {
@@ -3489,15 +3601,7 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 fs::remove_file(path).expect("remove disposable staged file");
             }
         }
-        assert!(
-            Command::new("sh")
-                .args(["-c", mutate])
-                .current_dir(&mode_stage)
-                .status()
-                .expect("mutate disposable mode fixture")
-                .success(),
-            "prepare {name} mode fixture"
-        );
+        mutate_mode_fixture(&mode_stage, mutation);
         if name != "writable-sealed-input" {
             seal_tool_stage_identity_inputs(&mode_stage);
         }
@@ -3542,8 +3646,22 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         .expect("make unlaunchable staged trunk executable");
     let new_trunk_sha = sha256(&unlaunchable_input.join("toolchain/bin/trunk"));
     let new_toolchain_tree = tree_sha256(&unlaunchable_input.join("toolchain"));
+    assert_ne!(old_trunk_sha, new_trunk_sha);
+    assert_ne!(old_toolchain_tree, new_toolchain_tree);
     let inventory = fs::read_to_string(unlaunchable_input.join("tool-input-inventory.txt"))
         .expect("read unlaunchable tool inventory");
+    assert_eq!(
+        inventory
+            .matches(&format!("sha256={old_trunk_sha}"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        inventory
+            .matches(&format!("tree_sha256={old_toolchain_tree}"))
+            .count(),
+        1
+    );
     write(
         unlaunchable_input.join("tool-input-inventory.txt"),
         &inventory
@@ -3560,6 +3678,8 @@ toolchain_image_sha256 = \"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     let unlaunchable_inventory_sha = sha256(&unlaunchable_input.join("tool-input-inventory.txt"));
     let input_receipt = fs::read_to_string(unlaunchable_input.join("tool-inputs.toml"))
         .expect("read unlaunchable input receipt");
+    assert_ne!(original_inventory_sha, unlaunchable_inventory_sha);
+    assert_eq!(input_receipt.matches(&original_inventory_sha).count(), 1);
     write(
         unlaunchable_input.join("tool-inputs.toml"),
         &input_receipt.replace(&original_inventory_sha, &unlaunchable_inventory_sha),
