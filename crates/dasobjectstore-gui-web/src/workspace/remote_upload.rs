@@ -41,7 +41,7 @@ pub fn remote_upload_page(props: &RemoteUploadPageProps) -> Html {
                 title="Remote Upload"
                 summary="Browser-approved ObjectStore selection for paired remote upload agents."
             />
-            { render_remote_upload_state(&*remote_upload_state, selected_store, selected_files) }
+            { render_remote_upload_state(&remote_upload_state, selected_store, selected_files) }
         </section>
     }
 }

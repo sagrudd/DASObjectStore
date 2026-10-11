@@ -221,6 +221,7 @@ pub fn home_throughput_source_class(source: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub fn home_throughput_chart_polyline(points: &[HomeThroughputChartPoint]) -> String {
     points
         .iter()

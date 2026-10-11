@@ -149,6 +149,10 @@ pub async fn build_application_mtls_listener(
 
 pub fn application_mtls_router() -> Router {
     Router::new()
+        .route(
+            "/continuity/v1/exact-source",
+            post(mtls_continuity_unavailable),
+        )
         .route(APPLICATION_ACCESS_TOKEN_EXCHANGE_ROUTE, post(mtls_exchange))
         .route(
             APPLICATION_UPLOAD_COMPLETION_CAPABILITY_ROUTE,
@@ -158,6 +162,21 @@ pub fn application_mtls_router() -> Router {
             APPLICATION_UPLOAD_COMPLETION_ROUTE,
             post(mtls_complete_upload),
         )
+}
+
+// General application mTLS admission does not authorize this new purpose. This
+// route reads no body, supplies no binding and performs no backend operation.
+// In particular, the existing general listener is not claimed to implement the
+// accepted continuity protocol's total deadline/framing or installed origin.
+async fn mtls_continuity_unavailable() -> impl axum::response::IntoResponse {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            ("content-type", "application/json"),
+            ("connection", "close"),
+        ],
+        dasobjectstore_daemon::runtime::exact_source_continuity_unavailable(),
+    )
 }
 
 async fn mtls_exchange(

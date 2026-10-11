@@ -288,7 +288,7 @@ pub fn endpoints_workspace(props: &EndpointsWorkspaceProps) -> Html {
                 <h1>{ "Connections" }</h1>
                 <span>{ "The services through which ObjectStores are reached by applications and external storage systems." }</span>
             </header>
-            { render_endpoints_state(&*endpoints_state, endpoints_state.clone(), form_state, pane_mode, add_endpoint_trigger_ref, props.api_base_path.clone(), (*stores_state).clone()) }
+            { render_endpoints_state(&endpoints_state, endpoints_state.clone(), form_state, pane_mode, add_endpoint_trigger_ref, props.api_base_path.clone(), (*stores_state).clone()) }
         </section>
     }
 }

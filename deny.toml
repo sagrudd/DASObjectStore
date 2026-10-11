@@ -1,0 +1,38 @@
+# DASObjectStore SOURCE dependency policy under the programme engineering standard.
+# Final resolved graph qualification and independent review remain required.
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = ["MIT", "Apache-2.0", "MPL-2.0", "BSD-3-Clause", "Unicode-3.0", "Zlib", "ISC"]
+exceptions = []
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+required-git-spec = "rev"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/sagrudd/pistis.git",
+    "https://github.com/sagrudd/prosopikon.git",
+    "https://github.com/sagrudd/proxenos.git",
+    "https://github.com/sagrudd/thesaurophylax.git",
+]

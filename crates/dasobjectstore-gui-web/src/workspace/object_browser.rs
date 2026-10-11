@@ -60,7 +60,7 @@ pub(super) fn render_object_browser_panel(
                     </select>
                 </label>
             </div>
-            { render_object_browser_download_state(&*browser_download_state) }
+            { render_object_browser_download_state(&browser_download_state) }
             { render_object_browser_state(
                 browser_state,
                 browser_prefix,
@@ -372,7 +372,7 @@ fn render_object_browser_file_details(file: &ObjectBrowserFileSummary) -> Html {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", test))]
 pub(super) fn render_object_browser_placements(
     summary: &str,
     placements: &[ObjectBrowserPlacementResponse],
@@ -414,7 +414,7 @@ pub(super) fn render_object_browser_placements(
     }
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(test)]
 pub(super) fn object_browser_placement_summary_state(
     placements: &[ObjectBrowserPlacementResponse],
 ) -> String {

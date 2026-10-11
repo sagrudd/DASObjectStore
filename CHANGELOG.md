@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.187.0
+
+- Bind internal workspace dependencies to 0.187.0 and review ISC coverage for the existing TLS dependencies while retaining their licence and notice obligations. Preserve browser state and callback behavior while repairing the complete strict WASM lint inventory.
+
+- Bind Pistis contracts to qualified source `ef00ff34efbb9cfeac9298c9c77f1dc9694162cd` and Prosopikon core 0.38.1/Yew 0.3.1 to normal merged source `37e3b1a418779ee6868d121600a54c8d948d617a`. Preserve historical packaging fixtures and require a fresh resolved graph, native checks and the actual typed browser integration test before source acceptance.
+
+- Carry the owned Yew, Yew macro and Tokise CSR source dependencies at the workspace root so downstream resolution uses one framework identity. Preserve existing features; the final lockfile, complete feature matrix and browser caller qualification remain required.
+
+- Align the SQLite consumer requirement to exact rusqlite 0.39.0 within the coordinated Kanon source transaction. Genuine lock resolution and fresh native qualification remain pending; previous code results apply to the previous dependency graph.
+- Add the accepted exact-source continuity owner codec and private immutable-history/CAS adapter. Canonical request, immutable enrollment, floor, exact original retry, bounded history, conditional-conflict reconciliation, fresh clock/expiry checks and lost-ack retention are covered by synthetic source tests.
+- Reserve the continuity mTLS route with an unavailable response. Installed purpose admission, independent backend policy, AWS provisioning and native transport qualification remain absent; general application mTLS and local catalogue CAS do not confer continuity authority.
+- Final source coordinates require the linked Kanon binding; this preparation is not a resolved lockset, installed service or release qualification.
+
 ## 0.186.41 - Unreleased
 
 - Use the already locked Rustls pki-types PEM APIs for the six internal

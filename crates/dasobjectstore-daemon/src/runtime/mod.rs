@@ -25,6 +25,7 @@ pub(crate) mod disk_lockdown;
 mod drive_backend;
 mod enclosure_prepare;
 mod endpoint_registry;
+mod exact_source_continuity;
 mod folder_backend;
 mod folder_catalogue;
 mod folder_paths;
@@ -64,6 +65,11 @@ mod workspace_cleanup;
 mod workspace_materialize;
 mod workspace_promotion;
 mod workspace_provision;
+
+pub use exact_source_continuity::{
+    exact_source_continuity_source_response, exact_source_continuity_source_wire_response,
+    exact_source_continuity_unavailable,
+};
 
 pub use admin_jobs::{
     admin_job_registry_path, AdminJobRegistry, FileBackedAdminJobRegistry,

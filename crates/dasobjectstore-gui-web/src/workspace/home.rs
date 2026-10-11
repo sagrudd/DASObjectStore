@@ -58,7 +58,7 @@ pub fn home_dashboard(props: &HomeDashboardProps) -> Html {
                 title="Home"
                 summary="Current operating posture for local storage, ingress, and object service."
             />
-            { render_home_dashboard_state(&*dashboard_state, selected_telemetry_window) }
+            { render_home_dashboard_state(&dashboard_state, selected_telemetry_window) }
         </section>
     }
 }

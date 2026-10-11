@@ -86,7 +86,7 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 summary="Choose a store to inspect its evidence or begin a scoped action."
             />
             { render_object_stores_state(
-                &*object_stores_state,
+                &object_stores_state,
                 create_state,
                 configure_state,
                 subobject_state,
@@ -95,16 +95,29 @@ pub fn object_stores_page(props: &ObjectStoresPageProps) -> Html {
                 create_trigger_ref,
                 refresh_nonce,
                 props.api_base_path.clone(),
-                browser_state,
-                browser_download_state,
-                browser_endpoint,
-                browser_prefix,
-                browser_search,
-                browser_sort,
-                props.on_upload_target.clone(),
+                ObjectStoreBrowserContext {
+                    browser_state,
+                    browser_download_state,
+                    browser_endpoint,
+                    browser_prefix,
+                    browser_search,
+                    browser_sort,
+                    on_upload_target: props.on_upload_target.clone(),
+                },
             ) }
         </section>
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(super) struct ObjectStoreBrowserContext {
+    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
+    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
+    browser_endpoint: UseStateHandle<String>,
+    browser_prefix: UseStateHandle<String>,
+    browser_search: UseStateHandle<String>,
+    browser_sort: UseStateHandle<String>,
+    on_upload_target: Callback<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -118,13 +131,7 @@ pub(super) fn render_object_stores_state(
     create_trigger_ref: NodeRef,
     refresh_nonce: UseStateHandle<u64>,
     api_base_path: String,
-    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
-    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
-    browser_endpoint: UseStateHandle<String>,
-    browser_prefix: UseStateHandle<String>,
-    browser_search: UseStateHandle<String>,
-    browser_sort: UseStateHandle<String>,
-    on_upload_target: Callback<String>,
+    browser: ObjectStoreBrowserContext,
 ) -> Html {
     match state {
         ApiLoadState::Loading => html! {
@@ -147,13 +154,7 @@ pub(super) fn render_object_stores_state(
                 create_trigger_ref,
                 refresh_nonce,
                 api_base_path,
-                browser_state,
-                browser_download_state,
-                browser_endpoint,
-                browser_prefix,
-                browser_search,
-                browser_sort,
-                on_upload_target,
+                browser,
             )
         }
         ApiLoadState::Empty(message) => html! {
@@ -185,14 +186,17 @@ pub(super) fn render_object_store_inventory(
     create_trigger_ref: NodeRef,
     refresh_nonce: UseStateHandle<u64>,
     api_base_path: String,
-    browser_state: UseStateHandle<ApiLoadState<ObjectBrowserResponse>>,
-    browser_download_state: UseStateHandle<ObjectBrowserDownloadState>,
-    browser_endpoint: UseStateHandle<String>,
-    browser_prefix: UseStateHandle<String>,
-    browser_search: UseStateHandle<String>,
-    browser_sort: UseStateHandle<String>,
-    on_upload_target: Callback<String>,
+    browser: ObjectStoreBrowserContext,
 ) -> Html {
+    let ObjectStoreBrowserContext {
+        browser_state,
+        browser_download_state,
+        browser_endpoint,
+        browser_prefix,
+        browser_search,
+        browser_sort,
+        on_upload_target,
+    } = browser;
     let create_enabled = view.create_object_store.enabled;
     let open_create = {
         let view = view.clone();
@@ -226,7 +230,7 @@ pub(super) fn render_object_store_inventory(
             </div>
             { render_object_store_registry_table(
                 &summaries,
-                &*pane_mode,
+                &pane_mode,
                 pane_mode.clone(),
                 *registry_sort,
                 registry_sort,
@@ -463,7 +467,7 @@ fn render_object_store_task_surface(
                 <TaskPane mode={TaskPaneMode::Edit(store_id.clone())} title={format!("Browse {store_name}")} selected_context={Some(format!("ObjectStore: {store_id}"))} return_focus_to={Some(create_trigger_ref)} on_close={close}>
                     { render_object_browser_panel(
                         view,
-                        &*browser_state,
+                        &browser_state,
                         api_base_path,
                         browser_download_state,
                         browser_endpoint,

@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["vendor", "vendor/yew", "vendor/yew-macro", "vendor/tokise"]
 members = [
     "crates/dasobjectstore-cli",
     "crates/dasobjectstore-core",
@@ -17,7 +18,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.186.41"
+version = "0.187.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -32,18 +33,18 @@ bytes = "1.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 clap = { version = "4.5.48", features = ["derive"] }
 crossterm = "0.29.0"
-dasobjectstore-core = { path = "crates/dasobjectstore-core" }
-dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon" }
-dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api" }
-dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web" }
-dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata" }
-dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne" }
-dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service" }
-dasobjectstore-platform = { path = "crates/dasobjectstore-platform" }
-dasobjectstore-reference = { path = "crates/dasobjectstore-reference" }
-dasobjectstore-remote = { path = "crates/dasobjectstore-remote" }
-dasobjectstore-tui = { path = "crates/dasobjectstore-tui" }
-dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host" }
+dasobjectstore-core = { path = "crates/dasobjectstore-core", version = "=0.187.0"}
+dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon", version = "=0.187.0"}
+dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api", version = "=0.187.0"}
+dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web", version = "=0.187.0"}
+dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata", version = "=0.187.0"}
+dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne", version = "=0.187.0"}
+dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service", version = "=0.187.0"}
+dasobjectstore-platform = { path = "crates/dasobjectstore-platform", version = "=0.187.0"}
+dasobjectstore-reference = { path = "crates/dasobjectstore-reference", version = "=0.187.0"}
+dasobjectstore-remote = { path = "crates/dasobjectstore-remote", version = "=0.187.0"}
+dasobjectstore-tui = { path = "crates/dasobjectstore-tui", version = "=0.187.0"}
+dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host", version = "=0.187.0"}
 gloo-net = "0.5.0"
 gloo-timers = "0.3.0"
 flate2 = "1.1.5"
@@ -52,11 +53,11 @@ getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"
 js-sys = "0.3.83"
 plist = "1"
 p256 = { version = "0.13.2", features = ["ecdsa"] }
-proxenos = { version = "=0.62.0", git = "https://github.com/sagrudd/proxenos.git", rev = "56d4853f57c59a3303124ae4f33800170ed9be44" }
+proxenos = { version = "=0.65.0", git = "https://github.com/sagrudd/proxenos.git", rev = "ae595ea6ca27ab312ea41fe206d2244bc5273707" }
 coset = "0.3.8"
-pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85" }
-prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git", rev = "6c421a6e1ddaee63692e88c9b46095c652befe04" }
-prosopikon-yew = { git = "https://github.com/sagrudd/prosopikon.git", rev = "6c421a6e1ddaee63692e88c9b46095c652befe04" }
+pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "ef00ff34efbb9cfeac9298c9c77f1dc9694162cd", version = "=0.1.1" }
+prosopikon-core = { version = "=0.38.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "37e3b1a418779ee6868d121600a54c8d948d617a" }
+prosopikon-yew = { version = "=0.3.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "37e3b1a418779ee6868d121600a54c8d948d617a" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
@@ -66,7 +67,7 @@ reqwest = { version = "0.12.24", default-features = false, features = ["blocking
 rustls = "0.23.42"
 tokio-rustls = "0.26.4"
 ring = "0.17.14"
-rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
+rusqlite = { version = "=0.39.0", features = ["fallible_uint", "bundled", "hooks"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_jcs = "0.1.0"
@@ -83,3 +84,8 @@ wasm-bindgen-futures = "0.4.76"
 web-sys = "0.3.82"
 x509-parser = "0.18.0"
 yew = { version = "0.23.0", features = ["csr"] }
+
+[patch.crates-io]
+yew = { path = "vendor/yew" }
+yew-macro = { path = "vendor/yew-macro" }
+tokise = { path = "vendor/tokise" }

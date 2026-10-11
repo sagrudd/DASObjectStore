@@ -9,6 +9,7 @@ stabilized in the current MVP.
 
    expedition-retained-dossiers
    custody-bootstrap-plan
+   exact_source_continuity
 
    getting-started
    local-docker

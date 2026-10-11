@@ -115,24 +115,12 @@ pub async fn get_home_dashboard(path: &str) -> Result<HomeDashboardResponse, Api
     get_json(path).await
 }
 
-#[cfg(target_arch = "wasm32")]
-pub async fn get_cached_home_dashboard(
-    path: &str,
-) -> Result<CachedHomeDashboardResponse, ApiError> {
-    get_json(path).await
-}
-
-#[cfg(target_arch = "wasm32")]
-pub async fn get_store_capacity(path: &str) -> Result<ObjectStoreCapacityStatusResponse, ApiError> {
-    get_json(path).await
-}
-
-#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+#[cfg(test)]
 pub fn cached_home_dashboard_api_path(api_base_path: &str) -> String {
     format!("{}/dashboard/status", api_base_path.trim_end_matches('/'))
 }
 
-#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+#[cfg(test)]
 pub fn store_capacity_api_path(api_base_path: &str, store_id: &str) -> String {
     format!(
         "{}/dashboard/object-stores/{}/capacity",
@@ -475,14 +463,6 @@ pub async fn submit_object_store_ingest_policy(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn submit_ingest_control(
-    api_base_path: &str,
-    request: &IngestControlRequest,
-) -> Result<IngestControlResponse, ApiError> {
-    post_json(&ingest_control_path(api_base_path), request).await
-}
-
-#[cfg(target_arch = "wasm32")]
 pub async fn submit_endpoint_inventory_upsert(
     api_base_path: &str,
     request: &EndpointInventoryUpsertRequest,
@@ -515,7 +495,7 @@ pub fn object_store_ingest_policy_path(api_base_path: &str) -> String {
     )
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(test)]
 pub fn ingest_control_path(api_base_path: &str) -> String {
     format!(
         "{}/workspaces/admin/ingest-control",
