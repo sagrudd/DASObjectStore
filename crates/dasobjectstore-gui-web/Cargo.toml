@@ -27,3 +27,8 @@ yew.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 sha2.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+gloo-timers = { workspace = true, features = ["futures"] }
+wasm-bindgen-test = "=0.3.76"
+web-sys = { workspace = true, features = ["HtmlButtonElement"] }

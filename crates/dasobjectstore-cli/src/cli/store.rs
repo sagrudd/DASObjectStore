@@ -587,7 +587,7 @@ impl StoreIngestMode {
 pub(crate) struct StoreContentsArgs {
     /// Store identifier, optionally followed by a slash-delimited folder/file prefix.
     target: StoreContentsTarget,
-    /// Render aggregate folder sizes, similar to du -h -d <n>.
+    /// Render aggregate folder sizes, similar to `du -h -d <n>`.
     #[arg(long)]
     du: bool,
     /// Render a tree of directories and object leaves.
@@ -658,7 +658,7 @@ pub(crate) struct StoreS3UploadArgs {
     /// AWS CLI region value to store in the generated profile.
     #[arg(long, default_value = "garage")]
     region: String,
-    /// AWS CLI profile name; defaults to dasobjectstore-<store>.
+    /// AWS CLI profile name; defaults to `dasobjectstore-<store>`.
     #[arg(long)]
     profile: Option<String>,
     /// Authority that manages remote S3 credential issuance.

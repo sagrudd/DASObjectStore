@@ -291,7 +291,9 @@ fn configure_read_connection(
     deadline: CustodyReadDeadline,
 ) -> Result<(), CustodyReadError> {
     deadline.remaining()?;
-    connection.progress_handler(1000, Some(move || deadline.remaining().is_err()));
+    connection
+        .progress_handler(1000, Some(move || deadline.remaining().is_err()))
+        .map_err(|_| CustodyReadError::Ledger)?;
     // No busy wait renews the remaining whole-operation budget.
     connection
         .busy_timeout(Duration::ZERO)

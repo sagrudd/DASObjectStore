@@ -956,7 +956,7 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "CARGO_NET_OFFLINE=true",
         "RUSTC=\"$staged_rustc\"",
         "\"$staged_trunk\" build --release",
-        "F05_PROSOPIKON_REVISION=6c421a6e1ddaee63692e88c9b46095c652befe04",
+        "F05_PROSOPIKON_REVISION=37e3b1a418779ee6868d121600a54c8d948d617a",
         "requires the exact Prosopikon lock revision",
         "rejects an ambient Prosopikon sibling",
         "does not accept a prebuilt web distribution",
@@ -1117,9 +1117,7 @@ fn external_attempt_harness_copies_sealed_inputs_and_retains_real_failure_status
         "Cargo must receive the explicit copied manifest path"
     );
     assert!(
-        cargo_invocation
-            .find("argv=build --manifest-path")
-            .is_some(),
+        cargo_invocation.contains("argv=build --manifest-path"),
         "Cargo must receive the build subcommand before its manifest argument"
     );
     assert!(
@@ -1994,7 +1992,7 @@ fn external_attempt_harness_binds_writable_tmp_for_staged_trunk() {
     let staged_trunk = sealed.join("toolchain/bin/trunk");
     write(
         &staged_trunk,
-        &fixture_tool_script("trunk fixture 1.0.0", "set -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/6c421a6/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n"),
+        &fixture_tool_script("trunk fixture 1.0.0", "set -eu\ntest \"$TMPDIR\" = \"/var/tmp/tmp\"\ntest \"$TMP\" = \"$TMPDIR\"\ntest \"$TEMP\" = \"$TMPDIR\"\ntest \"$XDG_CACHE_HOME\" = \"/var/tmp/xdg-cache\"\ntest -d \"$TMPDIR\" && test -w \"$TMPDIR\"\ntest -f \"$CARGO_HOME/git/checkouts/prosopikon-739f7520363f0e4d/37e3b1a/fixture\"\ntest -f \"$CARGO_HOME/registry/index/fixture\"\nbindgen=\"$XDG_CACHE_HOME/trunk/wasm-bindgen-0.2.128/wasm-bindgen\"\nwasm_opt=\"$XDG_CACHE_HOME/trunk/wasm-opt-version_123/bin/wasm-opt\"\nif ! test -x \"$bindgen\" || ! test -x \"$wasm_opt\"; then\n  curl https://example.invalid/trunk-tool\nfi\nprintf 'tmpdir=%s\\ntmp=%s\\ntemp=%s\\nxdg_cache=%s\\ncargo_home=%s\\ncached_wasm_bindgen=%s\\ncached_wasm_opt=%s\\ndownloader=NOT_INVOKED\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$XDG_CACHE_HOME\" \"$CARGO_HOME\" \"$bindgen\" \"$wasm_opt\" > \"$TMPDIR/trunk-env.log\"\n: > \"$TMPDIR/trunk-temp-proof\"\nif test -w /tmp; then\n  printf 'host_tmp_writable=UNEXPECTED\\n' >> \"$TMPDIR/trunk-env.log\"\n  exit 74\nfi\nprintf 'host_tmp_writable=DENIED\\n' >> \"$TMPDIR/trunk-env.log\"\nexit 73\n"),
     );
     fs::set_permissions(&staged_trunk, fs::Permissions::from_mode(0o755))
         .expect("make staged Trunk executable");
@@ -2610,7 +2608,7 @@ fn restore_default_sigint(command: &mut Command) {
 // This current preparer assay deliberately leaves the historical shared fixture unchanged.
 fn current_trunk_fixture(root: &Path) -> PathBuf {
     const OLD: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
-    const CURRENT: &str = "6c421a6e1ddaee63692e88c9b46095c652befe04";
+    const CURRENT: &str = "37e3b1a418779ee6868d121600a54c8d948d617a";
     let stage = staged_fixture(root);
     for name in ["Cargo.toml", "Cargo.lock"] {
         let path = stage.join("source").join(name);
@@ -2626,12 +2624,29 @@ fn current_trunk_fixture(root: &Path) -> PathBuf {
         assert_ne!(before, after);
         fs::write(path, after).expect("bind owned current Trunk input");
     }
+    let manifest_path = stage.join("source/Cargo.toml");
+    let manifest = fs::read_to_string(&manifest_path).expect("read current manifest");
+    let manifest = manifest
+        .replace(
+            "prosopikon-core = { git =",
+            "prosopikon-core = { version = \"=0.38.1\", git =",
+        )
+        .replace(
+            "prosopikon-yew = { git =",
+            "prosopikon-yew = { version = \"=0.3.1\", git =",
+        );
+    fs::write(&manifest_path, format!("{manifest}\n[patch.crates-io]\nyew = {{ path = \"vendor/yew\" }}\nyew-macro = {{ path = \"vendor/yew-macro\" }}\ntokise = {{ path = \"vendor/tokise\" }}\n"))
+        .expect("bind current root patch rows");
+    for name in ["yew", "yew-macro", "tokise"] {
+        write(stage.join("source/vendor").join(name).join("Cargo.toml"),
+            &format!("# Synthetic current preparer fixture only\n[package]\nname = \"{name}\"\nversion = \"0.0.0\"\n"));
+    }
     let cache = stage.join("cargo-home/git/checkouts/prosopikon-739f7520363f0e4d");
     assert!(cache.join("f097492/fixture").is_file());
-    assert!(!cache.join("6c421a6").exists());
-    fs::rename(cache.join("f097492"), cache.join("6c421a6"))
+    assert!(!cache.join("37e3b1a").exists());
+    fs::rename(cache.join("f097492"), cache.join("37e3b1a"))
         .expect("bind current owned Prosop cache coordinate");
-    assert!(cache.join("6c421a6/fixture").is_file());
+    assert!(cache.join("37e3b1a/fixture").is_file());
     write_f05_manifest(&stage);
     stage
 }

@@ -123,8 +123,8 @@ pub fn activity_page(props: &ActivityPageProps) -> Html {
                 summary="Administrator work, ingest, settlement, repair, and endpoint validation from the shared daemon job model."
             />
             { render_activity_state(
-                &*activity_state,
-                &*report_upload_state,
+                &activity_state,
+                &report_upload_state,
                 on_report_file_change,
                 on_report_drag_over,
                 on_report_drop,

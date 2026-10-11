@@ -137,7 +137,7 @@ pub struct LoginArgs {
     /// Install and verify the issued session in a standard AWS CLI profile.
     #[arg(long)]
     set_s3_config: bool,
-    /// AWS profile name; defaults to dasobjectstore-<ObjectStore>.
+    /// AWS profile name; defaults to `dasobjectstore-<ObjectStore>`.
     #[arg(long, requires = "set_s3_config")]
     s3_profile: Option<String>,
     /// Replace a conflicting DASObjectStore-managed AWS profile association.
@@ -296,7 +296,7 @@ pub struct AuthenticateArgs {
     /// Install the issued session into a standard AWS CLI profile.
     #[arg(long)]
     set_s3_config: bool,
-    /// AWS profile name; defaults to dasobjectstore-<ObjectStore>.
+    /// AWS profile name; defaults to `dasobjectstore-<ObjectStore>`.
     #[arg(long, requires = "set_s3_config")]
     s3_profile: Option<String>,
     /// Replace a conflicting DASObjectStore-managed AWS profile association.

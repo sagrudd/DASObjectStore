@@ -21,7 +21,7 @@ das_package_configure_pinned_mnemosyne_sources() {
   pistis_root="$workspace_root/pistis"
   proxenos_root="$workspace_root/proxenos"
   thesaurophylax_root="$workspace_root/thesaurophylax"
-  prosopikon_revision="$(sed -n 's/^prosopikon-core = { git = "https:\/\/github.com\/sagrudd\/prosopikon.git", rev = "\([0-9a-f]\{40\}\)" }$/\1/p' "$repo_root/Cargo.toml")"
+  prosopikon_revision="$(sed -n 's/^prosopikon-core = { version = "=0\.38\.1", git = "https:\/\/github.com\/sagrudd\/prosopikon.git", rev = "\([0-9a-f]\{40\}\)" }$/\1/p' "$repo_root/Cargo.toml")"
   proxenos_contract="$(sed -n 's/^proxenos = { version = "=\([0-9][0-9.]*\)", git = "https:\/\/github.com\/sagrudd\/proxenos.git", rev = "\([0-9a-f]\{40\}\)" }$/\1 \2/p' "$repo_root/Cargo.toml")"
 
   if [[ ! "$prosopikon_revision" =~ ^[0-9a-f]{40}$ ]]; then

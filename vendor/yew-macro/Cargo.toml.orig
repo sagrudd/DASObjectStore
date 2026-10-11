@@ -1,0 +1,33 @@
+[package]
+name = "yew-macro"
+version = "0.23.0"
+edition = "2021"
+authors = ["Justin Starry <justin@yew.rs>"]
+repository = "https://github.com/yewstack/yew"
+homepage = "https://github.com/yewstack/yew"
+documentation = "https://docs.rs/yew-macro/"
+license = "MIT OR Apache-2.0"
+keywords = ["web", "wasm", "frontend", "webasm", "webassembly"]
+categories = ["gui", "web-programming", "wasm"]
+description = "A framework for making client-side single-page apps"
+rust-version = "1.84.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-error = "1"
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["full", "extra-traits", "visit-mut"] }
+prettyplease = "0.2"
+rustversion.workspace = true
+
+# testing
+[dev-dependencies]
+trybuild = { workspace = true }
+yew = { path = "../yew" }
+implicit-clone = { workspace = true }
+
+[lints]
+workspace = true

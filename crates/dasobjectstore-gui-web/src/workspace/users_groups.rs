@@ -233,7 +233,7 @@ pub fn users_groups_page(props: &UsersGroupsPageProps) -> Html {
                 summary="Map Prosopikon-recognized local users onto appliance OS groups and DASObjectStore writer/admin access rules."
             />
             { render_users_groups_state(
-                &*users_groups_state,
+                &users_groups_state,
                 users_groups_state.clone(),
                 create_group_state,
                 add_user_state,
@@ -477,7 +477,7 @@ fn render_users_groups_task_pane(
 }
 
 #[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct AddUserTaskState {
     username: String,
     selected_groups: Vec<String>,
@@ -485,20 +485,6 @@ pub(super) struct AddUserTaskState {
     applying: bool,
     submitted: Vec<LocalGroupAdminResponse>,
     error: Option<String>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Default for AddUserTaskState {
-    fn default() -> Self {
-        Self {
-            username: String::new(),
-            selected_groups: Vec::new(),
-            qualification_acknowledged: false,
-            applying: false,
-            submitted: Vec::new(),
-            error: None,
-        }
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -630,7 +616,7 @@ fn render_add_user_task_pane_for_user(
                                     .clone()
                                     .unwrap_or_else(|| pending.username.clone());
                                 users_groups_state.set(users_groups_state_with_group_assignment(
-                                    &*users_groups_state,
+                                    &users_groups_state,
                                     &username,
                                     &response.group_name,
                                 ));
@@ -660,7 +646,7 @@ fn render_add_user_task_pane_for_user(
                         .unwrap_or_else(|| pending.username.clone());
                     let group_name = response.group_name.clone();
                     users_groups_state.set(users_groups_state_with_group_assignment(
-                        &*users_groups_state,
+                        &users_groups_state,
                         &username,
                         &group_name,
                     ));
@@ -779,7 +765,7 @@ pub(super) fn render_create_local_group_card(
                         let group_name = response.group_name.clone();
                         create_group_state.set(CreateLocalGroupFormState::new());
                         users_groups_state.set(users_groups_state_with_writer_group(
-                            &*users_groups_state,
+                            &users_groups_state,
                             &group_name,
                         ));
                         refresh_users_groups_workspace(api_base_path, users_groups_state);

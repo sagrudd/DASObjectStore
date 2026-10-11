@@ -157,7 +157,7 @@ pub fn bioinformatics_page(props: &BioinformaticsPageProps) -> Html {
                 title="Bioinformatics"
                 summary="Sequencing data readiness, workflow handoff, and Mnemosyne integration state."
             />
-            { render_bioinformatics_state(&*bioinformatics_state) }
+            { render_bioinformatics_state(&bioinformatics_state) }
         </section>
     }
 }

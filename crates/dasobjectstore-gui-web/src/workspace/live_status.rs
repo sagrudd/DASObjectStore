@@ -439,6 +439,7 @@ fn display_time(timestamp: &str) -> String {
         .take(8)
         .collect()
 }
+#[cfg(test)]
 fn format_duration(seconds: u64) -> String {
     if seconds < 60 {
         format!("{seconds} s")

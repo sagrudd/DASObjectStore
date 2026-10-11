@@ -41,7 +41,7 @@ pub fn enclosures_page(props: &EnclosuresPageProps) -> Html {
                 summary="Physical shelves and landing media grouped for operator review."
             />
             { render_enclosures_state(
-                &*enclosures_state,
+                &enclosures_state,
                 selected_id,
                 wizard_state,
                 pane_mode,
@@ -151,7 +151,7 @@ pub(super) fn render_enclosure_inventory(
                     { view.add_enclosure.label.clone() }
                 </button>
             </div>
-            { render_enclosure_registry_table(view, &*pane_mode, pane_mode.clone(), selected_id.clone()) }
+            { render_enclosure_registry_table(view, &pane_mode, pane_mode.clone(), selected_id.clone()) }
             { render_enclosure_task_surface(
                 view,
                 &candidate_id,

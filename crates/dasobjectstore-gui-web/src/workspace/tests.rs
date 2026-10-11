@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
 fn workspace_component_source() -> String {
     [
         include_str!("home.rs"),
@@ -1616,8 +1619,14 @@ fn object_browser_component_contract_covers_rows_downloads_and_empty_states() {
     );
 }
 
-#[test]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn object_browser_component_contract_keeps_placement_details_out_of_default_rows() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let placements = super::object_browser::render_object_browser_placements("Pending", &[]);
+        assert!(matches!(placements, yew::virtual_dom::VNode::VTag(_)));
+    }
     let source = workspace_component_source();
     let css = web_styles_source();
 

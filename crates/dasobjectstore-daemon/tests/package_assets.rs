@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "6c421a6e1ddaee63692e88c9b46095c652befe04";
+    const REVISION: &str = "37e3b1a418779ee6868d121600a54c8d948d617a";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -100,17 +100,17 @@ fn workspace_pins_one_prosopikon_type_identity() {
 }
 
 #[test]
-fn workspace_pins_the_proposed_pistis_0161_source() {
-    const PISTIS_REVISION: &str = "e36275d9fba8cfbfcd8d92d25b0cebe6199d4b85";
+fn workspace_pins_the_qualified_current_pistis_source() {
+    const PISTIS_REVISION: &str = "ef00ff34efbb9cfeac9298c9c77f1dc9694162cd";
     assert_contains(
         WORKSPACE_MANIFEST,
         &format!(
-            "pistis-canonical = {{ git = \"https://github.com/sagrudd/pistis.git\", rev = \"{PISTIS_REVISION}\" }}"
+            "pistis-canonical = {{ git = \"https://github.com/sagrudd/pistis.git\", rev = \"{PISTIS_REVISION}\", version = \"=0.1.1\" }}"
         ),
     );
 
     let locked_canonical_crate = format!(
-        "name = \"pistis-canonical\"\nversion = \"0.1.0\"\nsource = \"git+https://github.com/sagrudd/pistis.git?rev={PISTIS_REVISION}#{PISTIS_REVISION}\""
+        "name = \"pistis-canonical\"\nversion = \"0.1.1\"\nsource = \"git+https://github.com/sagrudd/pistis.git?rev={PISTIS_REVISION}#{PISTIS_REVISION}\""
     );
     assert_contains(WORKSPACE_LOCK, &locked_canonical_crate);
     assert!(!WORKSPACE_MANIFEST.contains("14e481497d3838d3310df3b0a21232f5d01d6f9f"));
@@ -119,10 +119,10 @@ fn workspace_pins_the_proposed_pistis_0161_source() {
 
 #[test]
 fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.62.0";
-    const PROXENOS_REVISION: &str = "56d4853f57c59a3303124ae4f33800170ed9be44";
-    const THESAUROPHYLAX_VERSION: &str = "0.79.9";
-    const THESAUROPHYLAX_REVISION: &str = "eb2f180ee7b8cb8673fa325a9235a5ba2709adb9";
+    const PROXENOS_VERSION: &str = "0.65.0";
+    const PROXENOS_REVISION: &str = "ae595ea6ca27ab312ea41fe206d2244bc5273707";
+    const THESAUROPHYLAX_VERSION: &str = "0.86.0";
+    const THESAUROPHYLAX_REVISION: &str = "e72598aae824f2bdafc20803adca73c6a6c8dcd2";
 
     assert_contains(
         WORKSPACE_MANIFEST,
@@ -627,19 +627,19 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
 fn local_docker_build_fails_closed_when_the_prosopikon_pin_drifts() {
     let dependency = WORKSPACE_MANIFEST
         .lines()
-        .find(|line| line.starts_with("prosopikon-core = { git = "))
+        .find(|line| line.starts_with("prosopikon-core = { version = \"=0.38.1\", git = "))
         .expect("workspace Prosopikon dependency");
 
     assert_contains(LOCAL_DOCKERFILE, dependency);
     assert_contains(LOCAL_DOCKERFILE, "grep -Fqx");
     assert_contains(
         LOCAL_DOCKERFILE,
-        r#"prosopikon-core = { path = "../prosopikon/crates/prosopikon-core" }"#,
+        r#"prosopikon-core = { version = "=0.38.1", path = "../prosopikon/crates/prosopikon-core" }"#,
     );
     assert_contains(
         LOCAL_DOCKERFILE,
         r#"! grep -Fq \
-        'prosopikon-core = { git = "https://github.com/sagrudd/prosopikon.git"'"#,
+        'prosopikon-core = { version = "=0.38.1", git = "https://github.com/sagrudd/prosopikon.git"'"#,
     );
 }
 

@@ -1,0 +1,9 @@
+[workspace]
+members = ["yew-macro"]
+exclude = ["yew", "tokise"]
+resolver = "2"
+
+[patch.crates-io]
+yew = { path = "yew" }
+yew-macro = { path = "yew-macro" }
+tokise = { path = "tokise" }
