@@ -1,5 +1,30 @@
 # Internal dependency catalogue
 
+## Current 0.187.1 source preparation
+
+This compatible successor starts from normally merged DASObjectStore 0.187.0
+`7577eb6cd56e67ac547e2239a5da03fd800f9c2a`. Core and Yew now select normally
+merged Prosopikon `d13523430fbc7443bd73490207d33ac884c17972` at 0.39.0 and
+0.4.0 respectively. The current Monas actor and the DAS public
+`accept_preverified_pistis_actor` parameter must resolve to one exact
+Prosopikon Rust source identity. Serialization does not replace that type
+identity or create authentication authority.
+
+Pistis remains `ef00ff34efbb9cfeac9298c9c77f1dc9694162cd`, Proxenos remains
+`ae595ea6ca27ab312ea41fe206d2244bc5273707`, and Thesaurophylax remains
+`e72598aae824f2bdafc20803adca73c6a6c8dcd2`; vendor sources are retained.
+The resolver-generated lock and current native/browser/security checks are
+pending. Earlier source receipts are historical, with applicability reviewed
+separately. The fixed profile-readiness contract keeps its existing package
+range; this patch does not widen it or infer installed readiness.
+
+The exact source transaction is allocated in
+[Kanon #749](https://github.com/sagrudd/kanon/pull/749#issuecomment-6116576221).
+Final Kanon source binding, a supported resolved lockset, package qualification
+and live installation/Site/Target authority remain separate requirements.
+
+## Historical dependency catalogue
+
 This catalogue records the Mnemosyne-owned sources required to build a
 release package. Package builders fail closed unless the pinned sibling
 checkouts below are exact and clean; they never fetch private source during a

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.187.1 — compatible source patch
+
+- Select normal Prosopikon `d13523430fbc7443bd73490207d33ac884c17972` (core 0.39.0, Yew 0.4.0) so the public current-actor adapter shares the same Rust type identity as Monas 0.142. Preserve actor verification, wire formats, storage and crypto behavior.
+- Align all workspace version constraints, packaged product and process descriptors, source-pin fixtures and web preparation. The local Docker builder selects Rust 1.90 for the supplier’s declared minimum version.
+- Preserve the genuine resolver-generated lock and all 450 registry coordinates/checksums. Full native Rust 1.94 default tests passed (2,612; 47 harnesses) and all-feature tests passed (2,617; 47 harnesses), each with two ignored tests; both prior failure cases passed. Applicable strict lint, Rust 1.90 support, private documentation and nine frontend/security gates retain their verified scope. The earlier failed phases remain historical failures. No package installation, runtime origin or release readiness is claimed. Source allocation: [Kanon #749](https://github.com/sagrudd/kanon/pull/749#issuecomment-6116576221).
+
 ## 0.187.0
 
 - Bind internal workspace dependencies to 0.187.0 and review ISC coverage for the existing TLS dependencies while retaining their licence and notice obligations. Preserve browser state and callback behavior while repairing the complete strict WASM lint inventory.
