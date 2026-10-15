@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "37e3b1a418779ee6868d121600a54c8d948d617a";
+    const REVISION: &str = "d13523430fbc7443bd73490207d33ac884c17972";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -627,19 +627,19 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
 fn local_docker_build_fails_closed_when_the_prosopikon_pin_drifts() {
     let dependency = WORKSPACE_MANIFEST
         .lines()
-        .find(|line| line.starts_with("prosopikon-core = { version = \"=0.38.1\", git = "))
+        .find(|line| line.starts_with("prosopikon-core = { version = \"=0.39.0\", git = "))
         .expect("workspace Prosopikon dependency");
 
     assert_contains(LOCAL_DOCKERFILE, dependency);
     assert_contains(LOCAL_DOCKERFILE, "grep -Fqx");
     assert_contains(
         LOCAL_DOCKERFILE,
-        r#"prosopikon-core = { version = "=0.38.1", path = "../prosopikon/crates/prosopikon-core" }"#,
+        r#"prosopikon-core = { version = "=0.39.0", path = "../prosopikon/crates/prosopikon-core" }"#,
     );
     assert_contains(
         LOCAL_DOCKERFILE,
         r#"! grep -Fq \
-        'prosopikon-core = { version = "=0.38.1", git = "https://github.com/sagrudd/prosopikon.git"'"#,
+        'prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git"'"#,
     );
 }
 

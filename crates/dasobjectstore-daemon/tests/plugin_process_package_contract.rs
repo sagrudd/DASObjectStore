@@ -956,7 +956,7 @@ fn staged_web_closure_is_exact_vendored_and_rejects_ambient_siblings() {
         "CARGO_NET_OFFLINE=true",
         "RUSTC=\"$staged_rustc\"",
         "\"$staged_trunk\" build --release",
-        "F05_PROSOPIKON_REVISION=37e3b1a418779ee6868d121600a54c8d948d617a",
+        "F05_PROSOPIKON_REVISION=d13523430fbc7443bd73490207d33ac884c17972",
         "requires the exact Prosopikon lock revision",
         "rejects an ambient Prosopikon sibling",
         "does not accept a prebuilt web distribution",
@@ -2608,7 +2608,7 @@ fn restore_default_sigint(command: &mut Command) {
 // This current preparer assay deliberately leaves the historical shared fixture unchanged.
 fn current_trunk_fixture(root: &Path) -> PathBuf {
     const OLD: &str = "f09749273ef382c1b42bf04a77d96189dd7361b3";
-    const CURRENT: &str = "37e3b1a418779ee6868d121600a54c8d948d617a";
+    const CURRENT: &str = "d13523430fbc7443bd73490207d33ac884c17972";
     let stage = staged_fixture(root);
     for name in ["Cargo.toml", "Cargo.lock"] {
         let path = stage.join("source").join(name);
@@ -2629,11 +2629,11 @@ fn current_trunk_fixture(root: &Path) -> PathBuf {
     let manifest = manifest
         .replace(
             "prosopikon-core = { git =",
-            "prosopikon-core = { version = \"=0.38.1\", git =",
+            "prosopikon-core = { version = \"=0.39.0\", git =",
         )
         .replace(
             "prosopikon-yew = { git =",
-            "prosopikon-yew = { version = \"=0.3.1\", git =",
+            "prosopikon-yew = { version = \"=0.4.0\", git =",
         );
     fs::write(&manifest_path, format!("{manifest}\n[patch.crates-io]\nyew = {{ path = \"vendor/yew\" }}\nyew-macro = {{ path = \"vendor/yew-macro\" }}\ntokise = {{ path = \"vendor/tokise\" }}\n"))
         .expect("bind current root patch rows");

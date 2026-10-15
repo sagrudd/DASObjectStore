@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 web_root="$repo_root/crates/dasobjectstore-gui-web"
 prosopikon_core_root="$repo_root/../prosopikon/crates/prosopikon-core"
 prosopikon_yew_root="$repo_root/../prosopikon/crates/prosopikon-yew"
-readonly F05_PROSOPIKON_REVISION=37e3b1a418779ee6868d121600a54c8d948d617a
+readonly F05_PROSOPIKON_REVISION=d13523430fbc7443bd73490207d33ac884c17972
 staged_closure_root=${DASOBJECTSTORE_F05_STAGED_CLOSURE_ROOT:-}
 staged_cargo=''
 staged_rustc=''
@@ -78,8 +78,8 @@ validate_f05_staged_closure() {
     vendor_input=${vendor_path#"$repo_root/vendor/"}
     staged_closure_manifest_requires "source/vendor/$vendor_input"
   done
-  grep -Fx "prosopikon-core = { version = \"=0.38.1\", git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon manifest revision'
-  grep -Fx "prosopikon-yew = { version = \"=0.3.1\", git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon Yew manifest revision'
+  grep -Fx "prosopikon-core = { version = \"=0.39.0\", git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon manifest revision'
+  grep -Fx "prosopikon-yew = { version = \"=0.4.0\", git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"$F05_PROSOPIKON_REVISION\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact Prosopikon Yew manifest revision'
   grep -F "git+https://github.com/sagrudd/prosopikon.git?rev=$F05_PROSOPIKON_REVISION#$F05_PROSOPIKON_REVISION" "$repo_root/Cargo.lock" >/dev/null || staged_closure_error 'requires the exact Prosopikon lock revision'
   for patched_crate in yew yew-macro tokise; do
     grep -Fx "$patched_crate = { path = \"vendor/$patched_crate\" }" "$repo_root/Cargo.toml" >/dev/null || staged_closure_error 'requires the exact current root vendor patch'
