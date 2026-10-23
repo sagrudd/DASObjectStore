@@ -248,7 +248,7 @@ install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectst
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/log/dasobjectstore
-install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore
+install -d -o root -g "\$service_group" -m 0750 /opt/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore/tls
 install -d -o root -g "\$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$service_group" {} + -exec chmod 0640 {} +
@@ -404,20 +404,8 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload || true
 fi
 
-wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
-if [ -x "\$wrapper" ]; then
-  if "\$wrapper" prewarm-report-provider >/dev/null 2>&1; then
-    printf 'DASObjectStore formal PDF report provider is installed and prewarmed.\n'
-  else
-    cat >&2 <<WARNING
-DASObjectStore formal PDF reporting could not prewarm the Grammateus provider.
-Install or repair Grammateus and initialise the provider with:
-  grammateus_report_provider install --image grammateus/report:0.8.1
-Then restart dasobjectstore-server.service before rebuilding reports from the
-Web interface.
-WARNING
-  fi
-fi
+# Reporting provider preparation is an explicit operator step, never an install hook.
+printf 'DASObjectStore report-provider preparation is deferred; see the deployment guide.\\n'
 
 %preun
 if [ "\$1" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
