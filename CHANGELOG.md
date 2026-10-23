@@ -2,6 +2,8 @@
 
 ## 0.187.2 — protected package-code parent
 
+- Declare the supported Rust 1.90 baseline centrally and inherit it in all thirteen owned workspace packages, matching the existing maintained Docker builder. Dependency pins, lockfile and runtime behavior are unchanged; current native 1.90 qualification remains required. Compatibility coordination: [Kanon #803](https://github.com/sagrudd/kanon/pull/803).
+
 - Patch five locked TLS advisories with rustls0.23.46 and rustls-webpki0.103.16. The real Cargo resolver changes only those two versions/checksums; all dependency edges and internal Git SDK pins remain unchanged. Exact upstream licence/notice originals are unchanged; current full qualification remains required.
 
 - Keep `/opt/dasobjectstore` root-owned with the existing service group and mode0750 in RPM, Debian and tmpfiles contracts. Preserve service-owned TLS and data children without recursive ownership changes.
