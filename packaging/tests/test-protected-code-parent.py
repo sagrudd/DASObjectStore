@@ -47,8 +47,10 @@ class ProtectedParent(unittest.TestCase):
             os.chown(tls, 65534, 65534)
             key = tls / "existing-key"
             key.write_bytes(b"controlled-key-fixture")
-            os.chown(key, 65534, 65534)
+            # Set mode while Root still owns the file; the bounded fixture
+            # deliberately has no CAP_FOWNER after ownership is transferred.
             key.chmod(0o600)
+            os.chown(key, 65534, 65534)
             before = (tls.stat(), key.stat(), key.read_bytes())
             command = expected.replace(r'\"', '"')
             command = command.replace(r"\$service_group", "65534").replace("$service_group", "65534")
