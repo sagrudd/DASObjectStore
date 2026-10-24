@@ -2,6 +2,8 @@
 
 ## 0.187.2 — protected package-code parent
 
+- Correct the Rust tmpfiles package-asset regression to require the already adopted Root-owned0750 code parent, explicitly reject its former service ownership, and preserve service ownership of the TLS child. Package contents and permissions are unchanged; native package-asset qualification remains required.
+
 - Record a reviewed, exact-byte/no-growth temporary module-size baseline for fourteen unchanged inherited files, expiring before31October2026UTC. Keep the1000-line limit and existing five exceptions; changed, malformed, expired and unlisted entries deny. Native governance remains required; see tools/INT07_MODULE_SIZE_BASELINE.md.
 
 - Retain before/after public process-state diagnostics when the bounded descendant fixture fails its existing PID-absence assertion. Signals, deadlines, assertions and production behavior are unchanged; the pending0.187.2 diagnostic requires a targeted native reproduction.

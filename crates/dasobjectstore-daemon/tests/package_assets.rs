@@ -897,8 +897,18 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
     );
     assert_contains(
         TMPFILES,
-        &format!(
+        &format!("d /opt/dasobjectstore 0750 root {DEFAULT_DAEMON_GROUP} -"),
+    );
+    assert!(
+        !TMPFILES.contains(&format!(
             "d /opt/dasobjectstore 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
+        )),
+        "the protected code parent must not be service-owned"
+    );
+    assert_contains(
+        TMPFILES,
+        &format!(
+            "d /opt/dasobjectstore/tls 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
         ),
     );
 }
