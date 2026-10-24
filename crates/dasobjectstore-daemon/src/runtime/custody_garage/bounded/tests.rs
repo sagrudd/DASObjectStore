@@ -53,7 +53,15 @@ else:
     if mode == 'cleanup': open(os.path.join(os.path.dirname(fifo), 'unrelated'), 'w').write('retain')
     if mode == 'descendant':
         child = subprocess.Popen(['/usr/bin/python3', '-c', 'import time;time.sleep(30)'])
-        open(os.path.join(os.path.dirname(os.path.dirname(fifo)), 'descendant.pid'), 'w').write(str(child.pid))
+        fixture_root = os.path.dirname(os.path.dirname(fifo))
+        open(os.path.join(fixture_root, 'descendant.pid'), 'w').write(str(child.pid))
+        if sys.platform.startswith('linux'):
+            try:
+                with open('/proc/' + str(child.pid) + '/stat') as state:
+                    before_state = state.read()
+            except OSError as error:
+                before_state = repr(error)
+            open(os.path.join(fixture_root, 'descendant-before.stat'), 'w').write(before_state)
 "#
         );
         fs::write(&executable, body).unwrap();
@@ -195,7 +203,13 @@ fn bounded_process_stalls_and_descendants_hit_deadline() {
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            assert!(dead, "descendant still alive after owned-group termination");
+            assert!(
+                dead,
+                "descendant still present after owned-group termination; before={:?}; after={:?}; pid1={:?}",
+                fs::read_to_string(f.root.join("descendant-before.stat")),
+                fs::read_to_string(format!("/proc/{pid}/stat")),
+                fs::read_to_string("/proc/1/stat"),
+            );
         }
     }
 }

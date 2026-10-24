@@ -2,6 +2,8 @@
 
 ## 0.187.2 — protected package-code parent
 
+- Retain before/after public process-state diagnostics when the bounded descendant fixture fails its existing PID-absence assertion. Signals, deadlines, assertions and production behavior are unchanged; the pending0.187.2 diagnostic requires a targeted native reproduction.
+
 - Prepare the existing-key ownership fixture with mode0600 before transferring ownership. Its final fixture and assertions remain unchanged, and the bounded assay retains its exact four capabilities without CAP_FOWNER. This finalizes the pending0.187.2 test correction; native rerun remains required.
 
 - Declare the supported Rust 1.90 baseline centrally and inherit it in all thirteen owned workspace packages, matching the existing maintained Docker builder. Dependency pins, lockfile and runtime behavior are unchanged; current native 1.90 qualification remains required. Compatibility coordination: [Kanon #803](https://github.com/sagrudd/kanon/pull/803).
