@@ -2,6 +2,13 @@
 
 ## 0.187.2 — protected package-code parent
 
+- Preserve existing parent and ancestor directory permissions in generic HDD
+  copies, fanout and direct imports, including failed or cancelled copies.
+  Apply ``0770`` only to newly created copy directories and retain payload
+  ``0660``. Keep shallow-destination regressions and the explicit managed-store
+  permission contract; dependency pins and lockfile remain unchanged. Native
+  qualification remains required.
+
 - Use the configured temporary directory for the two synthetic local-retirement socket fixtures. UUID isolation, exact response/challenge/retry assertions and owned-fixture cleanup are unchanged; the read-only system `/tmp` no longer prevents these tests. Native qualification remains required.
 
 - Correct the Rust tmpfiles package-asset regression to require the already adopted Root-owned0750 code parent, explicitly reject its former service ownership, and preserve service ownership of the TLS child. Package contents and permissions are unchanged; native package-asset qualification remains required.
