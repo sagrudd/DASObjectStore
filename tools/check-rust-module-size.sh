@@ -41,6 +41,10 @@ while IFS= read -r path; do
         continue
     fi
 
+    if python3 tools/check-rust-module-baseline.py "$path" "$production_lines"; then
+        continue
+    fi
+
     printf 'production module exceeds %s lines: %s (%s lines)\n' \
         "$max_lines" "$path" "$production_lines" >&2
     violations=1

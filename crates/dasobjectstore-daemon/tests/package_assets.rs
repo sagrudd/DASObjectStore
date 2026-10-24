@@ -897,8 +897,18 @@ fn tmpfiles_declares_daemon_runtime_and_state_directories() {
     );
     assert_contains(
         TMPFILES,
-        &format!(
+        &format!("d /opt/dasobjectstore 0750 root {DEFAULT_DAEMON_GROUP} -"),
+    );
+    assert!(
+        !TMPFILES.contains(&format!(
             "d /opt/dasobjectstore 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
+        )),
+        "the protected code parent must not be service-owned"
+    );
+    assert_contains(
+        TMPFILES,
+        &format!(
+            "d /opt/dasobjectstore/tls 0750 {DEFAULT_DAEMON_SERVICE_USER} {DEFAULT_DAEMON_GROUP} -"
         ),
     );
 }
@@ -1033,8 +1043,8 @@ fn package_installs_das_owned_report_renderer_wrapper() {
         BUILD_RPM,
         "/usr/libexec/dasobjectstore/gnostikon-workflow-control",
     );
-    assert_contains(BUILD_RPM, "prewarm-report-provider");
-    assert_contains(
+    assert_not_contains(BUILD_RPM, "prewarm-report-provider");
+    assert_not_contains(
         BUILD_RPM,
         "grammateus_report_provider install --image grammateus/report:0.8.1",
     );
@@ -1234,9 +1244,9 @@ fn deb_postinst_rejects_user_owned_managed_root() {
         "ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750",
     );
     assert_contains(POSTINST, "ensure_container_runtime_access");
-    assert_contains(POSTINST, "ensure_report_provider");
-    assert_contains(POSTINST, "prewarm-report-provider");
-    assert_contains(
+    assert_not_contains(POSTINST, "ensure_report_provider");
+    assert_not_contains(POSTINST, "prewarm-report-provider");
+    assert_not_contains(
         POSTINST,
         "grammateus_report_provider install --image grammateus/report:0.8.1",
     );

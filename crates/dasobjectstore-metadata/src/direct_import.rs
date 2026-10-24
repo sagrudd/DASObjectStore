@@ -194,6 +194,8 @@ mod tests {
     use dasobjectstore_core::risk::{ActionConfirmation, RiskGateError, RiskPolicy};
     use dasobjectstore_core::store::{IngestMode, StoreClass, StorePolicy};
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -249,10 +251,26 @@ mod tests {
 
     #[test]
     fn direct_import_hashes_inline_when_expected_digest_is_unavailable() {
-        let root = temp_root("direct-import-inline-hash");
+        let owned = temp_root("direct-import-inline-hash");
+        let root = owned.join("fixture/root");
         let source_path = root.join("source");
         let destination_path = root.join("dest");
         fs::create_dir_all(&root).expect("create temp root");
+        #[cfg(unix)]
+        fs::set_permissions(&owned, fs::Permissions::from_mode(0o700)).expect("private sentinel");
+        #[cfg(unix)]
+        let existing: Vec<_> = root
+            .ancestors()
+            .map(|path| {
+                (
+                    path.to_path_buf(),
+                    fs::metadata(path)
+                        .expect("existing before")
+                        .permissions()
+                        .mode(),
+                )
+            })
+            .collect();
         fs::write(&source_path, b"payload without pre-copy").expect("source payload");
         let request = request(source_path, destination_path, String::new());
 
@@ -262,7 +280,29 @@ mod tests {
         assert_eq!(report.content_hash_algorithm, "sha256");
         assert_eq!(report.bytes_written, 24);
         assert!(!report.content_hash.is_empty());
-        let _ = fs::remove_dir_all(root);
+        #[cfg(unix)]
+        {
+            for (path, mode) in existing {
+                assert_eq!(
+                    fs::metadata(&path)
+                        .expect("existing after")
+                        .permissions()
+                        .mode(),
+                    mode,
+                    "import changed existing parent {}",
+                    path.display()
+                );
+            }
+            assert_eq!(
+                fs::metadata(&request.destination_path)
+                    .expect("payload mode")
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                crate::secure_fs::PRIVATE_FILE_MODE
+            );
+        }
+        let _ = fs::remove_dir_all(owned);
     }
 
     #[test]

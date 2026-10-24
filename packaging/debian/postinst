@@ -102,26 +102,6 @@ ensure_workspace_metadata_config() {
   fi
 }
 
-ensure_report_provider() {
-  local wrapper="/usr/libexec/dasobjectstore/gnostikon-workflow-control"
-  if [[ ! -x "$wrapper" ]]; then
-    return 0
-  fi
-
-  if "$wrapper" prewarm-report-provider >/dev/null 2>&1; then
-    printf 'DASObjectStore formal PDF report provider is installed and prewarmed.\n'
-    return 0
-  fi
-
-  cat >&2 <<WARNING
-DASObjectStore formal PDF reporting could not prewarm the Grammateus provider.
-Install or repair Grammateus and initialise the provider with:
-  grammateus_report_provider install --image grammateus/report:0.8.1
-Then restart dasobjectstore-server.service before rebuilding reports from the
-Web interface.
-WARNING
-}
-
 ensure_owned_dir() {
   local path="$1"
   local mode="$2"
@@ -216,7 +196,7 @@ ensure_owned_dir /var/lib/dasobjectstore/projection-authority 0700
 ensure_owned_dir /var/lib/dasobjectstore/report-rebuild 0750
 ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750
 ensure_owned_dir /var/log/dasobjectstore 0750
-ensure_owned_dir "$product_root" 0750
+install -d -o root -g "$service_group" -m 0750 "$product_root"
 ensure_owned_dir "$product_root/tls" 0750
 install -d -o root -g "$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' \
@@ -287,4 +267,5 @@ if command -v systemctl >/dev/null 2>&1; then
   /usr/libexec/dasobjectstore/restart-running-services
 fi
 
-ensure_report_provider
+# Report-provider preparation is an explicit operator step.
+printf 'DASObjectStore report-provider preparation is deferred; see the deployment guide.\n'

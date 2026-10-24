@@ -255,3 +255,21 @@ Before creating a store, inspect the class defaults:
    dasobjectstore store defaults --class generated_data
 
 See :doc:`store-classes` for class meanings and redundancy defaults.
+
+Copy Destination Permissions
+----------------------------
+
+Generic verified copies, direct HDD imports and copy fanout preserve the
+permissions of all existing destination directories and their ancestors.
+Only directories newly created for a copy receive mode ``0770``; newly created
+payload files receive ``0660`` on Unix. A hash mismatch or cancellation does
+not broaden existing directory permissions. This also applies to shallow
+caller-selected destinations outside the normal managed-object layout.
+
+Existing directory symlinks and relative paths keep their previous resolution
+semantics. Parent creation uses directory descriptors; a newly created node
+is checked without following a replacement symlink and permissions are applied
+through its descriptor. This is not a guarantee that the entire copy is immune
+to concurrent namespace changes: the existing payload-file open still uses its
+named path. Explicit initialization and permission handling for system-managed
+ObjectStore/Ingest trees remain separate and unchanged.

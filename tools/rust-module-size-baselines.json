@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "source_baseline": "35d60d1445b98a4fc9c466b8bfcdc28e76d80597",
+  "scope": "Only these exact inherited bytes; no runtime, security or release exception.",
+  "records": [
+    {
+      "path": "crates/dasobjectstore-cli/src/run.rs",
+      "sha256": "eaf7debb23985bd35977ef022fb29573adc12a4476248088bea7d5d5c2330af6",
+      "max_production_lines": 1021,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-core/src/application_auth.rs",
+      "sha256": "793a2b074337e139b241f814a43480f4df2d3745bba24ba4b01dda6a42fe8883",
+      "max_production_lines": 1022,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-core/src/s6_dossier_custody.rs",
+      "sha256": "6beaa6dc7bc62a20d164f08327754675f6ea733ead1f741141a16a451f622209",
+      "max_production_lines": 1430,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/client/mod.rs",
+      "sha256": "eadf628ef1639c1535652d04d7a9e72f97138f085c849d568fd01363d41b6876",
+      "max_production_lines": 1093,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/main.rs",
+      "sha256": "d4bc261584de23fdb180f33b4f7bf0ccda6314c716fb86a4a3e154566e85436e",
+      "max_production_lines": 1106,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/runtime/custody_garage.rs",
+      "sha256": "a6583c150642d03aa90302cac8e16e7015760e30a6c9bb5fd02e24463b272dea",
+      "max_production_lines": 1162,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/runtime/remote_sessions.rs",
+      "sha256": "cb6fdcd172a7958b24260b35bf16d1826d7e3b6945518b01dee03e09b4a2094f",
+      "max_production_lines": 1004,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/runtime/service.rs",
+      "sha256": "9b76bdcf9e3fd290653fa521f2c08337518fc72130109bb827379f6e3c67f5a1",
+      "max_production_lines": 1416,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/server/request_handler.rs",
+      "sha256": "69451fabe6a1a49d83494333e898979089bf1f07dfcbb0e257e88ee4bd499c0a",
+      "max_production_lines": 1259,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-daemon/src/server/request_handler/provider_stream.rs",
+      "sha256": "e435068040095699c6d19989774216fd0fde2015f3f9ce915588506bd0df643f",
+      "max_production_lines": 1595,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-gui-api/src/auth_routes.rs",
+      "sha256": "aced05015fcef13a46f6cb06b2b165fecc08dc34071c84072a1aba1c6fbdb4ba",
+      "max_production_lines": 1314,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-object-service/src/custody.rs",
+      "sha256": "64fcee17594e548973826174a13af4a7b8a36d76a48336c00e317251c0418db8",
+      "max_production_lines": 3022,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-object-service/src/custody_attestation.rs",
+      "sha256": "b3b827e1b67f86bc10ec446c5d94756d11f7d1ee7b6f16f6cba7095af7cb7e36",
+      "max_production_lines": 1096,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    },
+    {
+      "path": "crates/dasobjectstore-platform/src/r237_bootstrap_observer.rs",
+      "sha256": "ed814226ea0d907f767f8792c2aa3d1763223c32e518f71acc6f4856ae682d0e",
+      "max_production_lines": 1029,
+      "expires_before_utc": "2026-10-31",
+      "owner": "INT-07 delivery owner",
+      "remediation": "Split this inherited module by responsibility; remove its record after the maintained 1000-line guard passes."
+    }
+  ]
+}

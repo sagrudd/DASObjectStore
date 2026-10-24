@@ -1,5 +1,5 @@
 use crate::hash::{copy_and_hash_with_controlled_progress, hash_file_sha256, SHA256_ALGORITHM};
-use crate::secure_fs::{create_private_dir_all, create_private_file, set_private_dir_permissions};
+use crate::secure_fs::{create_copy_parent_all, create_private_file};
 use dasobjectstore_core::ids::{DiskId, ObjectId};
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Display};
@@ -158,8 +158,7 @@ pub fn write_verified_hdd_copy_with_controlled_progress(
     progress: impl FnMut(u64) -> Result<(), HddCopyError>,
 ) -> Result<HddCopyReport, HddCopyError> {
     if let Some(parent) = request.destination_path.parent() {
-        create_private_dir_all(parent)?;
-        restrict_object_tree_dirs(parent)?;
+        create_copy_parent_all(parent)?;
     }
 
     let report = write_verified_hdd_copy_inner(request, progress);
@@ -175,8 +174,7 @@ pub fn write_hdd_copy_with_inline_hash_with_controlled_progress(
     progress: impl FnMut(u64) -> Result<(), HddCopyError>,
 ) -> Result<HddCopyReport, HddCopyError> {
     if let Some(parent) = request.destination_path.parent() {
-        create_private_dir_all(parent)?;
-        restrict_object_tree_dirs(parent)?;
+        create_copy_parent_all(parent)?;
     }
 
     let report = write_hdd_copy_with_inline_hash_inner(request, progress);
@@ -224,8 +222,7 @@ fn write_hdd_copies_from_reader_with_controlled_progress(
     let prepared = (|| -> Result<(), HddCopyError> {
         for request in requests {
             if let Some(parent) = request.destination_path.parent() {
-                create_private_dir_all(parent)?;
-                restrict_object_tree_dirs(parent)?;
+                create_copy_parent_all(parent)?;
             }
             destinations.push(create_private_file(&request.destination_path)?);
         }
@@ -521,18 +518,6 @@ fn hdd_copy_error_from_io(error: io::Error) -> HddCopyError {
     }
 }
 
-fn restrict_object_tree_dirs(payload_parent: &Path) -> Result<(), HddCopyError> {
-    set_private_dir_permissions(payload_parent)?;
-    if let Some(prefix_dir) = payload_parent.parent() {
-        set_private_dir_permissions(prefix_dir)?;
-        if let Some(objects_dir) = prefix_dir.parent() {
-            set_private_dir_permissions(objects_dir)?;
-        }
-    }
-
-    Ok(())
-}
-
 pub fn verify_hdd_copy_hash(
     copy_path: impl AsRef<Path>,
     expected_content_hash: &str,
@@ -578,6 +563,12 @@ mod tests {
         let expected_hash = hash_file_sha256(&source_path).expect("source hash");
         let request = request(source_path, destination_path.clone(), expected_hash.clone());
 
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("protected owned root");
+        #[cfg(unix)]
+        let existing = existing_modes(&root);
+
         let report = write_verified_hdd_copy(&request).expect("verified copy");
 
         assert_eq!(report.object_id.as_str(), "object-a");
@@ -594,6 +585,8 @@ mod tests {
         #[cfg(unix)]
         assert_private_payload_tree(&destination_path);
 
+        #[cfg(unix)]
+        assert_existing_modes(existing);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -610,10 +603,18 @@ mod tests {
             "not-the-real-hash".to_string(),
         );
 
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("protected owned root");
+        #[cfg(unix)]
+        let existing = existing_modes(&root);
+
         let err = write_verified_hdd_copy(&request).expect_err("hash mismatch");
 
         assert!(matches!(err, HddCopyError::HashMismatch { .. }));
 
+        #[cfg(unix)]
+        assert_existing_modes(existing);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -627,6 +628,12 @@ mod tests {
         let expected_hash = hash_file_sha256(&source_path).expect("source hash");
         let request = request(source_path, destination_path.clone(), expected_hash);
 
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("protected owned root");
+        #[cfg(unix)]
+        let existing = existing_modes(&root);
+
         let err = write_verified_hdd_copy_with_controlled_progress(&request, |_| {
             Err(HddCopyError::Cancelled)
         })
@@ -638,12 +645,20 @@ mod tests {
             "cancelled HDD copy should remove partial destination payload"
         );
 
+        #[cfg(unix)]
+        assert_existing_modes(existing);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn direct_fanout_reads_the_source_once_and_writes_each_target() {
-        let root = temp_root("direct-fanout-single-read");
+        let owned = temp_root("direct-fanout-single-read");
+        let root = owned.join("fixture/root");
+        fs::create_dir_all(&root).expect("owned shallow fixture");
+        #[cfg(unix)]
+        fs::set_permissions(&owned, fs::Permissions::from_mode(0o700)).expect("private sentinel");
+        #[cfg(unix)]
+        let existing = existing_modes(&root);
         let payload = vec![0x5a_u8; 192 * 1024];
         let object_id = ObjectId::new("object-a").expect("object id");
         let source_path = root.join("source.bin");
@@ -701,7 +716,9 @@ mod tests {
                     && *copy_number == request.copy_number));
         }
 
-        let _ = fs::remove_dir_all(root);
+        #[cfg(unix)]
+        assert_existing_modes(existing);
+        let _ = fs::remove_dir_all(owned);
     }
 
     struct CountingReader {
@@ -753,6 +770,36 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn existing_modes(root: &std::path::Path) -> Vec<(PathBuf, u32)> {
+        root.ancestors()
+            .map(|path| {
+                (
+                    path.to_path_buf(),
+                    fs::metadata(path)
+                        .expect("existing parent before")
+                        .permissions()
+                        .mode(),
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn assert_existing_modes(existing: Vec<(PathBuf, u32)>) {
+        for (path, mode) in existing {
+            assert_eq!(
+                fs::metadata(&path)
+                    .expect("existing parent after")
+                    .permissions()
+                    .mode(),
+                mode,
+                "copy changed existing parent {}",
+                path.display()
+            );
+        }
+    }
+
+    #[cfg(unix)]
     fn assert_private_payload_tree(payload_path: &std::path::Path) {
         assert_eq!(
             fs::metadata(payload_path)
@@ -765,8 +812,7 @@ mod tests {
 
         let object_dir = payload_path.parent().expect("object dir");
         let prefix_dir = object_dir.parent().expect("prefix dir");
-        let objects_dir = prefix_dir.parent().expect("objects dir");
-        for directory in [object_dir, prefix_dir, objects_dir] {
+        for directory in [object_dir, prefix_dir] {
             assert_eq!(
                 fs::metadata(directory)
                     .expect("directory metadata")

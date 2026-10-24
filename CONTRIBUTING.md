@@ -22,6 +22,13 @@ Before making changes, read:
 
 Use the Rust workspace from the repository root.
 
+The supported Rust baseline is 1.90, matching the maintained Docker builder.
+The workspace declares this baseline and each owned package inherits it. The
+pending 0.187.2 source still requires its actual Rust 1.90 support check; a
+newer-toolchain result does not stand in for that check. This is not a claim
+that 1.90 is the empirically earliest compiler that can compile the product.
+The source compatibility declaration is coordinated in [Kanon #803](https://github.com/sagrudd/kanon/pull/803).
+
 ```bash
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
