@@ -2,6 +2,8 @@
 
 ## 0.187.2 — protected package-code parent
 
+- Use the configured temporary directory for the two synthetic local-retirement socket fixtures. UUID isolation, exact response/challenge/retry assertions and owned-fixture cleanup are unchanged; the read-only system `/tmp` no longer prevents these tests. Native qualification remains required.
+
 - Correct the Rust tmpfiles package-asset regression to require the already adopted Root-owned0750 code parent, explicitly reject its former service ownership, and preserve service ownership of the TLS child. Package contents and permissions are unchanged; native package-asset qualification remains required.
 
 - Record a reviewed, exact-byte/no-growth temporary module-size baseline for fourteen unchanged inherited files, expiring before31October2026UTC. Keep the1000-line limit and existing five exceptions; changed, malformed, expired and unlisted entries deny. Native governance remains required; see tools/INT07_MODULE_SIZE_BASELINE.md.

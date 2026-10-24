@@ -809,7 +809,7 @@ mod tests {
 
     #[test]
     fn fixed_client_accepts_only_the_exact_bounded_response() {
-        let root = PathBuf::from("/tmp").join(format!("das-receipt-client-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("das-receipt-client-{}", Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let socket = root.join("monas.sock");
         let listener = UnixListener::bind(&socket).unwrap();
@@ -833,7 +833,7 @@ mod tests {
 
     #[test]
     fn fixed_client_retries_the_exact_challenge_after_lost_response() {
-        let root = PathBuf::from("/tmp").join(format!("das-receipt-retry-{}", Uuid::new_v4()));
+        let root = std::env::temp_dir().join(format!("das-receipt-retry-{}", Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         let socket = root.join("monas.sock");
         let listener = UnixListener::bind(&socket).unwrap();
