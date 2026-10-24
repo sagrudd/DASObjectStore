@@ -364,7 +364,7 @@ require_text "$sysusers" "g mnemosyne-pistis-das"
 require_text "$tmpfiles" "z /srv/dasobjectstore 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /run/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
-require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectstore -"
+require_text "$tmpfiles" "d /opt/dasobjectstore 0750 root dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/object-service 0700 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/report-rebuild 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/telemetry 0750 dasobjectstore dasobjectstore -"
@@ -563,8 +563,8 @@ require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -
 require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectstore/object-service'
 require_text "$build_rpm" 'install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry'
 require_text "$build_rpm" '/usr/libexec/dasobjectstore/gnostikon-workflow-control'
-require_text "$build_rpm" 'prewarm-report-provider'
-require_text "$build_rpm" 'grammateus_report_provider install --image grammateus/report:0.8.1'
+require_absent "$build_rpm" 'prewarm-report-provider'
+require_absent "$build_rpm" 'grammateus_report_provider install --image grammateus/report:0.8.1'
 require_text "$build_rpm" 'repair_marked_managed_tree()'
 require_text "$build_rpm" 'profile'
 require_text "$build_rpm" 'namespace marker is missing'
@@ -638,3 +638,11 @@ require_text "$build_deb" "validate-package-auth-content.sh"
 require_text "$build_rpm" "validate-package-auth-content.sh"
 require_text "$build_remote_deb" "validate-package-auth-content.sh"
 require_text "$build_remote_rpm" "validate-package-auth-content.sh"
+
+# Code ancestors remain root-owned; mutable TLS is a separate child.
+require_text "$postinst" 'install -d -o root -g "$service_group" -m 0750 "$product_root"'
+require_text "$build_rpm" 'install -d -o root -g "\$service_group" -m 0750 /opt/dasobjectstore'
+require_text "$tmpfiles" 'd /opt/dasobjectstore/tls 0750 dasobjectstore dasobjectstore -'
+
+require_absent "$postinst" 'ensure_report_provider'
+require_absent "$postinst" 'prewarm-report-provider'

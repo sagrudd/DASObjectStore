@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.187.2 — protected package-code parent
+
+- Prepare the existing-key ownership fixture with mode0600 before transferring ownership. Its final fixture and assertions remain unchanged, and the bounded assay retains its exact four capabilities without CAP_FOWNER. This finalizes the pending0.187.2 test correction; native rerun remains required.
+
+- Declare the supported Rust 1.90 baseline centrally and inherit it in all thirteen owned workspace packages, matching the existing maintained Docker builder. Dependency pins, lockfile and runtime behavior are unchanged; current native 1.90 qualification remains required. Compatibility coordination: [Kanon #803](https://github.com/sagrudd/kanon/pull/803).
+
+- Patch five locked TLS advisories with rustls0.23.46 and rustls-webpki0.103.16. The real Cargo resolver changes only those two versions/checksums; all dependency edges and internal Git SDK pins remain unchanged. Exact upstream licence/notice originals are unchanged; current full qualification remains required.
+
+- Keep `/opt/dasobjectstore` root-owned with the existing service group and mode0750 in RPM, Debian and tmpfiles contracts. Preserve service-owned TLS and data children without recursive ownership changes.
+- Defer automatic report-provider acquisition/execution from RPM and Debian install hooks; preserve the explicit operator wrapper and all existing images/data. Kanon allocation amendment42191d97 in PR801 covers this inactive-lifecycle correction.
+- Align own workspace/product versions to0.187.2; preserve dependency source pins and runtime authority. Linked source allocation: [Kanon #801](https://github.com/sagrudd/kanon/pull/801), `INT07_ALMA_DAS_01872_PENDING_SOURCE_ALLOCATION.md`. Native qualification remains pending.
+
 ## 0.187.1 — compatible source patch
 
 - Select normal Prosopikon `d13523430fbc7443bd73490207d33ac884c17972` (core 0.39.0, Yew 0.4.0) so the public current-actor adapter shares the same Rust type identity as Monas 0.142. Preserve actor verification, wire formats, storage and crypto behavior.

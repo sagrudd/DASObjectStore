@@ -124,3 +124,27 @@ with:
 
 Surrogate or older-commit evidence must never be relabelled as physical
 acceptance.
+
+Protected package code and mutable TLS
+-------------------------------------
+
+DASObjectStore 0.187.2 keeps ``/opt/dasobjectstore`` owned by
+``root:dasobjectstore`` with mode ``0750``. The service can read packaged web
+and process-descriptor assets but cannot replace their parent directory.
+The separate ``tls`` child remains service-owned so existing TLS material
+and normal certificate creation keep their current behavior. Package hooks
+change only the parent ownership; they do not recursively change packaged
+assets, data, or keys. Source preparation is allocated in Kanon PR #801,
+``INT07_ALMA_DAS_01872_PENDING_SOURCE_ALLOCATION.md``. Native package and
+installation qualification remain separate gates.
+
+Package installation also defers report-provider preparation. It neither
+acquires a report-provider image nor runs its container. Existing images and
+reporting data remain untouched. When the reporting environment is explicitly
+ready, the existing operator command remains available::
+
+   /usr/libexec/dasobjectstore/gnostikon-workflow-control prewarm-report-provider
+
+That command has its existing runtime and authority requirements; package
+installation does not grant them. This lifecycle correction is allocated in
+Kanon PR #801 amendment ``42191d97627a1b9d7c8417afaf358e14021ad2ff``.

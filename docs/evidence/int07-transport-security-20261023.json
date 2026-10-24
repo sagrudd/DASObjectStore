@@ -1,0 +1,69 @@
+{
+  "source_base": "14778965ee71f0f8cb17e785d7ad0f9872702ab7",
+  "lock_sha256": "bff6db6878097d1f744dc1fee06556bf9dbe00f7750b99d949eb6af97b644bd4",
+  "resolved_packages": 478,
+  "changed_records": 2,
+  "unchanged_records": 476,
+  "all_dependency_edges_and_git_pins_unchanged": true,
+  "resolver": "Two actual offline Cargo precise updates; lock not hand edited",
+  "old_unsuppressed_audit": "5 advisories, rustls0.23.45 and webpki0.103.15, freshf7b2f6b data. Full current rerun remains required.",
+  "suppliers": [
+    {
+      "crate": "rustls",
+      "originals": [
+        {
+          "version": "0.23.45",
+          "archive_sha256": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+          "upstream_git_commit": "2976d90fd1c2db6b518700dd101b714069cfcb17",
+          "license_expression": "Apache-2.0 OR ISC OR MIT",
+          "repository": "https://github.com/rustls/rustls",
+          "license_notice_sha256": {
+            "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+            "LICENSE-ISC": "7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4",
+            "LICENSE-MIT": "709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c"
+          }
+        },
+        {
+          "version": "0.23.46",
+          "archive_sha256": "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf",
+          "upstream_git_commit": "f04804fa13341a9b1dc02b5d1dd8a746f2c4b7fb",
+          "license_expression": "Apache-2.0 OR ISC OR MIT",
+          "repository": "https://github.com/rustls/rustls",
+          "license_notice_sha256": {
+            "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+            "LICENSE-ISC": "7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4",
+            "LICENSE-MIT": "709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c"
+          }
+        }
+      ],
+      "all_license_and_notice_bytes_identical": true
+    },
+    {
+      "crate": "rustls-webpki",
+      "originals": [
+        {
+          "version": "0.103.15",
+          "archive_sha256": "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
+          "upstream_git_commit": "c14836d8de33c0ad0ac7dcb28fe9aade20831a4d",
+          "license_expression": "ISC",
+          "repository": "https://github.com/rustls/webpki",
+          "license_notice_sha256": {
+            "LICENSE": "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a"
+          }
+        },
+        {
+          "version": "0.103.16",
+          "archive_sha256": "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281",
+          "upstream_git_commit": "8ecdcc76f56b68fda67a6adf7976f5eed5006a4c",
+          "license_expression": "ISC",
+          "repository": "https://github.com/rustls/webpki",
+          "license_notice_sha256": {
+            "LICENSE": "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a"
+          }
+        }
+      ],
+      "all_license_and_notice_bytes_identical": true
+    }
+  ],
+  "scope": "Compatible security source preparation in pending0.187.2 and KanonPR801; no native compiler, package, install or fullflow acceptance"
+}

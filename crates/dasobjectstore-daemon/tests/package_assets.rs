@@ -1033,8 +1033,8 @@ fn package_installs_das_owned_report_renderer_wrapper() {
         BUILD_RPM,
         "/usr/libexec/dasobjectstore/gnostikon-workflow-control",
     );
-    assert_contains(BUILD_RPM, "prewarm-report-provider");
-    assert_contains(
+    assert_not_contains(BUILD_RPM, "prewarm-report-provider");
+    assert_not_contains(
         BUILD_RPM,
         "grammateus_report_provider install --image grammateus/report:0.8.1",
     );
@@ -1234,9 +1234,9 @@ fn deb_postinst_rejects_user_owned_managed_root() {
         "ensure_owned_dir /var/lib/dasobjectstore/telemetry 0750",
     );
     assert_contains(POSTINST, "ensure_container_runtime_access");
-    assert_contains(POSTINST, "ensure_report_provider");
-    assert_contains(POSTINST, "prewarm-report-provider");
-    assert_contains(
+    assert_not_contains(POSTINST, "ensure_report_provider");
+    assert_not_contains(POSTINST, "prewarm-report-provider");
+    assert_not_contains(
         POSTINST,
         "grammateus_report_provider install --image grammateus/report:0.8.1",
     );
