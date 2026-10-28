@@ -14,6 +14,9 @@ class RpmManagedRootFileListTests(unittest.TestCase):
         descriptor='/opt/dasobjectstore/plugin-process-descriptor.json'
         self.assertIn('"$payload_root'+descriptor+'"',script)
         self.assertEqual(files.splitlines().count(descriptor),1)
+        for name in ('managed-storage.v1.json','s3-gateway.json','workspace-host.json'):
+            self.assertEqual(files.splitlines().count(
+                '%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/'+name),1)
 
 
 if __name__=='__main__':

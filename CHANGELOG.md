@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.187.4 - 2026-10-28
+
+- Preserve the intended 0640 RPM permissions for the managed storage, S3 gateway, and workspace host configuration files during extraction. Native RPM qualification remains required.
+
 ## 0.187.3 - 2026-10-28
 
 - Include the existing Monas managed-root traversal helper in the RPM file

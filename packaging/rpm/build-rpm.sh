@@ -428,9 +428,9 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
-%config(noreplace) /etc/dasobjectstore/managed-storage.v1.json
-%config(noreplace) /etc/dasobjectstore/s3-gateway.json
-%config(noreplace) /etc/dasobjectstore/workspace-host.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/managed-storage.v1.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/s3-gateway.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /opt/dasobjectstore/config.json
 /opt/dasobjectstore/plugin-process-descriptor.json
 %dir /etc/dasobjectstore-remote
