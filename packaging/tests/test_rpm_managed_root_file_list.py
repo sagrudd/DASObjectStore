@@ -11,6 +11,9 @@ class RpmManagedRootFileListTests(unittest.TestCase):
         spec=script.split('cat >"$spec_path" <<SPEC\n',1)[1].split('\nSPEC\n',1)[0]
         files=spec.split('\n%files\n',1)[1].split('\n%changelog\n',1)[0]
         self.assertEqual(files.splitlines().count(helper),1)
+        descriptor='/opt/dasobjectstore/plugin-process-descriptor.json'
+        self.assertIn('"$payload_root'+descriptor+'"',script)
+        self.assertEqual(files.splitlines().count(descriptor),1)
 
 
 if __name__=='__main__':

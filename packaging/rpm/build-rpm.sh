@@ -432,6 +432,7 @@ fi
 %config(noreplace) /etc/dasobjectstore/s3-gateway.json
 %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /opt/dasobjectstore/config.json
+/opt/dasobjectstore/plugin-process-descriptor.json
 %dir /etc/dasobjectstore-remote
 %dir /etc/dasobjectstore-remote/site-trust.d
 %dir /etc/dasobjectstore-remote/site-trust-sources.d
