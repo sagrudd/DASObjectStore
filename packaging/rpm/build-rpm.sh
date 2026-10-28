@@ -447,6 +447,7 @@ fi
 /usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
+/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
 /usr/libexec/dasobjectstore/verify-managed-storage-mounts
 /usr/libexec/dasobjectstore/migrate-monas-integrated-config
