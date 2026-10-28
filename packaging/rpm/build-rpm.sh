@@ -428,10 +428,11 @@ fi
 
 %files
 %config(noreplace) /etc/dasobjectstore/daemon.json
-%config(noreplace) /etc/dasobjectstore/managed-storage.v1.json
-%config(noreplace) /etc/dasobjectstore/s3-gateway.json
-%config(noreplace) /etc/dasobjectstore/workspace-host.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/managed-storage.v1.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/s3-gateway.json
+%attr(0640,root,root) %config(noreplace) /etc/dasobjectstore/workspace-host.json
 %config(noreplace) /opt/dasobjectstore/config.json
+/opt/dasobjectstore/plugin-process-descriptor.json
 %dir /etc/dasobjectstore-remote
 %dir /etc/dasobjectstore-remote/site-trust.d
 %dir /etc/dasobjectstore-remote/site-trust-sources.d
@@ -447,6 +448,7 @@ fi
 /usr/libexec/dasobjectstore/dasobjectstore-authority-retirement-finalize
 /usr/libexec/dasobjectstore/gnostikon-workflow-control
 /usr/libexec/dasobjectstore/prepare-external-mount-traversal
+/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal
 /usr/libexec/dasobjectstore/configure-external-mount-policy
 /usr/libexec/dasobjectstore/verify-managed-storage-mounts
 /usr/libexec/dasobjectstore/migrate-monas-integrated-config
