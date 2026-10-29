@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.187.5 — maintained provider candidate
+
+- Prepare the existing retirement and authentication consumers for the maintained P-256 provider, exact Pistis B01, Prosopikon Core 0.41.2, and its matching Yew source. Align the consumed Proxenos source with its maintained provider and retain high-S receipt rejection. Keep package provenance fail-closed on the exact three-package Thesaurophylax API closure. The Linux 1.94 three-package all-target check, high-S receipt regression, exact source/closure tests and package-guard fixture passed against the resolved lock. Dependency security, MSRV, native package and release qualification remain pending.
+
 ## 0.187.4 - 2026-10-28
 
 - Preserve the intended 0640 RPM permissions for the managed storage, S3 gateway, and workspace host configuration files during extraction. Native RPM qualification remains required.

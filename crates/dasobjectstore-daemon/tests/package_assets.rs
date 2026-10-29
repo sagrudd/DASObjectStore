@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "d13523430fbc7443bd73490207d33ac884c17972";
+    const REVISION: &str = "3092d8c7d39bf2ee02bd98819e9f1ade78eebb16";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -101,7 +101,7 @@ fn workspace_pins_one_prosopikon_type_identity() {
 
 #[test]
 fn workspace_pins_the_qualified_current_pistis_source() {
-    const PISTIS_REVISION: &str = "ef00ff34efbb9cfeac9298c9c77f1dc9694162cd";
+    const PISTIS_REVISION: &str = "b01d6af73d19bd5b36ba75a2e23acf03ee04eda2";
     assert_contains(
         WORKSPACE_MANIFEST,
         &format!(
@@ -119,10 +119,10 @@ fn workspace_pins_the_qualified_current_pistis_source() {
 
 #[test]
 fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.65.0";
-    const PROXENOS_REVISION: &str = "ae595ea6ca27ab312ea41fe206d2244bc5273707";
-    const THESAUROPHYLAX_VERSION: &str = "0.86.0";
-    const THESAUROPHYLAX_REVISION: &str = "e72598aae824f2bdafc20803adca73c6a6c8dcd2";
+    const PROXENOS_VERSION: &str = "0.69.3";
+    const PROXENOS_REVISION: &str = "dec0c3aafbcb76be40b8ea4eba879583ff48cd36";
+    const THESAUROPHYLAX_VERSION: &str = "0.93.1";
+    const THESAUROPHYLAX_REVISION: &str = "7ff879a8e3b09ed12d9512ec5baf4020f3ad9e85";
 
     assert_contains(
         WORKSPACE_MANIFEST,
@@ -140,7 +140,6 @@ fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
         "thesaurophylax-api",
         "thesaurophylax-core",
         "thesaurophylax-policy",
-        "thesaurophylax-store",
     ] {
         assert_locked_git_package(
             package,
@@ -149,6 +148,15 @@ fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
             THESAUROPHYLAX_REVISION,
         );
     }
+    assert_eq!(
+        WORKSPACE_LOCK
+            .lines()
+            .filter(|line| line
+                .contains("source = \"git+https://github.com/sagrudd/thesaurophylax.git?"))
+            .count(),
+        3,
+        "the selected API closure must not hide another Thesaurophylax revision"
+    );
     assert_not_contains(WORKSPACE_LOCK, "27b587001742d9e345eb94c2a6fc7ae9b8450acc");
     assert_not_contains(WORKSPACE_LOCK, "544e657a71997b92e7f0e4d1984bf4300f5dbfda");
     assert_contains(PINNED_MNEMOSYNE_SOURCES, "das_require_locked_git_package");

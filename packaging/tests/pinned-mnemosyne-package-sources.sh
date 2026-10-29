@@ -27,7 +27,7 @@ proxenos_revision="$(make_checkout "$workspace/proxenos" "thesaurophylax-api = {
 
 mkdir -p "$workspace/dasobjectstore"
 cat >"$workspace/dasobjectstore/Cargo.toml" <<EOF
-prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
+prosopikon-core = { version = "=0.41.2", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
 proxenos = { version = "=0.57.0", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
 EOF
 cat >"$workspace/dasobjectstore/Cargo.lock" <<EOF
@@ -52,11 +52,6 @@ source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_
 name = "thesaurophylax-policy"
 version = "0.72.3"
 source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_revision#$thesaurophylax_revision"
-
-[[package]]
-name = "thesaurophylax-store"
-version = "0.72.3"
-source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_revision#$thesaurophylax_revision"
 EOF
 
 source "$source_helper"
@@ -74,7 +69,7 @@ expected="{\"schema\":\"mnemosyne.dasobjectstore.package-dependencies.v2\",\"pro
 
 valid_manifest="$(<"$workspace/dasobjectstore/Cargo.toml")"
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
-printf '%s\n' "${valid_manifest/=0.39.0/=0.39.1}" >"$workspace/dasobjectstore/Cargo.toml"
+printf '%s\n' "${valid_manifest/=0.41.2/=0.41.3}" >"$workspace/dasobjectstore/Cargo.toml"
 if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
   printf 'pinned source validation accepted a wrong Prosopikon version\n' >&2
   exit 1
@@ -95,6 +90,30 @@ if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>
 fi
 
 printf '%s\n' "$valid_lock" >"$workspace/dasobjectstore/Cargo.lock"
+cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
+
+[[package]]
+name = "thesaurophylax-api"
+version = "0.93.1"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$pistis_revision#$pistis_revision"
+EOF
+if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
+  printf 'pinned source validation accepted an additional Thesaurophylax revision\n' >&2
+  exit 1
+fi
+printf '%s\n' "$valid_lock" >"$workspace/dasobjectstore/Cargo.lock"
+cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
+
+[[package]]
+name = "thesaurophylax-store"
+version = "0.72.3"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_revision#$thesaurophylax_revision"
+EOF
+if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
+  printf 'pinned source validation accepted an additional Thesaurophylax package\n' >&2
+  exit 1
+fi
+printf '%s\n' "$valid_lock" >"$workspace/dasobjectstore/Cargo.lock"
 
 printf '# uncommitted fixture drift\n' >>"$workspace/proxenos/Cargo.toml"
 if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
@@ -102,4 +121,4 @@ if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>
   exit 1
 fi
 
-printf 'pinned source validation: supported projection and four independent denials passed\n'
+printf 'pinned source validation: supported projection and six independent denials passed\n'
