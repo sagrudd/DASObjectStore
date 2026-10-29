@@ -357,7 +357,7 @@ pub fn verify_das_replacement_receipt_v1(
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::ReceiptDenied)?;
     let signature = Signature::from_slice(&cose.signature)
         .map_err(|_| DasLocalAuthorityRetirementErrorV1::ReceiptDenied)?;
-    if signature.normalize_s().is_some() {
+    if signature.normalize_s() != signature {
         return Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied);
     }
     cose.verify_signature(&[], |sig, tbs| {
@@ -666,7 +666,7 @@ mod tests {
     fn expectation(signing: &SigningKey) -> DasReplacementReceiptExpectationV1 {
         let public_key_sec1 = signing
             .verifying_key()
-            .to_encoded_point(true)
+            .to_sec1_point(true)
             .as_bytes()
             .try_into()
             .unwrap();
@@ -780,11 +780,7 @@ mod tests {
             .payload(payload)
             .create_signature(&[], |tbs| {
                 let signature: Signature = signing.sign(tbs);
-                signature
-                    .normalize_s()
-                    .unwrap_or(signature)
-                    .to_bytes()
-                    .to_vec()
+                signature.normalize_s().to_bytes().to_vec()
             })
             .build()
             .to_vec()
@@ -803,6 +799,25 @@ mod tests {
         changed.monas_package_sha256 = [99; 32];
         assert_eq!(
             verify_das_replacement_receipt_v1(&bytes, &changed),
+            Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied)
+        );
+    }
+
+    #[test]
+    fn rejects_high_s_twin_of_valid_receipt_signature() {
+        let signing = SigningKey::from_bytes((&[3; 32]).into()).unwrap();
+        let expected = expectation(&signing);
+        let bytes = receipt(&signing, &expected);
+        assert!(verify_das_replacement_receipt_v1(&bytes, &expected).is_ok());
+
+        let mut cose = CoseSign1::from_slice(&bytes).unwrap();
+        let low = Signature::from_slice(&cose.signature).unwrap();
+        assert_eq!(low.normalize_s(), low);
+        let high = Signature::from_scalars(low.r().to_bytes(), (-low.s()).to_bytes()).unwrap();
+        assert_ne!(high.normalize_s(), high);
+        cose.signature = high.to_bytes().to_vec();
+        assert_eq!(
+            verify_das_replacement_receipt_v1(&cose.to_vec().unwrap(), &expected),
             Err(DasLocalAuthorityRetirementErrorV1::ReceiptDenied)
         );
     }

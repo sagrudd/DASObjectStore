@@ -21,7 +21,7 @@ das_package_configure_pinned_mnemosyne_sources() {
   pistis_root="$workspace_root/pistis"
   proxenos_root="$workspace_root/proxenos"
   thesaurophylax_root="$workspace_root/thesaurophylax"
-  prosopikon_revision="$(sed -n 's/^prosopikon-core = { version = "=0\.39\.0", git = "https:\/\/github.com\/sagrudd\/prosopikon.git", rev = "\([0-9a-f]\{40\}\)" }$/\1/p' "$repo_root/Cargo.toml")"
+  prosopikon_revision="$(sed -n 's/^prosopikon-core = { version = "=0\.41\.2", git = "https:\/\/github.com\/sagrudd\/prosopikon.git", rev = "\([0-9a-f]\{40\}\)" }$/\1/p' "$repo_root/Cargo.toml")"
   proxenos_contract="$(sed -n 's/^proxenos = { version = "=\([0-9][0-9.]*\)", git = "https:\/\/github.com\/sagrudd\/proxenos.git", rev = "\([0-9a-f]\{40\}\)" }$/\1 \2/p' "$repo_root/Cargo.toml")"
 
   if [[ ! "$prosopikon_revision" =~ ^[0-9a-f]{40}$ ]]; then
@@ -63,7 +63,12 @@ das_package_configure_pinned_mnemosyne_sources() {
   das_require_locked_git_package "$repo_root/Cargo.lock" "thesaurophylax-api" "$thesaurophylax_version" "$thesaurophylax_revision" "Thesaurophylax API" || return 1
   das_require_locked_git_package "$repo_root/Cargo.lock" "thesaurophylax-core" "$thesaurophylax_version" "$thesaurophylax_revision" "Thesaurophylax core" || return 1
   das_require_locked_git_package "$repo_root/Cargo.lock" "thesaurophylax-policy" "$thesaurophylax_version" "$thesaurophylax_revision" "Thesaurophylax policy" || return 1
-  das_require_locked_git_package "$repo_root/Cargo.lock" "thesaurophylax-store" "$thesaurophylax_version" "$thesaurophylax_revision" "Thesaurophylax store" || return 1
+  # The maintained API closure has exactly API, core and policy; reject any
+  # extra Thesaurophylax Git package rather than emitting incomplete provenance.
+  if [[ "$(grep -c '^source = "git+https://github.com/sagrudd/thesaurophylax.git?' "$repo_root/Cargo.lock" || true)" != "3" ]]; then
+    printf 'DASObjectStore package build requires exactly the selected three Thesaurophylax source records\n' >&2
+    return 1
+  fi
   export DAS_PACKAGE_PROSOPIKON_REVISION="$prosopikon_revision"
   export DAS_PACKAGE_PISTIS_REVISION="$pistis_revisions"
   export DAS_PACKAGE_PROXENOS_REVISION="$proxenos_revision"
