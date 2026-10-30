@@ -1,9 +1,10 @@
 {
   "schema_version": "dasobjectstore.monas-profile-readiness-observer.v1",
-  "contract_version": "1.0.0",
+  "contract_version": "1.1.0",
   "producer": {
     "product_id": "dasobjectstore",
-    "compatible_package_range": ">=0.186.35,<0.187.0"
+    "compatible_package_range": ">=0.186.35,<0.187.0",
+    "additional_exact_package_versions": ["0.188.0"]
   },
   "readiness_evidence": {
     "schema_version": "dasobjectstore.profile_readiness.v1",

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.188.0 — proposed exact limited-profile producer
+
+- Preserve the existing limited-profile producer range and declare this source
+  version as an additional exact candidate. Cross-product conformance, Kanon
+  admission, native package and runtime qualification remain outstanding.
+
 ## 0.187.5 — maintained provider candidate
 
 - Prepare the existing retirement and authentication consumers for the maintained P-256 provider, exact Pistis B01, Prosopikon Core 0.41.2, and its matching Yew source. Align the consumed Proxenos source with its maintained provider and retain high-S receipt rejection. Keep package provenance fail-closed on the exact three-package Thesaurophylax API closure. The Linux 1.94 three-package all-target check, high-S receipt regression, exact source/closure tests and package-guard fixture passed against the resolved lock. Dependency security, MSRV, native package and release qualification remain pending.

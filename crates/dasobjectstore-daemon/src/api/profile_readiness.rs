@@ -12,13 +12,13 @@ pub const PROFILE_READINESS_ROUTE: &str = "/api/v1/profile-readiness/stores/{sto
 /// qualification statement.
 pub const PHOREUS_LIMITED_PROFILE_BINDING_CONTRACT: &str =
     "dasobjectstore.phoreus-limited-profile-binding.v1";
-pub const PHOREUS_LIMITED_PROFILE_BINDING_VERSION: &str = "1.0.2";
+pub const PHOREUS_LIMITED_PROFILE_BINDING_VERSION: &str = "1.1.0";
 /// The single daemon-owned declaration for the preverified Monas peer's
 /// read-only readiness observation. It is deliberately narrower than store
 /// read authorization, human authority, or any application capability.
 pub const MONAS_PROFILE_READINESS_OBSERVER_CONTRACT: &str =
     "dasobjectstore.monas-profile-readiness-observer.v1";
-pub const MONAS_PROFILE_READINESS_OBSERVER_VERSION: &str = "1.0.0";
+pub const MONAS_PROFILE_READINESS_OBSERVER_VERSION: &str = "1.1.0";
 pub const MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS: [&str; 2] = ["phoreus", "ergasterion"];
 
 pub fn is_monas_profile_readiness_store(store_id: &str) -> bool {
@@ -224,10 +224,16 @@ mod tests {
             env!("CARGO_PKG_VERSION_MINOR").parse::<u64>().unwrap(),
             env!("CARGO_PKG_VERSION_PATCH").parse::<u64>().unwrap(),
         );
-        assert_eq!(current, (0, 187, 2));
+        assert_eq!(current, (0, 188, 0));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 38)));
         assert!(((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 39)));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&current));
+        let exact = declaration["producer"]["additional_exact_package_versions"]
+            .as_array()
+            .expect("exact producer versions");
+        assert_eq!(exact.len(), 1);
+        assert_eq!(exact[0], "0.188.0");
+        assert!(!exact.iter().any(|version| version == "0.187.9" || version == "0.188.1" || version == "0.188.0-rc.1"));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 40)));
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
@@ -258,6 +264,7 @@ mod tests {
             declaration["readiness_evidence"]["allowed_store_ids"],
             serde_json::json!(MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS)
         );
+        assert_eq!(declaration["producer"]["additional_exact_package_versions"], serde_json::json!(["0.188.0"]));
         assert!(is_monas_profile_readiness_store("ergasterion"));
         assert!(is_monas_profile_readiness_store("phoreus"));
         assert!(!is_monas_profile_readiness_store("ergasterion-extra"));

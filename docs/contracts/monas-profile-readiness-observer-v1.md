@@ -13,6 +13,12 @@ the existing `dasobjectstore.profile_readiness.v1` route
 `mnemosyne-monas` identity from the Unix peer credential; it never accepts a
 caller-supplied identity or group as equivalent.
 
+Revision `1.1.0` retains the existing package range and adds `0.188.0` as an
+exact source candidate. A consumer implementing this revision accepts the
+union of the range and exact strings and rejects unrecognised fields or
+semantics. Adjacent, pre-release and build-suffixed strings do not match the
+exact entry. This declaration alone does not qualify an artifact or host.
+
 `ergasterion-extra`, case variants, and every other unlisted store identifier
 are refused before a profile binding can be inspected. A permitted request for
 an absent profile receives `profile_binding_not_found`, which is not readiness
