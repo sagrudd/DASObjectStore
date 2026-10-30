@@ -233,7 +233,9 @@ mod tests {
             .expect("exact producer versions");
         assert_eq!(exact.len(), 1);
         assert_eq!(exact[0], "0.188.0");
-        assert!(!exact.iter().any(|version| version == "0.187.9" || version == "0.188.1" || version == "0.188.0-rc.1"));
+        assert!(!exact.iter().any(|version| version == "0.187.9"
+            || version == "0.188.1"
+            || version == "0.188.0-rc.1"));
         assert!(!((0, 186, 39)..(0, 186, 40)).contains(&(0, 186, 40)));
         assert_eq!(
             declaration["readiness_evidence"]["schema_version"],
@@ -264,7 +266,10 @@ mod tests {
             declaration["readiness_evidence"]["allowed_store_ids"],
             serde_json::json!(MONAS_PROFILE_READINESS_ALLOWED_STORE_IDS)
         );
-        assert_eq!(declaration["producer"]["additional_exact_package_versions"], serde_json::json!(["0.188.0"]));
+        assert_eq!(
+            declaration["producer"]["additional_exact_package_versions"],
+            serde_json::json!(["0.188.0"])
+        );
         assert!(is_monas_profile_readiness_store("ergasterion"));
         assert!(is_monas_profile_readiness_store("phoreus"));
         assert!(!is_monas_profile_readiness_store("ergasterion-extra"));
