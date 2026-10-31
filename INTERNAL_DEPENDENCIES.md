@@ -1,6 +1,6 @@
 # Internal dependency catalogue
 
-## Current 0.187.1 source preparation
+## Current 0.188.0 source preparation
 
 This compatible successor starts from normally merged DASObjectStore 0.187.0
 `7577eb6cd56e67ac547e2239a5da03fd800f9c2a`. Core and Yew now select normally

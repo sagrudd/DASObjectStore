@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.188.0 — first-install storage bootstrap candidate
+
+- Add a root-only, one-shot daemon bootstrap path that prepares only two
+  explicitly selected, signature-free whole devices, initializes the SSD pool
+  metadata, writes UUID-backed mounts and the storage manifest, then starts the
+  fail-closed storage readiness verifier and daemon. A root-owned journal binds
+  resume to the original device identities, requires a separate explicit
+  confirmation before retrying an interrupted format, and keeps a completed
+  invocation from formatting again. It also verifies protected `/etc/fstab`
+  identity and contents before replacing managed entries, takes an exclusive
+  bootstrap lock, and revalidates device identities before each media command.
+  Each device must be at least 1 GiB. This is a source candidate; Kanon
+  successor resolution, independent review, package acceptance, and installed
+  first-install validation remain pending.
+
 ## 0.187.1 — compatible source patch
 
 - Select normal Prosopikon `d13523430fbc7443bd73490207d33ac884c17972` (core 0.39.0, Yew 0.4.0) so the public current-actor adapter shares the same Rust type identity as Monas 0.142. Preserve actor verification, wire formats, storage and crypto behavior.
