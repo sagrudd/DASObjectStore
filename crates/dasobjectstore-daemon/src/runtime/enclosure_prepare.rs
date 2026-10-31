@@ -15,6 +15,19 @@ pub(super) fn prepare_enclosure<R: ServiceCommandRunner>(
     request: PrepareEnclosureRequest,
     accepted_at_utc: &str,
 ) -> Result<PrepareEnclosureResponse, DaemonServiceRuntimeError> {
+    prepare_enclosure_with_guard(runner, request, accepted_at_utc, |_| Ok(()))
+}
+
+pub(super) fn prepare_enclosure_with_guard<R, G>(
+    runner: &R,
+    request: PrepareEnclosureRequest,
+    accepted_at_utc: &str,
+    device_guard: G,
+) -> Result<PrepareEnclosureResponse, DaemonServiceRuntimeError>
+where
+    R: ServiceCommandRunner,
+    G: Fn(&Path) -> Result<(), String>,
+{
     request
         .validate()
         .map_err(|error| DaemonServiceRuntimeError::UnsupportedOperation {
@@ -38,7 +51,7 @@ pub(super) fn prepare_enclosure<R: ServiceCommandRunner>(
 
     let mut planned_commands = Vec::new();
     for device in &devices {
-        planned_commands.extend(prepare_device(runner, &request, device)?);
+        planned_commands.extend(prepare_device(runner, &request, device, &device_guard)?);
     }
 
     let job_id_value = format!(
@@ -78,6 +91,7 @@ fn prepare_device<R: ServiceCommandRunner>(
     runner: &R,
     request: &PrepareEnclosureRequest,
     device: &Device,
+    device_guard: &impl Fn(&Path) -> Result<(), String>,
 ) -> Result<Vec<String>, DaemonServiceRuntimeError> {
     let partition_path = partition_path_for(&device.device_path);
     let mount_point = mount_point_for_role(&request.mount_root, &device.role);
@@ -144,6 +158,13 @@ fn prepare_device<R: ServiceCommandRunner>(
     let planned_commands = commands.iter().map(Command::render).collect();
     if !request.dry_run {
         for command in commands {
+            device_guard(&device.device_path).map_err(|error| {
+                DaemonServiceRuntimeError::UnsupportedOperation {
+                    operation: format!(
+                        "device identity changed during enclosure preparation: {error}"
+                    ),
+                }
+            })?;
             runner.run(&command.program, &command.args)?;
         }
         write_device_marker(&mount_point, device, request.filesystem)?;

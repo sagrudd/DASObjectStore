@@ -59,6 +59,41 @@ The default mount root is ``/srv/dasobjectstore``. The SSD root is normally
 ``/srv/dasobjectstore/ssd`` and HDD members are mounted under the same managed
 tree.
 
+First Install
+-------------
+
+On a new installation only, the packaged daemon has a separate bootstrap
+operation because its normal start is correctly held behind the complete
+storage-ready check. It accepts one blank SSD-role device and one blank HDD-role
+device, each at least 1 GiB. It rejects existing signatures, partitions,
+mountpoints, non-template storage manifests, and occupied managed mount roots.
+The operation still destroys the selected devices, so use it only for newly
+allocated blank media and supply both explicit confirmations:
+
+.. code-block:: console
+
+   sudo dasobjectstored bootstrap-storage \
+     --ssd-device /dev/disk/by-id/<new-ssd-device> \
+     --hdd-device /dev/disk/by-id/<new-hdd-device> \
+     --allow-format \
+     --acknowledge-blank-devices \
+     --confirm "confirm bootstrap das"
+
+This one-shot daemon mode prepares the enclosure, initializes the SSD pool
+metadata, writes UUID-based persistent mounts and the managed-storage manifest,
+then starts the storage-ready verifier and normal daemon. A root-owned journal
+binds an interrupted operation to the original device paths, device numbers,
+sizes and sysfs identities. Resume only that operation with the same device
+paths and confirmations plus ``--resume`` and
+``--confirm-resume-reformat "confirm resume reformat das"``. This separate
+confirmation explicitly permits reformatting those same journaled devices
+after an interrupted preparation. If the identity changed or the manifest is
+no longer the first-install template, the command refuses to format. A
+completed journal can be resumed without formatting. It cannot be used to
+replace or reconfigure an existing enclosure. For development VM
+surrogates, these devices remain virtual and must not be described as physical
+disks.
+
 ``--allow-format`` permits the destructive preparation policy. The separate
 ``--acknowledge-existing-data`` flag records that the operator understands the
 selected media may already contain data that will be destroyed by preparation.

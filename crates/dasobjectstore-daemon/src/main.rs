@@ -1,3 +1,5 @@
+mod storage_bootstrap;
+
 use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
@@ -183,7 +185,11 @@ fn validate_sqlite_backup(path: &Path) -> Result<(), String> {
 }
 
 fn run() -> Result<(), String> {
-    let args = DaemonArgs::parse(env::args().skip(1))?;
+    let argv = env::args().skip(1).collect::<Vec<_>>();
+    if argv.first().is_some_and(|arg| arg == "bootstrap-storage") {
+        return storage_bootstrap::run(&argv[1..]);
+    }
+    let args = DaemonArgs::parse(argv)?;
     if args.help {
         print_help();
         return Ok(());
@@ -1064,7 +1070,7 @@ fn read_config(path: &PathBuf) -> Result<DaemonRuntimeConfig, String> {
 }
 
 fn print_help() {
-    println!("Usage: dasobjectstored [--config <PATH>] [--check-config]");
+    println!("Usage: dasobjectstored [--config <PATH>] [--check-config]\n       dasobjectstored bootstrap-storage --help");
 }
 
 #[derive(Debug)]

@@ -66,6 +66,34 @@ mod workspace_materialize;
 mod workspace_promotion;
 mod workspace_provision;
 
+/// Perform the one-shot initial enclosure preparation used before the daemon
+/// can pass its managed-storage readiness gate. This entry point is reserved
+/// for the root-only `dasobjectstored bootstrap-storage` mode.
+pub fn bootstrap_initial_enclosure(
+    request: crate::api::PrepareEnclosureRequest,
+    accepted_at_utc: &str,
+) -> Result<crate::api::PrepareEnclosureResponse, String> {
+    enclosure_prepare::prepare_enclosure(&SystemServiceCommandRunner, request, accepted_at_utc)
+        .map_err(|error| error.to_string())
+}
+
+pub fn bootstrap_initial_enclosure_with_guard<G>(
+    request: crate::api::PrepareEnclosureRequest,
+    accepted_at_utc: &str,
+    device_guard: G,
+) -> Result<crate::api::PrepareEnclosureResponse, String>
+where
+    G: Fn(&std::path::Path) -> Result<(), String>,
+{
+    enclosure_prepare::prepare_enclosure_with_guard(
+        &SystemServiceCommandRunner,
+        request,
+        accepted_at_utc,
+        device_guard,
+    )
+    .map_err(|error| error.to_string())
+}
+
 pub use exact_source_continuity::{
     exact_source_continuity_source_response, exact_source_continuity_source_wire_response,
     exact_source_continuity_unavailable,

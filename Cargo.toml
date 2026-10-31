@@ -18,7 +18,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.187.1"
+version = "0.188.0"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -33,18 +33,18 @@ bytes = "1.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 clap = { version = "4.5.48", features = ["derive"] }
 crossterm = "0.29.0"
-dasobjectstore-core = { path = "crates/dasobjectstore-core", version = "=0.187.1"}
-dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon", version = "=0.187.1"}
-dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api", version = "=0.187.1"}
-dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web", version = "=0.187.1"}
-dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata", version = "=0.187.1"}
-dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne", version = "=0.187.1"}
-dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service", version = "=0.187.1"}
-dasobjectstore-platform = { path = "crates/dasobjectstore-platform", version = "=0.187.1"}
-dasobjectstore-reference = { path = "crates/dasobjectstore-reference", version = "=0.187.1"}
-dasobjectstore-remote = { path = "crates/dasobjectstore-remote", version = "=0.187.1"}
-dasobjectstore-tui = { path = "crates/dasobjectstore-tui", version = "=0.187.1"}
-dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host", version = "=0.187.1"}
+dasobjectstore-core = { path = "crates/dasobjectstore-core", version = "=0.188.0"}
+dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon", version = "=0.188.0"}
+dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api", version = "=0.188.0"}
+dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web", version = "=0.188.0"}
+dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata", version = "=0.188.0"}
+dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne", version = "=0.188.0"}
+dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service", version = "=0.188.0"}
+dasobjectstore-platform = { path = "crates/dasobjectstore-platform", version = "=0.188.0"}
+dasobjectstore-reference = { path = "crates/dasobjectstore-reference", version = "=0.188.0"}
+dasobjectstore-remote = { path = "crates/dasobjectstore-remote", version = "=0.188.0"}
+dasobjectstore-tui = { path = "crates/dasobjectstore-tui", version = "=0.188.0"}
+dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host", version = "=0.188.0"}
 gloo-net = "0.5.0"
 gloo-timers = "0.3.0"
 flate2 = "1.1.5"

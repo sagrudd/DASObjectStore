@@ -58,6 +58,13 @@ Work is dependency ordered. Only these entries define open release work:
 
 ### Tier 0 — MVP release-candidate blockers
 
+- `[~]` First-install DAS storage bootstrap — the `0.188.0` source candidate
+  adds a confirmed root-only one-shot which prepares explicit blank SSD/HDD
+  devices before the ordinary daemon can pass its storage-ready dependency.
+  Kanon successor lockset and Terraform projection, independent review,
+  accepted package, installed VM surrogate, and the downstream Monas
+  first-install/TLS verification remain open.
+
 - [x] **EPIC A — release baseline and planning authority.** Restored all
   repository source gates, split every newly oversized production module,
   reviewed rather than silently expanded legacy module exceptions, removed stale
