@@ -32,6 +32,25 @@ for builder in packaging/debian/build-deb.sh packaging/rpm/build-rpm.sh; do
   grep -Fq 'plugin-process-descriptor.json' "$repo_root/$builder"
 done
 
+# The RPM stages these assets before rpmbuild; assert they are also declared
+# in the actual %files payload, not merely mentioned by the staging commands.
+python3 - "$repo_root/packaging/rpm/build-rpm.sh" <<'PYFILES'
+import sys
+from pathlib import Path
+
+spec = Path(sys.argv[1]).read_text(encoding="utf-8")
+try:
+    files = spec.split("\n%files\n", 1)[1].split("\n%changelog", 1)[0]
+except IndexError:
+    raise SystemExit("RPM payload regression: %files section is missing")
+for path in (
+    "/opt/dasobjectstore/plugin-process-descriptor.json",
+    "/usr/libexec/dasobjectstore/prepare-monas-managed-root-traversal",
+):
+    if path not in files.splitlines():
+        raise SystemExit(f"RPM payload regression: {path} is not listed in %files")
+PYFILES
+
 fixture="$(mktemp -d)"
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/crates/example"

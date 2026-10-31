@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.188.1 - RPM payload manifest correction
+
+- Include the staged plugin process descriptor and managed-root traversal helper in the RPM file list. This patch corrects the package payload for the 0.188.0 first-install storage bootstrap candidate; it does not change bootstrap behavior.
+
 ## 0.188.0 — first-install storage bootstrap candidate
 
 - Add a root-only, one-shot daemon bootstrap path that prepares only two
