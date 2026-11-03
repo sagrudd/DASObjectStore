@@ -1,18 +1,14 @@
 # Internal dependency catalogue
 
-## Current 0.188.2 source preparation
+## Current 0.188.3 source preparation
 
-The 0.188.2 candidate resolves the package workspace to Prosopikon core
-`81226cd872290247404ba8f695addf011fd47879` (0.45.1) and Yew 0.4.0, Pistis
-`b01d6af73d19bd5b36ba75a2e23acf03ee04eda2`, Proxenos
-`d0715fb32cdc0bd77590e7b3edcdef03778a897e` (0.70.4), and Proxenos'
-Thesaurophylax 0.86.1 closure at
-`ad40c6d2cf1f9fbb9507c4ee687132c783e92889`. Its lock also contains
-Thesaurophylax 0.93.1 at
-`7ff879a8e3b09ed12d9512ec5baf4020f3ad9e85` through Prosopikon. The Monas
-0.147.5 candidate separately pins Thesaurophylax 0.94.5 for its direct source
-contract; all three resolved edges must be represented in the coordinated
-Kanon lockset. Source, package, and runtime acceptance remain separate gates.
+The 0.188.3 candidate resolves Proxenos 0.70.7 at `0024b3b6a52a01fb56a0da2939cf448aeaff0aa9`, Thesaurophylax
+API 0.94.6 at `bd34ae4ae412ba38b9922df70d0f52fd97b13ad2`, Prosopikon Core 0.47.0 at
+`f522d685b4577c26747755318b7674f65560e941`, and Pistis main at
+`e80a54abc51b9fca3be74226bad28586c9a6a465`. The exact Cargo-generated lock,
+all-target checks, package-source guard, security review, Kanon closure, and
+Monas consumer acceptance remain separate required gates. This source update
+does not imply installation, authority, or release support.
 
 ## Historical 0.188.0 source preparation
 

@@ -18,7 +18,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.188.2"
+version = "0.188.3"
 edition = "2021"
 license = "MPL-2.0"
 repository = "https://github.com/sagrudd/DASObjectStore"
@@ -33,18 +33,18 @@ bytes = "1.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 clap = { version = "4.5.48", features = ["derive"] }
 crossterm = "0.29.0"
-dasobjectstore-core = { path = "crates/dasobjectstore-core", version = "=0.188.2"}
-dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon", version = "=0.188.2"}
-dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api", version = "=0.188.2"}
-dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web", version = "=0.188.2"}
-dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata", version = "=0.188.2"}
-dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne", version = "=0.188.2"}
-dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service", version = "=0.188.2"}
-dasobjectstore-platform = { path = "crates/dasobjectstore-platform", version = "=0.188.2"}
-dasobjectstore-reference = { path = "crates/dasobjectstore-reference", version = "=0.188.2"}
-dasobjectstore-remote = { path = "crates/dasobjectstore-remote", version = "=0.188.2"}
-dasobjectstore-tui = { path = "crates/dasobjectstore-tui", version = "=0.188.2"}
-dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host", version = "=0.188.2"}
+dasobjectstore-core = { path = "crates/dasobjectstore-core", version = "=0.188.3"}
+dasobjectstore-daemon = { path = "crates/dasobjectstore-daemon", version = "=0.188.3"}
+dasobjectstore-gui-api = { path = "crates/dasobjectstore-gui-api", version = "=0.188.3"}
+dasobjectstore-gui-web = { path = "crates/dasobjectstore-gui-web", version = "=0.188.3"}
+dasobjectstore-metadata = { path = "crates/dasobjectstore-metadata", version = "=0.188.3"}
+dasobjectstore-mnemosyne = { path = "crates/dasobjectstore-mnemosyne", version = "=0.188.3"}
+dasobjectstore-object-service = { path = "crates/dasobjectstore-object-service", version = "=0.188.3"}
+dasobjectstore-platform = { path = "crates/dasobjectstore-platform", version = "=0.188.3"}
+dasobjectstore-reference = { path = "crates/dasobjectstore-reference", version = "=0.188.3"}
+dasobjectstore-remote = { path = "crates/dasobjectstore-remote", version = "=0.188.3"}
+dasobjectstore-tui = { path = "crates/dasobjectstore-tui", version = "=0.188.3"}
+dasobjectstore-workspace-host = { path = "crates/dasobjectstore-workspace-host", version = "=0.188.3"}
 gloo-net = "0.5.0"
 gloo-timers = "0.3.0"
 flate2 = "1.1.5"
@@ -53,11 +53,11 @@ getrandom_03 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"
 js-sys = "0.3.83"
 plist = "1"
 p256 = { version = "=0.14.0", features = ["ecdsa"] }
-proxenos = { version = "=0.70.4", git = "https://github.com/sagrudd/proxenos.git", rev = "d0715fb32cdc0bd77590e7b3edcdef03778a897e" }
+proxenos = { version = "=0.70.7", git = "https://github.com/sagrudd/proxenos.git", rev = "0024b3b6a52a01fb56a0da2939cf448aeaff0aa9" }
 coset = "0.3.8"
-pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "b01d6af73d19bd5b36ba75a2e23acf03ee04eda2", version = "=0.1.1" }
-prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "81226cd872290247404ba8f695addf011fd47879" }
-prosopikon-yew = { version = "=0.4.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "81226cd872290247404ba8f695addf011fd47879" }
+pistis-canonical = { git = "https://github.com/sagrudd/pistis.git", rev = "e80a54abc51b9fca3be74226bad28586c9a6a465", version = "=0.1.1" }
+prosopikon-core = { version = "=0.47.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "f522d685b4577c26747755318b7674f65560e941" }
+prosopikon-yew = { version = "=0.4.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "f522d685b4577c26747755318b7674f65560e941" }
 rcgen = "0.14.8"
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 ratatui = "0.30.2"
