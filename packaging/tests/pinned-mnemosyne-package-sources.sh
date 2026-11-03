@@ -33,7 +33,7 @@ proxenos_revision="$(make_checkout "$workspace/proxenos" "thesaurophylax-api = {
 
 mkdir -p "$workspace/dasobjectstore"
 cat >"$workspace/dasobjectstore/Cargo.toml" <<EOF
-prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
+prosopikon-core = { version = "=0.47.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
 proxenos = { version = "=0.57.0", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
 EOF
 cat >"$workspace/dasobjectstore/Cargo.lock" <<EOF
@@ -122,7 +122,7 @@ expected="{\"schema\":\"mnemosyne.dasobjectstore.package-dependencies.v2\",\"pro
 
 valid_manifest="$(<"$workspace/dasobjectstore/Cargo.toml")"
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
-printf '%s\n' "${valid_manifest/=0.45.1/=0.45.2}" >"$workspace/dasobjectstore/Cargo.toml"
+printf '%s\n' "${valid_manifest/=0.47.0/=0.47.1}" >"$workspace/dasobjectstore/Cargo.toml"
 if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
   printf 'pinned source validation accepted a wrong Prosopikon version\n' >&2
   exit 1
