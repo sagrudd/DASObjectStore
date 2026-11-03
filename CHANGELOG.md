@@ -6,6 +6,8 @@
   canonical source to protected-main `e80a54a`; regenerate the locked graph.
 - Advance all workspace crates and the product/plugin identity metadata to
   0.188.3. No stored format, wire contract, or custody behavior changes.
+- Bind the Phoreus source-candidate compatibility check to this 0.188.3
+  candidate while preserving its independently versioned 0.186.39 range.
 - This source candidate remains subject to exact-head review, dependency and
   security qualification, Kanon coordination, and consumer validation.
 
@@ -14,8 +16,6 @@
 - Move DASObjectStore's direct P-256 consumer to 0.14.0 and update low-S
   receipt verification for the new API. Preserve rejection of non-normalized
   signatures and canonical compressed public keys.
-- Bind the Phoreus source-candidate compatibility check to this 0.188.3
-  candidate while preserving its independently versioned 0.186.39 range.
 - Refresh the product manifest and packaged plugin descriptor to 0.188.2 so
   installed identity matches the source and RPM metadata.
 - This source candidate remains subject to Kanon coordination, complete
