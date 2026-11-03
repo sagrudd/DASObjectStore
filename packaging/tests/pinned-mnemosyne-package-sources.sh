@@ -21,13 +21,19 @@ make_checkout() {
 }
 
 pistis_revision="$(make_checkout "$workspace/pistis" 'name = "pistis-fixture"')"
+prosopikon_thesaurophylax_revision="$(make_checkout "$workspace/prosopikon-thesaurophylax" 'name = "thesaurophylax-prosopikon-fixture"')"
 prosopikon_revision="$(make_checkout "$workspace/prosopikon" "pistis-canonical = { git = \"https://github.com/sagrudd/pistis.git\", rev = \"$pistis_revision\" }")"
+mkdir -p "$workspace/prosopikon/crates/prosopikon-core"
+printf '%s\n' "thesaurophylax-api = { git = \"https://github.com/sagrudd/thesaurophylax.git\", rev = \"$prosopikon_thesaurophylax_revision\", optional = true }" >"$workspace/prosopikon/crates/prosopikon-core/Cargo.toml"
+git -C "$workspace/prosopikon" add crates/prosopikon-core/Cargo.toml
+git -C "$workspace/prosopikon" -c user.name=package-test -c user.email=package-test@example.invalid commit -qm fixture-thesaurophylax
+prosopikon_revision="$(git -C "$workspace/prosopikon" rev-parse HEAD)"
 thesaurophylax_revision="$(make_checkout "$workspace/thesaurophylax" 'name = "thesaurophylax-fixture"')"
 proxenos_revision="$(make_checkout "$workspace/proxenos" "thesaurophylax-api = { version = \"=0.72.3\", git = \"https://github.com/sagrudd/thesaurophylax.git\", rev = \"$thesaurophylax_revision\" }")"
 
 mkdir -p "$workspace/dasobjectstore"
 cat >"$workspace/dasobjectstore/Cargo.toml" <<EOF
-prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
+prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
 proxenos = { version = "=0.57.0", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
 EOF
 cat >"$workspace/dasobjectstore/Cargo.lock" <<EOF
@@ -57,6 +63,21 @@ source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_
 name = "thesaurophylax-store"
 version = "0.72.3"
 source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_revision#$thesaurophylax_revision"
+
+[[package]]
+name = "thesaurophylax-api"
+version = "0.93.1"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$prosopikon_thesaurophylax_revision#$prosopikon_thesaurophylax_revision"
+
+[[package]]
+name = "thesaurophylax-core"
+version = "0.93.1"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$prosopikon_thesaurophylax_revision#$prosopikon_thesaurophylax_revision"
+
+[[package]]
+name = "thesaurophylax-policy"
+version = "0.93.1"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$prosopikon_thesaurophylax_revision#$prosopikon_thesaurophylax_revision"
 EOF
 
 source "$source_helper"
@@ -67,6 +88,33 @@ das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore"
 [[ "$DAS_PACKAGE_PROXENOS_REVISION" == "$proxenos_revision" ]]
 [[ "$DAS_PACKAGE_THESAUROPHYLAX_REVISION" == "$thesaurophylax_revision" ]]
 
+valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
+cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
+
+[[package]]
+name = "thesaurophylax-store"
+version = "0.99.0"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$prosopikon_thesaurophylax_revision#$prosopikon_thesaurophylax_revision"
+EOF
+if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
+  printf 'pinned source validation accepted an unexpected Thesaurophylax lock edge\n' >&2
+  exit 1
+fi
+printf '%s\n' "$valid_lock" >"$workspace/dasobjectstore/Cargo.lock"
+
+cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
+
+[[package]]
+name = "proxenos"
+version = "0.99.0"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=$pistis_revision#$pistis_revision"
+EOF
+if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
+  printf 'pinned source validation accepted a duplicate Proxenos lock entry\n' >&2
+  exit 1
+fi
+printf '%s\n' "$valid_lock" >"$workspace/dasobjectstore/Cargo.lock"
+
 artifact="$workspace/dasobjectstore/test.deb"
 das_package_write_pinned_dependency_provenance "$artifact"
 expected="{\"schema\":\"mnemosyne.dasobjectstore.package-dependencies.v2\",\"prosopikon_revision\":\"$prosopikon_revision\",\"pistis_revision\":\"$pistis_revision\",\"proxenos_revision\":\"$proxenos_revision\",\"thesaurophylax_revision\":\"$thesaurophylax_revision\"}"
@@ -74,7 +122,7 @@ expected="{\"schema\":\"mnemosyne.dasobjectstore.package-dependencies.v2\",\"pro
 
 valid_manifest="$(<"$workspace/dasobjectstore/Cargo.toml")"
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
-printf '%s\n' "${valid_manifest/=0.39.0/=0.39.1}" >"$workspace/dasobjectstore/Cargo.toml"
+printf '%s\n' "${valid_manifest/=0.45.1/=0.45.2}" >"$workspace/dasobjectstore/Cargo.toml"
 if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>/dev/null; then
   printf 'pinned source validation accepted a wrong Prosopikon version\n' >&2
   exit 1

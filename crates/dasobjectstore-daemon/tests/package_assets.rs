@@ -79,7 +79,7 @@ const DEBIAN_REMOTE_TRANSITION: [&str; 3] = [
 
 #[test]
 fn workspace_pins_one_prosopikon_type_identity() {
-    const REVISION: &str = "d13523430fbc7443bd73490207d33ac884c17972";
+    const REVISION: &str = "81226cd872290247404ba8f695addf011fd47879";
     let manifest_pin =
         format!("git = \"https://github.com/sagrudd/prosopikon.git\", rev = \"{REVISION}\"");
     assert_eq!(WORKSPACE_MANIFEST.matches(&manifest_pin).count(), 2);
@@ -101,7 +101,7 @@ fn workspace_pins_one_prosopikon_type_identity() {
 
 #[test]
 fn workspace_pins_the_qualified_current_pistis_source() {
-    const PISTIS_REVISION: &str = "ef00ff34efbb9cfeac9298c9c77f1dc9694162cd";
+    const PISTIS_REVISION: &str = "b01d6af73d19bd5b36ba75a2e23acf03ee04eda2";
     assert_contains(
         WORKSPACE_MANIFEST,
         &format!(
@@ -119,10 +119,10 @@ fn workspace_pins_the_qualified_current_pistis_source() {
 
 #[test]
 fn package_builders_pin_the_selected_proxenos_and_thesaurophylax_closure() {
-    const PROXENOS_VERSION: &str = "0.65.0";
-    const PROXENOS_REVISION: &str = "ae595ea6ca27ab312ea41fe206d2244bc5273707";
-    const THESAUROPHYLAX_VERSION: &str = "0.86.0";
-    const THESAUROPHYLAX_REVISION: &str = "e72598aae824f2bdafc20803adca73c6a6c8dcd2";
+    const PROXENOS_VERSION: &str = "0.70.4";
+    const PROXENOS_REVISION: &str = "d0715fb32cdc0bd77590e7b3edcdef03778a897e";
+    const THESAUROPHYLAX_VERSION: &str = "0.86.1";
+    const THESAUROPHYLAX_REVISION: &str = "ad40c6d2cf1f9fbb9507c4ee687132c783e92889";
 
     assert_contains(
         WORKSPACE_MANIFEST,
@@ -627,19 +627,19 @@ fn local_docker_private_state_and_projects_are_storage_root_scoped() {
 fn local_docker_build_fails_closed_when_the_prosopikon_pin_drifts() {
     let dependency = WORKSPACE_MANIFEST
         .lines()
-        .find(|line| line.starts_with("prosopikon-core = { version = \"=0.39.0\", git = "))
+        .find(|line| line.starts_with("prosopikon-core = { version = \"=0.45.1\", git = "))
         .expect("workspace Prosopikon dependency");
 
     assert_contains(LOCAL_DOCKERFILE, dependency);
     assert_contains(LOCAL_DOCKERFILE, "grep -Fqx");
     assert_contains(
         LOCAL_DOCKERFILE,
-        r#"prosopikon-core = { version = "=0.39.0", path = "../prosopikon/crates/prosopikon-core" }"#,
+        r#"prosopikon-core = { version = "=0.45.1", path = "../prosopikon/crates/prosopikon-core" }"#,
     );
     assert_contains(
         LOCAL_DOCKERFILE,
         r#"! grep -Fq \
-        'prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git"'"#,
+        'prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git"'"#,
     );
 }
 

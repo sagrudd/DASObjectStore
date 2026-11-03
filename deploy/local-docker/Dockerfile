@@ -15,16 +15,16 @@ COPY DASObjectStore /src/DASObjectStore
 COPY prosopikon /src/prosopikon
 WORKDIR /src/DASObjectStore
 RUN grep -Fqx \
-        'prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "d13523430fbc7443bd73490207d33ac884c17972" }' \
+        'prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "81226cd872290247404ba8f695addf011fd47879" }' \
         Cargo.toml \
     && sed -i \
-        's#prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "d13523430fbc7443bd73490207d33ac884c17972" }#prosopikon-core = { version = "=0.39.0", path = "../prosopikon/crates/prosopikon-core" }#' \
+        's#prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git", rev = "81226cd872290247404ba8f695addf011fd47879" }#prosopikon-core = { version = "=0.45.1", path = "../prosopikon/crates/prosopikon-core" }#' \
         Cargo.toml \
     && grep -Fqx \
-        'prosopikon-core = { version = "=0.39.0", path = "../prosopikon/crates/prosopikon-core" }' \
+        'prosopikon-core = { version = "=0.45.1", path = "../prosopikon/crates/prosopikon-core" }' \
         Cargo.toml \
     && ! grep -Fq \
-        'prosopikon-core = { version = "=0.39.0", git = "https://github.com/sagrudd/prosopikon.git"' \
+        'prosopikon-core = { version = "=0.45.1", git = "https://github.com/sagrudd/prosopikon.git"' \
         Cargo.toml \
     && cargo build --release \
         -p dasobjectstore-cli \
