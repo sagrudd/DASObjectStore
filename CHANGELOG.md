@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.188.2 - maintain P-256 dependency
+
+- Move DASObjectStore's direct P-256 consumer to 0.14.0 and update low-S
+  receipt verification for the new API. Preserve rejection of non-normalized
+  signatures and canonical compressed public keys.
+- Bind the Phoreus source-candidate compatibility check to this 0.188.2
+  candidate while preserving its independently versioned 0.186.39 range.
+- Refresh the product manifest and packaged plugin descriptor to 0.188.2 so
+  installed identity matches the source and RPM metadata.
+- This source candidate remains subject to Kanon coordination, complete
+  dependency-graph review, native checks and package qualification.
+
 ## 0.188.1 - RPM payload manifest correction
 
 - Include the staged plugin process descriptor and managed-root traversal helper in the RPM file list. This patch corrects the package payload for the 0.188.0 first-install storage bootstrap candidate; it does not change bootstrap behavior.

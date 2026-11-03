@@ -1,6 +1,20 @@
 # Internal dependency catalogue
 
-## Current 0.188.0 source preparation
+## Current 0.188.2 source preparation
+
+The 0.188.2 candidate resolves the package workspace to Prosopikon core
+`81226cd872290247404ba8f695addf011fd47879` (0.45.1) and Yew 0.4.0, Pistis
+`b01d6af73d19bd5b36ba75a2e23acf03ee04eda2`, Proxenos
+`d0715fb32cdc0bd77590e7b3edcdef03778a897e` (0.70.4), and Proxenos'
+Thesaurophylax 0.86.1 closure at
+`ad40c6d2cf1f9fbb9507c4ee687132c783e92889`. Its lock also contains
+Thesaurophylax 0.93.1 at
+`7ff879a8e3b09ed12d9512ec5baf4020f3ad9e85` through Prosopikon. The Monas
+0.147.5 candidate separately pins Thesaurophylax 0.94.5 for its direct source
+contract; all three resolved edges must be represented in the coordinated
+Kanon lockset. Source, package, and runtime acceptance remain separate gates.
+
+## Historical 0.188.0 source preparation
 
 This compatible successor starts from normally merged DASObjectStore 0.187.0
 `7577eb6cd56e67ac547e2239a5da03fd800f9c2a`. Core and Yew now select normally
