@@ -1,5 +1,13 @@
 # Internal dependency catalogue
 
+## 0.188.7 source preparation
+
+Correct the shared and split supplier lock-closure guard to match Cargo
+reachability. The API, core, and policy records remain required at their exact
+source revisions; a store record is optional when unused and is validated when
+present. The Kanon source revision and candidate lockset must be refreshed
+before this version can be admitted to a Monas build.
+
 ## 0.188.6 source preparation
 
 Fix the shared-revision lock closure check for Proxenos and Prosopikon. When

@@ -168,18 +168,24 @@ das_require_locked_thesaurophylax_closure() {
     /^source = "/ { source = $0; sub(/^source = "/, "", source); sub(/"$/, "", source) }
     END {
       emit()
-      expected = shared_revision ? 4 : 7
+      # Cargo.lock contains packages reachable from the application workspace,
+      # not every package defined by either supplier repository. The store
+      # crate is therefore optional; when present it must use the exact
+      # Proxenos supplier revision.
+      expected = shared_revision ? 3 : 6
       for (package in seen) if (seen[package] != 1) invalid = 1
       if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
-      if (seen["thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
+      store_key = "thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision
+      if (seen[store_key] && seen[store_key] != 1) invalid = 1
       if (!shared_revision) {
         if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
         if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
         if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
       }
-      if (total != expected || invalid) exit 1
+      if ((total != expected && total != expected + 1) || invalid) exit 1
+      if (total == expected + 1 && seen[store_key] != 1) exit 1
       print "ok"
     }
   ' "$lockfile" 2>/dev/null)" || {

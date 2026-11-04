@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.188.7 - validate reachable supplier lock closure
+
+- Accept Cargo.lock files containing the exact reachable Thesaurophylax API,
+  core, and policy records when the supplier store crate is unused. Continue to
+  validate an optional store record when present and reject stale, unexpected,
+  or duplicate supplier entries.
+
 ## 0.188.6 - accept one shared supplier source record
 
 - Correct the deduplicated Thesaurophylax lock-closure guard so identical

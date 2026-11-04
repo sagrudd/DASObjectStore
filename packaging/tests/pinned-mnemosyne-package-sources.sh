@@ -89,8 +89,8 @@ das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore"
 [[ "$DAS_PACKAGE_THESAUROPHYLAX_REVISION" == "$thesaurophylax_revision" ]]
 
 # When Proxenos and Prosopikon use the same immutable supplier revision,
-# Cargo deduplicates their shared API/core/policy packages and the Proxenos
-# store package into one four-record closure.
+# Cargo deduplicates their shared API/core/policy packages. The supplier store
+# package is checked when reachable, but need not appear when unused.
 shared_revision="$(make_checkout "$workspace/thesaurophylax-shared" 'name = "thesaurophylax-shared-fixture"')"
 rm -rf "$workspace/thesaurophylax"
 mv "$workspace/thesaurophylax-shared" "$workspace/thesaurophylax"
@@ -139,6 +139,31 @@ source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision
 EOF
 das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore"
 [[ "$DAS_PACKAGE_THESAUROPHYLAX_REVISION" == "$shared_revision" ]]
+
+# The actual DASObjectStore source graph locks only the reachable shared
+# API/core/policy packages for this dependency set.
+shared_source="git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision#$shared_revision"
+reachable_lock="$workspace/reachable-thesaurophylax.lock"
+cat >"$reachable_lock" <<EOF
+[[package]]
+name = "thesaurophylax-api"
+version = "0.94.6"
+source = "$shared_source"
+
+[[package]]
+name = "thesaurophylax-core"
+version = "0.94.6"
+source = "$shared_source"
+
+[[package]]
+name = "thesaurophylax-policy"
+version = "0.94.6"
+source = "$shared_source"
+EOF
+if ! das_require_locked_thesaurophylax_closure "$reachable_lock" "0.94.6" "$shared_revision" "$shared_revision" >/dev/null; then
+  printf 'pinned source validation rejected the reachable shared Thesaurophylax lock closure\n' >&2
+  exit 1
+fi
 
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
 cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
