@@ -1,5 +1,12 @@
 # Internal dependency catalogue
 
+## 0.188.4 source preparation
+
+This patch preserves the 0.188.3 supplier graph while accepting valid Cargo
+dependency field ordering in the pinned Prosopikon manifest. The Kanon source
+revision and candidate lockset must be refreshed before this version can be
+admitted to a Monas build.
+
 ## Current 0.188.3 source preparation
 
 The 0.188.3 candidate resolves Proxenos 0.70.7 at `0024b3b6a52a01fb56a0da2939cf448aeaff0aa9`, Thesaurophylax
