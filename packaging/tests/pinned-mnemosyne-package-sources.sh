@@ -164,6 +164,17 @@ if ! das_require_locked_thesaurophylax_closure "$reachable_lock" "0.94.6" "$shar
   printf 'pinned source validation rejected the reachable shared Thesaurophylax lock closure\n' >&2
   exit 1
 fi
+cat >>"$reachable_lock" <<EOF
+
+[[package]]
+name = "thesaurophylax-api"
+version = "0.94.6"
+source = "$shared_source"
+EOF
+if das_require_locked_thesaurophylax_closure "$reachable_lock" "0.94.6" "$shared_revision" "$shared_revision" >/dev/null 2>&1; then
+  printf 'pinned source validation accepted a duplicate reachable Thesaurophylax record\n' >&2
+  exit 1
+fi
 
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
 cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
