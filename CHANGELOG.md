@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.188.5 - accept deduplicated supplier lock closure
+
+- Accept the exact Cargo.lock closure when Proxenos and Prosopikon pin the
+  same Thesaurophylax revision, while retaining strict checks for distinct
+  revisions and unexpected package edges.
+
 ## 0.188.4 - accept valid supplier manifest field ordering
 
 - Read the exact Thesaurophylax revision from Prosopikon manifests regardless

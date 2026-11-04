@@ -1,6 +1,6 @@
 # Internal dependency catalogue
 
-## 0.188.4 source preparation
+## 0.188.5 source preparation
 
 This patch preserves the 0.188.3 supplier graph while accepting valid Cargo
 dependency field ordering in the pinned Prosopikon manifest. The Kanon source

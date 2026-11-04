@@ -88,6 +88,58 @@ das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore"
 [[ "$DAS_PACKAGE_PROXENOS_REVISION" == "$proxenos_revision" ]]
 [[ "$DAS_PACKAGE_THESAUROPHYLAX_REVISION" == "$thesaurophylax_revision" ]]
 
+# When Proxenos and Prosopikon use the same immutable supplier revision,
+# Cargo deduplicates their shared API/core/policy packages and the Proxenos
+# store package into one four-record closure.
+shared_revision="$(make_checkout "$workspace/thesaurophylax-shared" 'name = "thesaurophylax-shared-fixture"')"
+rm -rf "$workspace/thesaurophylax"
+mv "$workspace/thesaurophylax-shared" "$workspace/thesaurophylax"
+sed -i.bak -e "s/$thesaurophylax_revision/$shared_revision/g" -e 's/=0.72.3/=0.94.6/' "$workspace/proxenos/Cargo.toml"
+rm -f "$workspace/proxenos/Cargo.toml.bak"
+git -C "$workspace/proxenos" add Cargo.toml
+git -C "$workspace/proxenos" -c user.name=package-test -c user.email=package-test@example.invalid commit -qm fixture-shared-thesaurophylax
+proxenos_revision="$(git -C "$workspace/proxenos" rev-parse HEAD)"
+sed -i.bak "s/$prosopikon_thesaurophylax_revision/$shared_revision/g" "$workspace/prosopikon/crates/prosopikon-core/Cargo.toml"
+rm -f "$workspace/prosopikon/crates/prosopikon-core/Cargo.toml.bak"
+git -C "$workspace/prosopikon" add crates/prosopikon-core/Cargo.toml
+git -C "$workspace/prosopikon" -c user.name=package-test -c user.email=package-test@example.invalid commit -qm fixture-shared-thesaurophylax
+prosopikon_revision="$(git -C "$workspace/prosopikon" rev-parse HEAD)"
+thesaurophylax_revision="$shared_revision"
+cat >"$workspace/dasobjectstore/Cargo.toml" <<EOF
+prosopikon-core = { version = "=0.47.0", git = "https://github.com/sagrudd/prosopikon.git", rev = "$prosopikon_revision" }
+proxenos = { version = "=0.57.0", git = "https://github.com/sagrudd/proxenos.git", rev = "$proxenos_revision" }
+EOF
+cat >"$workspace/dasobjectstore/Cargo.lock" <<EOF
+version = 4
+
+[[package]]
+name = "proxenos"
+version = "0.57.0"
+source = "git+https://github.com/sagrudd/proxenos.git?rev=$proxenos_revision#$proxenos_revision"
+
+[[package]]
+name = "thesaurophylax-api"
+version = "0.94.6"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision#$shared_revision"
+
+[[package]]
+name = "thesaurophylax-core"
+version = "0.94.6"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision#$shared_revision"
+
+[[package]]
+name = "thesaurophylax-policy"
+version = "0.94.6"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision#$shared_revision"
+
+[[package]]
+name = "thesaurophylax-store"
+version = "0.94.6"
+source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=$shared_revision#$shared_revision"
+EOF
+das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore"
+[[ "$DAS_PACKAGE_THESAUROPHYLAX_REVISION" == "$shared_revision" ]]
+
 valid_lock="$(<"$workspace/dasobjectstore/Cargo.lock")"
 cat >>"$workspace/dasobjectstore/Cargo.lock" <<EOF
 

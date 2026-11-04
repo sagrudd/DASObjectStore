@@ -50,7 +50,7 @@ das_package_configure_pinned_mnemosyne_sources() {
     return 1
   fi
 
-  prosopikon_thesaurophylax_revision="$(sed -n '/^thesaurophylax-api = {/ { /https:\/\/github.com\/sagrudd\/thesaurophylax\.git/ { s/.*rev = "\([0-9a-f]\{40\}\)".*/\1/p; } }' "$prosopikon_root/crates/prosopikon-core/Cargo.toml" 2>/dev/null | sort -u)"
+  prosopikon_thesaurophylax_revision="$(sed -n '/^thesaurophylax-api = {/!d; /https:\/\/github.com\/sagrudd\/thesaurophylax\.git/!d; s/.*rev = "\([0-9a-f]\{40\}\)".*/\1/p' "$prosopikon_root/crates/prosopikon-core/Cargo.toml" 2>/dev/null | sort -u)"
   if [[ "$(printf '%s\n' "$prosopikon_thesaurophylax_revision" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" || ! "$prosopikon_thesaurophylax_revision" =~ ^[0-9a-f]{40}$ ]]; then
     printf 'DASObjectStore package build requires one exact Thesaurophylax revision in pinned Prosopikon\n' >&2
     return 1
@@ -146,6 +146,7 @@ das_require_locked_thesaurophylax_closure() {
       total++
       prox_source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision
       pros_source = "git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision
+      shared_revision = (proxenos_revision == prosopikon_revision)
       key = name "|" source
       if ((name == "thesaurophylax-api" || name == "thesaurophylax-core" || name == "thesaurophylax-policy") && (source == prox_source || source == pros_source)) {
         seen[key]++
@@ -167,15 +168,19 @@ das_require_locked_thesaurophylax_closure() {
     /^source = "/ { source = $0; sub(/^source = "/, "", source); sub(/"$/, "", source) }
     END {
       emit()
-      expected = 7
+      expected = shared_revision ? 4 : 7
       for (package in seen) if (seen[package] != 1) invalid = 1
       if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
-      if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
-      if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
-      if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
+      if (shared_revision) {
+        if (seen["thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
+      } else {
+        if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
+        if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
+        if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
+      }
       if (total != expected || invalid) exit 1
       print "ok"
     }
