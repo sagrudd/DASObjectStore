@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.188.6 - accept one shared supplier source record
+
+- Correct the deduplicated Thesaurophylax lock-closure guard so identical
+  Proxenos and Prosopikon revisions count their shared store record once.
+- Add regression coverage for accepting the shared closure and rejecting a
+  duplicate record.
+
 ## 0.188.5 - accept deduplicated supplier lock closure
 
 - Accept the exact Cargo.lock closure when Proxenos and Prosopikon pin the
