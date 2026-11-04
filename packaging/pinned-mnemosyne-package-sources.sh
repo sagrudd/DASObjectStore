@@ -174,9 +174,7 @@ das_require_locked_thesaurophylax_closure() {
       if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
       if (seen["thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" proxenos_revision "#" proxenos_revision] != 1) invalid = 1
-      if (shared_revision) {
-        if (seen["thesaurophylax-store|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
-      } else {
+      if (!shared_revision) {
         if (seen["thesaurophylax-api|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
         if (seen["thesaurophylax-core|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1
         if (seen["thesaurophylax-policy|git+https://github.com/sagrudd/thesaurophylax.git?rev=" prosopikon_revision "#" prosopikon_revision] != 1) invalid = 1

@@ -202,4 +202,43 @@ if das_package_configure_pinned_mnemosyne_sources "$workspace/dasobjectstore" 2>
   exit 1
 fi
 
-printf 'pinned source validation: supported projection and four independent denials passed\n'
+shared_source="git+https://github.com/sagrudd/thesaurophylax.git?rev=$thesaurophylax_revision#$thesaurophylax_revision"
+shared_lock="$workspace/shared-thesaurophylax.lock"
+cat >"$shared_lock" <<EOF
+[[package]]
+name = "thesaurophylax-api"
+version = "0.94.6"
+source = "$shared_source"
+
+[[package]]
+name = "thesaurophylax-core"
+version = "0.94.6"
+source = "$shared_source"
+
+[[package]]
+name = "thesaurophylax-policy"
+version = "0.94.6"
+source = "$shared_source"
+
+[[package]]
+name = "thesaurophylax-store"
+version = "0.94.6"
+source = "$shared_source"
+EOF
+if ! das_require_locked_thesaurophylax_closure "$shared_lock" "0.94.6" "$thesaurophylax_revision" "$thesaurophylax_revision" >/dev/null; then
+  printf 'pinned source validation rejected the valid shared Thesaurophylax lock closure\n' >&2
+  exit 1
+fi
+cat >>"$shared_lock" <<EOF
+
+[[package]]
+name = "thesaurophylax-store"
+version = "0.94.6"
+source = "$shared_source"
+EOF
+if das_require_locked_thesaurophylax_closure "$shared_lock" "0.94.6" "$thesaurophylax_revision" "$thesaurophylax_revision" >/dev/null 2>&1; then
+  printf 'pinned source validation accepted a duplicate shared Thesaurophylax record\n' >&2
+  exit 1
+fi
+
+printf 'pinned source validation: supported projection, shared closure, and denials passed\n'

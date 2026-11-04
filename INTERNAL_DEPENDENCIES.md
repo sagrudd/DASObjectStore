@@ -1,5 +1,13 @@
 # Internal dependency catalogue
 
+## 0.188.6 source preparation
+
+Fix the shared-revision lock closure check for Proxenos and Prosopikon. When
+both pin the same Thesaurophylax revision, the four expected package records
+are counted once each; duplicate records remain rejected. This patch does not
+change dependency coordinates. The Kanon source revision and candidate lockset
+must be refreshed before this version can be admitted to a Monas build.
+
 ## 0.188.5 source preparation
 
 This patch preserves the 0.188.3 supplier graph while accepting valid Cargo
