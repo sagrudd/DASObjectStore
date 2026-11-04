@@ -50,7 +50,7 @@ das_package_configure_pinned_mnemosyne_sources() {
     return 1
   fi
 
-  prosopikon_thesaurophylax_revision="$(sed -n 's/^thesaurophylax-api = { git = "https:\/\/github.com\/sagrudd\/thesaurophylax.git", rev = "\([0-9a-f]\{40\}\)".*}$/\1/p' "$prosopikon_root/crates/prosopikon-core/Cargo.toml" 2>/dev/null | sort -u)"
+  prosopikon_thesaurophylax_revision="$(sed -n '/^thesaurophylax-api = {/ { /https:\/\/github.com\/sagrudd\/thesaurophylax\.git/ { s/.*rev = "\([0-9a-f]\{40\}\)".*/\1/p; } }' "$prosopikon_root/crates/prosopikon-core/Cargo.toml" 2>/dev/null | sort -u)"
   if [[ "$(printf '%s\n' "$prosopikon_thesaurophylax_revision" | sed '/^$/d' | wc -l | tr -d ' ')" != "1" || ! "$prosopikon_thesaurophylax_revision" =~ ^[0-9a-f]{40}$ ]]; then
     printf 'DASObjectStore package build requires one exact Thesaurophylax revision in pinned Prosopikon\n' >&2
     return 1

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.188.4 - accept valid supplier manifest field ordering
+
+- Read the exact Thesaurophylax revision from Prosopikon manifests regardless
+  of the ordering of valid Cargo dependency fields.
+- Keep requiring one exact supplier revision and the matching locked source
+  closure.
+
 ## 0.188.3 - align current Monas supplier source graph
 
 - Align Proxenos to 0.70.7, Prosopikon Core to 0.47.0, and direct Pistis

@@ -24,7 +24,7 @@ pistis_revision="$(make_checkout "$workspace/pistis" 'name = "pistis-fixture"')"
 prosopikon_thesaurophylax_revision="$(make_checkout "$workspace/prosopikon-thesaurophylax" 'name = "thesaurophylax-prosopikon-fixture"')"
 prosopikon_revision="$(make_checkout "$workspace/prosopikon" "pistis-canonical = { git = \"https://github.com/sagrudd/pistis.git\", rev = \"$pistis_revision\" }")"
 mkdir -p "$workspace/prosopikon/crates/prosopikon-core"
-printf '%s\n' "thesaurophylax-api = { git = \"https://github.com/sagrudd/thesaurophylax.git\", rev = \"$prosopikon_thesaurophylax_revision\", optional = true }" >"$workspace/prosopikon/crates/prosopikon-core/Cargo.toml"
+printf '%s\n' "thesaurophylax-api = { version = \"=0.94.6\", git = \"https://github.com/sagrudd/thesaurophylax.git\", rev = \"$prosopikon_thesaurophylax_revision\", optional = true }" >"$workspace/prosopikon/crates/prosopikon-core/Cargo.toml"
 git -C "$workspace/prosopikon" add crates/prosopikon-core/Cargo.toml
 git -C "$workspace/prosopikon" -c user.name=package-test -c user.email=package-test@example.invalid commit -qm fixture-thesaurophylax
 prosopikon_revision="$(git -C "$workspace/prosopikon" rev-parse HEAD)"
