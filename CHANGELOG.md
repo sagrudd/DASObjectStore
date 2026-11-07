@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.188.8 - consume Prosopikon Core 0.47.1
+
+- Bump the workspace packages to 0.188.8 and consume the reviewed Prosopikon
+  Core 0.47.1 source pin. This changes the exact dependency graph without
+  changing runtime behavior.
+
 ## 0.188.7 - validate reachable supplier lock closure
 
 - Accept Cargo.lock files containing the exact reachable Thesaurophylax API,
