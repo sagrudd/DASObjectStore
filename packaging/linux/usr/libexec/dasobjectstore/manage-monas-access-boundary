@@ -56,8 +56,17 @@ meta "$state_dir" "$service_user" "$shared_group" 750
 meta "$registry" "$service_user" "$shared_group" 640
 if [[ -e "$appliance_identity" || -L "$appliance_identity" ]]; then
   [[ -f "$appliance_identity" && ! -L "$appliance_identity" ]] || deny
-  case "$action" in publish-identity|publish-socket) ;; *)
-    meta "$appliance_identity" "$service_user" "$shared_group" 640
+  case "$action" in
+    publish-identity|publish-socket) ;;
+    pre-start)
+      # A crash between create-once and publication leaves the exact private
+      # service-owned record; the following publish step safely normalizes it.
+      [[ "$(stat -c %U "$appliance_identity")" == "$service_user" &&
+         "$(stat -c %a "$appliance_identity")" == 640 &&
+         "$(stat -c %h "$appliance_identity")" == 1 ]] || deny
+      case "$(stat -c %G "$appliance_identity")" in "$service_group"|"$shared_group") ;; *) deny ;; esac
+      ;;
+    *) meta "$appliance_identity" "$service_user" "$shared_group" 640 ;;
   esac
 fi
 [[ -d "$runtime_dir" && ! -L "$runtime_dir" ]] || deny

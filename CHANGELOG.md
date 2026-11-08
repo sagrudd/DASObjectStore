@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.188.8 - initialize appliance identity before daemon startup
+
+- Initialize the existing create-once appliance identity under the DAS service
+  account before publishing it and starting the managed storage daemon.
+- Preserve existing identity records and fail closed on invalid state.
+
 ## 0.188.7 - validate reachable supplier lock closure
 
 - Accept Cargo.lock files containing the exact reachable Thesaurophylax API,
