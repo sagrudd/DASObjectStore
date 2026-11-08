@@ -21,6 +21,7 @@ format=$2; path=$3; owner=dasobjectstore; group=mnemosyne-pistis-das; mode=750
 case "$path" in */stores.json|*/appliance-identity.json) mode=640;; */dasobjectstored.sock) mode=660;; */auth|*/srv/dasobjectstore|*/tls) group=dasobjectstore;; esac
 [ ! -e "$TEST_STATE/wrong-group" ] || group=root
 [ ! -e "$TEST_STATE/identity-private-group" ] || { case "$path" in */appliance-identity.json) group=dasobjectstore;; esac; }
+[ ! -e "$TEST_STATE/identity-wrong-owner" ] || { case "$path" in */appliance-identity.json) owner=root;; esac; }
 [ ! -e "$TEST_STATE/identity-legacy-mode" ] || { case "$path" in */appliance-identity.json) mode=650;; esac; }
 [ ! -e "$TEST_STATE/private-shared" ] || { case "$path" in */auth|*/srv/dasobjectstore|*/tls) group=mnemosyne-pistis-das;; esac; }
 links=1; [ ! -e "$TEST_STATE/identity-hardlink" ] || links=2
@@ -52,6 +53,15 @@ deny() { run "$1" >/dev/null 2>&1 && exit 1 || true; }
 
 run pre-start
 run publish-identity
+# Restart after create-once but before publication; no other input changes.
+touch "$state/identity-private-group"
+run pre-start
+run publish-identity
+[ ! -e "$state/identity-private-group" ]
+for marker in identity-wrong-owner identity-hardlink identity-legacy-mode; do
+  touch "$state/identity-private-group" "$state/$marker"; deny pre-start
+  rm "$state/identity-private-group" "$state/$marker"
+done
 touch "$state/identity-private-group" "$state/identity-legacy-mode"
 run publish-identity
 [ ! -e "$state/identity-private-group" ] && [ ! -e "$state/identity-legacy-mode" ]
