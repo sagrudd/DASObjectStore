@@ -791,6 +791,11 @@ fn systemd_service_uses_packaged_identity_and_paths() {
     assert_not_contains(SERVICE, "RuntimeDirectory=dasobjectstore");
     assert_not_contains(SERVICE, "StateDirectory=dasobjectstore");
     assert_contains(SERVICE, "manage-monas-access-boundary pre-start");
+    let pre = SERVICE.find("manage-monas-access-boundary pre-start").unwrap();
+    let init = SERVICE.find("ExecStartPre=/usr/bin/dasobjectstored ensure-appliance-identity").unwrap();
+    let publish = SERVICE.find("ExecStartPre=+/usr/libexec/dasobjectstore/manage-monas-access-boundary publish-identity").unwrap();
+    let start = SERVICE.find("ExecStart=/usr/bin/dasobjectstored --config").unwrap();
+    assert!(pre < init && init < publish && publish < start);
     assert_contains(SERVICE, "manage-monas-access-boundary publish-socket");
     assert_contains(SERVICE, "manage-monas-access-boundary retire-socket");
     assert_contains(SERVICE, "LogsDirectory=dasobjectstore");

@@ -9,8 +9,10 @@ Only ``/var/lib/dasobjectstore/stores.json`` (0640), the stable non-secret
 parent directories are 0750. DAS remains the sole owner and writer.
 
 Service startup refuses missing registries, substituted paths, unsafe metadata
-or stale socket inodes. The stable appliance identity is published after its
-create-once write and is reconciled during package upgrades. The socket is
+or stale socket inodes. The daemon startup initializes the stable appliance identity with the existing
+create-once writer under the DAS service account, then publishes it before
+starting the daemon. Existing identity is retained and invalid state is refused.
+The identity is also reconciled during package upgrades. The socket is
 published only after it is listening and is retired only after it is no longer
 listening. A Debian package upgrade does not enable or start the data plane. It
 restarts only already-running DAS application services after package

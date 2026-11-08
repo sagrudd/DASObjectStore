@@ -186,6 +186,15 @@ fn validate_sqlite_backup(path: &Path) -> Result<(), String> {
 
 fn run() -> Result<(), String> {
     let argv = env::args().skip(1).collect::<Vec<_>>();
+    if argv.first().is_some_and(|arg| arg == "ensure-appliance-identity") {
+        if argv.len() != 1 {
+            return Err("ensure-appliance-identity takes no arguments".to_string());
+        }
+        let state_dir = DaemonRuntimeConfig::default_packaged().state_dir;
+        dasobjectstore_daemon::runtime::ensure_appliance_identity(&state_dir)
+            .map_err(|error| format!("appliance identity initialization denied: {error}"))?;
+        return Ok(());
+    }
     if argv.first().is_some_and(|arg| arg == "bootstrap-storage") {
         return storage_bootstrap::run(&argv[1..]);
     }
@@ -1070,7 +1079,7 @@ fn read_config(path: &PathBuf) -> Result<DaemonRuntimeConfig, String> {
 }
 
 fn print_help() {
-    println!("Usage: dasobjectstored [--config <PATH>] [--check-config]\n       dasobjectstored bootstrap-storage --help");
+    println!("Usage: dasobjectstored [--config <PATH>] [--check-config]\n       dasobjectstored bootstrap-storage --help\n       dasobjectstored ensure-appliance-identity");
 }
 
 #[derive(Debug)]

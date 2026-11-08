@@ -20,6 +20,8 @@ Environment=DASOBJECTSTORE_STORE_REGISTRY_PATH=/var/lib/dasobjectstore/stores.js
 Environment=DASOBJECTSTORE_MANAGED_STORAGE_MANIFEST=/etc/dasobjectstore/managed-storage.v1.json
 ExecStartPre=+/usr/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/dasobjectstore.conf
 ExecStartPre=+/usr/libexec/dasobjectstore/manage-monas-access-boundary pre-start
+ExecStartPre=/usr/bin/dasobjectstored ensure-appliance-identity
+ExecStartPre=+/usr/libexec/dasobjectstore/manage-monas-access-boundary publish-identity
 ExecStart=/usr/bin/dasobjectstored --config /etc/dasobjectstore/daemon.json
 ExecStartPost=+/usr/libexec/dasobjectstore/manage-monas-access-boundary publish-socket
 ExecStopPost=+/usr/libexec/dasobjectstore/manage-monas-access-boundary retire-socket

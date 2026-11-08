@@ -1,6 +1,6 @@
 # Internal dependency catalogue
 
-## 0.188.7 source preparation
+## 0.188.8 source preparation
 
 Correct the shared and split supplier lock-closure guard to match Cargo
 reachability. The API, core, and policy records remain required at their exact
