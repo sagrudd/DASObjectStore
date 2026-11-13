@@ -9,7 +9,7 @@ if [[ -z "$current_version" ]]; then
   exit 1
 fi
 
-changelog_version="$(awk '/^## [^ ]+ - / { print $2; exit }' "$repo_root/CHANGELOG.md")"
+changelog_version="$(awk '/^##[[:space:]]+[0-9]/ { print $2; exit }' "$repo_root/CHANGELOG.md")"
 if [[ "$changelog_version" != "$current_version" ]]; then
   printf 'release version guard: Cargo.toml %s does not match CHANGELOG.md %s\n' \
     "$current_version" "${changelog_version:-missing}" >&2

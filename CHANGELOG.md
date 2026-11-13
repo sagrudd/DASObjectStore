@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.188.9 - Unreleased
+
+- Read the newest numbered release heading when checking the package version, including headings without a date or description.
+
 ## 0.188.8 - initialize appliance identity before daemon startup
 
 - Initialize the existing create-once appliance identity under the DAS service
