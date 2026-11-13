@@ -57,6 +57,19 @@ sed -i.bak 's/1.2.3/1.2.4/g' "$fixture/Cargo.toml" "$fixture/CHANGELOG.md" "$fix
 rm -f "$fixture/Cargo.toml.bak" "$fixture/CHANGELOG.md.bak" "$fixture/product-manifest.json.bak"
 bash "$repo_root/packaging/validate-release-version.sh" "$fixture" >/dev/null
 
+# Earlier releases use each of these heading formats. A newer mismatching
+# heading must never be skipped in favor of an older, matching release.
+for heading in '## 1.2.4' '## 1.2.4 — compatible source patch'; do
+  printf '# Changelog\n\n%s\n\n## 1.2.3 - Previously released\n' "$heading" >"$fixture/CHANGELOG.md"
+  bash "$repo_root/packaging/validate-release-version.sh" "$fixture" >/dev/null
+done
+printf '# Changelog\n\n## 1.2.5\n\n## 1.2.4 - Earlier entry\n' >"$fixture/CHANGELOG.md"
+if bash "$repo_root/packaging/validate-release-version.sh" "$fixture" >/dev/null 2>&1; then
+  printf 'release version regression: newer mismatching heading was skipped\n' >&2
+  exit 1
+fi
+printf '# Changelog\n\n## 1.2.4\n' >"$fixture/CHANGELOG.md"
+
 sed -i.bak 's/1.2.4/1.2.5/g' "$fixture/product-manifest.json"
 rm -f "$fixture/product-manifest.json.bak"
 if bash "$repo_root/packaging/validate-release-version.sh" "$fixture" >/dev/null 2>&1; then

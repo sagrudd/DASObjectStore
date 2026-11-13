@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.187.6 - Unreleased
+
+- Fix package release validation for changelog headings that contain only the version or use a dash before the description. The release check compares the newest version heading with the workspace and product manifest.
+
 ## 0.187.0
 
 - Bind internal workspace dependencies to 0.187.0 and review ISC coverage for the existing TLS dependencies while retaining their licence and notice obligations. Preserve browser state and callback behavior while repairing the complete strict WASM lint inventory.
