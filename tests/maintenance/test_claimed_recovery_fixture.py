@@ -16,6 +16,13 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class RecoveryFixtureTest(unittest.TestCase):
+    def test_preflight_is_read_only(self):
+        from claimed_recovery_transaction import validate_exact_claim
+        with sqlite3.connect(self.root / 'db.sqlite') as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.assertEqual(validate_exact_claim(db, self.intent, journal_present=True), 'active')
+            self.assertEqual(db.total_changes, 0)
+
     def test_release_requires_transaction(self):
         with sqlite3.connect(self.root / 'db.sqlite') as db:
             with self.assertRaisesRegex(ValueError, 'explicit transaction'):

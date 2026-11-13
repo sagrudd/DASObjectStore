@@ -7,8 +7,8 @@ COLUMNS = ('claim_id', 'claim_kind', 'owner_id', 'request_id', 'request_digest',
            'disk_id', 'reserved_bytes', 'consumed_bytes', 'created_at_utc')
 
 
-def release_exact_claim(conn, intent, *, journal_present):
-    """Validate current catalogue facts and transition only the bound claim."""
+def validate_exact_claim(conn, intent, *, journal_present):
+    """Validate catalogue facts without writing. Return the exact claim state."""
     if not conn.in_transaction:
         raise ValueError("claim release requires an explicit transaction")
     if set(intent['claim']) != set(COLUMNS):
@@ -60,10 +60,18 @@ def release_exact_claim(conn, intent, *, journal_present):
             raise ValueError('lease changed')
         if not journal_present or len(active) != 1:
             raise ValueError('active claim without exact journal')
+        return 'active'
+    elif row[-5:] != ('released', intent['release_time'], None, None, intent['release_time']) or active:
+        raise ValueError('unexpected released claim')
+    return 'released'
+
+
+def release_exact_claim(conn, intent, *, journal_present):
+    """Revalidate immediately before the caller commits the bound transition."""
+    if validate_exact_claim(conn, intent, journal_present=journal_present) == 'active':
+        claim = intent['claim']
         # Match the entire identity, not owner alone.  The fixed transition
         # timestamp is part of the immutable intent, making retries exact.
         conn.execute("UPDATE disk_capacity_claims SET state='released', released_at_utc=?, updated_at_utc=?, lease_owner=NULL, lease_expires_at_utc=NULL WHERE claim_id=? AND state='active' AND released_at_utc IS NULL", (intent['release_time'], intent['release_time'], claim['claim_id']))
         if conn.execute('SELECT changes()').fetchone()[0] != 1:
             raise ValueError('claim changed')
-    elif row[-5:] != ('released', intent['release_time'], None, None, intent['release_time']) or active:
-        raise ValueError('unexpected released claim')
