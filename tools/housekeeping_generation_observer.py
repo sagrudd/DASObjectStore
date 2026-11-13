@@ -8,6 +8,9 @@ import struct
 import time
 
 _IN_MOVED_TO = 0x00000080
+_IN_MOVED_FROM = 0x00000040
+_IN_MUTATION = _IN_MOVED_TO | _IN_MOVED_FROM | 0x00000100 | 0x00000200 | 0x00000004 | 0x00000002
+_IN_WATCH_INVALID = 0x00000400 | 0x00000800
 _IN_Q_OVERFLOW = 0x00004000
 _IN_IGNORED = 0x00008000
 _EVENT = struct.Struct('iIII')
@@ -17,8 +20,8 @@ _libc = ctypes.CDLL(None, use_errno=True)
 class ReportGenerationObserver:
     """Observe two distinct pinned atomic report replacements after a barrier.
 
-    The caller must install this watch *before* the barrier and call
-    discard_pre_barrier_events only *after* it. These events do not prove
+    The caller must watch before exchange, call begin_exchange immediately
+    before it and finish_exchange immediately after. These events do not prove
     source identity, single-worker execution, marker integrity, or exclusion.
     """
     def __init__(self, directory):
@@ -29,7 +32,8 @@ class ReportGenerationObserver:
             raise OSError(ctypes.get_errno(), 'inotify_init1')
         self.held = []
         self.ready = False
-        self.watch = _libc.inotify_add_watch(self.fd, os.fsencode(f'/proc/self/fd/{self.dirfd}'), _IN_MOVED_TO)
+        self.exchanging = False
+        self.watch = _libc.inotify_add_watch(self.fd, os.fsencode(f'/proc/self/fd/{self.dirfd}'), _IN_MUTATION | _IN_WATCH_INVALID)
         if self.watch < 0:
             err = ctypes.get_errno(); self.close(); raise OSError(err, 'inotify_add_watch')
 
@@ -51,14 +55,36 @@ class ReportGenerationObserver:
                 wd, mask, cookie, length = _EVENT.unpack_from(raw, pos); pos += _EVENT.size
                 if len(raw) - pos < length: raise RuntimeError('truncated event name')
                 name = raw[pos:pos+length].split(b'\0',1)[0]; pos += length
-                if mask & (_IN_Q_OVERFLOW | _IN_IGNORED): raise RuntimeError('report watch lost')
+                if mask & (_IN_Q_OVERFLOW | _IN_IGNORED | _IN_WATCH_INVALID): raise RuntimeError('report watch lost')
                 if wd != self.watch: raise RuntimeError('unexpected watch')
                 yield mask, name
 
-    def discard_pre_barrier_events(self):
-        if self.ready: raise RuntimeError('barrier already armed')
+    def begin_exchange(self):
+        if self.ready or self.exchanging: raise RuntimeError('exchange already armed')
         for _ in self._events(): pass
+        self.exchanging = True
+
+    def finish_exchange(self, timeout=5):
+        if not self.exchanging or self.ready: raise RuntimeError('exchange not armed')
+        deadline = time.monotonic() + timeout
+        expected = [_IN_MOVED_FROM, _IN_MOVED_TO]
+        while expected:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.fd], [], [], remaining)[0]:
+                raise TimeoutError('journal exchange events not observed')
+            for mask, name in self._events():
+                if name != b'operation.json': continue
+                if not expected or mask != expected.pop(0):
+                    raise RuntimeError('unexpected journal mutation during exchange')
+        self.exchanging = False
         self.ready = True
+        self.assert_intact()
+
+    def assert_intact(self):
+        if not self.ready: raise RuntimeError('observer not armed')
+        for mask, name in self._events():
+            if name == b'operation.json':
+                raise RuntimeError('journal changed after exchange')
 
     def wait_two(self, timeout):
         if not self.ready or timeout <= 0: raise RuntimeError('observer not armed')
@@ -69,7 +95,8 @@ class ReportGenerationObserver:
             if remaining <= 0: raise TimeoutError('two report generations not observed')
             if not select.select([self.fd], [], [], remaining)[0]: raise TimeoutError('two report generations not observed')
             for mask, name in self._events():
-                if not (mask & _IN_MOVED_TO) or name != b'latest.json': continue
+                if name == b'operation.json': raise RuntimeError('journal changed after exchange')
+                if len(found) == 2 or not (mask & _IN_MOVED_TO) or name != b'latest.json': continue
                 fd = os.open('latest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self.dirfd)
                 try:
                     before = os.fstat(fd)
@@ -88,7 +115,6 @@ class ReportGenerationObserver:
                     if identity in [item['identity'] for item in found]: raise RuntimeError('report generations collapsed')
                     self.held.append(fd); fd = -1
                     found.append({'identity':identity,'sha256':hashlib.sha256(data).hexdigest()})
-                    if len(found) == 2: break
                 finally:
                     if fd >= 0: os.close(fd)
         return found
