@@ -4,6 +4,9 @@
 
 - Add a non-root, disposable-fixture model for testing exact claimed-recovery
   interruption states. This diagnostic does not operate on appliance data.
+- Add an internal integration draft and disposable ext4 interruption rehearsal;
+  appliance target authentication, early-stage recovery and reviewed release
+  are not implemented, so this does not authorize live recovery.
 
 ## 0.185.9 - Unreleased
 

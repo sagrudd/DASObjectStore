@@ -59,6 +59,12 @@ class ReportGenerationObserver:
                 if wd != self.watch: raise RuntimeError('unexpected watch')
                 yield mask, name
 
+    def arm_existing_marker(self):
+        """Watch a separately authenticated persistent marker after restart."""
+        if self.ready or self.exchanging: raise RuntimeError('barrier already armed')
+        for _ in self._events(): pass
+        self.ready = True
+
     def begin_inode_marker(self):
         """Arm before metadata-only promotion of the existing journal inode."""
         if self.ready or self.exchanging: raise RuntimeError('barrier already armed')
