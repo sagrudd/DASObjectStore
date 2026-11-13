@@ -124,8 +124,16 @@ def run_pinned(root, pinned, stop_after):
         conn.execute('BEGIN IMMEDIATE')
         claim = intent['claim']
         candidate = intent['candidate']
-        keys = {'placement_id','object_id','store_id','disk_id','relative_path','size_bytes','content_hash'}
-        if set(candidate) != keys or type(candidate['size_bytes']) is not int or candidate['size_bytes'] <= 0:
+        keys = {'placement_id','object_id','store_id','disk_id','disk_state','relative_path','size_bytes','content_hash','verified_at_utc','existing_disk_ids'}
+        if (set(candidate) != keys or type(candidate['size_bytes']) is not int or candidate['size_bytes'] <= 0
+                or any(type(candidate[k]) is not str or not candidate[k] for k in ('placement_id','object_id','store_id','disk_id','disk_state','relative_path','content_hash'))
+                or len(candidate['content_hash']) != 64 or any(ch not in '0123456789abcdef' for ch in candidate['content_hash'])
+                or (candidate['verified_at_utc'] is not None and type(candidate['verified_at_utc']) is not str)
+                or type(candidate['existing_disk_ids']) is not list
+                or any(type(x) is not str or not x for x in candidate['existing_disk_ids'])
+                or len(set(candidate['existing_disk_ids'])) != len(candidate['existing_disk_ids'])
+                or candidate['disk_id'] not in candidate['existing_disk_ids']
+                or claim['disk_id'] in candidate['existing_disk_ids']):
             raise ValueError('candidate binding differs')
         if claim['reserved_bytes'] != candidate['size_bytes'] or candidate['content_hash'] != intent['source_sha256']:
             raise ValueError('claim or content size differs')

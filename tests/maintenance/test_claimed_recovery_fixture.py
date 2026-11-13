@@ -19,7 +19,7 @@ class RecoveryFixtureTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / '.disposable-recovery-fixture').write_text('fixture-only\n')
-        candidate = {'placement_id':'placement', 'object_id':'object', 'store_id':'store', 'disk_id':'source-disk', 'relative_path':'objects/payload', 'size_bytes':8, 'content_hash':hashlib.sha256(b'complete').hexdigest()}
+        candidate = {'placement_id':'placement', 'object_id':'object', 'store_id':'store', 'disk_id':'source-disk', 'disk_state':'Watch', 'verified_at_utc':'2026-01-01T00:00:00Z', 'existing_disk_ids':['source-disk','other-disk'], 'relative_path':'objects/payload', 'size_bytes':8, 'content_hash':hashlib.sha256(b'complete').hexdigest()}
         for name, data in [('backup-source', b'complete'), ('backup-partial', b'partial'), ('quarantine', b'partial'), ('operation.json', json.dumps({'schema': 'dasobjectstore.storage_assurance.operation.v1', 'phase': 'claimed', 'action': 'rotate', 'operation_id': 'op-1', 'claim_owner': 'owner', 'destination_disk_id': 'disk', 'destination_relative_path':'objects/payload', 'candidate':candidate}).encode())]:
             (self.root / name).write_bytes(data)
         q, j = (self.root / 'quarantine').stat(), (self.root / 'operation.json').stat()
@@ -70,6 +70,15 @@ class RecoveryFixtureTest(unittest.TestCase):
     def test_changed_active_timestamp_denied(self):
         with sqlite3.connect(self.root / 'db.sqlite') as db:
             db.execute("UPDATE disk_capacity_claims SET updated_at_utc='changed'")
+        with self.assertRaises(ValueError): module.run(self.root)
+        self.assertEqual(self.state(), ('active', None))
+    def test_full_candidate_extra_field_denied(self):
+        self.intent['candidate']['unexpected'] = 'value'
+        operation=json.loads((self.root/'operation.json').read_text())
+        operation['candidate']['unexpected'] = 'value'
+        (self.root/'operation.json').write_text(json.dumps(operation))
+        self.intent['journal_sha256']=module.digest(self.root/'operation.json')
+        (self.root/'intent.json').write_text(json.dumps(self.intent))
         with self.assertRaises(ValueError): module.run(self.root)
         self.assertEqual(self.state(), ('active', None))
     def test_object_destage_and_destination_placement_deny(self):
