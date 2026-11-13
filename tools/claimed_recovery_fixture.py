@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Disposable-fixture model of cb68 claimed recovery. Never operates on an appliance."""
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -27,12 +28,41 @@ def checked_regular(path):
     return st
 
 
-def check_inputs(root, intent):
+def pin_inputs(root, stack):
+    pinned = {}
+    for name in ('backup-source', 'backup-partial', 'quarantine'):
+        fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW)
+        stack.callback(os.close, fd)
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise ValueError('invalid preserved file')
+        h = hashlib.sha256()
+        while True:
+            data = os.read(fd, 1024 * 1024)
+            if not data:
+                break
+            h.update(data)
+        after = os.fstat(fd)
+        if fingerprint(before) != fingerprint(after):
+            raise ValueError('file changed during verification')
+        pinned[name] = (fd, fingerprint(after), h.hexdigest())
+    return pinned
+
+
+def fingerprint(st):
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mode, st.st_nlink,
+            st.st_uid, st.st_gid, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def check_inputs(root, intent, pinned):
     if root.is_symlink() or not root.is_dir() or (root / '.disposable-recovery-fixture').read_text() != 'fixture-only\n':
         raise ValueError('not a disposable fixture')
     # Fixed child names only. No caller-supplied appliance paths are accepted.
     for name in ('db.sqlite', 'intent.json', 'receipt.json', 'backup-source', 'backup-partial', 'quarantine'):
         checked_regular(root / name)
+    for name, (fd, expected, _) in pinned.items():
+        if fingerprint(os.fstat(fd)) != expected or fingerprint(checked_regular(root / name)) != expected:
+            raise ValueError('pinned input changed')
     if digest(root / 'receipt.json') != intent['receipt_sha256']:
         raise ValueError('receipt mismatch')
     receipt = json.loads((root / 'receipt.json').read_text())
@@ -42,7 +72,7 @@ def check_inputs(root, intent):
         if set(row) != {'name', 'size', 'sha256', 'device', 'inode'} or type(row['size']) is not int or row['size'] < 0 or type(row['device']) is not int or type(row['inode']) is not int:
             raise ValueError('invalid receipt row')
         backup = root / ('backup-' + row['name'])
-        if backup.stat().st_size != row['size'] or digest(backup) != row['sha256']:
+        if backup.stat().st_size != row['size'] or pinned['backup-' + row['name']][2] != row['sha256']:
             raise ValueError('backup differs from receipt')
     source = next(row for row in receipt if row['name'] == 'source')
     if source['sha256'] != intent['source_sha256']:
@@ -53,7 +83,7 @@ def check_inputs(root, intent):
     if (root / 'destination').exists() or (root / 'destination').is_symlink():
         raise ValueError('destination exists')
     for name, key in (('backup-source', 'source_sha256'), ('backup-partial', 'partial_sha256'), ('quarantine', 'partial_sha256')):
-        if digest(root / name) != intent[key]:
+        if pinned[name][2] != intent[key]:
             raise ValueError('preservation mismatch')
     q = (root / 'quarantine').stat()
     if (q.st_dev, q.st_ino) != tuple(intent['quarantine_identity']):
@@ -74,6 +104,12 @@ def run(root, stop_after=None):
     if os.geteuid() == 0:
         raise ValueError('fixture runner refuses root')
     root = Path(root).resolve(strict=True)
+    with ExitStack() as stack:
+        pinned = pin_inputs(root, stack)
+        return run_pinned(root, pinned, stop_after)
+
+
+def run_pinned(root, pinned, stop_after):
     intent = json.loads((root / 'intent.json').read_text())
     if set(intent['claim']) != set(COLUMNS):
         raise ValueError('claim binding incomplete')
@@ -82,18 +118,22 @@ def run(root, stop_after=None):
         raise ValueError('invalid claim text')
     if type(claim['reserved_bytes']) is not int or claim['reserved_bytes'] <= 0 or type(claim['consumed_bytes']) is not int or claim['consumed_bytes'] != 0 or claim['claim_kind'] != 'repair':
         raise ValueError('invalid claim quantities')
-    journal_present = check_inputs(root, intent)
+    journal_present = check_inputs(root, intent, pinned)
     conn = sqlite3.connect(root / 'db.sqlite', timeout=5, isolation_level=None)
     try:
         conn.execute('BEGIN IMMEDIATE')
         claim = intent['claim']
         rows = conn.execute('SELECT ' + ','.join(COLUMNS) + ',state,released_at_utc,lease_owner,lease_expires_at_utc,updated_at_utc FROM disk_capacity_claims WHERE claim_kind=? AND owner_id=?', (claim['claim_kind'], claim['owner_id'])).fetchall()
         exact = [row for row in rows if tuple(row[:len(COLUMNS)]) == tuple(claim[k] for k in COLUMNS)]
+        if any((row[-5] == 'active' and row[-4] is not None) or (row[-5] == 'released' and row[-4] is None) for row in rows):
+            raise ValueError('inconsistent claim state')
         active = [row for row in rows if row[-5] == 'active' and row[-4] is None]
         if len(exact) != 1 or any(row is not exact[0] for row in active):
             raise ValueError('ambiguous claim')
         row = exact[0]
         if row[-5:-3] == ('active', None):
+            if row[-1] != intent['original_updated_at']:
+                raise ValueError('claim timestamp changed')
             if list(row[-3:-1]) != intent['original_lease']:
                 raise ValueError('lease changed')
             if not journal_present or len(active) != 1:
@@ -117,7 +157,7 @@ def run(root, stop_after=None):
         os._exit(90)
     if journal_present:
         # Recheck exact inode and bytes after committing; a changed name is denied.
-        check_inputs(root, intent)
+        check_inputs(root, intent, pinned)
         os.unlink(root / 'operation.json')
     if stop_after == 'unlink':
         os._exit(91)

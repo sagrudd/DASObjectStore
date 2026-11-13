@@ -25,7 +25,7 @@ class RecoveryFixtureTest(unittest.TestCase):
         self.claim = dict(zip(module.COLUMNS, ('claim-1', 'repair', 'owner', 'request', 'digest', 'disk', 100, 0, '2026-01-01T00:00:00Z')))
         receipt = [{'name': 'source', 'size': 8, 'sha256': hashlib.sha256(b'complete').hexdigest(), 'device': 1, 'inode': 2}, {'name': 'partial', 'size': 7, 'sha256': hashlib.sha256(b'partial').hexdigest(), 'device': q.st_dev, 'inode': q.st_ino}]
         (self.root / 'receipt.json').write_text(json.dumps(receipt))
-        self.intent = {'receipt': receipt, 'receipt_sha256': module.digest(self.root / 'receipt.json'), 'claim': self.claim, 'source_sha256': hashlib.sha256(b'complete').hexdigest(), 'partial_sha256': hashlib.sha256(b'partial').hexdigest(), 'operation_id': 'op-1', 'journal_sha256': module.digest(self.root / 'operation.json'), 'journal_identity': [j.st_dev, j.st_ino], 'quarantine_identity': [q.st_dev, q.st_ino], 'original_lease': [None, None], 'release_time': '2026-01-02T00:00:00Z'}
+        self.intent = {'receipt': receipt, 'receipt_sha256': module.digest(self.root / 'receipt.json'), 'claim': self.claim, 'source_sha256': hashlib.sha256(b'complete').hexdigest(), 'partial_sha256': hashlib.sha256(b'partial').hexdigest(), 'operation_id': 'op-1', 'journal_sha256': module.digest(self.root / 'operation.json'), 'journal_identity': [j.st_dev, j.st_ino], 'quarantine_identity': [q.st_dev, q.st_ino], 'original_updated_at': '2026-01-01T00:00:00Z', 'original_lease': [None, None], 'release_time': '2026-01-02T00:00:00Z'}
         (self.root / 'intent.json').write_text(json.dumps(self.intent))
         with sqlite3.connect(self.root / 'db.sqlite') as db:
             schema = (SCRIPT.parents[1] / 'crates/dasobjectstore-metadata/src/schema.rs').read_text().split('pub const LIVE_SCHEMA_SQL: &str = r#"', 1)[1].split('"#;', 1)[0]
@@ -53,6 +53,20 @@ class RecoveryFixtureTest(unittest.TestCase):
     def test_extra_active_or_wrong_journal_denied(self):
         with sqlite3.connect(self.root / 'db.sqlite') as db:
             db.execute("INSERT INTO disk_capacity_claims (claim_id,claim_kind,owner_id,request_id,request_digest,disk_id,reserved_bytes,consumed_bytes,created_at_utc,state,released_at_utc,updated_at_utc,lease_owner,lease_expires_at_utc) SELECT 'claim-2',claim_kind,owner_id,request_id,request_digest,'other-disk',reserved_bytes,consumed_bytes,created_at_utc,state,released_at_utc,updated_at_utc,lease_owner,lease_expires_at_utc FROM disk_capacity_claims")
+        with self.assertRaises(ValueError): module.run(self.root)
+        self.assertEqual(self.state(), ('active', None))
+    def test_wrong_journal_denied(self):
+        (self.root / 'operation.json').write_text('{}')
+        with self.assertRaises(ValueError): module.run(self.root)
+        self.assertEqual(self.state(), ('active', None))
+    def test_inconsistent_other_owner_row_denied(self):
+        with sqlite3.connect(self.root / 'db.sqlite') as db:
+            db.execute("INSERT INTO disk_capacity_claims (claim_id,claim_kind,owner_id,request_id,request_digest,disk_id,reserved_bytes,consumed_bytes,created_at_utc,state,released_at_utc,updated_at_utc) SELECT 'claim-2',claim_kind,owner_id,request_id,request_digest,'other-disk',reserved_bytes,consumed_bytes,created_at_utc,'active','unexpected',updated_at_utc FROM disk_capacity_claims")
+        with self.assertRaises(ValueError): module.run(self.root)
+        self.assertEqual(self.state(), ('active', None))
+    def test_changed_active_timestamp_denied(self):
+        with sqlite3.connect(self.root / 'db.sqlite') as db:
+            db.execute("UPDATE disk_capacity_claims SET updated_at_utc='changed'")
         with self.assertRaises(ValueError): module.run(self.root)
         self.assertEqual(self.state(), ('active', None))
     def test_released_timestamp_mismatch_denied(self):
