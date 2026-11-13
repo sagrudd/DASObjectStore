@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.185.12 - Unreleased
+
+- Add a non-root, disposable-fixture model for testing exact claimed-recovery
+  interruption states. This diagnostic does not operate on appliance data.
+
 ## 0.185.9 - Unreleased
 
 - Align the product manifest with the workspace and package version. This
