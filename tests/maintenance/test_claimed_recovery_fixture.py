@@ -10,11 +10,27 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[2] / 'tools' / 'claimed_recovery_fixture.py'
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location('claimed_recovery_fixture', SCRIPT)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class RecoveryFixtureTest(unittest.TestCase):
+    def test_release_requires_transaction(self):
+        with sqlite3.connect(self.root / 'db.sqlite') as db:
+            with self.assertRaisesRegex(ValueError, 'explicit transaction'):
+                module.release_exact_claim(db, self.intent, journal_present=True)
+
+    def test_uncommitted_transition_rolls_back(self):
+        db = sqlite3.connect(self.root / 'db.sqlite')
+        try:
+            db.execute('BEGIN IMMEDIATE')
+            module.release_exact_claim(db, self.intent, journal_present=True)
+            db.rollback()
+            self.assertEqual(db.execute('SELECT state FROM disk_capacity_claims').fetchall(), [('active',)])
+        finally:
+            db.close()
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
