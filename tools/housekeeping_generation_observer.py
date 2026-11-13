@@ -59,6 +59,29 @@ class ReportGenerationObserver:
                 if wd != self.watch: raise RuntimeError('unexpected watch')
                 yield mask, name
 
+    def begin_inode_marker(self):
+        """Arm before metadata-only promotion of the existing journal inode."""
+        if self.ready or self.exchanging: raise RuntimeError('barrier already armed')
+        for _ in self._events(): pass
+        self.exchanging = True
+
+    def finish_inode_marker(self, timeout=5):
+        if not self.exchanging or self.ready: raise RuntimeError('barrier not armed')
+        deadline = time.monotonic() + timeout
+        observed = False
+        while not observed:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.fd], [], [], remaining)[0]:
+                raise TimeoutError('journal metadata event not observed')
+            for mask, name in self._events():
+                if name != b'operation.json': continue
+                if mask != 0x00000004:
+                    raise RuntimeError('unexpected journal mutation during promotion')
+                observed = True
+        self.exchanging = False
+        self.ready = True
+        self.assert_intact()
+
     def begin_exchange(self):
         if self.ready or self.exchanging: raise RuntimeError('exchange already armed')
         for _ in self._events(): pass
@@ -83,8 +106,8 @@ class ReportGenerationObserver:
     def assert_intact(self):
         if not self.ready: raise RuntimeError('observer not armed')
         for mask, name in self._events():
-            if name == b'operation.json':
-                raise RuntimeError('journal changed after exchange')
+            if name == b'operation.json' or (name == b'' and mask & 0x00000004):
+                raise RuntimeError('journal or parent changed after barrier')
 
     def wait_two(self, timeout):
         if not self.ready or timeout <= 0: raise RuntimeError('observer not armed')
@@ -95,7 +118,7 @@ class ReportGenerationObserver:
             if remaining <= 0: raise TimeoutError('two report generations not observed')
             if not select.select([self.fd], [], [], remaining)[0]: raise TimeoutError('two report generations not observed')
             for mask, name in self._events():
-                if name == b'operation.json': raise RuntimeError('journal changed after exchange')
+                if name == b'operation.json' or (name == b'' and mask & 0x00000004): raise RuntimeError('journal or parent changed after barrier')
                 if len(found) == 2 or not (mask & _IN_MOVED_TO) or name != b'latest.json': continue
                 fd = os.open('latest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=self.dirfd)
                 try:

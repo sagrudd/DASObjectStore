@@ -48,10 +48,22 @@ class ObserverTest(unittest.TestCase):
         thread.start()
         with self.assertRaises(TimeoutError):self.obs.wait_two(.2)
         thread.join()
+    def test_inode_marker_rejects_later_mutation(self):
+        self.obs.begin_inode_marker()
+        os.chmod(self.root/'operation.json',0o600)
+        self.obs.finish_inode_marker()
+        (self.root/'operation.json').write_text('changed')
+        with self.assertRaisesRegex(RuntimeError,'changed after barrier'):
+            self.obs.assert_intact()
     def test_post_exchange_journal_mutation_denied(self):
         self.exchange()
         (self.root/'operation.json').write_text('changed')
-        with self.assertRaisesRegex(RuntimeError,'journal changed'):
+        with self.assertRaisesRegex(RuntimeError,'changed after barrier'):
+            self.obs.assert_intact()
+    def test_parent_metadata_change_denied(self):
+        self.exchange()
+        os.chmod(self.root,0o700)
+        with self.assertRaisesRegex(RuntimeError,'changed after barrier'):
             self.obs.assert_intact()
     def test_symlink_report_denied(self):
         self.exchange()
