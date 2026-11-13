@@ -94,7 +94,7 @@ def check_inputs(root, intent, pinned):
         if (st.st_dev, st.st_ino) != tuple(intent['journal_identity']) or digest(journal) != intent['journal_sha256']:
             raise ValueError('journal mismatch')
         operation = json.loads(journal.read_text())
-        if operation.get('schema') != 'dasobjectstore.storage_assurance.operation.v1' or operation.get('phase') != 'claimed' or operation.get('action') != 'rotate' or operation.get('operation_id') != intent['operation_id'] or operation.get('claim_owner') != intent['claim']['owner_id'] or operation.get('destination_disk_id') != intent['claim']['disk_id']:
+        if operation.get('schema') != 'dasobjectstore.storage_assurance.operation.v1' or operation.get('phase') != 'claimed' or operation.get('action') != 'rotate' or operation.get('operation_id') != intent['operation_id'] or operation.get('claim_owner') != intent['claim']['owner_id'] or operation.get('destination_disk_id') != intent['claim']['disk_id'] or operation.get('destination_relative_path') != intent['candidate']['relative_path'] or operation.get('candidate') != intent['candidate']:
             raise ValueError('journal operation mismatch')
         return True
     return False
@@ -123,6 +123,22 @@ def run_pinned(root, pinned, stop_after):
     try:
         conn.execute('BEGIN IMMEDIATE')
         claim = intent['claim']
+        candidate = intent['candidate']
+        keys = {'placement_id','object_id','store_id','disk_id','relative_path','size_bytes','content_hash'}
+        if set(candidate) != keys or type(candidate['size_bytes']) is not int or candidate['size_bytes'] <= 0:
+            raise ValueError('candidate binding differs')
+        if claim['reserved_bytes'] != candidate['size_bytes'] or candidate['content_hash'] != intent['source_sha256']:
+            raise ValueError('claim or content size differs')
+        obj = conn.execute('SELECT store_id,state,size_bytes,content_hash FROM objects WHERE object_id=?', (candidate['object_id'],)).fetchall()
+        if obj != [(candidate['store_id'],'HddCopyVerified',candidate['size_bytes'],candidate['content_hash'])]:
+            raise ValueError('catalogue object differs')
+        source = conn.execute('SELECT object_id,disk_id,relative_path,content_hash FROM placements WHERE placement_id=?', (candidate['placement_id'],)).fetchall()
+        if source != [(candidate['object_id'],candidate['disk_id'],candidate['relative_path'],candidate['content_hash'])]:
+            raise ValueError('source placement differs')
+        if conn.execute('SELECT COUNT(*) FROM placements WHERE disk_id=? AND relative_path=?', (claim['disk_id'],candidate['relative_path'])).fetchone()[0] != 0:
+            raise ValueError('destination placement exists')
+        if conn.execute('SELECT COUNT(*) FROM destage_queue WHERE object_id=?', (candidate['object_id'],)).fetchone()[0] != 0:
+            raise ValueError('object has destage work')
         rows = conn.execute('SELECT ' + ','.join(COLUMNS) + ',state,released_at_utc,lease_owner,lease_expires_at_utc,updated_at_utc FROM disk_capacity_claims WHERE claim_kind=? AND owner_id=?', (claim['claim_kind'], claim['owner_id'])).fetchall()
         exact = [row for row in rows if tuple(row[:len(COLUMNS)]) == tuple(claim[k] for k in COLUMNS)]
         if any((row[-5] == 'active' and row[-4] is not None) or (row[-5] == 'released' and row[-4] is None) for row in rows):
