@@ -97,11 +97,14 @@ class OriginalJournalMarker:
         self.observer.finish_inode_marker();self._check_marked(True)
         return intent
 
+    def recheck_without_observer(self):
+        p=self._check_marked(True)
+        if (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode),_acl(self.parent.parent_fd))!=(0,972,0o1770,_FENCED_ACL):
+            raise RuntimeError('report-write parent lost')
+
     def recheck(self):
         for _ in range(2):
-            p=self._check_marked(True)
-            if (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode),_acl(self.parent.parent_fd))!=(0,972,0o1770,_FENCED_ACL):
-                raise RuntimeError('report-write parent lost')
+            self.recheck_without_observer()
             self.observer.assert_intact()
 
     def close(self):

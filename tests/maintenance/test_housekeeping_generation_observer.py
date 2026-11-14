@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[2] / 'tools' / 'housekeeping_generation_observer.py'
 spec = importlib.util.spec_from_file_location('report_observer', SCRIPT)
@@ -48,6 +49,21 @@ class ObserverTest(unittest.TestCase):
         thread.start()
         with self.assertRaises(TimeoutError):self.obs.wait_two(.2)
         thread.join()
+    def test_wait_rechecks_and_does_not_consume_new_generations(self):
+        self.exchange();calls=[]
+        def check():calls.append(1)
+        def writer():
+            time.sleep(.05);self.replace('first')
+            time.sleep(.1);self.replace('second')
+        thread=threading.Thread(target=writer);thread.start()
+        found=self.obs.wait_two(2,check=check);thread.join()
+        self.assertEqual(len(found),2)
+        self.assertGreaterEqual(len(calls),2)
+    def test_failed_authorization_aborts_wait(self):
+        self.exchange()
+        def deny():raise RuntimeError('authorization expired')
+        with self.assertRaisesRegex(RuntimeError,'authorization expired'):
+            self.obs.wait_two(10,check=deny)
     def test_inode_marker_rejects_later_mutation(self):
         self.obs.begin_inode_marker()
         os.chmod(self.root/'operation.json',0o600)

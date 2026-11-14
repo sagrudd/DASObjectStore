@@ -56,7 +56,7 @@ class RecoveredJournalMarker:
         except BaseException:
             self.close();raise
     def _sigio(self,*_):self.broken=True
-    def recheck(self):
+    def recheck_without_observer(self):
         p=os.fstat(self.parent_fd);f=os.fstat(self.journal_fd);n=os.stat('operation.json',dir_fd=self.parent_fd,follow_symlinks=False)
         if ((p.st_dev,p.st_ino)!=tuple(self.intent['parent']) or (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode),_acl(self.parent_fd))!=(0,972,0o1770,_FENCED_ACL)
             or not stat.S_ISREG(n.st_mode) or n.st_nlink!=1 or (n.st_dev,n.st_ino)!=(f.st_dev,f.st_ino) or (f.st_dev,f.st_ino)!=tuple(self.intent['journal'])
@@ -67,6 +67,8 @@ class RecoveredJournalMarker:
         if len(data)!=f.st_size or hashlib.sha256(data).hexdigest()!=self.intent['journal_sha256']:
             raise RuntimeError('persistent journal bytes differ')
         if self.broken or not self.leased or fcntl.fcntl(self.journal_fd,fcntl.F_GETLEASE)!=fcntl.F_RDLCK:raise RuntimeError('marker lease lost')
+    def recheck(self):
+        self.recheck_without_observer()
         self.observer.assert_intact()
     def close(self):
         if self.leased:fcntl.fcntl(self.journal_fd,fcntl.F_SETLEASE,fcntl.F_UNLCK);self.leased=False
