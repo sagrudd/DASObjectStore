@@ -165,12 +165,24 @@ class HeldTarget:
     This does not establish a writer fence. The caller must hold reviewed owner
     exclusion and repeat recheck around each effect; errors must preserve state.
     """
-    def __init__(self):
+    def __init__(self, *, stopped=False):
         self.stack = ExitStack()
         self.connection = None
-        self.daemon_stopped = False
+        self.daemon_stopped = stopped
         try:
-            verify_read_only()
+            if stopped:
+                machine=open_absolute('/etc/machine-id')
+                try:
+                    if hashlib.sha256(os.read(machine,4096)).hexdigest()!=MACHINE_SHA256:
+                        raise RuntimeError('NUC machine differs')
+                finally: os.close(machine)
+                for mount,uuid in MOUNTS.items():
+                    data=json.loads(subprocess.check_output(
+                        ['/usr/bin/findmnt','--json','--target',mount,'--output','TARGET,UUID,FSTYPE'],timeout=10))['filesystems']
+                    if data != [{'target':mount,'uuid':uuid,'fstype':'ext4'}]:
+                        raise RuntimeError('NUC filesystem differs')
+            else:
+                verify_read_only()
             self.paths = {}
             for path in (*MOUNTS, str(Path(DATABASE).parent), DATABASE, SOURCE_PARENT,
                          DESTINATION_PARENT, JOURNAL_PARENT, BACKUP_PARENT):
@@ -184,6 +196,9 @@ class HeldTarget:
                 raise RuntimeError('catalogue identity differs')
             self.processes = {}
             for unit, (pid, invocation, digest) in PROCESSES.items():
+                if stopped and unit=='dasobjectstored.service':
+                    self.processes[unit]=(None,None,None,None)
+                    continue
                 pidfd = os.pidfd_open(pid)
                 self.stack.callback(os.close, pidfd)
                 exe = os.open(f'/proc/{pid}/exe', os.O_RDONLY | os.O_CLOEXEC)
@@ -237,7 +252,9 @@ class HeldTarget:
         for unit, (pid, invocation, digest) in PROCESSES.items():
             pidfd, exe, start, original = self.processes[unit]
             if unit == 'dasobjectstored.service' and self.daemon_stopped:
-                if not select.select([pidfd], [], [], 0)[0]:
+                if pidfd is None and os.path.exists(f'/proc/{pid}'):
+                    raise RuntimeError('original daemon PID remains present')
+                if pidfd is not None and not select.select([pidfd], [], [], 0)[0]:
                     raise RuntimeError('original daemon still alive')
                 fields = dict(line.split('=', 1) for line in subprocess.check_output(
                     ['/usr/bin/systemctl','show','--property=MainPID','--property=ActiveState',

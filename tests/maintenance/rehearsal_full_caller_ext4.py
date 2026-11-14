@@ -56,11 +56,11 @@ try:
   import nuc_claim_target as targetmod,nuc_claim_run as runner,das_unit_start_fence as fence
   import types
   class FakeTarget:
-   def __init__(self):
+   def __init__(self, *, stopped=False):
     self.opened=[];self.paths={}
     for key,path in ((runner.BACKUP_PARENT,backup),(runner.SOURCE_PARENT,sp),(runner.DESTINATION_PARENT,dp),(runner.JOURNAL_PARENT,jdir),('/srv/dasobjectstore/hdd/qnap-1058',dm)):
      fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY);self.opened.append(fd);self.paths[key]=types.SimpleNamespace(fds=[fd])
-    self.connection=sqlite3.connect(dbpath,isolation_level=None);self.daemon_stopped=False
+    self.connection=sqlite3.connect(dbpath,isolation_level=None);self.daemon_stopped=stopped
    def recheck(self):pass
    def observe_stopped(self):self.daemon_stopped=True
    def close(self):
@@ -68,12 +68,14 @@ try:
     for fd in self.opened:os.close(fd)
   targetmod.HeldTarget=FakeTarget;runner.HeldTarget=FakeTarget
   runner.STATE_PARENT=str(jr);runner.STATE_NAME='state';runner.QUARANTINE_NAME='q0';runner.JOURNAL_SHA=journal_sha;runner.JOURNAL_PARENT=str(jdir)
-  real_acquire=fence.DasClientStartFence.acquire;real_recheck=fence.DasClientStartFence.recheck;real_promote=fence.DasClientStartFence.promote_after_recovery;real_recover=fence.DasClientStartFence.recover_client_held
+  real_acquire=fence.DasClientStartFence.acquire;real_recheck=fence.DasClientStartFence.recheck;real_promote=fence.DasClientStartFence.promote_after_recovery;real_recover=fence.DasClientStartFence.recover_client_held;real_promoted=fence.DasClientStartFence.recover_promoted
   def fake_acquire(self):self.fd=os.open('/dev/null',os.O_RDONLY);return self
   def fake_recheck(self):pass
+  def fake_promoted(self):
+   self.fd=os.open('/dev/null',os.O_RDONLY);self.journal_kind='das-promoted-client-fence-v1';return self
   def fake_promote(self,proof):
    proof.recheck();proof.target.observe_stopped();proof.recheck();self.journal_kind='das-promoted-client-fence-v1';return self
-  fence.DasClientStartFence.acquire=fake_acquire;fence.DasClientStartFence.recover_client_held=fake_acquire;fence.DasClientStartFence.recheck=fake_recheck;fence.DasClientStartFence.promote_after_recovery=fake_promote
+  fence.DasClientStartFence.recover_promoted=fake_promoted;fence.DasClientStartFence.acquire=fake_acquire;fence.DasClientStartFence.recover_client_held=fake_acquire;fence.DasClientStartFence.recheck=fake_recheck;fence.DasClientStartFence.promote_after_recovery=fake_promote
   writer=os.fork()
   if writer==0:
    try:
@@ -90,6 +92,15 @@ try:
     child=os.fork()
     if child==0:
      original_write=recovery.IntegratedClaimRecovery._write
+     if interrupt.startswith('restore:'):
+      native_rename=os.rename
+      def kill_restore(src,dst,*args,**kwargs):
+       result=native_rename(src,dst,*args,**kwargs)
+       if src=='restore.new':
+        data=json.loads((state/'restore.json').read_text())
+        if data['phase']==interrupt.split(':',1)[1]:os.kill(os.getpid(),signal.SIGKILL)
+       return result
+      os.rename=kill_restore
      def kill_at(self,value):
       original_write(self,value)
       if value==interrupt:os.kill(os.getpid(),signal.SIGKILL)
@@ -100,6 +111,7 @@ try:
      except BaseException:os._exit(8)
     _,status=os.waitpid(child,0)
     if not os.WIFSIGNALED(status) or os.WTERMSIG(status)!=signal.SIGKILL:raise RuntimeError('caller interruption failed')
+    if interrupt.startswith('restore:'):runner._promoted_hold_exists=lambda:True
    with runner.hold_claim_recovery(stop_and_restore=True) as live:
     live.recheck(); result=live.result
     if result['restore']!='restored-daemon-still-fenced' or sf.read_bytes()!=b'complete' or (dm/'q0'/'partial').read_bytes()!=b'partial' or journal.exists() or not (state/'original-journal').is_file():raise RuntimeError('full caller outcome differs')
@@ -108,7 +120,7 @@ try:
    if not os.WIFEXITED(status) or os.WEXITSTATUS(status)!=0:raise RuntimeError('fixture reporter failed')
    results[phase]=True;results['all_passed']=True
   finally:
-   fence.DasClientStartFence.acquire=real_acquire;fence.DasClientStartFence.recheck=real_recheck;fence.DasClientStartFence.promote_after_recovery=real_promote;fence.DasClientStartFence.recover_client_held=real_recover
+   fence.DasClientStartFence.acquire=real_acquire;fence.DasClientStartFence.recheck=real_recheck;fence.DasClientStartFence.promote_after_recovery=real_promote;fence.DasClientStartFence.recover_client_held=real_recover;fence.DasClientStartFence.recover_promoted=real_promoted
 finally:
  for mount in reversed(mounts):subprocess.run(['/usr/bin/umount',str(mount)],check=True);os.rmdir(mount)
  data=(json.dumps({'results':results,'details':details},sort_keys=True)+'\n').encode();fd=os.open(root/'result.json',os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o400);os.write(fd,data);os.fsync(fd);os.close(fd)

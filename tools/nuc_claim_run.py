@@ -57,11 +57,11 @@ class HeldRecovery:
         else:
             self.marker.recheck()
 
-    def begin_apt(self):
+    def begin_apt(self, audited_units_fd):
         """Retain the verified running image across the package pathname swap."""
         if not self.restored: raise RuntimeError('recovery restoration is required')
         self.recheck()
-        self.fence.bind_apt_verifier(self)
+        self.fence.bind_apt_verifier(self,audited_units_fd)
         self.recheck()
 
 
@@ -82,13 +82,41 @@ def _open_private(parent_fd,name):
     return fd
 
 
+def _promoted_hold_exists():
+    """Inspect only the fixed protected fence journal; never modify it."""
+    from das_unit_start_fence import STATE
+    from nuc_claim_target import HeldPath
+    try: directory=HeldPath(str(STATE),directory=True)
+    except FileNotFoundError: return False
+    try:
+        parent=os.fstat(directory.fds[-1])
+        if (parent.st_uid,parent.st_gid,stat.S_IMODE(parent.st_mode))!=(0,0,0o700):
+            raise RuntimeError('fence journal parent differs')
+        try: fd=os.open('journal.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=directory.fds[-1])
+        except FileNotFoundError:return False
+        try:
+            st=os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid!=0 or st.st_gid!=0 or st.st_nlink!=1 or st.st_mode&0o077 or st.st_size>131072:
+                raise RuntimeError('fence journal custody differs')
+            data=json.loads(os.read(fd,131073))
+        finally:os.close(fd)
+        if data.get('kind')=='das-promoted-client-fence-v1':
+            if data.get('phase')!='held':raise RuntimeError('partial promotion requires attended reconciliation')
+            return True
+        return False
+    finally:directory.close()
+
+
 @contextmanager
 def hold_claim_recovery(*, stop_and_restore=False):
     """Release the claim and optionally stop/fence DAS and restore metadata."""
     if os.geteuid()!=0: raise RuntimeError('root required')
     # This entry point deliberately has no generic caller-supplied paths,
     # adapters, callbacks, or substituted target/owner proof.
-    target=HeldTarget(); backups=None; held=None; marker=None; guard=None; observer=None; coord=None; source=None; partial=None
+    stopped=_promoted_hold_exists()
+    target=HeldTarget(stopped=stopped) if stopped else HeldTarget()
+    backups=None; held=None; marker=None; guard=None; observer=None; coord=None; source=None; partial=None
+    restored=False
     fds=[]
     try:
         backupfd=os.dup(target.paths[BACKUP_PARENT].fds[-1]);fds.append(backupfd)
@@ -110,7 +138,14 @@ def hold_claim_recovery(*, stop_and_restore=False):
         quarantine=_open_private(root,QUARANTINE_NAME) if existing else _mkdir_private(root,QUARANTINE_NAME)
         fds.append(quarantine)
         sp=os.dup(target.paths[SOURCE_PARENT].fds[-1]); dp=os.dup(target.paths[DESTINATION_PARENT].fds[-1]); jp=os.dup(target.paths[JOURNAL_PARENT].fds[-1]);fds.extend((sp,dp,jp))
-        if existing:
+        if stopped:
+            if not existing:raise RuntimeError('stopped hold without retained recovery state')
+            from nuc_recovery_restore import resume_restoration
+            held=DasClientStartFence().recover_promoted()
+            result={'recovery':'already-committed',
+                    'restore':resume_restoration(target,held,backups,state,sp,dp,quarantine,jp)}
+            restored=True
+        elif existing:
             from recovered_journal_marker import RecoveredJournalMarker
             from integrated_claim_recovery import resume_early
             for name in ('restore.json','restore.new'):
@@ -158,15 +193,16 @@ def hold_claim_recovery(*, stop_and_restore=False):
             source=Payload(sp,sfd,backups.rows['source']);partial=Payload(dp,dfd,backups.rows['partial'])
             coord=IntegratedClaimRecovery(marker,backups,source,partial,state,quarantine,conn,intent,external_check=check)
             result=coord.run()
-        if stop_and_restore:
+        if stop_and_restore and not restored:
             from nuc_claim_target import RecoveryStopProof
             from nuc_recovery_restore import restore_after_stop
             proof=RecoveryStopProof(target,marker,backups,state,sp,dp,quarantine)
             held.promote_after_recovery(proof)
             result={'recovery':result, 'restore':restore_after_stop(proof,held)}
+            restored=True
         # The consumer runs within this scope; its lock and descriptors remain
         # live. On exit masks remain and require an explicit reviewed release.
-        yield HeldRecovery(target,held,marker,backups,state,quarantine,sp,dp,result,stop_and_restore)
+        yield HeldRecovery(target,held,marker,backups,state,quarantine,sp,dp,result,restored)
     finally:
         if coord is not None: coord.close()
         else:
