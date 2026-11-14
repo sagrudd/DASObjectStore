@@ -92,6 +92,9 @@ try:
     child=os.fork()
     if child==0:
      original_write=recovery.IntegratedClaimRecovery._write
+     if interrupt=='pre-observation':
+      def kill_before(self,**kwargs):os.kill(os.getpid(),signal.SIGKILL)
+      recovery.IntegratedClaimRecovery.run=kill_before
      if interrupt.startswith('restore:'):
       native_rename=os.rename
       def kill_restore(src,dst,*args,**kwargs):
@@ -106,13 +109,27 @@ try:
       if value==interrupt:os.kill(os.getpid(),signal.SIGKILL)
      recovery.IntegratedClaimRecovery._write=kill_at
      try:
-      with runner.hold_claim_recovery(stop_and_restore=True):pass
+      with runner.hold_claim_recovery(stop_and_restore=True,authorization_end_ns=time.monotonic_ns()+3600_000_000_000,authorize=lambda:None):pass
       os._exit(9)
      except BaseException:os._exit(8)
     _,status=os.waitpid(child,0)
     if not os.WIFSIGNALED(status) or os.WTERMSIG(status)!=signal.SIGKILL:raise RuntimeError('caller interruption failed')
     if interrupt.startswith('restore:'):runner._promoted_hold_exists=lambda:True
-   with runner.hold_claim_recovery(stop_and_restore=True) as live:
+    if interrupt=='pre-observation':
+     try:
+      with runner.hold_claim_recovery(stop_and_restore=True,authorization_end_ns=time.monotonic_ns()+300_000_000_000,authorize=lambda:None):
+       raise RuntimeError('insufficient budget accepted')
+     except RuntimeError as error:
+      if 'insufficient signed time' not in str(error):raise
+     jf=os.open(journal,os.O_RDONLY)
+     try:
+      if not marker._flags(jf)&0x10 or list((dm/'q0').iterdir()):raise RuntimeError('deadline denial changed held state')
+     finally:os.close(jf)
+     checkdb=sqlite3.connect(dbpath)
+     try:
+      if checkdb.execute("SELECT state FROM disk_capacity_claims WHERE claim_id='claim-1'").fetchone()!=('active',):raise RuntimeError('deadline denial changed claim')
+     finally:checkdb.close()
+   with runner.hold_claim_recovery(stop_and_restore=True,authorization_end_ns=time.monotonic_ns()+3600_000_000_000,authorize=lambda:None) as live:
     live.recheck(); result=live.result
     if result['restore']!='restored-daemon-still-fenced' or sf.read_bytes()!=b'complete' or (dm/'q0'/'partial').read_bytes()!=b'partial' or journal.exists() or not (state/'original-journal').is_file():raise RuntimeError('full caller outcome differs')
     if live.fence.fd is None:raise RuntimeError('holder lock closed before consumer')

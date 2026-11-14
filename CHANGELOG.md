@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.185.16 - Unreleased
+
+- Resume an exact retained pre-observation marker under the original signed
+  deadline while requiring two newly observed housekeeping generations.
+
 ## 0.185.15 - Unreleased
 
 - Bind the reviewed NUC recovery to the observed restarted DAS owner and exact service cgroup.

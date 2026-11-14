@@ -48,7 +48,7 @@ EXPECTED_ORIGINAL_JOURNAL_SHA256 = '57568bee1c28385f25798edf25fe30093de25473f5f9
 
 class VerifiedBackups:
     """Prehash root-protected backup copies before taking a live hold."""
-    def __init__(self,dirfd):
+    def __init__(self,dirfd,check=None):
         self.dirfd=os.dup(dirfd);self.files={};self.rows={}
         try:
             directory=os.fstat(self.dirfd)
@@ -73,7 +73,7 @@ class VerifiedBackups:
                 self.files[row['name']]=fd;before=os.fstat(fd)
                 if not stat.S_ISREG(before.st_mode) or before.st_uid!=0 or before.st_gid!=0 or before.st_nlink!=1 or stat.S_IMODE(before.st_mode)!=0o600 or before.st_size!=row['size']:
                     raise RuntimeError('backup copy custody differs')
-                if _hash_fd(fd,lambda:None)!=row['sha256'] or _finger(os.fstat(fd))!=_finger(before):
+                if _hash_fd(fd,check if check is not None else lambda:None)!=row['sha256'] or _finger(os.fstat(fd))!=_finger(before):
                     raise RuntimeError('backup copy hash differs')
                 self.rows[row['name']]=dict(row);self.rows[row['name']]['backup_fingerprint']=_finger(before)
             self.directory_identity=_ident(directory)
@@ -161,16 +161,16 @@ class Payload:
 class IntegratedClaimRecovery:
     """Execute only with fixed, independently authenticated NUC bindings."""
     def __init__(self,marker,backups,source,partial,state_fd,quarantine_fd,conn,intent,external_check=None):
-        if type(marker) is not OriginalJournalMarker or type(backups) is not VerifiedBackups or type(source) is not Payload or type(partial) is not Payload:
+        from recovered_journal_marker import RecoveredJournalMarker
+        if type(marker) not in (OriginalJournalMarker,RecoveredJournalMarker) or type(backups) is not VerifiedBackups or type(source) is not Payload or type(partial) is not Payload:
             raise RuntimeError('exact reviewed hold types required')
         state=os.fstat(state_fd);q=os.fstat(quarantine_fd)
         if (not stat.S_ISDIR(state.st_mode) or state.st_uid!=0 or state.st_gid!=0 or stat.S_IMODE(state.st_mode)!=0o700
             or not stat.S_ISDIR(q.st_mode) or q.st_uid!=0 or q.st_gid!=0 or stat.S_IMODE(q.st_mode)!=0o700
             or q.st_dev!=partial.before.st_dev):raise RuntimeError('private state or quarantine differs')
         if conn.in_transaction:raise RuntimeError('connection already has transaction')
-        if marker.parent.journal_sha256 != EXPECTED_ORIGINAL_JOURNAL_SHA256:
-            raise RuntimeError('original journal digest differs')
-        raw=os.pread(marker.parent.journal_fd,131073,0)
+        journal_fd=marker.parent.journal_fd if type(marker) is OriginalJournalMarker else marker.journal_fd
+        raw=os.pread(journal_fd,131073,0)
         if len(raw)>131072 or hashlib.sha256(raw).hexdigest()!=EXPECTED_ORIGINAL_JOURNAL_SHA256:
             raise RuntimeError('original journal bytes differ')
         operation=json.loads(raw)
@@ -250,10 +250,14 @@ class IntegratedClaimRecovery:
         if _ident(p)!=_ident(item.parent_before) or (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode))!=(0,0,0o500):
             raise RuntimeError('payload parent fence differs')
         self._check();self._verify_name(item);self._write(label+'-parent-held')
-    def run(self,timeout=900):
+    def run(self,timeout=2700):
         if self.external_check is not None:self.external_check()
         self.marker.recheck()
-        generations=self.marker.observer.wait_two(timeout)
+        def wait_check():
+            if self.external_check is not None:self.external_check()
+            self.marker.recheck_without_observer()
+            self.backups.recheck()
+        generations=self.marker.observer.wait_two(timeout,check=wait_check)
         self.marker.recheck()
         self.source.acquire_lease()
         try:

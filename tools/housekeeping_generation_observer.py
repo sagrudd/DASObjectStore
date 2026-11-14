@@ -115,14 +115,15 @@ class ReportGenerationObserver:
             if name == b'operation.json' or (name == b'' and mask & 0x00000004):
                 raise RuntimeError('journal or parent changed after barrier')
 
-    def wait_two(self, timeout):
+    def wait_two(self, timeout, check=None):
         if not self.ready or timeout <= 0: raise RuntimeError('observer not armed')
         deadline = time.monotonic() + timeout
         found = []
         while len(found) < 2:
+            if check is not None: check()
             remaining = deadline - time.monotonic()
             if remaining <= 0: raise TimeoutError('two report generations not observed')
-            if not select.select([self.fd], [], [], remaining)[0]: raise TimeoutError('two report generations not observed')
+            if not select.select([self.fd], [], [], min(remaining,10))[0]: continue
             for mask, name in self._events():
                 if name == b'operation.json' or (name == b'' and mask & 0x00000004): raise RuntimeError('journal or parent changed after barrier')
                 if len(found) == 2 or not (mask & _IN_MOVED_TO) or name != b'latest.json': continue

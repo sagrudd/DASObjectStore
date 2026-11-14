@@ -198,6 +198,7 @@ class HeldTarget:
         self.stack = ExitStack()
         self.connection = None
         self.daemon_stopped = stopped
+        self.authorization_check = None
         try:
             if stopped:
                 machine=open_absolute('/etc/machine-id')
@@ -271,6 +272,7 @@ class HeldTarget:
 
     def recheck(self):
         import select
+        if self.authorization_check is not None:self.authorization_check()
         for path in self.paths.values():
             path.recheck()
         if not self.daemon_stopped:
