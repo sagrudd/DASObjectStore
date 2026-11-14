@@ -85,13 +85,25 @@ def restore_after_stop(proof, held):
     finally: os.close(source)
 
 
+def _hash_restoration_payload(fd, guard, authorization_end_ns):
+    """Keep the deadline on every chunk and recheck full custody at most ten seconds apart."""
+    from nuc_claim_run import _authorization_guard
+    from integrated_claim_recovery import _hash_fd
+    guard()
+    check = _authorization_guard(authorization_end_ns, guard)
+    digest = _hash_fd(fd, check)
+    guard()
+    return digest
+
+
 def resume_restoration(target, held, backups, state_fd, source_parent_fd,
-                       destination_parent_fd, quarantine_fd, journal_parent_fd):
+                       destination_parent_fd, quarantine_fd, journal_parent_fd,
+                       *, authorization_end_ns):
     """Resume exact post-stop metadata restoration without restarting DAS."""
     from nuc_claim_target import HeldTarget
     from das_unit_start_fence import DasClientStartFence
     from recovered_journal_marker import _read_intent
-    from integrated_claim_recovery import VerifiedBackups, _hash_fd, EXPECTED_ORIGINAL_JOURNAL_SHA256
+    from integrated_claim_recovery import VerifiedBackups, EXPECTED_ORIGINAL_JOURNAL_SHA256
     from claimed_recovery_transaction import validate_exact_claim
     import hashlib
     if type(target) is not HeldTarget or not target.daemon_stopped or type(held) is not DasClientStartFence or type(backups) is not VerifiedBackups:
@@ -140,7 +152,7 @@ def resume_restoration(target, held, backups, state_fd, source_parent_fd,
         for name,fd in (('source',source),('partial',partial)):
             st=os.fstat(fd); old=record[name]['file']; row=backups.rows[name]
             if (not stat.S_ISREG(st.st_mode) or st.st_nlink!=1 or (st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns)!=(row['device'],row['inode'],row['size'],old['mtime_ns'])
-                or old['sha256']!=row['sha256'] or _hash_fd(fd,guard)!=row['sha256']):
+                or old['sha256']!=row['sha256'] or _hash_restoration_payload(fd,guard,authorization_end_ns)!=row['sha256']):
                 raise RuntimeError('restoration payload differs')
             if name=='partial' and (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode),_flags(fd))!=(0,0,0o640,old['flags']):
                 raise RuntimeError('quarantined payload custody differs')
