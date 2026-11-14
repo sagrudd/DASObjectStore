@@ -202,7 +202,8 @@ def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authori
             from nuc_recovery_restore import resume_restoration
             held=DasClientStartFence().recover_promoted()
             result={'recovery':'already-committed',
-                    'restore':resume_restoration(target,held,backups,state,sp,dp,quarantine,jp)}
+                    'restore':resume_restoration(target,held,backups,state,sp,dp,quarantine,jp,
+                                                 authorization_end_ns=authorization_end_ns)}
             restored=True
         elif existing:
             from recovered_journal_marker import RecoveredJournalMarker

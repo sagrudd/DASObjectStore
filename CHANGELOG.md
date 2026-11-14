@@ -1,3 +1,7 @@
+# 0.185.17
+
+- Bound stopped recovery hash authorization checks.
+
 # Changelog
 
 ## 0.185.16 - Unreleased
