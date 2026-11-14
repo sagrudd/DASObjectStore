@@ -1,3 +1,7 @@
+# 0.185.18
+
+- Bind promoted fence retry to the existing recovery custody.
+
 # 0.185.17
 
 - Bound stopped recovery hash authorization checks.

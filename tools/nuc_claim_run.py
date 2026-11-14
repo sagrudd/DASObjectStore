@@ -200,7 +200,8 @@ def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authori
         if stopped:
             if not existing:raise RuntimeError('stopped hold without retained recovery state')
             from nuc_recovery_restore import resume_restoration
-            held=DasClientStartFence().recover_promoted()
+            held=DasClientStartFence().recover_promoted(
+                handover_guard=lambda: (target.recheck(), backups.recheck()))
             result={'recovery':'already-committed',
                     'restore':resume_restoration(target,held,backups,state,sp,dp,quarantine,jp,
                                                  authorization_end_ns=authorization_end_ns)}
