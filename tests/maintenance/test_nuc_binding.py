@@ -41,9 +41,9 @@ class TargetBindingTests(unittest.TestCase):
         client.__enter__.return_value=client
         client.sendall.side_effect=lambda raw:events.append(('sent',raw))
         client.getsockopt.side_effect=lambda *args:(events.append(('peer',None)) or struct.pack('3i',1,2,3))
-        proof=object.__new__(module.RecoveryStopProof);proof.target=types.SimpleNamespace(daemon_stopped=False)
-        with mock.patch.object(module.RecoveryStopProof,'recheck'),mock.patch.object(socket,'socket',return_value=client):
-            with self.assertRaisesRegex(RuntimeError,'socket peer changed'):proof.check_quiet()
+        target=object.__new__(module.HeldTarget);target.daemon_stopped=False
+        with mock.patch.object(module.HeldTarget,'recheck'),mock.patch.object(socket,'socket',return_value=client):
+            with self.assertRaisesRegex(RuntimeError,'socket peer changed'):module.assert_daemon_quiet(target)
         self.assertEqual([item[0] for item in events],['sent','peer'])
         self.assertTrue(events[0][1].endswith(b'\n'))
 

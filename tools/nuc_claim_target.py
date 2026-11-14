@@ -397,48 +397,56 @@ class RecoveryStopProof:
         self.target.recheck(); self.marker.recheck(); self.backups.recheck()
 
     def check_quiet(self):
-        """Fresh owner status and queue snapshot before a normal service stop."""
-        import socket
-        import struct
+        """Recheck recovery custody around the shared read-only quiet check."""
         self.recheck()
-        if self.target.daemon_stopped:
-            raise RuntimeError('quiet check requires running daemon')
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(5)
-            client.connect('/run/dasobjectstore/dasobjectstored.sock')
-            # A complete envelope must precede any denial: the installed
-            # daemon exits if a peer closes before receiving its newline.
-            client.sendall(b'{"command":"live_status","payload":null}\n')
-            if struct.unpack('3i',client.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12)) != (DAEMON_PID,994,972):
-                raise RuntimeError('daemon socket peer changed')
-            with client.makefile('rb') as response:
-                raw=response.readline(1024*1024+1)
-            if len(raw)>1024*1024 or not raw.endswith(b'\n'):
-                raise RuntimeError('daemon status response differs')
-        result=json.loads(raw)
-        payload=result.get('payload',{})
-        aggregate=payload.get('aggregate',{})
-        keys=('connected_hosts','active_stores','active_ingests','active_hdd_transfers',
-              'source_read_bytes_per_second','ssd_write_bytes_per_second','hdd_write_bytes_per_second')
-        if (result.get('kind')!='live_status' or payload.get('schema_version')!=1
-            or any(type(aggregate.get(key)) is not int or aggregate[key]!=0 for key in keys)
-            or payload.get('active')!=[] or payload.get('garbage_collection',{}).get('running') is not False):
-            raise RuntimeError('daemon is not quiet')
-        conn=self.target.connection
-        if conn.in_transaction: raise RuntimeError('unexpected open transaction')
-        conn.execute('BEGIN')
-        try:
-            for table in ('compute_workspace_operations','compute_workspace_materializations','compute_workspace_promotions'):
-                if conn.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] != 0:
-                    raise RuntimeError('workspace activity exists')
-            if conn.execute("SELECT COUNT(*) FROM destage_queue WHERE state!='hdd_copy_verified' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('destage work is not settled')
-            if conn.execute("SELECT COUNT(*) FROM scheduler_jobs WHERE state!='completed' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('scheduler work is not settled')
-            if conn.execute("SELECT COUNT(*) FROM ingest_jobs WHERE state!='ssd_accepted' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('ingest state differs')
-            conn.rollback()
-        except BaseException:
-            if conn.in_transaction: conn.rollback()
-            raise
+        assert_daemon_quiet(self.target)
         self.recheck()
+
+def assert_daemon_quiet(target):
+    """Read-only live-status and queue check against one fixed held target."""
+    if type(target) is not HeldTarget:
+        raise RuntimeError('quiet target differs')
+    import socket
+    import struct
+    target.recheck()
+    if target.daemon_stopped:
+        raise RuntimeError('quiet check requires running daemon')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(5)
+        client.connect('/run/dasobjectstore/dasobjectstored.sock')
+        # A complete envelope must precede any denial: the installed
+        # daemon exits if a peer closes before receiving its newline.
+        client.sendall(b'{"command":"live_status","payload":null}\n')
+        if struct.unpack('3i',client.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12)) != (DAEMON_PID,994,972):
+            raise RuntimeError('daemon socket peer changed')
+        with client.makefile('rb') as response:
+            raw=response.readline(1024*1024+1)
+        if len(raw)>1024*1024 or not raw.endswith(b'\n'):
+            raise RuntimeError('daemon status response differs')
+    result=json.loads(raw)
+    payload=result.get('payload',{})
+    aggregate=payload.get('aggregate',{})
+    keys=('connected_hosts','active_stores','active_ingests','active_hdd_transfers',
+          'source_read_bytes_per_second','ssd_write_bytes_per_second','hdd_write_bytes_per_second')
+    if (result.get('kind')!='live_status' or payload.get('schema_version')!=1
+        or any(type(aggregate.get(key)) is not int or aggregate[key]!=0 for key in keys)
+        or payload.get('active')!=[] or payload.get('garbage_collection',{}).get('running') is not False):
+        raise RuntimeError('daemon is not quiet')
+    conn=target.connection
+    if conn.in_transaction: raise RuntimeError('unexpected open transaction')
+    conn.execute('BEGIN')
+    try:
+        for table in ('compute_workspace_operations','compute_workspace_materializations','compute_workspace_promotions'):
+            if conn.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] != 0:
+                raise RuntimeError('workspace activity exists')
+        if conn.execute("SELECT COUNT(*) FROM destage_queue WHERE state!='hdd_copy_verified' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('destage work is not settled')
+        if conn.execute("SELECT COUNT(*) FROM scheduler_jobs WHERE state!='completed' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('scheduler work is not settled')
+        if conn.execute("SELECT COUNT(*) FROM ingest_jobs WHERE state!='ssd_accepted' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('ingest state differs')
+        conn.rollback()
+    except BaseException:
+        if conn.in_transaction: conn.rollback()
+        raise
+    target.recheck()
