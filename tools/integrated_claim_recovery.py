@@ -257,15 +257,6 @@ class IntegratedClaimRecovery:
         try:
             self.partial.acquire_lease();self._check()
             for item in (self.source,self.partial):
-                item.check_original()
-                last=[time.monotonic()]
-                def hash_check():
-                    self.source.check_lease();self.partial.check_lease()
-                    if self.marker.broken:raise RuntimeError('lease break observed')
-                    if time.monotonic()-last[0]>=2:
-                        self._check();last[0]=time.monotonic()
-                if _hash_fd(item.file_fd,hash_check)!=item.row['sha256']:
-                    raise RuntimeError('payload hash differs from retained backup')
                 item.check_original();self._check()
             self.record={'kind':'das-integrated-recovery-v1','intent':self.intent,'source':self.source.snapshot(),
                          'partial':self.partial.snapshot(),'quarantine':list(_ident(os.fstat(self.qfd))),
@@ -284,6 +275,16 @@ class IntegratedClaimRecovery:
                 self._protect_parent(self.source,'source');self._protect_parent(self.partial,'partial')
                 self._verify_name(self.source);self._verify_name(self.partial)
                 self._protect_file(self.source,'source');self._protect_file(self.partial,'partial')
+                # Immutable inode flags and root-only parent fences, not a
+                # lease timeout, protect content during potentially stalled I/O.
+                for item in (self.source,self.partial):
+                    before=os.fstat(item.file_fd);last=[time.monotonic()]
+                    def hash_check():
+                        if self.marker.broken:raise RuntimeError('lease break observed')
+                        if time.monotonic()-last[0]>=2:self._check();last[0]=time.monotonic()
+                    if _hash_fd(item.file_fd,hash_check)!=item.row['sha256'] or _finger(os.fstat(item.file_fd))!=_finger(before):
+                        raise RuntimeError('protected payload hash differs from retained backup')
+                    self._check();self._verify_name(item)
                 self._write('before-quarantine');self._check()
                 self._verify_name(self.source);self._verify_name(self.partial)
                 flags=array.array('L',[self.partial.flags]);fcntl.ioctl(self.partial.file_fd,_SETFLAGS,flags,True);os.fsync(self.partial.file_fd)
@@ -345,7 +346,7 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
         if _finger(before)!=_finger(after):raise RuntimeError('recovery state changed')
     finally:os.close(fd)
     record=json.loads(raw)
-    if set(record)!={'kind','intent','source','partial','quarantine','generations','phase'} or record['kind']!='das-integrated-recovery-v1' or record['phase'] not in ('quarantined','before-commit','committed'):
+    if set(record)!={'kind','intent','source','partial','quarantine','generations','phase'} or record['kind']!='das-integrated-recovery-v1' or record['phase'] not in ('before-quarantine','quarantined','before-commit','committed'):
         raise RuntimeError('not a post-quarantine checkpoint')
     generations=record['generations']
     if (type(generations) is not list or len(generations)!=2 or any(type(x) is not dict or set(x)!={'identity','sha256'} or type(x['identity']) is not list or len(x['identity'])!=2 or type(x['sha256']) is not str or len(x['sha256'])!=64 for x in generations)
@@ -373,7 +374,7 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
             current=os.fstat(fd);saved=record[name]['file'];row=backups.rows[name]
             if (not stat.S_ISREG(current.st_mode) or current.st_nlink!=1 or (current.st_dev,current.st_ino,current.st_size)!=(row['device'],row['inode'],row['size'])
                 or (current.st_dev,current.st_ino,current.st_size)!=(saved['device'],saved['inode'],saved['size'])
-                or (current.st_uid,current.st_gid,stat.S_IMODE(current.st_mode))!=(0,0,0o640)
+                or (current.st_uid,current.st_gid,stat.S_IMODE(current.st_mode))!=(0,0,0o640) or current.st_mtime_ns!=saved['mtime_ns']
                 or _flags(fd)!=(saved['flags']|(_IMMUTABLE if immutable else 0)) or saved['sha256']!=row['sha256']):
                 raise RuntimeError('protected payload differs')
             last=[time.monotonic()]
@@ -384,14 +385,22 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
             if _hash_fd(fd,hash_check)!=row['sha256'] or _finger(os.fstat(fd))!=_finger(current):
                 raise RuntimeError('protected payload bytes changed')
         backups.recheck();marker.recheck()
-        # Persist the pending commit before acquiring the SQLite writer lock.
-        record['phase']='before-commit'
-        _write_recovery_record(state_fd,record)
+        # A crash can occur after rename but before either directory fsync.
+        # The exact absent/present inode checks above make both directories
+        # safe to sync again before recording a pending database commit.
+        os.fsync(destination_parent_fd);os.fsync(quarantine_fd)
+        marker.recheck();backups.recheck()
+        previous_phase=record['phase']
         conn.execute('BEGIN IMMEDIATE')
         try:
             if conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0] != 0:
                 raise RuntimeError('unexpected SQLite triggers')
-            validate_exact_claim(conn,intent,journal_present=True)
+            observed=validate_exact_claim(conn,intent,journal_present=True)
+            if previous_phase=='committed' and observed!='released':raise RuntimeError('committed claim reverted')
+            if previous_phase in ('before-quarantine','quarantined') and observed!='active':
+                raise RuntimeError('claim advanced before commit checkpoint')
+            if previous_phase!='committed':
+                record['phase']='before-commit';_write_recovery_record(state_fd,record)
             marker.recheck();backups.recheck()
             release_exact_claim(conn,intent,journal_present=True)
             conn.commit()
@@ -413,3 +422,232 @@ def _write_recovery_record(state_fd,record):
         os.fsync(fd)
     finally:os.close(fd)
     os.rename('recovery.new','recovery.json',src_dir_fd=state_fd,dst_dir_fd=state_fd);os.fsync(state_fd)
+
+
+_EARLY_PHASES = frozenset(('prepared','before-source-parent','source-parent-held',
+    'before-partial-parent','partial-parent-held','before-source-chown',
+    'before-source-immutable','source-immutable','before-partial-chown',
+    'before-partial-immutable','partial-immutable','before-quarantine'))
+
+
+def _acl_entries(text):
+    return tuple(line.split('#',1)[0].strip() for line in text.splitlines() if line.strip())
+
+
+def _acl_for_mode(text,mode):
+    entries=list(_acl_entries(text));has_mask=any(x.startswith('mask::') for x in entries)
+    def perms(bits):return ''.join(c if bits & b else '-' for c,b in (('r',4),('w',2),('x',1)))
+    out=[]
+    for entry in entries:
+        if entry.startswith('default:'):out.append(entry)
+        elif entry.startswith('user::'):out.append('user::'+perms((mode>>6)&7))
+        elif entry.startswith('mask::'):out.append('mask::'+perms((mode>>3)&7))
+        elif entry.startswith('group::') and not has_mask:out.append('group::'+perms((mode>>3)&7))
+        elif entry.startswith('other::'):out.append('other::'+perms(mode&7))
+        else:out.append(entry)
+    return tuple(out)
+
+
+def _load_recovery_record(state_fd):
+    st=os.fstat(state_fd)
+    if not stat.S_ISDIR(st.st_mode) or (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode))!=(0,0,0o700):
+        raise RuntimeError('recovery state directory differs')
+    try:os.stat('recovery.new',dir_fd=state_fd,follow_symlinks=False)
+    except FileNotFoundError:pass
+    else:raise RuntimeError('incomplete recovery state write')
+    fd=os.open('recovery.json',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=state_fd)
+    try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_uid!=0 or before.st_gid!=0 or before.st_nlink!=1 or stat.S_IMODE(before.st_mode)!=0o600 or before.st_size>131072:
+            raise RuntimeError('recovery state custody differs')
+        raw=os.read(fd,131073)
+        if _finger(os.fstat(fd))!=_finger(before):raise RuntimeError('recovery state changed')
+    finally:os.close(fd)
+    record=json.loads(raw)
+    if set(record)!={'kind','intent','source','partial','quarantine','generations','phase'} or record['kind']!='das-integrated-recovery-v1':
+        raise RuntimeError('recovery record differs')
+    return record
+
+
+def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn):
+    """Requalify recognized pre-quarantine stages, then complete under lock.
+
+    Named paths, mount ancestry, process/worker continuity and client admission
+    are independently held by the caller. Ambiguous states retain the marker.
+    """
+    from recovered_journal_marker import RecoveredJournalMarker
+    if type(marker) is not RecoveredJournalMarker or type(backups) is not VerifiedBackups or conn.in_transaction:
+        raise RuntimeError('exact recovered hold types required')
+    record=_load_recovery_record(state_fd);phase=record['phase']
+    if phase not in _EARLY_PHASES and phase not in ('quarantined','before-commit','committed'):
+        raise RuntimeError('unknown recovery checkpoint')
+    q=os.fstat(quarantine_fd)
+    if not stat.S_ISDIR(q.st_mode) or (q.st_dev,q.st_ino)!=tuple(record['quarantine']) or (q.st_uid,q.st_gid,stat.S_IMODE(q.st_mode))!=(0,0,0o700):
+        raise RuntimeError('quarantine custody differs')
+    def exists(fd,name):
+        try:os.stat(name,dir_fd=fd,follow_symlinks=False);return True
+        except FileNotFoundError:return False
+    original_present=exists(destination_parent_fd,'payload');quarantined=exists(quarantine_fd,'partial')
+    if quarantined and not original_present:
+        if phase not in ('before-quarantine','quarantined','before-commit','committed'):
+            raise RuntimeError('quarantine conflicts with recorded phase')
+        return resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn)
+    if not original_present or quarantined or phase not in _EARLY_PHASES:
+        raise RuntimeError('ambiguous partial pathname state')
+    generations=record['generations']
+    if (type(generations) is not list or len(generations)!=2 or any(type(x) is not dict or set(x)!={'identity','sha256'} or type(x['identity']) is not list or len(x['identity'])!=2 or type(x['sha256']) is not str or len(x['sha256'])!=64 for x in generations)
+        or generations[0]['identity']==generations[1]['identity']):raise RuntimeError('report evidence differs')
+    intent=record['intent'];backups.recheck();marker.recheck()
+    operation=json.loads(os.pread(marker.journal_fd,131073,0))
+    if (operation.get('schema')!='dasobjectstore.storage_assurance.operation.v1' or operation.get('phase')!='claimed' or operation.get('action')!='rotate'
+        or operation.get('candidate')!=intent.get('candidate') or operation.get('claim_owner')!=intent['claim']['owner_id']
+        or operation.get('destination_disk_id')!=intent['claim']['disk_id'] or operation.get('destination_relative_path')!=intent['candidate']['relative_path']):
+        raise RuntimeError('recovery intent differs from journal')
+    items=[]
+    try:
+        for name,dfd in (('source',source_parent_fd),('partial',destination_parent_fd)):
+            saved=record[name];old=saved['file'];par=saved['parent'];row=backups.rows[name]
+            fs=intent['filesystem'][name]
+            if ((old['device'],old['inode'],old['size'],old['sha256'])!=(row['device'],row['inode'],row['size'],row['sha256'])
+                or (par['device'],par['inode'],par['uid'],par['gid'],par['mode'],par['acl'])!=(fs['parent_device'],fs['parent_inode'],fs['parent_uid'],fs['parent_gid'],fs['parent_mode'],fs['parent_acl'])
+                or (old['uid'],old['gid'],old['mode'],old['acl'],old['flags'])!=(fs['file_uid'],fs['file_gid'],fs['file_mode'],fs['file_acl'],fs['file_flags'])
+                or os.fstat(backups.files[name]).st_dev in (record['source']['file']['device'],record['partial']['file']['device'])):
+                raise RuntimeError('authenticated recovery baseline differs')
+            watch=PayloadNameWatch(dfd)
+            try:fd=os.open('payload',os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=dfd)
+            except BaseException:watch.close();raise
+            item={'name':name,'dirfd':dfd,'fd':fd,'watch':watch,'file':old,'parent':par,'leased':False}
+            items.append(item)
+        def check_item(item):
+            p=os.fstat(item['dirfd']);f=os.fstat(item['fd']);n=os.stat('payload',dir_fd=item['dirfd'],follow_symlinks=False);old=item['file'];par=item['parent']
+            if (not stat.S_ISDIR(p.st_mode) or (p.st_dev,p.st_ino)!=(par['device'],par['inode'])
+                or not stat.S_ISREG(f.st_mode) or f.st_nlink!=1 or not stat.S_ISREG(n.st_mode) or n.st_nlink!=1
+                or (f.st_dev,f.st_ino,f.st_size,f.st_mtime_ns)!=(old['device'],old['inode'],old['size'],old['mtime_ns'])
+                or _ident(n)!=_ident(f)):
+                raise RuntimeError('recovery payload identity differs')
+            pmode=stat.S_IMODE(p.st_mode);fmode=stat.S_IMODE(f.st_mode)
+            pshape=(p.st_uid,p.st_gid,pmode)
+            if pshape==(par['uid'],par['gid'],par['mode']):pacl=_acl_entries(par['acl'])
+            elif pshape in ((par['uid'],par['gid'],0o500),(0,0,0o500)):pacl=_acl_for_mode(par['acl'],0o500)
+            else:raise RuntimeError('ambiguous recovery parent state')
+            if _acl_entries(_acl(item['dirfd']))!=pacl:raise RuntimeError('recovery parent ACL differs')
+            fshape=(f.st_uid,f.st_gid,fmode);flags=_flags(item['fd'])
+            if fshape==(old['uid'],old['gid'],old['mode']) and flags==old['flags']:
+                facl=_acl_entries(old['acl'])
+            elif fshape==(0,0,old['mode']) and flags==old['flags']:
+                facl=_acl_entries(old['acl'])
+            elif fshape==(0,0,0o640) and flags in (old['flags'],old['flags']|_IMMUTABLE):
+                facl=_acl_for_mode(old['acl'],0o640)
+            else:raise RuntimeError('ambiguous recovery file state')
+            if _acl_entries(_acl(item['fd']))!=facl:raise RuntimeError('recovery file ACL differs')
+            return p,f,flags
+        def check_all():
+            marker.recheck();backups.recheck()
+            for item in items:
+                if not item['leased'] or fcntl.fcntl(item['fd'],fcntl.F_GETLEASE)!=fcntl.F_RDLCK:
+                    raise RuntimeError('recovery payload lease lost')
+                item['watch'].consume();check_item(item)
+        def shape(item):
+            p,f,flags=check_item(item);par=item['parent'];old=item['file']
+            if (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode))==(par['uid'],par['gid'],par['mode']): ps='original'
+            elif (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode))==(par['uid'],par['gid'],0o500): ps='masked'
+            elif (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode))==(0,0,0o500): ps='fenced'
+            else:raise RuntimeError('unknown parent state')
+            if (f.st_uid,f.st_gid)==(old['uid'],old['gid']): fs='original'
+            elif flags&_IMMUTABLE:fs='immutable'
+            elif stat.S_IMODE(f.st_mode)!=0o640:fs='chowned'
+            else:fs='root'
+            return ps,fs
+        O={'original'};P={'original','masked','fenced'};F={'fenced'};C={'original','chowned','root'};R={'root','immutable'};I={'immutable'}
+        shapes={
+            'prepared':(O,O,O,O),
+            'before-source-parent':(P,O,O,O),
+            'source-parent-held':(F,O,O,O),
+            'before-partial-parent':(F,P,O,O),
+            'partial-parent-held':(F,F,O,O),
+            'before-source-chown':(F,F,C,O),
+            'before-source-immutable':(F,F,R,O),
+            'source-immutable':(F,F,I,O),
+            'before-partial-chown':(F,F,I,C),
+            'before-partial-immutable':(F,F,I,R),
+            'partial-immutable':(F,F,I,I),
+            'before-quarantine':(F,F,I,R),
+        }
+        source_shape=shape(items[0]);partial_shape=shape(items[1])
+        observed=(source_shape[0],partial_shape[0],source_shape[1],partial_shape[1])
+        if any(value not in allowed for value,allowed in zip(observed,shapes[phase])):
+            raise RuntimeError('checkpoint metadata order differs')
+        for item in items:
+            fcntl.fcntl(item['fd'],fcntl.F_SETLEASE,fcntl.F_RDLCK);item['leased']=True
+        check_all()
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            if conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger'").fetchone()[0] != 0:
+                raise RuntimeError('unexpected SQLite triggers')
+            if validate_exact_claim(conn,intent,journal_present=True)!='active':raise RuntimeError('early checkpoint claim is not active')
+            ordered=('prepared','before-source-parent','source-parent-held','before-partial-parent','partial-parent-held','before-source-chown','before-source-immutable','source-immutable','before-partial-chown','before-partial-immutable','partial-immutable','before-quarantine','quarantined','before-commit','committed')
+            def advance(next_phase):
+                if ordered.index(next_phase)>=ordered.index(record['phase']):
+                    record['phase']=next_phase;_write_recovery_record(state_fd,record)
+            for item in items:
+                name=item['name'];p,_,_=check_item(item)
+                if (p.st_uid,p.st_gid,stat.S_IMODE(p.st_mode))!=(0,0,0o500):
+                    advance('before-'+name+'-parent');check_all()
+                    os.fchmod(item['dirfd'],0o500);os.fchown(item['dirfd'],0,0);os.fchmod(item['dirfd'],0o500);os.fsync(item['dirfd'])
+                    item['watch'].consume(parent_attrib=True);check_all()
+                advance(name+'-parent-held');check_all()
+            for item in items:
+                name=item['name'];_,f,flags=check_item(item)
+                if (f.st_uid,f.st_gid,stat.S_IMODE(f.st_mode))!=(0,0,0o640):
+                    if flags&_IMMUTABLE:raise RuntimeError('immutable unprotected payload state')
+                    advance('before-'+name+'-chown');check_all()
+                    os.fchown(item['fd'],0,0);os.fchmod(item['fd'],0o640);os.fsync(item['fd'])
+                    item['watch'].consume(file_mask=0x00000004);check_all()
+                _,_,flags=check_item(item)
+                if not flags&_IMMUTABLE:
+                    advance('before-'+name+'-immutable');check_all()
+                    value=array.array('L',[item['file']['flags']|_IMMUTABLE]);fcntl.ioctl(item['fd'],_SETFLAGS,value,True);os.fsync(item['fd'])
+                    item['watch'].consume(file_mask=0x00000004);check_all()
+                advance(name+'-immutable');check_all()
+            for item in items:
+                before=os.fstat(item['fd']);last=[time.monotonic()]
+                def hash_check():
+                    if marker.broken:raise RuntimeError('lease break observed')
+                    if time.monotonic()-last[0]>=2:check_all();last[0]=time.monotonic()
+                if _hash_fd(item['fd'],hash_check)!=item['file']['sha256'] or _finger(os.fstat(item['fd']))!=_finger(before):
+                    raise RuntimeError('protected recovery payload hash differs')
+                check_all()
+            advance('before-quarantine');check_all()
+            partial=items[1];value=array.array('L',[partial['file']['flags']]);fcntl.ioctl(partial['fd'],_SETFLAGS,value,True);os.fsync(partial['fd'])
+            partial['watch'].consume(file_mask=0x00000004);check_all()
+            if _libc.renameat2(destination_parent_fd,b'payload',quarantine_fd,b'partial',1):raise OSError(ctypes.get_errno(),'quarantine no-replace')
+            partial['watch'].consume(file_mask=0x00000040);os.fsync(destination_parent_fd);os.fsync(quarantine_fd)
+            named=os.stat('partial',dir_fd=quarantine_fd,follow_symlinks=False)
+            if _ident(named)!=_ident(os.fstat(partial['fd'])) or not stat.S_ISREG(named.st_mode):raise RuntimeError('quarantine inode differs')
+            advance('quarantined')
+            marker.recheck();backups.recheck()
+            # Source remains at its protected exact pathname; destination is absent.
+            check_item(items[0]);items[0]['watch'].consume()
+            if exists(destination_parent_fd,'payload'):raise RuntimeError('destination unexpectedly exists')
+            advance('before-commit')
+            marker.recheck();backups.recheck()
+            for current in items:
+                if fcntl.fcntl(current['fd'],fcntl.F_GETLEASE)!=fcntl.F_RDLCK:raise RuntimeError('recovery payload lease lost')
+                current['watch'].consume()
+            check_item(items[0])
+            named=os.stat('partial',dir_fd=quarantine_fd,follow_symlinks=False)
+            if _ident(named)!=_ident(os.fstat(items[1]['fd'])) or exists(destination_parent_fd,'payload'):
+                raise RuntimeError('quarantine or destination changed before commit')
+            release_exact_claim(conn,intent,journal_present=True)
+            conn.commit()
+        except BaseException:
+            if conn.in_transaction:conn.rollback()
+            raise
+        advance('committed');marker.recheck();backups.recheck()
+        return 'committed-marker-retained'
+    finally:
+        for item in items:
+            if item['leased']:
+                try:fcntl.fcntl(item['fd'],fcntl.F_SETLEASE,fcntl.F_UNLCK)
+                except OSError:pass
+            item['watch'].close();os.close(item['fd'])

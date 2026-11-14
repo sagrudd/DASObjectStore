@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.185.13 - Unreleased
+
+- Add fail-closed retry classification for interrupted claimed-recovery fixtures,
+  retaining the journal marker and durable payload protection. Live target
+  authorization and recovery release remain separate.
+
 ## 0.185.12 - Unreleased
 
 - Add a non-root, disposable-fixture model for testing exact claimed-recovery
