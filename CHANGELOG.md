@@ -8,6 +8,10 @@
 
 # Changelog
 
+## 0.185.19 - Unreleased
+
+- Bind reviewed partial-install unit inventory before stopped recovery.
+
 ## 0.185.16 - Unreleased
 
 - Resume an exact retained pre-observation marker under the original signed

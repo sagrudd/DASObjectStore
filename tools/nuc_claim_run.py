@@ -161,7 +161,7 @@ def _observation_budget(authorization_end_ns):
 
 
 @contextmanager
-def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authorize):
+def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authorize, v11_units_fd=None):
     """Release the claim and optionally stop/fence DAS and restore metadata."""
     if os.geteuid()!=0: raise RuntimeError('root required')
     current=_authorization_guard(authorization_end_ns,authorize)
@@ -200,8 +200,10 @@ def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authori
         if stopped:
             if not existing:raise RuntimeError('stopped hold without retained recovery state')
             from nuc_recovery_restore import resume_restoration
-            held=DasClientStartFence().recover_promoted(
-                handover_guard=lambda: (target.recheck(), backups.recheck()))
+            held=DasClientStartFence()
+            if v11_units_fd is not None:
+                held.bind_v11_stopped(target,v11_units_fd)
+            held.recover_promoted(handover_guard=lambda: (target.recheck(), backups.recheck()))
             result={'recovery':'already-committed',
                     'restore':resume_restoration(target,held,backups,state,sp,dp,quarantine,jp,
                                                  authorization_end_ns=authorization_end_ns)}
