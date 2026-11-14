@@ -160,7 +160,7 @@ class Payload:
 
 class IntegratedClaimRecovery:
     """Execute only with fixed, independently authenticated NUC bindings."""
-    def __init__(self,marker,backups,source,partial,state_fd,quarantine_fd,conn,intent):
+    def __init__(self,marker,backups,source,partial,state_fd,quarantine_fd,conn,intent,external_check=None):
         if type(marker) is not OriginalJournalMarker or type(backups) is not VerifiedBackups or type(source) is not Payload or type(partial) is not Payload:
             raise RuntimeError('exact reviewed hold types required')
         state=os.fstat(state_fd);q=os.fstat(quarantine_fd)
@@ -198,7 +198,7 @@ class IntegratedClaimRecovery:
                 or (item.before.st_uid,item.before.st_gid,stat.S_IMODE(item.before.st_mode),item.file_acl,item.flags)!=(fs['file_uid'],fs['file_gid'],fs['file_mode'],fs['file_acl'],fs['file_flags'])):
                 raise RuntimeError('authenticated filesystem baseline differs')
         self.marker=marker;self.backups=backups;self.source=source;self.partial=partial;self.state_fd=os.dup(state_fd);self.qfd=os.dup(quarantine_fd)
-        self.conn=conn;self.intent=intent;self.record=None
+        self.conn=conn;self.intent=intent;self.record=None;self.external_check=external_check
     def _write(self,phase):
         self.record['phase']=phase
         raw=(json.dumps(self.record,sort_keys=True)+'\n').encode()
@@ -210,6 +210,7 @@ class IntegratedClaimRecovery:
         os.rename('recovery.new','recovery.json',src_dir_fd=self.state_fd,dst_dir_fd=self.state_fd)
         os.fsync(self.state_fd)
     def _check(self):
+        if self.external_check is not None:self.external_check()
         self.marker.recheck();self.backups.recheck()
         for item in (self.source,self.partial):
             item.check_lease();item.watch.consume()
@@ -250,6 +251,7 @@ class IntegratedClaimRecovery:
             raise RuntimeError('payload parent fence differs')
         self._check();self._verify_name(item);self._write(label+'-parent-held')
     def run(self,timeout=900):
+        if self.external_check is not None:self.external_check()
         self.marker.recheck()
         generations=self.marker.observer.wait_two(timeout)
         self.marker.recheck()
@@ -322,13 +324,17 @@ class IntegratedClaimRecovery:
         self.source.close();self.partial.close();os.close(self.state_fd);os.close(self.qfd)
 
 
-def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn):
+def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn,external_check=None):
     """Resume only an authenticated post-quarantine checkpoint; keep marker held.
 
     Caller independently authenticates target, process, named mounts and DB.
     Any pre-quarantine or ambiguous state is deliberately denied.
     """
     from recovered_journal_marker import RecoveredJournalMarker
+    def guarded_marker():
+        if external_check is not None:external_check()
+        marker.recheck()
+    if external_check is not None:external_check()
     if type(marker) is not RecoveredJournalMarker or type(backups) is not VerifiedBackups or conn.in_transaction:
         raise RuntimeError('exact recovered hold types required')
     st=os.fstat(state_fd)
@@ -351,7 +357,7 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
     generations=record['generations']
     if (type(generations) is not list or len(generations)!=2 or any(type(x) is not dict or set(x)!={'identity','sha256'} or type(x['identity']) is not list or len(x['identity'])!=2 or type(x['sha256']) is not str or len(x['sha256'])!=64 for x in generations)
         or generations[0]['identity']==generations[1]['identity']):raise RuntimeError('report evidence differs')
-    intent=record['intent'];backups.recheck();marker.recheck()
+    intent=record['intent'];backups.recheck();guarded_marker()
     operation=json.loads(os.pread(marker.journal_fd,131073,0))
     if (operation.get('schema')!='dasobjectstore.storage_assurance.operation.v1' or operation.get('phase')!='claimed' or operation.get('action')!='rotate'
         or operation.get('candidate')!=intent.get('candidate') or operation.get('claim_owner')!=intent['claim']['owner_id']
@@ -381,15 +387,15 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
             def hash_check():
                 if marker.broken:raise RuntimeError('marker lease break observed')
                 if time.monotonic()-last[0]>=2:
-                    marker.recheck();last[0]=time.monotonic()
+                    guarded_marker();last[0]=time.monotonic()
             if _hash_fd(fd,hash_check)!=row['sha256'] or _finger(os.fstat(fd))!=_finger(current):
                 raise RuntimeError('protected payload bytes changed')
-        backups.recheck();marker.recheck()
+        backups.recheck();guarded_marker()
         # A crash can occur after rename but before either directory fsync.
         # The exact absent/present inode checks above make both directories
         # safe to sync again before recording a pending database commit.
         os.fsync(destination_parent_fd);os.fsync(quarantine_fd)
-        marker.recheck();backups.recheck()
+        guarded_marker();backups.recheck()
         previous_phase=record['phase']
         conn.execute('BEGIN IMMEDIATE')
         try:
@@ -401,14 +407,14 @@ def resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,qua
                 raise RuntimeError('claim advanced before commit checkpoint')
             if previous_phase!='committed':
                 record['phase']='before-commit';_write_recovery_record(state_fd,record)
-            marker.recheck();backups.recheck()
+            guarded_marker();backups.recheck()
             release_exact_claim(conn,intent,journal_present=True)
             conn.commit()
         except BaseException:
             if conn.in_transaction:conn.rollback()
             raise
         record['phase']='committed';_write_recovery_record(state_fd,record)
-        marker.recheck();backups.recheck()
+        guarded_marker();backups.recheck()
         return 'committed-marker-retained'
     finally:
         for fd in opened:os.close(fd)
@@ -469,13 +475,17 @@ def _load_recovery_record(state_fd):
     return record
 
 
-def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn):
+def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn,external_check=None):
     """Requalify recognized pre-quarantine stages, then complete under lock.
 
     Named paths, mount ancestry, process/worker continuity and client admission
     are independently held by the caller. Ambiguous states retain the marker.
     """
     from recovered_journal_marker import RecoveredJournalMarker
+    def guarded_marker():
+        if external_check is not None:external_check()
+        marker.recheck()
+    if external_check is not None:external_check()
     if type(marker) is not RecoveredJournalMarker or type(backups) is not VerifiedBackups or conn.in_transaction:
         raise RuntimeError('exact recovered hold types required')
     record=_load_recovery_record(state_fd);phase=record['phase']
@@ -491,13 +501,13 @@ def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantin
     if quarantined and not original_present:
         if phase not in ('before-quarantine','quarantined','before-commit','committed'):
             raise RuntimeError('quarantine conflicts with recorded phase')
-        return resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn)
+        return resume_quarantined(marker,backups,source_parent_fd,destination_parent_fd,quarantine_fd,state_fd,conn,external_check)
     if not original_present or quarantined or phase not in _EARLY_PHASES:
         raise RuntimeError('ambiguous partial pathname state')
     generations=record['generations']
     if (type(generations) is not list or len(generations)!=2 or any(type(x) is not dict or set(x)!={'identity','sha256'} or type(x['identity']) is not list or len(x['identity'])!=2 or type(x['sha256']) is not str or len(x['sha256'])!=64 for x in generations)
         or generations[0]['identity']==generations[1]['identity']):raise RuntimeError('report evidence differs')
-    intent=record['intent'];backups.recheck();marker.recheck()
+    intent=record['intent'];backups.recheck();guarded_marker()
     operation=json.loads(os.pread(marker.journal_fd,131073,0))
     if (operation.get('schema')!='dasobjectstore.storage_assurance.operation.v1' or operation.get('phase')!='claimed' or operation.get('action')!='rotate'
         or operation.get('candidate')!=intent.get('candidate') or operation.get('claim_owner')!=intent['claim']['owner_id']
@@ -542,7 +552,7 @@ def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantin
             if _acl_entries(_acl(item['fd']))!=facl:raise RuntimeError('recovery file ACL differs')
             return p,f,flags
         def check_all():
-            marker.recheck();backups.recheck()
+            guarded_marker();backups.recheck()
             for item in items:
                 if not item['leased'] or fcntl.fcntl(item['fd'],fcntl.F_GETLEASE)!=fcntl.F_RDLCK:
                     raise RuntimeError('recovery payload lease lost')
@@ -625,12 +635,12 @@ def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantin
             named=os.stat('partial',dir_fd=quarantine_fd,follow_symlinks=False)
             if _ident(named)!=_ident(os.fstat(partial['fd'])) or not stat.S_ISREG(named.st_mode):raise RuntimeError('quarantine inode differs')
             advance('quarantined')
-            marker.recheck();backups.recheck()
+            guarded_marker();backups.recheck()
             # Source remains at its protected exact pathname; destination is absent.
             check_item(items[0]);items[0]['watch'].consume()
             if exists(destination_parent_fd,'payload'):raise RuntimeError('destination unexpectedly exists')
             advance('before-commit')
-            marker.recheck();backups.recheck()
+            guarded_marker();backups.recheck()
             for current in items:
                 if fcntl.fcntl(current['fd'],fcntl.F_GETLEASE)!=fcntl.F_RDLCK:raise RuntimeError('recovery payload lease lost')
                 current['watch'].consume()
@@ -643,7 +653,7 @@ def resume_early(marker,backups,source_parent_fd,destination_parent_fd,quarantin
         except BaseException:
             if conn.in_transaction:conn.rollback()
             raise
-        advance('committed');marker.recheck();backups.recheck()
+        advance('committed');guarded_marker();backups.recheck()
         return 'committed-marker-retained'
     finally:
         for item in items:

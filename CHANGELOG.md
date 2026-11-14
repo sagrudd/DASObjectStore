@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.185.14 - Unreleased
+
+- Add draft fixed-target claim recovery bindings and stopped-owner metadata
+  restoration. Live execution remains gated on independent review.
+
 ## 0.185.13 - Unreleased
 
 - Add fail-closed retry classification for interrupted claimed-recovery fixtures,
