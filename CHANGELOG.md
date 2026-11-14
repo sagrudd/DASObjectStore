@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.185.15 - Unreleased
+
+- Bind the reviewed NUC recovery to the observed restarted DAS owner and exact service cgroup.
+
 ## 0.185.14 - Unreleased
 
 - Add draft fixed-target claim recovery bindings and stopped-owner metadata

@@ -26,8 +26,12 @@ MOUNTS = {
     "/srv/dasobjectstore/hdd/qnap-1061": "fa144a19-3f1e-4b9a-89da-802aee27b322",
     "/srv/dasobjectstore/hdd/qnap-1058": "d02c099d-9d51-4d3e-abc6-b92a0b0fcdf7",
 }
+DAEMON_PID = 2042692
+DAEMON_INVOCATION = "488e898ccab04596aeafea982ef3acfb"
+DAEMON_CGROUP = "/dasobjectstore.slice/dasobjectstore-storage.slice/dasobjectstored.service"
+
 PROCESSES = {
-    "dasobjectstored.service": (8342, "3bd2db3105e84fbbb5945f0effa1a3c4",
+    "dasobjectstored.service": (DAEMON_PID, DAEMON_INVOCATION,
         "8f5f01bf4a757e2bf7845bb6887f8afa04470489e2d3f22870a9301573c8dc72"),
     "mnemosyne-expedition-basecamp-vault-migration-verifier.service":
         (2973, "6ce7b0630e6347f18af2294379865b92",
@@ -65,6 +69,30 @@ def schema_digest(connection):
                                      ensure_ascii=True).encode()).hexdigest()
 
 
+def verify_daemon_cgroup():
+    """Bind the fixed observed manager cgroup and the same process membership."""
+    raw=subprocess.check_output(['/usr/bin/systemctl','show','--property=ControlGroup',
+                                 '--','dasobjectstored.service'],text=True,timeout=10).splitlines()
+    if raw != ['ControlGroup='+DAEMON_CGROUP]:
+        raise ValueError('daemon manager cgroup differs')
+    if Path(f'/proc/{DAEMON_PID}/cgroup').read_text().splitlines() != ['0::'+DAEMON_CGROUP]:
+        raise ValueError('daemon process cgroup differs')
+
+
+def require_stopped_cgroup_empty(cgroup):
+    """Check the held unit's actual cgroup, including descendants."""
+    cgroup=Path(cgroup); parent=cgroup.parent
+    if not parent.is_dir() or parent.is_symlink() or cgroup.is_symlink():
+        raise RuntimeError('daemon cgroup ancestry differs')
+    if not cgroup.exists():
+        return  # systemd may remove the empty stopped unit cgroup
+    def failed(error):
+        raise RuntimeError('daemon cgroup walk failed') from error
+    for directory, _, files in os.walk(cgroup,onerror=failed,followlinks=False):
+        if 'cgroup.procs' not in files or Path(directory,'cgroup.procs').read_text().strip():
+            raise RuntimeError('daemon cgroup is not empty')
+
+
 def verify_read_only():
     """Reject a different machine, mount, schema, daemon or custody verifier."""
     with ExitStack() as stack:
@@ -92,6 +120,7 @@ def verify_read_only():
             with open(f"/proc/{pid}/exe", "rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != digest:
                     raise ValueError("NUC executable differs")
+        verify_daemon_cgroup()
         dbfd = open_absolute(DATABASE)
         stack.callback(os.close, dbfd)
         before = os.fstat(dbfd)
@@ -245,10 +274,11 @@ class HeldTarget:
         for path in self.paths.values():
             path.recheck()
         if not self.daemon_stopped:
-            daemon_status = Path('/proc/8342/status').read_text()
+            daemon_status = Path(f'/proc/{DAEMON_PID}/status').read_text()
             daemon_fields = dict(line.split(':', 1) for line in daemon_status.splitlines() if ':' in line)
             if daemon_fields.get('Uid', '').split() != ['994'] * 4 or daemon_fields.get('Gid', '').split() != ['972'] * 4 or int(daemon_fields.get('CapEff', '-1').strip(), 16) != 0:
                 raise RuntimeError('daemon credentials changed')
+            verify_daemon_cgroup()
         for unit, (pid, invocation, digest) in PROCESSES.items():
             pidfd, exe, start, original = self.processes[unit]
             if unit == 'dasobjectstored.service' and self.daemon_stopped:
@@ -261,11 +291,7 @@ class HeldTarget:
                      '--property=SubState','--',unit], text=True, timeout=10).splitlines())
                 if fields != {'MainPID':'0','ActiveState':'inactive','SubState':'dead'}:
                     raise RuntimeError('daemon stopped state changed')
-                cgroup = Path('/sys/fs/cgroup/system.slice/dasobjectstored.service')
-                if cgroup.exists():
-                    for directory, _, files in os.walk(cgroup):
-                        if 'cgroup.procs' in files and Path(directory, 'cgroup.procs').read_text().strip():
-                            raise RuntimeError('daemon cgroup is not empty')
+                require_stopped_cgroup_empty(Path('/sys/fs/cgroup' + DAEMON_CGROUP))
                 continue
             if select.select([pidfd], [], [], 0)[0] or self._starttime(pid) != start:
                 raise RuntimeError('owner process exited or changed')
@@ -371,46 +397,56 @@ class RecoveryStopProof:
         self.target.recheck(); self.marker.recheck(); self.backups.recheck()
 
     def check_quiet(self):
-        """Fresh owner status and queue snapshot before a normal service stop."""
-        import socket
-        import struct
+        """Recheck recovery custody around the shared read-only quiet check."""
         self.recheck()
-        if self.target.daemon_stopped:
-            raise RuntimeError('quiet check requires running daemon')
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(5)
-            client.connect('/run/dasobjectstore/dasobjectstored.sock')
-            if struct.unpack('3i',client.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12)) != (8342,994,972):
-                raise RuntimeError('daemon socket peer changed')
-            client.sendall(b'{"command":"live_status","payload":null}\n')
-            with client.makefile('rb') as response:
-                raw=response.readline(1024*1024+1)
-            if len(raw)>1024*1024 or not raw.endswith(b'\n'):
-                raise RuntimeError('daemon status response differs')
-        result=json.loads(raw)
-        payload=result.get('payload',{})
-        aggregate=payload.get('aggregate',{})
-        keys=('connected_hosts','active_stores','active_ingests','active_hdd_transfers',
-              'source_read_bytes_per_second','ssd_write_bytes_per_second','hdd_write_bytes_per_second')
-        if (result.get('kind')!='live_status' or payload.get('schema_version')!=1
-            or any(type(aggregate.get(key)) is not int or aggregate[key]!=0 for key in keys)
-            or payload.get('active')!=[] or payload.get('garbage_collection',{}).get('running') is not False):
-            raise RuntimeError('daemon is not quiet')
-        conn=self.target.connection
-        if conn.in_transaction: raise RuntimeError('unexpected open transaction')
-        conn.execute('BEGIN')
-        try:
-            for table in ('compute_workspace_operations','compute_workspace_materializations','compute_workspace_promotions'):
-                if conn.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] != 0:
-                    raise RuntimeError('workspace activity exists')
-            if conn.execute("SELECT COUNT(*) FROM destage_queue WHERE state!='hdd_copy_verified' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('destage work is not settled')
-            if conn.execute("SELECT COUNT(*) FROM scheduler_jobs WHERE state!='completed' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('scheduler work is not settled')
-            if conn.execute("SELECT COUNT(*) FROM ingest_jobs WHERE state!='ssd_accepted' OR state IS NULL").fetchone()[0]:
-                raise RuntimeError('ingest state differs')
-            conn.rollback()
-        except BaseException:
-            if conn.in_transaction: conn.rollback()
-            raise
+        assert_daemon_quiet(self.target)
         self.recheck()
+
+def assert_daemon_quiet(target):
+    """Read-only live-status and queue check against one fixed held target."""
+    if type(target) is not HeldTarget:
+        raise RuntimeError('quiet target differs')
+    import socket
+    import struct
+    target.recheck()
+    if target.daemon_stopped:
+        raise RuntimeError('quiet check requires running daemon')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(5)
+        client.connect('/run/dasobjectstore/dasobjectstored.sock')
+        # A complete envelope must precede any denial: the installed
+        # daemon exits if a peer closes before receiving its newline.
+        client.sendall(b'{"command":"live_status","payload":null}\n')
+        if struct.unpack('3i',client.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12)) != (DAEMON_PID,994,972):
+            raise RuntimeError('daemon socket peer changed')
+        with client.makefile('rb') as response:
+            raw=response.readline(1024*1024+1)
+        if len(raw)>1024*1024 or not raw.endswith(b'\n'):
+            raise RuntimeError('daemon status response differs')
+    result=json.loads(raw)
+    payload=result.get('payload',{})
+    aggregate=payload.get('aggregate',{})
+    keys=('connected_hosts','active_stores','active_ingests','active_hdd_transfers',
+          'source_read_bytes_per_second','ssd_write_bytes_per_second','hdd_write_bytes_per_second')
+    if (result.get('kind')!='live_status' or payload.get('schema_version')!=1
+        or any(type(aggregate.get(key)) is not int or aggregate[key]!=0 for key in keys)
+        or payload.get('active')!=[] or payload.get('garbage_collection',{}).get('running') is not False):
+        raise RuntimeError('daemon is not quiet')
+    conn=target.connection
+    if conn.in_transaction: raise RuntimeError('unexpected open transaction')
+    conn.execute('BEGIN')
+    try:
+        for table in ('compute_workspace_operations','compute_workspace_materializations','compute_workspace_promotions'):
+            if conn.execute('SELECT COUNT(*) FROM '+table).fetchone()[0] != 0:
+                raise RuntimeError('workspace activity exists')
+        if conn.execute("SELECT COUNT(*) FROM destage_queue WHERE state!='hdd_copy_verified' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('destage work is not settled')
+        if conn.execute("SELECT COUNT(*) FROM scheduler_jobs WHERE state!='completed' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('scheduler work is not settled')
+        if conn.execute("SELECT COUNT(*) FROM ingest_jobs WHERE state!='ssd_accepted' OR state IS NULL").fetchone()[0]:
+            raise RuntimeError('ingest state differs')
+        conn.rollback()
+    except BaseException:
+        if conn.in_transaction: conn.rollback()
+        raise
+    target.recheck()
