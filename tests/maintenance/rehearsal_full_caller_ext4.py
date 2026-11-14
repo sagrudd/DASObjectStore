@@ -68,12 +68,12 @@ try:
     for fd in self.opened:os.close(fd)
   targetmod.HeldTarget=FakeTarget;runner.HeldTarget=FakeTarget
   runner.STATE_PARENT=str(jr);runner.STATE_NAME='state';runner.QUARANTINE_NAME='q0';runner.JOURNAL_SHA=journal_sha;runner.JOURNAL_PARENT=str(jdir)
-  real_acquire=fence.DasClientStartFence.acquire;real_recheck=fence.DasClientStartFence.recheck;real_promote=fence.DasClientStartFence.promote_after_recovery
+  real_acquire=fence.DasClientStartFence.acquire;real_recheck=fence.DasClientStartFence.recheck;real_promote=fence.DasClientStartFence.promote_after_recovery;real_recover=fence.DasClientStartFence.recover_client_held
   def fake_acquire(self):self.fd=os.open('/dev/null',os.O_RDONLY);return self
   def fake_recheck(self):pass
   def fake_promote(self,proof):
    proof.recheck();proof.target.observe_stopped();proof.recheck();self.journal_kind='das-promoted-client-fence-v1';return self
-  fence.DasClientStartFence.acquire=fake_acquire;fence.DasClientStartFence.recheck=fake_recheck;fence.DasClientStartFence.promote_after_recovery=fake_promote
+  fence.DasClientStartFence.acquire=fake_acquire;fence.DasClientStartFence.recover_client_held=fake_acquire;fence.DasClientStartFence.recheck=fake_recheck;fence.DasClientStartFence.promote_after_recovery=fake_promote
   writer=os.fork()
   if writer==0:
    try:
@@ -85,6 +85,21 @@ try:
     os._exit(0)
    except BaseException:os._exit(1)
   try:
+   interrupt=os.environ.get('DAS_FULL_INTERRUPT')
+   if interrupt:
+    child=os.fork()
+    if child==0:
+     original_write=recovery.IntegratedClaimRecovery._write
+     def kill_at(self,value):
+      original_write(self,value)
+      if value==interrupt:os.kill(os.getpid(),signal.SIGKILL)
+     recovery.IntegratedClaimRecovery._write=kill_at
+     try:
+      with runner.hold_claim_recovery(stop_and_restore=True):pass
+      os._exit(9)
+     except BaseException:os._exit(8)
+    _,status=os.waitpid(child,0)
+    if not os.WIFSIGNALED(status) or os.WTERMSIG(status)!=signal.SIGKILL:raise RuntimeError('caller interruption failed')
    with runner.hold_claim_recovery(stop_and_restore=True) as live:
     live.recheck(); result=live.result
     if result['restore']!='restored-daemon-still-fenced' or sf.read_bytes()!=b'complete' or (dm/'q0'/'partial').read_bytes()!=b'partial' or journal.exists() or not (state/'original-journal').is_file():raise RuntimeError('full caller outcome differs')
@@ -93,7 +108,7 @@ try:
    if not os.WIFEXITED(status) or os.WEXITSTATUS(status)!=0:raise RuntimeError('fixture reporter failed')
    results[phase]=True;results['all_passed']=True
   finally:
-   fence.DasClientStartFence.acquire=real_acquire;fence.DasClientStartFence.recheck=real_recheck;fence.DasClientStartFence.promote_after_recovery=real_promote
+   fence.DasClientStartFence.acquire=real_acquire;fence.DasClientStartFence.recheck=real_recheck;fence.DasClientStartFence.promote_after_recovery=real_promote;fence.DasClientStartFence.recover_client_held=real_recover
 finally:
  for mount in reversed(mounts):subprocess.run(['/usr/bin/umount',str(mount)],check=True);os.rmdir(mount)
  data=(json.dumps({'results':results,'details':details},sort_keys=True)+'\n').encode();fd=os.open(root/'result.json',os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o400);os.write(fd,data);os.fsync(fd);os.close(fd)
