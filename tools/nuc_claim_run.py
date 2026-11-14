@@ -135,6 +135,21 @@ def _promoted_hold_exists():
     finally:directory.close()
 
 
+def _authorization_guard(authorization_end_ns,authorize):
+    if type(authorization_end_ns) is not int or not callable(authorize):
+        raise RuntimeError('signed authorization deadline required')
+    last_full_check=[0]
+    def current(*, force=False):
+        now=time.monotonic_ns()
+        if now>=authorization_end_ns:raise RuntimeError('signed authorization deadline expired')
+        if force or now-last_full_check[0]>=10_000_000_000:
+            authorize()
+            now=time.monotonic_ns()
+            if now>=authorization_end_ns:raise RuntimeError('signed authorization deadline expired')
+            last_full_check[0]=now
+    return current
+
+
 def _observation_budget(authorization_end_ns):
     # Reserve fifteen minutes for the protected payload checks, recovery,
     # owner preparation and APT. This is a conservative bound, not a promise
@@ -149,17 +164,15 @@ def _observation_budget(authorization_end_ns):
 def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authorize):
     """Release the claim and optionally stop/fence DAS and restore metadata."""
     if os.geteuid()!=0: raise RuntimeError('root required')
-    if type(authorization_end_ns) is not int or not callable(authorize):
-        raise RuntimeError('signed authorization deadline required')
-    def current():
-        if time.monotonic_ns()>=authorization_end_ns:raise RuntimeError('signed authorization deadline expired')
-        authorize()
-    current()
+    current=_authorization_guard(authorization_end_ns,authorize)
+    current(force=True)
     # This entry point deliberately has no generic caller-supplied paths,
     # adapters, callbacks, or substituted target/owner proof.
     stopped=_promoted_hold_exists()
     target=HeldTarget(stopped=stopped) if stopped else HeldTarget()
-    target.authorization_check=current
+    # Every held-target recheck guards a state transition. Backup hashing uses
+    # the lightweight cadence above; transitions force the full check.
+    target.authorization_check=lambda:current(force=True)
     backups=None; held=None; marker=None; guard=None; observer=None; coord=None; source=None; partial=None
     restored=False
     fds=[]
@@ -225,7 +238,7 @@ def hold_claim_recovery(*, stop_and_restore=False, authorization_end_ns, authori
             jstat=os.fstat(journal_fd);pstat=os.fstat(jp)
             intent=_make_intent(target,backups,journal_fd,sp,dp,sfd,dfd)
             _observation_budget(authorization_end_ns)
-            current();held=DasClientStartFence().acquire()
+            current(force=True);held=DasClientStartFence().acquire()
             def check(): target.recheck(); held.recheck()
             check()
             guard=StickyJournalParent(jp,state,(pstat.st_dev,pstat.st_ino),(jstat.st_dev,jstat.st_ino),JOURNAL_SHA);guard.acquire()
