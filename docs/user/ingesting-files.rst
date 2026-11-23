@@ -638,10 +638,13 @@ responsiveness:
    degraded response for escalation. Do not kill the daemon, delete staging
    files, or restart services as the default recovery action.
 
-The authenticated maintenance bridge also accepts
-``ingest control --action hold-background``. This command waits up to ten seconds
-for active daemon housekeeping cycles to finish, then holds new cycles for two
-minutes. If the drain times out, background admission reopens immediately.
+Use the Pistis-authenticated ``POST /api/v1/workspaces/admin/ingest-control``
+endpoint with action ``hold_background`` to apply the maintenance hold.
+The local CLI supports a preview with
+``ingest control --action hold-background --dry-run``.
+The authenticated request waits up to ten seconds for active daemon
+housekeeping cycles to finish, then holds new cycles for two minutes. If the
+drain times out, background admission reopens immediately.
 The hold covers workspace reconciliation, SSD housekeeping and durable destage,
 storage assurance, capacity lease maintenance, appliance telemetry and detached
 multipart completion. The existing file-ingest control state is preserved.
