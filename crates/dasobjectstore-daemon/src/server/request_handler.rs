@@ -4573,6 +4573,7 @@ mod tests {
                     dry_run: false,
                     confirmation_marker: crate::api::INGEST_CONTROL_CONFIRMATION.to_string(),
                     verified_subject: None,
+                    verified_hold_subject: None,
                 },
             ))
             .expect("request handled");

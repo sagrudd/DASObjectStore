@@ -106,6 +106,7 @@ pub(super) struct StandaloneIngestControlDaemonRequest {
     pub(super) dry_run: bool,
     pub(super) confirmation_marker: String,
     pub(super) verified_subject: Option<String>,
+    pub(super) verified_hold_subject: Option<dasobjectstore_daemon::api::PreverifiedHostSubject>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +211,7 @@ impl StandaloneEnclosureAdminClient for DaemonStandaloneEnclosureAdminClient {
                 dry_run: request.dry_run,
                 confirmation_marker: request.confirmation_marker,
                 verified_subject: request.verified_subject,
+                verified_hold_subject: request.verified_hold_subject,
             })
             .map(ingest_control_response_from_daemon)
             .map_err(standalone_enclosure_admin_client_error)

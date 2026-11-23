@@ -711,6 +711,7 @@ fn run_ingest_control(args: &IngestControlArgs, writer: &mut impl Write) -> Resu
         dry_run: args.dry_run(),
         confirmation_marker: args.confirm().to_string(),
         verified_subject: None,
+        verified_hold_subject: None,
     })?;
     if args.json() {
         serde_json::to_writer_pretty(&mut *writer, &response)?;

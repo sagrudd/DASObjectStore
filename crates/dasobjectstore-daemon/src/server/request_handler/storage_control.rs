@@ -4,37 +4,53 @@ use crate::api::{
 use crate::auth::DaemonLocalActor;
 use crate::runtime::DEFAULT_DAEMON_SERVICE_USER;
 
+fn require_control_authority(
+    request: &IngestControlRequest,
+    actor: Option<&DaemonLocalActor>,
+) -> Result<(), DaemonApiErrorResponse> {
+    if request.dry_run {
+        return Ok(());
+    }
+    if request.action == api::DaemonIngestControlAction::HoldBackground {
+        return crate::server::request_handler::require_verified_pistis_host_authority(
+            actor.filter(|actor| actor.uid != 0),
+            request.verified_hold_subject.as_ref(),
+            "background hold",
+        );
+    }
+    let Some(actor) = actor else {
+        return Err(DaemonApiErrorResponse::new(
+            "administrator_authentication_required",
+            "ingest control requires a preverified host service peer",
+        ));
+    };
+    if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_authority_required",
+            "ingest control rejects direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service",
+        ));
+    }
+    if request
+        .verified_subject
+        .as_deref()
+        .is_none_or(|subject| subject.trim().is_empty())
+    {
+        return Err(DaemonApiErrorResponse::new(
+            "preverified_host_subject_required",
+            "ingest control requires a verified host subject",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn ingest_control_for_actor(
     request: IngestControlRequest,
     actor: Option<&DaemonLocalActor>,
-) -> Result<IngestControlResponse, (&'static str, String)> {
-    if !request.dry_run {
-        let Some(actor) = actor else {
-            return Err((
-                "administrator_authentication_required",
-                "ingest control requires a preverified host service peer".to_string(),
-            ));
-        };
-        if actor.username.as_deref() != Some(DEFAULT_DAEMON_SERVICE_USER) {
-            return Err((
-                "preverified_host_authority_required",
-                "ingest control rejects direct root, sudo, and dasobjectstore-admin socket peers; submit through the preverified host service".to_string(),
-            ));
-        }
-        if request
-            .verified_subject
-            .as_deref()
-            .is_none_or(|subject| subject.trim().is_empty())
-        {
-            return Err((
-                "preverified_host_subject_required",
-                "ingest control requires a verified host subject".to_string(),
-            ));
-        }
-    }
+) -> Result<IngestControlResponse, DaemonApiErrorResponse> {
+    require_control_authority(&request, actor)?;
     if !request.dry_run && request.action == api::DaemonIngestControlAction::HoldBackground {
         crate::background_maintenance::hold()
-            .map_err(|error| ("background_hold_unavailable", error.to_owned()))?;
+            .map_err(|error| DaemonApiErrorResponse::new("background_hold_unavailable", error))?;
     }
     Ok(api::ingest_control::apply(
         request.action,
@@ -49,15 +65,13 @@ pub(super) fn response(
 ) -> DaemonApiResponse {
     match ingest_control_for_actor(request, actor) {
         Ok(response) => DaemonApiResponse::IngestControl(response),
-        Err((code, message)) => {
-            DaemonApiResponse::Error(DaemonApiErrorResponse::new(code, message))
-        }
+        Err(error) => DaemonApiResponse::Error(error),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ingest_control_for_actor;
+    use super::{ingest_control_for_actor, require_control_authority};
     use crate::api::{
         DaemonIngestControlAction, IngestControlRequest, INGEST_CONTROL_CONFIRMATION,
     };
@@ -71,7 +85,47 @@ mod tests {
             dry_run: false,
             confirmation_marker: INGEST_CONTROL_CONFIRMATION.to_string(),
             verified_subject: Some("pistis:administrator".to_string()),
+            verified_hold_subject: None,
         }
+    }
+
+    #[test]
+    fn hold_binds_the_typed_pistis_subject_to_the_packaged_monas_peer() {
+        use crate::api::{
+            PreverifiedHostSubject, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+            PREVERIFIED_HOST_MONAS_PEER_IDENTITY, PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+        };
+
+        let mut request = request();
+        request.action = DaemonIngestControlAction::HoldBackground;
+        let monas = DaemonLocalActor::new(993).with_username("mnemosyne-monas");
+        assert!(matches!(
+            require_control_authority(&request, Some(&monas)),
+            Err(error) if error.code == "preverified_host_subject_required"
+        ));
+
+        request.verified_hold_subject = Some(PreverifiedHostSubject {
+            schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.into(),
+            peer_identity: PREVERIFIED_HOST_MONAS_PEER_IDENTITY.into(),
+            subject_id: "pistis:administrator".into(),
+            session_id: "fixture-session".into(),
+            correlation_id: "fixture-request".into(),
+        });
+        assert!(require_control_authority(&request, Some(&monas)).is_ok());
+        for peer in [
+            DaemonLocalActor::new(0).with_username("mnemosyne-monas"),
+            DaemonLocalActor::new(994).with_username(DEFAULT_DAEMON_SERVICE_USER),
+            DaemonLocalActor::new(995).with_groups(["mnemosyne-pistis-das"]),
+        ] {
+            assert!(require_control_authority(&request, Some(&peer)).is_err());
+        }
+
+        request
+            .verified_hold_subject
+            .as_mut()
+            .unwrap()
+            .peer_identity = PREVERIFIED_HOST_GUI_API_PEER_IDENTITY.into();
+        assert!(require_control_authority(&request, Some(&monas)).is_err());
     }
 
     #[test]
@@ -89,7 +143,7 @@ mod tests {
         for actor in direct_peers {
             assert!(matches!(
                 ingest_control_for_actor(request(), Some(&actor)),
-                Err(("preverified_host_authority_required", _))
+                Err(error) if error.code == "preverified_host_authority_required"
             ));
         }
     }
@@ -104,7 +158,7 @@ mod tests {
 
         assert!(matches!(
             ingest_control_for_actor(missing_subject, Some(&service_peer)),
-            Err(("preverified_host_subject_required", _))
+            Err(error) if error.code == "preverified_host_subject_required"
         ));
     }
 
