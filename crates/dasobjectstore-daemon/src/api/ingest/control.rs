@@ -11,6 +11,7 @@ pub enum DaemonIngestControlAction {
     Pause,
     Throttle,
     Resume,
+    HoldBackground,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -46,6 +47,7 @@ pub enum DaemonIngestControlState {
     Running,
     Throttled,
     Paused,
+    BackgroundHeld,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -95,14 +97,15 @@ pub(crate) fn apply(
         DaemonIngestControlAction::Pause => DaemonIngestControlState::Paused,
         DaemonIngestControlAction::Throttle => DaemonIngestControlState::Throttled,
         DaemonIngestControlAction::Resume => DaemonIngestControlState::Running,
+        DaemonIngestControlAction::HoldBackground => DaemonIngestControlState::BackgroundHeld,
     };
     let mut state = runtime_state().lock().expect("ingest control lock");
     let changed = state.state != next;
-    if !dry_run {
+    if !dry_run && next != DaemonIngestControlState::BackgroundHeld {
         state.state = next;
     }
     IngestControlResponse {
-        state: if dry_run { next } else { state.state },
+        state: next,
         changed,
         dry_run,
         reason,

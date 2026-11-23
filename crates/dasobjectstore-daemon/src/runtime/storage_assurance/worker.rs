@@ -84,6 +84,7 @@ pub fn spawn_disk_housekeeping_loop(
             let mut previous_io_at = Instant::now();
             loop {
                 thread::sleep(Duration::from_secs(config.poll_seconds));
+                let _cycle = crate::background_maintenance::enter();
                 let observed_at = Instant::now();
                 let current_io = read_linux_disk_io_bytes().ok();
                 let io_rate = match (previous_io, current_io) {

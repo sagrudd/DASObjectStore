@@ -60,6 +60,7 @@ pub(super) fn ensure_multipart_completion_worker(work: MultipartCompletionWork) 
             &job_id[job_id.len().saturating_sub(12)..]
         ))
         .spawn(move || {
+            let _cycle = crate::background_maintenance::enter();
             run_multipart_completion(work);
             if let Ok(mut active) = ACTIVE_COMPLETIONS
                 .get_or_init(|| Mutex::new(BTreeSet::new()))

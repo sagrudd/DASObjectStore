@@ -3,6 +3,7 @@
 pub mod api;
 pub mod application_token_verifier;
 pub mod auth;
+pub mod background_maintenance;
 pub mod client;
 #[cfg(feature = "development-self-signing")]
 pub mod development_self_signing;

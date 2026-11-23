@@ -401,12 +401,20 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
         progress: &mut dyn FnMut(DaemonIngestProgressEvent) -> Result<(), DaemonClientError>,
         heartbeat: &mut dyn FnMut() -> Result<(), DaemonClientError>,
     ) -> Result<DaemonApiResponse, DaemonClientError> {
+        let idle_timeout = match &request {
+            DaemonApiRequest::IngestControl(control)
+                if control.action == crate::api::DaemonIngestControlAction::HoldBackground =>
+            {
+                Some(Duration::from_secs(12))
+            }
+            _ => self.idle_timeout,
+        };
         let mut stream = UnixStream::connect(&self.socket_path).map_err(|error| {
             DaemonClientError::Transport(connect_error_message(&self.socket_path, &error))
         })?;
         stream
             .set_read_timeout(Some(
-                self.idle_timeout
+                idle_timeout
                     .unwrap_or(Duration::from_secs(1))
                     .min(Duration::from_secs(1)),
             ))
@@ -421,7 +429,7 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
             .map_err(|error| DaemonClientError::Transport(error.to_string()))?;
 
         let mut reader = BufReader::new(stream);
-        let mut idle_deadline = self.idle_timeout.map(|timeout| {
+        let mut idle_deadline = idle_timeout.map(|timeout| {
             Instant::now()
                 .checked_add(timeout)
                 .unwrap_or_else(Instant::now)
@@ -451,7 +459,7 @@ impl DaemonClientTransport for UnixSocketDaemonTransport {
                     "daemon closed the connection without a final response".to_string(),
                 ));
             }
-            if let Some(timeout) = self.idle_timeout {
+            if let Some(timeout) = idle_timeout {
                 idle_deadline = Some(
                     Instant::now()
                         .checked_add(timeout)
@@ -879,6 +887,49 @@ mod tests {
                 if message.contains("bounded idle deadline")
         ));
         join.join().expect("server thread joins");
+        let _ = fs::remove_file(socket_path);
+    }
+
+    #[test]
+    fn background_hold_can_reply_after_the_ordinary_bridge_idle_deadline() {
+        use crate::api::{
+            DaemonIngestControlAction, DaemonIngestControlState, IngestControlRequest,
+            IngestControlResponse, INGEST_CONTROL_CONFIRMATION,
+        };
+
+        let socket_path = unique_socket_path();
+        let listener = UnixListener::bind(&socket_path).expect("listener binds");
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("client connects");
+            let mut reader = BufReader::new(stream);
+            let mut request = String::new();
+            reader.read_line(&mut request).expect("control request");
+            thread::sleep(Duration::from_secs(2));
+            let mut stream = reader.into_inner();
+            serde_json::to_writer(
+                &mut stream,
+                &DaemonApiResponse::IngestControl(IngestControlResponse {
+                    state: DaemonIngestControlState::BackgroundHeld,
+                    changed: true,
+                    dry_run: false,
+                    reason: "maintenance".into(),
+                }),
+            )
+            .expect("reply after drain");
+            stream.write_all(b"\n").expect("end reply");
+        });
+        let client = DaemonClient::new(UnixSocketDaemonTransport::for_bounded_bridge(&socket_path));
+        let response = client
+            .ingest_control(IngestControlRequest {
+                action: DaemonIngestControlAction::HoldBackground,
+                reason: "maintenance".into(),
+                dry_run: false,
+                confirmation_marker: INGEST_CONTROL_CONFIRMATION.into(),
+                verified_subject: Some("pistis:administrator".into()),
+            })
+            .expect("bounded background hold");
+        assert_eq!(response.state, DaemonIngestControlState::BackgroundHeld);
+        server.join().expect("server thread joins");
         let _ = fs::remove_file(socket_path);
     }
 

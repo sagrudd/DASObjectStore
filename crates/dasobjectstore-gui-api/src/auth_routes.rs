@@ -993,16 +993,22 @@ async fn submit_preverified_host_ingest_control_request(
     request: StandaloneIngestControlDaemonRequest,
 ) -> Result<IngestControlResponse, (StatusCode, Json<AuthRouteError>)> {
     let client = Arc::clone(&state.enclosure_admin_client);
-    state
-        .priority_daemon_bridge
-        .clone()
-        .call_message(move || {
-            client
-                .submit_ingest_control(request)
-                .map_err(|error| error.message)
-        })
-        .await
-        .map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
+    let hold =
+        request.action == dasobjectstore_daemon::api::DaemonIngestControlAction::HoldBackground;
+    let submit = move || {
+        client
+            .submit_ingest_control(request)
+            .map_err(|error| error.message)
+    };
+    let bridge = &state.priority_daemon_bridge;
+    let result = if hold {
+        bridge
+            .call_message_with_deadline(std::time::Duration::from_secs(14), submit)
+            .await
+    } else {
+        bridge.call_message(submit).await
+    };
+    result.map_err(|error| admin_daemon_bridge_error_with_code(error, "ingest_control_failed"))
 }
 
 async fn submit_preverified_host_store_drain_request(

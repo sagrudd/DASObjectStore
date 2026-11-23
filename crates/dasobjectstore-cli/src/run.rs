@@ -696,6 +696,7 @@ fn run_ingest_control(args: &IngestControlArgs, writer: &mut impl Write) -> Resu
         "pause" => DaemonIngestControlAction::Pause,
         "throttle" => DaemonIngestControlAction::Throttle,
         "resume" => DaemonIngestControlAction::Resume,
+        "hold-background" => DaemonIngestControlAction::HoldBackground,
         value => {
             return Err(CliError::CommandFailed(format!(
                 "unsupported ingest control action: {value}"

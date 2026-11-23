@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.188.10 - Unreleased
+
+- Add a time-limited maintenance hold for recurring daemon background work.
+
 ## 0.188.9 - Unreleased
 
 - Read the newest numbered release heading when checking the package version, including headings without a date or description.
