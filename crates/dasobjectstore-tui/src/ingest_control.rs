@@ -19,6 +19,7 @@ impl IngestControlDisplay {
             DaemonIngestControlState::Running => "Running",
             DaemonIngestControlState::Throttled => "Throttled",
             DaemonIngestControlState::Paused => "Paused",
+            DaemonIngestControlState::BackgroundHeld => "Background held",
         };
         let action_label = if response.changed {
             "changed"

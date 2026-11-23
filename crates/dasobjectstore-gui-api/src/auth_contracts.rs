@@ -195,6 +195,7 @@ pub enum IngestControlAction {
     Pause,
     Throttle,
     Resume,
+    HoldBackground,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

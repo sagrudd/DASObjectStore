@@ -1,6 +1,6 @@
 mod storage_bootstrap;
 
-use dasobjectstore_daemon::api::DaemonIngestResourceBudget;
+use dasobjectstore_daemon::{api::DaemonIngestResourceBudget, background_maintenance};
 use dasobjectstore_daemon::runtime::{
     application_audit_log_path, application_identity_registry_path, application_key_registry_path,
     build_ssd_residency_report, build_staging_inventory, default_hdd_root, default_ssd_root,
@@ -472,6 +472,7 @@ fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::Joi
             lease_owner: format!("dasobjectstored.{}", std::process::id()),
         };
         loop {
+            let cycle = background_maintenance::enter();
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -485,6 +486,7 @@ fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::Joi
                     if let Some(parent) = report_path.parent() {
                         if let Err(error) = std::fs::create_dir_all(parent) {
                             eprintln!("workspace recovery report directory failed: {error}");
+                            drop(cycle);
                             thread::sleep(Duration::from_secs(5));
                             continue;
                         }
@@ -532,6 +534,7 @@ fn spawn_workspace_provision_worker(config: &DaemonRuntimeConfig) -> thread::Joi
                 }
                 Err(error) => eprintln!("workspace NFS reconciliation deferred: {error}"),
             }
+            drop(cycle);
             thread::sleep(Duration::from_secs(5));
         }
     })
@@ -546,6 +549,7 @@ fn spawn_workspace_materialize_worker(config: &DaemonRuntimeConfig) -> thread::J
             lease_owner: format!("dasobjectstored.materialize.{}", std::process::id()),
         };
         loop {
+            let cycle = background_maintenance::enter();
             match reconcile_workspace_materializations(&worker) {
                 Ok(report) => {
                     let report_path =
@@ -566,6 +570,7 @@ fn spawn_workspace_materialize_worker(config: &DaemonRuntimeConfig) -> thread::J
                 }
                 Err(error) => eprintln!("workspace materialization cycle deferred: {error}"),
             }
+            drop(cycle);
             thread::sleep(Duration::from_secs(5));
         }
     })
@@ -586,6 +591,7 @@ fn spawn_workspace_promotion_worker(
             capacity_provider,
         };
         loop {
+            let cycle = background_maintenance::enter();
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -617,6 +623,7 @@ fn spawn_workspace_promotion_worker(
                 }
                 Err(error) => eprintln!("workspace promotion cycle deferred: {error}"),
             }
+            drop(cycle);
             thread::sleep(Duration::from_secs(5));
         }
     })
@@ -631,6 +638,7 @@ fn spawn_workspace_cleanup_worker(config: &DaemonRuntimeConfig) -> thread::JoinH
             lease_owner: format!("dasobjectstored.cleanup.{}", std::process::id()),
         };
         loop {
+            let cycle = background_maintenance::enter();
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
@@ -653,6 +661,7 @@ fn spawn_workspace_cleanup_worker(config: &DaemonRuntimeConfig) -> thread::JoinH
                 }
                 Err(error) => eprintln!("workspace cleanup cycle deferred: {error}"),
             }
+            drop(cycle);
             thread::sleep(Duration::from_secs(5));
         }
     })
@@ -666,6 +675,7 @@ fn spawn_startup_garbage_collection(
     thread::Builder::new()
         .name("disk_housekeeping_ssd_cleanup".to_string())
         .spawn(move || {
+        let startup_cycle = background_maintenance::enter();
         live_status_registry.record_garbage_collection(LiveStatusGarbageCollection {
             running: true,
             ..LiveStatusGarbageCollection::default()
@@ -803,11 +813,13 @@ fn spawn_startup_garbage_collection(
         }
         // Startup collection owns the initial SSD metadata/removal window. Begin
         // durable destage only after that pass has either completed or failed closed.
+        drop(startup_cycle);
         let _ = spawn_durable_destage_loop();
         let residency_report_path = state_dir.join("disk_housekeeping/ssd-residency.json");
         let mut next_reclaim = std::time::Instant::now() + Duration::from_secs(60 * 60);
         let mut next_residency_audit = std::time::Instant::now();
         loop {
+            let cycle = background_maintenance::enter();
             let now_utc = current_utc_timestamp();
             if std::time::Instant::now() >= next_reclaim {
                 match run_garbage_collection(
@@ -851,6 +863,7 @@ fn spawn_startup_garbage_collection(
                 &now_utc,
                 SystemTime::now(),
             ));
+            drop(cycle);
             thread::sleep(Duration::from_secs(30));
         }
         })
@@ -894,11 +907,15 @@ fn spawn_durable_destage_loop() -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let mut previously_served_store = None;
         loop {
-            match run_one_durable_destage(
-                &config,
-                &current_utc_timestamp(),
-                previously_served_store.as_ref(),
-            ) {
+            let outcome = {
+                let _cycle = background_maintenance::enter();
+                run_one_durable_destage(
+                    &config,
+                    &current_utc_timestamp(),
+                    previously_served_store.as_ref(),
+                )
+            };
+            match outcome {
                 Ok(DurableDestageOutcome::Settled { store_id, .. }) => {
                     previously_served_store = Some(store_id);
                 }
@@ -923,6 +940,7 @@ fn spawn_capacity_lease_loop(
 ) -> thread::JoinHandle<()> {
     let audit_path = dasobjectstore_daemon::capacity_lease_audit_path(&config.state_dir);
     thread::spawn(move || loop {
+        let cycle = background_maintenance::enter();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
@@ -933,6 +951,7 @@ fn spawn_capacity_lease_loop(
             Ok(report) => record_capacity_lease_report(&audit_path, now, &report),
             Err(error) => eprintln!("capacity reservation lease maintenance failed: {error}"),
         }
+        drop(cycle);
         thread::sleep(Duration::from_secs(
             DEFAULT_CAPACITY_RESERVATION_MAINTENANCE_CADENCE_SECONDS,
         ));
@@ -984,6 +1003,7 @@ fn spawn_appliance_telemetry_loop(
             ApplianceTelemetryLoop::new(loop_config, LinuxProcTelemetryCollector::default());
         let mut sink = FileBackedApplianceTelemetrySink::new(telemetry_path);
         loop {
+            let cycle = background_maintenance::enter();
             match telemetry_loop.collect_once(current_utc_timestamp()) {
                 Ok(sample_set) => {
                     if let Err(error) = sink.record(&sample_set) {
@@ -992,6 +1012,7 @@ fn spawn_appliance_telemetry_loop(
                 }
                 Err(error) => eprintln!("appliance telemetry collection failed: {error}"),
             }
+            drop(cycle);
             thread::sleep(cadence);
         }
     })))

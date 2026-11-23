@@ -336,6 +336,7 @@ pub(super) fn validate_ingest_control_request(
         IngestControlAction::Pause => DaemonIngestControlAction::Pause,
         IngestControlAction::Throttle => DaemonIngestControlAction::Throttle,
         IngestControlAction::Resume => DaemonIngestControlAction::Resume,
+        IngestControlAction::HoldBackground => DaemonIngestControlAction::HoldBackground,
     };
     let daemon_request = DaemonIngestControlRequest {
         action,

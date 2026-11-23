@@ -220,7 +220,7 @@ impl IngestDrainQueueArgs {
 #[derive(Debug, Eq, PartialEq, Args)]
 pub(crate) struct IngestControlArgs {
     /// Desired state: pause, throttle, or resume.
-    #[arg(long, value_parser = ["pause", "throttle", "resume"])]
+    #[arg(long, value_parser = ["pause", "throttle", "resume", "hold-background"])]
     action: String,
     #[arg(long, default_value = "operator ingest control")]
     reason: String,

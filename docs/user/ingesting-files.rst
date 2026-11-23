@@ -638,6 +638,18 @@ responsiveness:
    degraded response for escalation. Do not kill the daemon, delete staging
    files, or restart services as the default recovery action.
 
+Use the Pistis-authenticated ``POST /api/v1/workspaces/admin/ingest-control``
+endpoint with action ``hold_background`` to apply the maintenance hold.
+The local CLI supports a preview with
+``ingest control --action hold-background --dry-run``.
+The authenticated request waits up to ten seconds for active daemon
+housekeeping cycles to finish, then holds new cycles for two minutes. If the
+drain times out, background admission reopens immediately.
+The hold covers workspace reconciliation, SSD housekeeping and durable destage,
+storage assurance, capacity lease maintenance, appliance telemetry and detached
+multipart completion. The existing file-ingest control state is preserved.
+Foreground operations can still run during the hold.
+
 Provider-specific S3 workers keep their own admission gate; the emergency
 control documented here governs daemon file-ingest source reads. Appliance
 throughput, PSI, and full-disk acceptance still require the separate quiescent

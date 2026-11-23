@@ -32,6 +32,10 @@ pub(super) fn ingest_control_for_actor(
             ));
         }
     }
+    if !request.dry_run && request.action == api::DaemonIngestControlAction::HoldBackground {
+        crate::background_maintenance::hold()
+            .map_err(|error| ("background_hold_unavailable", error.to_owned()))?;
+    }
     Ok(api::ingest_control::apply(
         request.action,
         request.reason,

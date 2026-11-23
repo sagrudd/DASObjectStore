@@ -80,6 +80,7 @@ pub(super) fn ingest_control_response_from_daemon(
             DaemonIngestControlState::Running => "running",
             DaemonIngestControlState::Throttled => "throttled",
             DaemonIngestControlState::Paused => "paused",
+            DaemonIngestControlState::BackgroundHeld => "background_held",
         }
         .to_string(),
         changed: response.changed,
