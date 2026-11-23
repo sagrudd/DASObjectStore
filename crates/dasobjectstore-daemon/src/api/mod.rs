@@ -1001,6 +1001,7 @@ mod tests {
             dry_run: false,
             confirmation_marker: INGEST_CONTROL_CONFIRMATION.to_string(),
             verified_subject: None,
+            verified_hold_subject: None,
         });
         request.validate().expect("control request validates");
         let encoded = serde_json::to_value(request).expect("request serializes");

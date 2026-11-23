@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.188.11 - Unreleased
+
+- Bind background holds to the existing typed Pistis subject and packaged host peer.
+
 ## 0.188.10 - Unreleased
 
 - Add a time-limited maintenance hold for recurring daemon background work.

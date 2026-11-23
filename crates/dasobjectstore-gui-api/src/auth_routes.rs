@@ -636,7 +636,31 @@ async fn preverified_host_control_ingest(
 ) -> Result<Json<IngestControlResponse>, (StatusCode, Json<AuthRouteError>)> {
     require_preverified_host_administrator(&actor, &verified)?;
     let mut request = validate_ingest_control_request(request)?;
-    request.verified_subject = Some(actor.subject_id);
+    if request.action == dasobjectstore_daemon::api::DaemonIngestControlAction::HoldBackground {
+        use dasobjectstore_daemon::api::{
+            PreverifiedHostSubject, PREVERIFIED_HOST_GUI_API_PEER_IDENTITY,
+            PREVERIFIED_HOST_MONAS_PEER_IDENTITY, PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION,
+        };
+
+        let context = verified.context();
+        let peer_identity = match context.authority {
+            crate::HostAuthenticationAuthority::MonasStandalone => {
+                PREVERIFIED_HOST_MONAS_PEER_IDENTITY
+            }
+            crate::HostAuthenticationAuthority::SynoptikonIntegrated => {
+                PREVERIFIED_HOST_GUI_API_PEER_IDENTITY
+            }
+        };
+        request.verified_hold_subject = Some(PreverifiedHostSubject {
+            schema_version: PREVERIFIED_HOST_SUBJECT_SCHEMA_VERSION.into(),
+            peer_identity: peer_identity.into(),
+            subject_id: context.subject_id.clone(),
+            session_id: context.session_id.clone(),
+            correlation_id: context.correlation_id.clone(),
+        });
+    } else {
+        request.verified_subject = Some(actor.subject_id);
+    }
     submit_preverified_host_ingest_control_request(&state, request)
         .await
         .map(Json)

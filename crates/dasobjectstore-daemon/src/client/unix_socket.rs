@@ -926,6 +926,7 @@ mod tests {
                 dry_run: false,
                 confirmation_marker: INGEST_CONTROL_CONFIRMATION.into(),
                 verified_subject: Some("pistis:administrator".into()),
+                verified_hold_subject: None,
             })
             .expect("bounded background hold");
         assert_eq!(response.state, DaemonIngestControlState::BackgroundHeld);

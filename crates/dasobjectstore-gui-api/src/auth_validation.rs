@@ -344,6 +344,7 @@ pub(super) fn validate_ingest_control_request(
         dry_run: request.dry_run,
         confirmation_marker,
         verified_subject: None,
+        verified_hold_subject: None,
     };
     daemon_request.validate().map_err(|error| {
         route_error(
@@ -358,6 +359,7 @@ pub(super) fn validate_ingest_control_request(
         dry_run: daemon_request.dry_run,
         confirmation_marker: daemon_request.confirmation_marker,
         verified_subject: None,
+        verified_hold_subject: None,
     })
 }
 

@@ -26,6 +26,8 @@ pub struct IngestControlRequest {
     /// peer to the dedicated service identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_hold_subject: Option<crate::api::PreverifiedHostSubject>,
 }
 
 impl IngestControlRequest {
@@ -147,6 +149,7 @@ mod tests {
             dry_run: false,
             confirmation_marker: String::new(),
             verified_subject: None,
+            verified_hold_subject: None,
         };
         assert_eq!(
             request.validate(),
