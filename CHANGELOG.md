@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.188.12
+
+- Initialize the store registry and grant daemon read access to the manifest during fresh managed-storage bootstrap. Existing registries are retained.
+
 ## 0.188.11 - Unreleased
 
 - Bind background holds to the existing typed Pistis subject and packaged host peer.
