@@ -80,8 +80,10 @@ allocated blank media and supply both explicit confirmations:
      --confirm "confirm bootstrap das"
 
 This one-shot daemon mode prepares the enclosure, initializes the SSD pool
-metadata, writes UUID-based persistent mounts and the managed-storage manifest,
-then starts the storage-ready verifier and normal daemon. A root-owned journal
+metadata and writes UUID-based persistent mounts. It initializes the empty
+store registry only if the file is absent and publishes the managed-storage
+manifest with daemon read access before starting the verifier and daemon.
+Existing registries are preserved. A root-owned journal
 binds an interrupted operation to the original device paths, device numbers,
 sizes and sysfs identities. Resume only that operation with the same device
 paths and confirmations plus ``--resume`` and

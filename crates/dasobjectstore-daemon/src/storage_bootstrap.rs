@@ -13,7 +13,8 @@ use dasobjectstore_metadata::{initialize_pool, PoolInitOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,6 +22,7 @@ use uuid::Uuid;
 
 const MANIFEST: &str = "/etc/dasobjectstore/managed-storage.v1.json";
 const JOURNAL: &str = "/etc/dasobjectstore/storage-bootstrap.v1.json";
+const STORE_REGISTRY: &str = "/var/lib/dasobjectstore/stores.json";
 const LOCK: &str = "/run/lock/dasobjectstore-storage-bootstrap.lock";
 const MOUNT_ROOT: &str = "/srv/dasobjectstore";
 const SSD_MOUNT: &str = "/srv/dasobjectstore/ssd";
@@ -80,6 +82,9 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         return Err("--confirm-resume-reformat is only valid with --resume".into());
     }
     let _lock = acquire_bootstrap_lock()?;
+    let service_uid = account_id("id", &["-u", "dasobjectstore"], 0)?;
+    let service_gid = account_id("id", &["-g", "dasobjectstore"], 0)?;
+    let shared_gid = account_id("getent", &["group", "mnemosyne-pistis-das"], 2)?;
     let existing_journal = read_journal(Path::new(JOURNAL))?;
     let (ssd, hdd, resume) = match existing_journal {
         Some(journal) => {
@@ -119,6 +124,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
                 return Err("--resume was supplied but no storage-bootstrap journal exists".into());
             }
             ensure_pristine_manifest(Path::new(MANIFEST))?;
+            ensure_daemon_inactive()?;
             ensure_mount_targets_unused()?;
             let ssd = validate_blank_device(&options.ssd_device)?;
             let hdd = validate_blank_device(&options.hdd_device)?;
@@ -240,7 +246,8 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             role: "hdd:disk-hdd-01".into(),
         }],
     };
-    write_manifest(Path::new(MANIFEST), &manifest)?;
+    initialize_empty_store_registry(Path::new(STORE_REGISTRY), service_uid, shared_gid)?;
+    write_manifest(Path::new(MANIFEST), &manifest, service_gid)?;
     start_storage_services()?;
     eprintln!(
         "DASObjectStore first-install storage is ready and the daemon is active: SSD={} HDD={} ({})",
@@ -705,6 +712,7 @@ fn remove_prior_bootstrap_fstab_entries(ssd: &Path, hdd: &Path) -> Result<(), St
             &replacement,
             metadata.mode() & 0o777,
             Some((&metadata, contents.as_bytes())),
+            None,
         )?;
     }
     Ok(())
@@ -832,6 +840,7 @@ fn append_fstab_mounts(ssd_uuid: &str, hdd_uuid: &str) -> Result<(), String> {
         &updated,
         metadata.mode() & 0o777,
         Some((&metadata, entries.as_bytes())),
+        None,
     )
 }
 
@@ -883,14 +892,104 @@ fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
         && left.nlink() == right.nlink()
 }
 
-fn write_manifest(path: &Path, manifest: &ManagedStorageManifest) -> Result<(), String> {
-    let mut payload = serde_json::to_vec_pretty(manifest).map_err(|error| error.to_string())?;
-    payload.push(b'\n');
-    atomic_replace(path, &payload, 0o640)
+fn account_id(program: &str, args: &[&str], field: usize) -> Result<u32, String> {
+    let id = command_output(program, args)?;
+    id.trim()
+        .split(':')
+        .nth(field)
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value != 0)
+        .ok_or_else(|| format!("cannot resolve package account with {program}"))
 }
 
-fn atomic_replace(path: &Path, payload: &[u8], mode: u32) -> Result<(), String> {
-    atomic_replace_with_expected(path, payload, mode, None)
+fn set_file_owner(file: &File, uid: u32, gid: u32) -> io::Result<()> {
+    if unsafe { libc::fchown(file.as_raw_fd(), uid, gid) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn initialize_empty_store_registry(path: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    use std::{
+        ffi::CString,
+        os::fd::FromRawFd,
+        os::unix::{ffi::OsStrExt, fs::PermissionsExt},
+    };
+
+    let initialize = || -> io::Result<()> {
+        match fs::symlink_metadata(path) {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let parent = path.parent().expect("store registry has a parent");
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(parent)?;
+        let metadata = directory.metadata()?;
+        if metadata.uid() != uid || metadata.gid() != gid || metadata.mode() & 0o7777 != 0o750 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "store registry directory does not match package ownership",
+            ));
+        }
+        let fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                c".".as_ptr(),
+                libc::O_TMPFILE | libc::O_WRONLY | libc::O_CLOEXEC,
+                0o600,
+            )
+        };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut file = unsafe { File::from_raw_fd(fd) };
+        // The daemon reads an array of StoreServiceDefinition values.
+        file.write_all(b"[]\n")?;
+        set_file_owner(&file, uid, gid)?;
+        file.set_permissions(fs::Permissions::from_mode(0o640))?;
+        file.sync_all()?;
+        let source = CString::new(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
+        let name = CString::new(
+            path.file_name()
+                .expect("store registry has a name")
+                .as_bytes(),
+        )?;
+        // Publish the open inode without following any destination path. An
+        // existing or concurrently published registry always wins.
+        let linked = unsafe {
+            libc::linkat(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::AT_SYMLINK_FOLLOW,
+            )
+        };
+        if linked != 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::AlreadyExists {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        directory.sync_all()
+    };
+    initialize().map_err(|error| format!("cannot initialize {}: {error}", path.display()))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn initialize_empty_store_registry(_: &Path, _: u32, _: u32) -> Result<(), String> {
+    Err("packaged managed-storage bootstrap requires Linux".into())
+}
+
+fn write_manifest(path: &Path, manifest: &ManagedStorageManifest, gid: u32) -> Result<(), String> {
+    let mut payload = serde_json::to_vec_pretty(manifest).map_err(|error| error.to_string())?;
+    payload.push(b'\n');
+    atomic_replace_with_expected(path, &payload, 0o640, None, Some(gid))
 }
 
 fn atomic_replace_with_expected(
@@ -898,6 +997,7 @@ fn atomic_replace_with_expected(
     payload: &[u8],
     mode: u32,
     expected: Option<(&fs::Metadata, &[u8])>,
+    group: Option<u32>,
 ) -> Result<(), String> {
     let temporary = path.with_extension(format!("tmp.{}", std::process::id()));
     let mut file = OpenOptions::new()
@@ -906,6 +1006,10 @@ fn atomic_replace_with_expected(
         .mode(mode)
         .open(&temporary)
         .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
+    if let Some(gid) = group {
+        set_file_owner(&file, 0, gid)
+            .map_err(|error| format!("cannot set {} ownership: {error}", temporary.display()))?;
+    }
     file.write_all(payload)
         .and_then(|_| file.sync_all())
         .map_err(|error| format!("cannot sync {}: {error}", temporary.display()))?;
@@ -1029,6 +1133,48 @@ impl BootstrapArgs {
 mod tests {
     use super::{partition_path, BootstrapArgs};
     use std::path::Path;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fresh_registry_has_native_schema_and_keeps_existing_records() {
+        use super::initialize_empty_store_registry;
+        use std::{
+            fs,
+            os::unix::fs::{symlink, MetadataExt, PermissionsExt},
+        };
+        use uuid::Uuid;
+
+        let root = std::env::temp_dir().join(format!("das-registry-test-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o750)).unwrap();
+        let parent = fs::metadata(&root).unwrap();
+        let path = root.join("stores.json");
+        initialize_empty_store_registry(&path, parent.uid(), parent.gid()).unwrap();
+        let created = fs::metadata(&path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"[]\n");
+        assert_eq!((created.uid(), created.gid()), (parent.uid(), parent.gid()));
+        assert_eq!(created.mode() & 0o7777, 0o640);
+        assert_eq!(created.nlink(), 1);
+
+        fs::write(&path, b"retained records").unwrap();
+        initialize_empty_store_registry(&path, parent.uid(), parent.gid()).unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().ino(), created.ino());
+        assert_eq!(fs::read(&path).unwrap(), b"retained records");
+
+        let outside = root.join("missing");
+        let symlink_path = root.join("stores-link.json");
+        symlink(&outside, &symlink_path).unwrap();
+        initialize_empty_store_registry(&symlink_path, parent.uid(), parent.gid()).unwrap();
+        assert_eq!(fs::read_link(&symlink_path).unwrap(), outside);
+        assert!(!outside.exists());
+
+        let bad_path = root.join("stores-unsafe.json");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(initialize_empty_store_registry(&bad_path, parent.uid(), parent.gid()).is_err());
+        assert!(!bad_path.exists());
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn bootstrap_requires_explicit_blank_device_acknowledgement_and_confirmation() {
