@@ -248,7 +248,7 @@ install -d -o "\$service_user" -g "\$service_group" -m 0700 /var/lib/dasobjectst
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/report-rebuild
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/lib/dasobjectstore/telemetry
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /var/log/dasobjectstore
-install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore
+install -d -o root -g "\$service_group" -m 0750 /opt/dasobjectstore
 install -d -o "\$service_user" -g "\$service_group" -m 0750 /opt/dasobjectstore/tls
 install -d -o root -g "\$service_group" -m 0750 /etc/dasobjectstore
 find /etc/dasobjectstore -maxdepth 1 -type f -name '*.json' -exec chgrp "\$service_group" {} + -exec chmod 0640 {} +
@@ -498,6 +498,7 @@ SPEC
 
 SOURCE_DATE_EPOCH="$DAS_PACKAGE_SOURCE_EPOCH" rpmbuild \
   --define "_topdir $rpm_root" \
+  --define "_build_id_links none" \
   -bb "$spec_path"
 
 find "$rpm_root/RPMS" -type f -name "${package_name}-${version}-${release}*.rpm" -print | while read -r package_path; do

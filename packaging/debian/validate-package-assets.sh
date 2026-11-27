@@ -364,7 +364,7 @@ require_text "$sysusers" "g mnemosyne-pistis-das"
 require_text "$tmpfiles" "z /srv/dasobjectstore 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /run/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore 0750 dasobjectstore mnemosyne-pistis-das -"
-require_text "$tmpfiles" "d /opt/dasobjectstore 0750 dasobjectstore dasobjectstore -"
+require_text "$tmpfiles" "d /opt/dasobjectstore 0750 root dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/object-service 0700 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/report-rebuild 0750 dasobjectstore dasobjectstore -"
 require_text "$tmpfiles" "d /var/lib/dasobjectstore/telemetry 0750 dasobjectstore dasobjectstore -"
@@ -636,5 +636,9 @@ require_text "$prepare_web_dist" "--allow-fallback"
 require_text "$prepare_web_dist" "target/web-fallback/dist"
 require_text "$build_deb" "validate-package-auth-content.sh"
 require_text "$build_rpm" "validate-package-auth-content.sh"
+require_text "$build_rpm" 'install -d -o root -g "\$service_group" -m 0750 /opt/dasobjectstore'
+require_text "$build_rpm" '--define "_build_id_links none"'
+require_text "$postinst" 'install -d -o root -g "$service_group" -m 0750 "$product_root"'
+require_text "$postinst" 'ensure_owned_dir "$product_root/tls" 0750'
 require_text "$build_remote_deb" "validate-package-auth-content.sh"
 require_text "$build_remote_rpm" "validate-package-auth-content.sh"
