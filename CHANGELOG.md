@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.188.13
+
+- Keep packaged application files under a root-owned directory and keep the TLS state writable by DAS.
+- Omit generated build-ID links from appliance RPMs while preserving the ELF build IDs.
+
 ## 0.188.12
 
 - Initialize the store registry and grant daemon read access to the manifest during fresh managed-storage bootstrap. Existing registries are retained.
